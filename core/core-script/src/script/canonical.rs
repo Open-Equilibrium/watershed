@@ -8,8 +8,6 @@ pub(super) fn canonicalize_registry_block(
     let (kind, identity) = block.kind_and_identity();
     let (kind, id) = (kind.as_str(), identity.id.clone());
     let mut value = serde_json::to_value(block).map_err(RegistryError::Serialize)?;
-    // WHY: canonical JSON would convert text to NFC, so the executed or sent bytes would
-    // differ from the reviewed definition; such text is refused instead.
     if let Some(field) = non_nfc_block_field(&value) {
         return Err(RegistryError::NonNfcDefinitionText { kind, id, field });
     }
@@ -18,10 +16,6 @@ pub(super) fn canonicalize_registry_block(
     serde_json::from_str(&canonical).map_err(RegistryError::Serialize)
 }
 
-/// Returns the innermost field of a serialized block that holds text which is not NFC.
-///
-/// Block ids, names and references are matched in NFC form, so they keep their normalization.
-/// Only the block body's own `id` and `name` are exempt: parameter and field names are not.
 fn non_nfc_block_field(block: &Value) -> Option<String> {
     block.as_object()?.values().find_map(|body| {
         body.as_object()?.iter().find_map(|(key, child)| {
@@ -52,7 +46,6 @@ fn non_nfc_field(field: &str, value: &Value) -> Option<String> {
     }
 }
 
-/// Reference names are text or a list of text; an object under a reference-like key is data.
 fn is_reference_text(value: &Value) -> bool {
     match value {
         Value::String(_) => true,

@@ -10,12 +10,8 @@ import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 // These functions are ignored because they are not marked as `pub`: `color`, `of`, `of`, `of`, `to_core`, `to_core`, `to_core`, `width`
 // These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
 
-/// A drawing's style and elements, bottom to top.
 class BridgeDrawing {
-  /// How it draws its shapes and text.
   final BridgeDrawingStyle style;
-
-  /// Its elements, bottom to top.
   final List<BridgeElement> elements;
 
   const BridgeDrawing({required this.style, required this.elements});
@@ -32,15 +28,9 @@ class BridgeDrawing {
           elements == other.elements;
 }
 
-/// Elements removed, changed and added in one Action.
 class BridgeDrawingEdit {
-  /// New elements, each above all before.
   final List<BridgeElement> add;
-
-  /// Changes to live elements.
   final List<BridgeElementChange> change;
-
-  /// Elements to remove.
   final List<String> remove;
 
   const BridgeDrawingEdit({
@@ -65,67 +55,25 @@ class BridgeDrawingEdit {
           remove == other.remove;
 }
 
-/// How a drawing shows its shapes and text.
-enum BridgeDrawingStyle {
-  /// As Excalidraw draws, text in Excalifont.
-  handDrawn,
+enum BridgeDrawingStyle { handDrawn, clean }
 
-  /// Exact lines, text in Liquid's typeface.
-  clean,
-}
-
-/// A stroke, shape or text: where it lies, turned `rotation` radians clockwise around its
-/// center, and how it looks.
 class BridgeElement {
-  /// Its identity; none in a new one.
   final String? id;
-
-  /// What it is.
   final BridgeElementKind kind;
-
-  /// Left.
   final double x;
-
-  /// Top.
   final double y;
-
-  /// Its frame's width; a line's may be negative.
   final double w;
-
-  /// Its frame's height; a line's may be negative.
   final double h;
-
-  /// Rotation in radians, clockwise.
   final double rotation;
-
-  /// Its color.
   final BridgeInkColor color;
-
-  /// Its line width, or a text's size: 0, 1 or 2.
   final PlatformInt64 width;
-
-  /// The page of an annotated document it lies on, from 0; 0 on a Whiteboard.
   final PlatformInt64 docPage;
-
-  /// A stroke's pen.
   final BridgePen pen;
-
-  /// A stroke's points: x, y and pressure as little-endian f32, 12 bytes a point.
   final Uint8List points;
-
-  /// A shape.
   final BridgeShape shape;
-
-  /// The seed of a shape's hand-drawn lines.
   final PlatformInt64 seed;
-
-  /// Whether a line ends in an arrowhead.
   final bool arrowhead;
-
-  /// A triangle's corners: x, y of each, from 0 to 1 of its frame.
   final Float64List corners;
-
-  /// A text element's text.
   final String text;
 
   const BridgeElement({
@@ -192,36 +140,16 @@ class BridgeElement {
           text == other.text;
 }
 
-/// A change to a live element: its frame and look, a text's text, a line's arrowhead.
 class BridgeElementChange {
-  /// The element.
   final String id;
-
-  /// Left.
   final double x;
-
-  /// Top.
   final double y;
-
-  /// Width.
   final double w;
-
-  /// Height.
   final double h;
-
-  /// Rotation in radians, clockwise.
   final double rotation;
-
-  /// Its color.
   final BridgeInkColor color;
-
-  /// Its line width or text size.
   final PlatformInt64 width;
-
-  /// A text element's new text; none keeps it.
   final String? text;
-
-  /// A line's arrowhead; none keeps it.
   final bool? arrowhead;
 
   const BridgeElementChange({
@@ -267,71 +195,10 @@ class BridgeElementChange {
           arrowhead == other.arrowhead;
 }
 
-/// What an element is; each kind names the parts it fills.
-enum BridgeElementKind {
-  /// Ink: `pen` and `points`.
-  stroke,
+enum BridgeElementKind { stroke, shape, text }
 
-  /// `shape`, with `seed`, `arrowhead` for a line and `corners` for a triangle.
-  shape,
+enum BridgeInkColor { text, data1, data2, data3, yellow, green, blue, pink }
 
-  /// `text`.
-  text,
-}
+enum BridgePen { ball, fountain, brush, highlighter }
 
-/// An element's color.
-enum BridgeInkColor {
-  /// The text color.
-  text,
-
-  /// Data color 1.
-  data1,
-
-  /// Data color 2.
-  data2,
-
-  /// Data color 3.
-  data3,
-
-  /// The yellow tag color.
-  yellow,
-
-  /// The green tag color.
-  green,
-
-  /// The blue tag color.
-  blue,
-
-  /// The pink tag color.
-  pink,
-}
-
-/// The pen a stroke was drawn with.
-enum BridgePen {
-  /// An even line.
-  ball,
-
-  /// A line that follows the pressure.
-  fountain,
-
-  /// A line that follows the pressure most.
-  brush,
-
-  /// Broad, translucent ink beneath the rest.
-  highlighter,
-}
-
-/// A shape.
-enum BridgeShape {
-  /// A line across its frame.
-  line,
-
-  /// A rectangle.
-  rectangle,
-
-  /// An ellipse.
-  ellipse,
-
-  /// A triangle with `corners`.
-  triangle,
-}
+enum BridgeShape { line, rectangle, ellipse, triangle }

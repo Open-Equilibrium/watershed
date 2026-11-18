@@ -8,21 +8,14 @@ import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
 import 'table_cells.dart';
 
-/// The color a new option of `field` takes: the one after its last option's, wrapping
-/// after the ten tag colors.
 int nextColor(BridgeField field) =>
     ((field.options.lastOrNull?.color ?? -1) + 1) % 10;
 
-/// The options a select cell's picker offers for what is typed: those whose name holds it,
-/// ignoring case.
 List<BridgeOption> optionsFor(BridgeField field, String typed) => [
   for (final option in field.options)
     if (option.name.toLowerCase().contains(typed.trim().toLowerCase())) option,
 ];
 
-/// A select cell's picker: typing filters the
-/// options, ↑↓ choose, ⏎ or a click picks one, or creates the typed name in the next color
-/// when no option holds it; esc closes it and keeps the value, ⇥ keeps it and goes on.
 class SelectPicker extends StatefulWidget {
   const SelectPicker({
     super.key,
@@ -37,24 +30,19 @@ class SelectPicker extends StatefulWidget {
 
   final BridgeField field;
 
-  /// What is typed to filter it, kept by the selection so keys typed before the picker
-  /// takes them count too.
   final TextEditingController text;
   final ValueChanged<BridgeOption> onPick;
   final ValueChanged<String> onCreate;
   final VoidCallback onClose;
 
-  /// ⇥ or, going back, ⇧⇥.
   final ValueChanged<bool> onTab;
 
-  /// Takes the picker's keys while it is open, for keys that reach the cell first.
   final void Function(KeyEventResult Function(KeyEvent event)? keys)? onKeys;
 
   static const _filterHeight = 34.0;
   static const _labelHeight = 22.0;
   static const _itemHeight = 30.0;
 
-  /// The height the picker takes with `options` options and nothing typed.
   static double heightFor(int options) =>
       _filterHeight +
       2 * WsMetrics.space2 +
@@ -76,7 +64,6 @@ class _SelectPickerState extends State<SelectPicker> {
     super.initState();
     _text.addListener(_filtered);
     widget.onKeys?.call((event) => _key(_focus, event));
-    // The filter takes the keys, also while the cell had them.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _focus.requestFocus();
     });
@@ -84,7 +71,6 @@ class _SelectPickerState extends State<SelectPicker> {
 
   void _filtered() => _choose(0);
 
-  /// Chooses the option at `index` and scrolls the list to keep it in view.
   void _choose(int index) {
     setState(() => _chosen = index);
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -111,7 +97,6 @@ class _SelectPickerState extends State<SelectPicker> {
 
   List<BridgeOption> get _options => optionsFor(widget.field, _typed);
 
-  /// Whether the typed name is one no option has, to create.
   bool get _creates =>
       _typed.isNotEmpty &&
       !widget.field.options.any(
@@ -197,13 +182,11 @@ class _SelectPickerState extends State<SelectPicker> {
               child: TextField(
                 controller: _text,
                 focusNode: _focus,
-                // The caret stays where Liquid puts it; desktop Flutter would select all on focus.
                 selectAllOnFocus: false,
                 style: TextStyle(fontSize: WsMetrics.fsUi, color: ws.text),
                 decoration: const InputDecoration.collapsed(hintText: null),
               ),
             ),
-            // The options scroll in the height the picker has.
             Flexible(
               child: Padding(
                 padding: const EdgeInsets.all(WsMetrics.space2),
@@ -273,14 +256,10 @@ class _SelectPickerState extends State<SelectPicker> {
   }
 }
 
-/// How a day shows in a cell and a date picker's field, in the person's region.
 DateFormat shownDays(String locale) => DateFormat.yMMMd(locale);
 
-/// How the core stores a day (ADR-0242).
 final storedDays = DateFormat('yyyy-MM-dd', 'en_US');
 
-/// The day typed in the person's region's short form, as cells show it or as the core
-/// stores it, with a year of four digits; none for anything else, such as a year of two.
 DateTime? parseDay(String typed, String locale) {
   for (final format in [
     DateFormat.yMd(locale),
@@ -299,10 +278,6 @@ DateTime? parseDay(String typed, String locale) {
   return null;
 }
 
-/// A date cell's picker: its field holds the day
-/// as typed, a calendar below shows its month. ↑↓ choose the day after or before, ⏎, ⇥ and
-/// a click outside write what is typed, a click on a day writes it, and Clear empties the
-/// cell; esc closes it and keeps the value.
 class DatePicker extends StatefulWidget {
   const DatePicker({
     super.key,
@@ -316,21 +291,16 @@ class DatePicker extends StatefulWidget {
     this.onKeys,
   });
 
-  /// What is typed, kept by the selection so keys typed before the picker takes them
-  /// count too.
   final TextEditingController text;
 
-  /// The person's region, as intl names it.
   final String locale;
   final ValueChanged<DateTime> onDay;
   final VoidCallback onEnter;
   final VoidCallback onClear;
   final VoidCallback onClose;
 
-  /// ⇥ or, going back, ⇧⇥.
   final ValueChanged<bool> onTab;
 
-  /// Takes the picker's keys while it is open, for keys that reach the cell first.
   final void Function(KeyEventResult Function(KeyEvent event)? keys)? onKeys;
 
   static const _fieldHeight = 30.0;
@@ -339,7 +309,6 @@ class DatePicker extends StatefulWidget {
   static const _weekHeight = 30.0;
   static const _clearHeight = 30.0;
 
-  /// The height the picker takes at most, with a month of six weeks.
   static const height =
       2 * WsMetrics.space2 +
       _fieldHeight +
@@ -360,7 +329,6 @@ class _DatePickerState extends State<DatePicker> {
   TextEditingController get _text => widget.text;
   late final _focus = FocusNode(debugLabel: 'Date picker', onKeyEvent: _key);
 
-  /// The first day of the month the calendar shows.
   late DateTime _month = _monthOf(_day ?? _today);
 
   DateTime get _today {
@@ -377,13 +345,11 @@ class _DatePickerState extends State<DatePicker> {
     super.initState();
     _text.addListener(_typed);
     widget.onKeys?.call((event) => _key(_focus, event));
-    // The field takes the keys, also while the cell had them.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _focus.requestFocus();
     });
   }
 
-  /// The calendar follows a typed day to its month.
   void _typed() => setState(() {
     if (_day case final day?) _month = _monthOf(day);
   });
@@ -427,7 +393,6 @@ class _DatePickerState extends State<DatePicker> {
     final ws = context.ws;
     final chosen = _day;
     final symbols = DateFormat(null, widget.locale).dateSymbols;
-    // 0 is Sunday, as DateTime's weekday 7 is.
     final first = MaterialLocalizations.of(context).firstDayOfWeekIndex;
     final lead = (_month.weekday % 7 - first + 7) % 7;
     final length = DateTime(_month.year, _month.month + 1, 0).day;
@@ -471,7 +436,6 @@ class _DatePickerState extends State<DatePicker> {
         boxShadow: ws.shadow,
       ),
       clipBehavior: Clip.antiAlias,
-      // A window too low for the whole month scrolls it.
       child: SingleChildScrollView(
         padding: const EdgeInsets.all(WsMetrics.space2),
         child: DefaultTextStyle.merge(
@@ -495,7 +459,6 @@ class _DatePickerState extends State<DatePicker> {
                 child: TextField(
                   controller: _text,
                   focusNode: _focus,
-                  // The caret stays where Liquid puts it; desktop Flutter would select all on focus.
                   selectAllOnFocus: false,
                   style: TextStyle(fontSize: WsMetrics.fsUi, color: ws.text),
                   decoration: const InputDecoration.collapsed(hintText: null),
@@ -598,14 +561,12 @@ class _DatePickerState extends State<DatePicker> {
     );
   }
 
-  /// A weekday's short name, at most two letters, as the mockup shows them.
   static String _weekday(String name) {
     final letters = name.replaceAll('.', '');
     return letters.length > 2 ? letters.substring(0, 2) : letters;
   }
 }
 
-/// A picker's item, which shows the hover and takes a click.
 class _Hovered extends StatefulWidget {
   const _Hovered({
     super.key,

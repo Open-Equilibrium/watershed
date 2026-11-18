@@ -5,18 +5,14 @@ use crate::{
 use serde_json::Value;
 use std::{fmt, io::Write};
 
-/// Failure to validate one closed, bounded `flow-value-v0` value.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct FlowValueValidationError {
     message: String,
 }
 
-/// Explains why a signed decimal integer is not canonical.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum CanonicalIntegerError {
-    /// The value is not a signed 64-bit decimal integer.
     Invalid,
-    /// The value parses but does not use its canonical decimal spelling.
     NonCanonical,
 }
 
@@ -36,7 +32,6 @@ impl fmt::Display for FlowValueValidationError {
 
 impl std::error::Error for FlowValueValidationError {}
 
-/// Validates one closed `flow-value-v0` JSON wrapper and all protocol bounds.
 pub fn validate_flow_value_v0(value: &Value) -> Result<(), FlowValueValidationError> {
     let mut nodes = 0;
     validate_at(value, 1, &mut nodes, "$")?;
@@ -49,9 +44,6 @@ pub fn validate_flow_value_v0(value: &Value) -> Result<(), FlowValueValidationEr
 }
 
 pub(crate) fn canonical_flow_value_fits_byte_limit(value: &Value) -> bool {
-    // `validate_at` has already enforced NFC strings and the closed grammar has
-    // no JSON numbers, so streamed serde JSON has the canonical byte length.
-    // Object ordering cannot change that length.
     let mut counter = ByteLimitWriter::default();
     match serde_json::to_writer(&mut counter, value) {
         Ok(()) => true,
@@ -146,7 +138,6 @@ fn validate_integer(value: &Value, path: &str) -> Result<(), FlowValueValidation
     }
 }
 
-/// Parses a canonically spelled signed 64-bit decimal integer.
 pub fn parse_canonical_i64(value: &str) -> Result<i64, CanonicalIntegerError> {
     let parsed = value
         .parse::<i64>()

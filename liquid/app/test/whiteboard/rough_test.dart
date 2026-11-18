@@ -7,7 +7,6 @@ import 'package:liquid/src/whiteboard/rough.dart';
 const _corners = [Offset(0, 0), Offset(100, 0), Offset(100, 60), Offset(0, 60)];
 const _box = Rect.fromLTWH(0, 0, 100, 60);
 
-/// Positions sampled every [step] px along each contour, in path order.
 List<Offset> _samples(Path path, {double step = 1}) {
   final points = <Offset>[];
   for (final metric in path.computeMetrics()) {
@@ -52,9 +51,6 @@ void main() {
     var reachesOutside = false;
     for (var seed = 1; seed <= 50; seed++) {
       final options = RoughOptions(seed: seed);
-      // rough.js moves a point by at most roughness * maxRandomnessOffset, and
-      // bows a control point by at most bowing * maxRandomnessOffset * side / 200
-      // for the longest side (100 px).
       final margin =
           options.roughness * options.maxRandomnessOffset +
           options.bowing * options.maxRandomnessOffset * 100 / 200;
@@ -79,7 +75,6 @@ void main() {
     final path = roughLine(a, b, const RoughOptions(seed: 7, roughness: 0));
     final samples = _samples(path, step: 0.5);
     expect(samples, isNotEmpty);
-    // Path stores float32 coordinates, so allow 1e-3 px of rounding.
     for (final p in samples) {
       expect(_distanceToSegment(p, a, b), lessThan(1e-3));
     }
@@ -87,7 +82,6 @@ void main() {
 
   test('a rough ellipse closes around its centre', () {
     final path = roughEllipse(_box, const RoughOptions(seed: 3));
-    // Eight 45-degree sectors around the centre; each must hold outline.
     final sectors = <int>{};
     for (final p in _samples(path, step: 0.5)) {
       final angle = math.atan2(p.dy - _box.center.dy, p.dx - _box.center.dx);

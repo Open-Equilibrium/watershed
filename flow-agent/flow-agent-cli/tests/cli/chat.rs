@@ -85,68 +85,42 @@ fn chat_failed_flow_exits_with_failed_status() {
 }
 
 #[test]
-fn chat_requires_a_nonblank_reference_before_eof() {
-    for (case, input) in [
-        ("blank-only", b"\n   \n".as_slice()),
-        ("slash-only", b"/\n".as_slice()),
+fn chat_rejects_unusable_input_before_session_mutation() {
+    let overlong = |chars: usize| [vec![b'x'; chars], vec![b'\n']].concat();
+    let nonblank = "error: flow chat requires one nonblank stdin Flow reference\n";
+    for (case, input, code, stderr) in [
+        ("blank-only", b"\n   \n".to_vec(), 64, nonblank),
+        ("slash-only", b"/\n".to_vec(), 64, nonblank),
+        (
+            "overlong",
+            overlong(core_script::MAX_BLOCK_NAME_CHARS + 1),
+            64,
+            nonblank,
+        ),
+        ("overlong-1024", overlong(1_024), 64, nonblank),
+        (
+            "invalid-utf8",
+            b"\xff\n".to_vec(),
+            64,
+            "error: flow chat stdin must be valid UTF-8\n",
+        ),
+        (
+            "unknown-reference",
+            b"/unknown\n".to_vec(),
+            65,
+            "error: registry root references missing flow unknown\n",
+        ),
     ] {
         let workspace = workspace_copy("hello-flow");
-        let output = run_chat(&workspace, input);
+        let output = run_chat(&workspace, &input);
 
-        assert_eq!(output.status.code(), Some(64), "{case}");
+        assert_eq!(output.status.code(), Some(code), "{case}");
         assert!(output.stdout.is_empty(), "{case}");
         assert_eq!(
             String::from_utf8(output.stderr).expect("stderr should be UTF-8"),
-            "error: flow chat requires one nonblank stdin Flow reference\n",
+            stderr,
             "{case}"
         );
         assert!(!workspace_session_dir(&workspace).exists(), "{case}");
     }
-}
-
-#[test]
-fn chat_rejects_increasing_overlong_references_before_session_mutation() {
-    let workspace = workspace_copy("hello-flow");
-    for input_chars in [core_script::MAX_BLOCK_NAME_CHARS + 1, 1_024] {
-        let mut input = vec![b'x'; input_chars];
-        input.push(b'\n');
-        let output = run_chat(&workspace, &input);
-
-        assert_eq!(output.status.code(), Some(64), "{input_chars}");
-        assert!(output.stdout.is_empty(), "{input_chars}");
-        assert_eq!(
-            String::from_utf8(output.stderr).expect("stderr should be UTF-8"),
-            "error: flow chat requires one nonblank stdin Flow reference\n",
-            "{input_chars}"
-        );
-        assert!(!workspace_session_dir(&workspace).exists(), "{input_chars}");
-    }
-}
-
-#[test]
-fn chat_rejects_invalid_utf8_as_input_validation_before_session_mutation() {
-    let workspace = workspace_copy("hello-flow");
-    let output = run_chat(&workspace, b"\xff\n");
-
-    assert_eq!(output.status.code(), Some(64));
-    assert!(output.stdout.is_empty());
-    assert_eq!(
-        String::from_utf8(output.stderr).expect("stderr should be UTF-8"),
-        "error: flow chat stdin must be valid UTF-8\n"
-    );
-    assert!(!workspace_session_dir(&workspace).exists());
-}
-
-#[test]
-fn chat_unknown_reference_fails_before_session_mutation() {
-    let workspace = workspace_copy("hello-flow");
-    let output = run_chat(&workspace, b"/unknown\n");
-
-    assert_eq!(output.status.code(), Some(65));
-    assert_eq!(
-        String::from_utf8(output.stderr).expect("stderr should be UTF-8"),
-        "error: registry root references missing flow unknown\n"
-    );
-    assert!(output.stdout.is_empty());
-    assert!(!workspace_session_dir(&workspace).exists());
 }

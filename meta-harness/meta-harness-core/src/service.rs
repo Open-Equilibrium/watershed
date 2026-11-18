@@ -1,8 +1,3 @@
-//! Meta-Harness's service (ADR-0286, ADR-0297): it owns a data folder, starts the pinned T3 Code
-//! server there and serves the API (see [`crate::api`]) on a WebSocket at 127.0.0.1, as T3 Code
-//! serves its own clients. Every connection must carry the bearer token the service writes, with
-//! its address, into `connection.json`, which only the user can read.
-
 use std::collections::HashMap;
 use std::net::IpAddr;
 use std::path::{Path, PathBuf};
@@ -20,55 +15,44 @@ use tokio_tungstenite::tungstenite::handshake::server::{ErrorResponse, Request, 
 
 mod admit;
 mod listener;
+mod moves;
+pub(crate) mod transfers;
 
 use crate::api::{
     self, Call, Checkout, ConfigCall, GitCall, HostCall, HostsCall, ProjectCall, Reply, Stream,
     ThreadCall,
 };
 use crate::config::{Homes, Proposed, Store, now_ms, provider_instances};
+use crate::host_move;
 use crate::hosts::{self, Links};
 
 use crate::util::IDLE;
 use crate::{AcpAgent, Host, HostConfig, Project, Thread, tunnel};
 use admit::{Admission, Caller, Listener, admit, header, revoked};
 
-/// The file that tells clients where the service listens and which token it accepts.
 pub const CONNECTION_FILE: &str = "connection.json";
 
-/// Frames a connection's writer holds before a stream waits for the client to read.
 const OUTGOING: usize = 256;
 
-/// Threads a connection keeps followed after their last call; a stream keeps its own thread.
 const FOLLOWED: usize = 32;
 
-/// How many remote connections may be in their handshake at once; the excess is closed (ADR-0299).
 const HANDSHAKES: usize = 32;
 
-/// How long a new connection may take to complete its handshake.
 const HANDSHAKE: std::time::Duration = std::time::Duration::from_secs(10);
 
-/// How long a reply to a malformed request may wait for room in the outgoing queue.
 const REPLY_WAIT: std::time::Duration = std::time::Duration::from_secs(10);
 
-/// How many requests one connection may have in progress at once: a call, or a stream until it
-/// ends. A client that sends more is disconnected; no Liquid client issues anywhere near this many.
 const REQUESTS: usize = 256;
 
-/// The refusal of a call or stream that the caller's kind does not make (ADR-0299).
 const REFUSED_CALL: &str = "This client may not make that call.";
 
-/// The refusal of a link while T3 refuses agents from other hosts here (ADR-0300).
 const LINKS_OFF: &str =
     "Agents from other hosts are off here. Turn them on first: meta host agents on.";
 
-/// Revocations a connection may still be behind on; one behind further ends (see [`revoked`]).
 const REVOKED: usize = 64;
 
-/// How often linked hosts are checked for links that are due (ADR-0288).
 const RELINK_EVERY: std::time::Duration = std::time::Duration::from_secs(3600);
 
-/// Meta-Harness's data folder: `META_HARNESS_HOME`, which must be absolute, else `.meta-harness`
-/// in the home folder, as T3 Code keeps `~/.t3`.
 pub fn default_home() -> Result<PathBuf, String> {
     match std::env::var_os("META_HARNESS_HOME") {
         Some(home) if Path::new(&home).is_absolute() => Ok(PathBuf::from(home)),
@@ -79,23 +63,15 @@ pub fn default_home() -> Result<PathBuf, String> {
     }
 }
 
-/// What a service runs on.
 #[derive(Debug, Clone)]
 pub struct ServiceConfig {
-    /// Meta-Harness's data folder: its store, T3's data, the harness homes and the connection
-    /// file. One service at a time owns it.
     pub home: PathBuf,
-    /// The pinned `t3` executable (ADR-0281).
     pub t3: PathBuf,
-    /// Agents T3 runs as local ACP commands.
     pub acp_agents: Vec<AcpAgent>,
 }
 
-/// A running service.
 pub struct Service {
-    /// `ws://127.0.0.1:<port>`.
     pub url: String,
-    /// The bearer token every connection must send.
     pub token: String,
     host: Arc<Host>,
     shared: Arc<Shared>,
@@ -112,40 +88,25 @@ struct Shared {
     homes: Homes,
     person_codex: PathBuf,
     token: String,
-    /// Turns true when the service stops, which ends every connection.
     stopping: tokio::sync::watch::Receiver<bool>,
-    /// Held until the last connection and call ends; a new service on the folder fails until then.
     _lock: std::fs::File,
-    /// The name of each client revoked; its open connections end (ADR-0299).
     revoked: tokio::sync::broadcast::Sender<String>,
-    /// This host's name for other hosts: T3's name for it, in lower case.
     name: String,
-    /// Where the remote listener binds; `None` for the Tailscale addresses.
     remote_bind: Option<Vec<IpAddr>>,
-    /// The remote listener while remote access is on.
     remote: std::sync::Mutex<listener::Remote>,
-    /// Held while remote access is turned on or off, or bound again, so those changes do not
-    /// interleave.
     remote_serial: tokio::sync::Mutex<()>,
-    /// The hosts this one links to and their tunnels.
     links: Links,
-    /// The handshake slots of the remote listener (see [`HANDSHAKES`]).
     handshakes: Arc<tokio::sync::Semaphore>,
-    /// Held for reading by each sign-in a tunnel forwards until T3 answers it, and for writing while
-    /// a client's T3 sessions end, so no sign-in in flight survives that (ADR-0301).
     sign_ins: Arc<tokio::sync::RwLock<()>>,
+    moves: tokio::sync::RwLock<()>,
+    transfers: transfers::TransferLocks,
 }
 
 impl Service {
-    /// Takes the data folder, writes the current configuration into the harness homes, starts
-    /// T3 with Claude Code and Codex pointed at them and listens for clients. Remote access binds
-    /// the Tailscale addresses.
     pub async fn start(config: ServiceConfig) -> Result<Self, String> {
         Self::start_with_remote(config, None).await
     }
 
-    /// As [`Service::start`], but remote access binds `remote_bind` instead of the Tailscale
-    /// addresses (ADR-0299); the tests bind loopback this way.
     pub async fn start_with_remote(
         config: ServiceConfig,
         remote_bind: Option<Vec<IpAddr>>,
@@ -158,7 +119,6 @@ impl Service {
             .map(PathBuf::from)
             .or_else(|| std::env::home_dir().map(|h| h.join(".codex")))
             .ok_or("The home folder is unknown.")?;
-        // A revision the homes cannot take must not keep the service from serving its revert.
         let written = homes.write(&store.current()?.blocks, &person_codex);
         if let Err(error) = &written {
             eprintln!("meta: {error}");
@@ -212,8 +172,9 @@ impl Service {
             links,
             handshakes: Arc::new(tokio::sync::Semaphore::new(HANDSHAKES)),
             sign_ins: Arc::new(tokio::sync::RwLock::new(())),
+            moves: tokio::sync::RwLock::default(),
+            transfers: transfers::TransferLocks::default(),
         });
-        // Remote access stays on across restarts (ADR-0299); a port it cannot take is retried.
         let remembered = hosts::remote_port(&shared.store.db())?;
         if let Some(port) = remembered
             && let Err(error) = listener::start(&shared, port).await
@@ -228,6 +189,7 @@ impl Service {
             shared.stopping.clone(),
         ));
         let relink = tokio::spawn(relink(shared.clone()));
+        tokio::spawn(moves::retry_pauses(shared.clone()));
         let retry = tokio::spawn(listener::retry(shared.clone()));
         Ok(Self {
             url,
@@ -242,7 +204,6 @@ impl Service {
         })
     }
 
-    /// Stops listening, ends every connection, removes the connection file and stops T3.
     pub async fn stop(self) {
         let host = self.host.clone();
         drop(self);
@@ -250,15 +211,12 @@ impl Service {
     }
 }
 
-/// A dropped service stops as [`Service::stop`] does, except that it does not stop T3: T3's host
-/// stops when its last handle is dropped.
 impl Drop for Service {
     fn drop(&mut self) {
         self.accept.abort();
         self.relink.abort();
         self.retry.abort();
         self.shared.links.stop();
-        // The remote listener's tasks hold the shared state, so they end with it.
         drop(crate::util::lock(&self.shared.remote).listening.take());
         let _ = self.stopping.send(true);
         let _ = std::fs::remove_file(&self.connection_file);
@@ -274,7 +232,6 @@ fn create_private_dir(path: &Path) -> Result<(), String> {
     Ok(())
 }
 
-/// Locks `home` for this service; a second service on it fails at once.
 fn take_lock(home: &Path) -> Result<std::fs::File, String> {
     let path = home.join("service.lock");
     let file = std::fs::OpenOptions::new()
@@ -288,7 +245,6 @@ fn take_lock(home: &Path) -> Result<std::fs::File, String> {
     Ok(file)
 }
 
-/// Writes `text` to `path` readable only by the user, replacing it whole.
 fn write_private(path: &Path, text: &str) -> Result<(), String> {
     use std::io::Write;
     let temporary = path.with_extension("tmp");
@@ -307,7 +263,6 @@ fn write_private(path: &Path, text: &str) -> Result<(), String> {
         .map_err(|e| format!("Could not write {}: {e}", path.display()))
 }
 
-/// Makes the links that are due, now and every hour, until the service stops (ADR-0288).
 async fn relink(shared: Arc<Shared>) {
     loop {
         shared.links.relink_due(&shared.store).await;
@@ -315,7 +270,6 @@ async fn relink(shared: Arc<Shared>) {
     }
 }
 
-/// Serves each connection that `listener` accepts, until the task ends.
 async fn accept(
     listener: TcpListener,
     shared: Arc<Shared>,
@@ -323,7 +277,6 @@ async fn accept(
     ends: tokio::sync::watch::Receiver<bool>,
 ) {
     crate::util::accept_each(listener, move |socket| {
-        // A remote connection needs one of the handshake slots; with none free it is closed.
         let slot = match kind {
             Listener::Local => Ok(None),
             Listener::Remote => shared.handshakes.clone().try_acquire_owned().map(Some),
@@ -338,9 +291,6 @@ async fn accept(
     .await;
 }
 
-/// One client connection: its handshake must admit it (see [`admit`]); then each request runs on
-/// its own task, and streams end when the client cancels them or leaves.
-// tungstenite's handshake callback returns its own large error response.
 #[allow(clippy::result_large_err)]
 async fn serve(
     shared: Arc<Shared>,
@@ -351,7 +301,6 @@ async fn serve(
 ) {
     let mut client = String::new();
     let mut admission = None;
-    // Subscribed before the token is checked, so no revocation during the handshake is missed.
     let mut revocations = shared.revoked.subscribe();
     let check = |request: &Request, response: Response| -> Result<Response, ErrorResponse> {
         admission = Some(admit(&shared, listener, request)?);
@@ -366,7 +315,6 @@ async fn serve(
     else {
         return;
     };
-    // The handshake is over, so its slot is free for the next connection.
     drop(slot);
     let (caller, owner) = match admission {
         Some(Admission::Session(caller, owner)) => (caller, owner),
@@ -400,8 +348,6 @@ async fn serve(
     };
     let (mut sink, mut frames) = socket.split();
     let (out, mut outgoing) = mpsc::channel::<Message>(OUTGOING);
-    // The connection's tasks are owned here, so when the connection ends, aborted or not, they end too
-    // and nothing they hold outlives it (their state holds the service's data-folder lock).
     let mut tasks = tokio::task::JoinSet::new();
     tasks.spawn(async move {
         while let Some(message) = outgoing.recv().await {
@@ -419,22 +365,17 @@ async fn serve(
         threads: Mutex::default(),
     });
     let mut streams: HashMap<u64, AbortHandle> = HashMap::new();
-    // Signalled by a malformed request's reply that the queue did not take in time.
     let (stalled, mut stalls) = mpsc::channel::<()>(1);
-    // The one malformed request whose reply may wait for queue room.
     let replying = Arc::new(tokio::sync::Semaphore::new(1));
-    // Each request in progress holds one of these until its task ends.
     let requests = Arc::new(tokio::sync::Semaphore::new(REQUESTS));
     let mut ping = crate::util::pings();
     let mut heard = tokio::time::Instant::now();
     loop {
-        // The ping is sent after the select, so no guard it holds lives across that await.
         let frame = tokio::select! {
             frame = frames.next() => Some(frame),
             _ = stopping.wait_for(|stopped| *stopped) => break,
             () = revoked(&mut revocations, owner.as_deref()) => break,
             _ = stalls.recv() => break,
-            // Finished tasks are reaped as they finish, so none is kept after its end.
             Some(_) = tasks.join_next() => continue,
             _ = ping.tick() => None,
         };
@@ -442,7 +383,6 @@ async fn serve(
             if heard.elapsed() > IDLE {
                 break;
             }
-            // A full queue is a peer that is not reading, which the next ping finds.
             let _ = out.try_send(Message::Ping(Vec::new().into()));
             continue;
         };
@@ -451,7 +391,6 @@ async fn serve(
         let Message::Text(text) = frame else { continue };
         let request = match serde_json::from_str::<api::Request>(&text) {
             Ok(request) => request,
-            // Such as a call a newer client knows and this service does not: it fails at once.
             Err(error) => {
                 let id = serde_json::from_str::<Value>(&text)
                     .ok()
@@ -461,10 +400,6 @@ async fn serve(
                     let reply = frame_of(&Reply::Error { id, error });
                     match out.try_send(reply) {
                         Ok(()) => {}
-                        // A full queue waits for room on a task of its own, so the loop goes on
-                        // noticing revocation and shutdown. A second reply while one waits means a
-                        // client that does not read: it is disconnected, as one that takes no
-                        // reply within REPLY_WAIT is.
                         Err(mpsc::error::TrySendError::Full(reply)) => {
                             let Ok(permit) = replying.clone().try_acquire_owned() else {
                                 break;
@@ -489,7 +424,6 @@ async fn serve(
         streams.retain(|_, task| !task.is_finished());
         match request {
             api::Request::Call { id, call } => {
-                // A client past its requests in progress is disconnected, rather than queued.
                 let Ok(permit) = requests.clone().try_acquire_owned() else {
                     break;
                 };
@@ -514,8 +448,6 @@ async fn serve(
                         let _ = out.send(frame_of(&Reply::Error { id, error })).await;
                     }
                 });
-                // A client that reuses a live stream's id ends that stream, so none is left
-                // running without a way to cancel it.
                 if let Some(earlier) = streams.insert(id, task) {
                     earlier.abort();
                 }
@@ -538,8 +470,6 @@ fn frame_of(reply: &Reply) -> Message {
     )
 }
 
-/// Answers stream `id` with `first`, then sends each of `items` until the client is gone or the
-/// items end, and ends the stream.
 async fn answer(
     out: &mpsc::Sender<Message>,
     id: u64,
@@ -564,13 +494,11 @@ fn to(value: impl Serialize) -> Result<Value, String> {
     serde_json::to_value(value).map_err(|e| e.to_string())
 }
 
-/// What one connection opened: projects by folder and threads by id.
 struct Session {
     shared: Arc<Shared>,
     client: String,
     caller: Caller,
     projects: Mutex<HashMap<String, Project>>,
-    /// Followed threads, the most recently used last.
     threads: Mutex<Vec<(String, Thread)>>,
 }
 
@@ -589,7 +517,20 @@ impl Session {
         Ok(project)
     }
 
-    /// The thread `id`, followed on first use, also after the client reconnected.
+    async fn writable(
+        &self,
+        thread: &Thread,
+        sealed_too: bool,
+    ) -> Result<tokio::sync::RwLockReadGuard<'_, ()>, String> {
+        let gate = self.shared.moves.read().await;
+        match host_move::state(&self.shared.store.db(), thread.id())? {
+            Some(state) if sealed_too || state == host_move::State::Moving => {
+                Err(host_move::refusal(state).to_owned())
+            }
+            _ => Ok(gate),
+        }
+    }
+
     async fn thread(&self, root: &str, id: &str) -> Result<Thread, String> {
         {
             let mut threads = self.threads.lock().await;
@@ -605,7 +546,6 @@ impl Session {
         Ok(thread)
     }
 
-    /// Keeps `thread` followed, letting go of the least recently used beyond [`FOLLOWED`].
     async fn keep(&self, thread: Thread) {
         let mut threads = self.threads.lock().await;
         threads.retain(|(known, _)| known != thread.id());
@@ -628,10 +568,7 @@ impl Session {
         match call {
             Call::Host(call) => self.host_call(call).await,
             Call::Project { root, call } => self.project_call(&root, call).await,
-            Call::Thread { root, id, call } => {
-                let thread = self.thread(&root, &id).await?;
-                thread_call(&thread, call).await
-            }
+            Call::Thread { root, id, call } => self.thread_request(&root, &id, call).await,
             Call::Git { checkout, call } => git_call(&self.git(&checkout).await?, call).await,
             Call::Config(call) => self.config_call(call),
             Call::Remote(call) => listener::call(&self.shared, call).await,
@@ -650,9 +587,6 @@ impl Session {
         match call {
             HostsCall::T3Pairing => to(shared.links.pairing_code(self.caller.access()).await?),
             HostsCall::Revoke(name) => {
-                // The client goes first, so none of its connections is admitted again. Then the sign-ins
-                // in flight finish, its open connections end with its token (ADR-0299), and the sessions
-                // its sign-ins made end (ADR-0301). A failure there leaves the name to revoke again.
                 let had_client = hosts::revoke(&shared.store.db(), &name)?;
                 let ended = {
                     let _sign_ins = shared.sign_ins.write().await;
@@ -697,6 +631,23 @@ impl Session {
             }),
             HostCall::Providers => to(host.providers().await?),
             HostCall::EnvironmentName => to(host.environment_name().await?),
+            HostCall::EnvironmentMachine => to(host.environment_machine().await?),
+            HostCall::EnvironmentId => to(host.environment_id().await?),
+            HostCall::Projects => to(host.projects().await?),
+            HostCall::CloneProject { remote_url, path } => {
+                to(host.clone_project(&remote_url, &path).await?)
+            }
+            HostCall::AddProject { root } => to(host.add_project(&root).await?),
+            HostCall::MoveStatus { transfer } => {
+                to(moves::move_status(&self.shared, &transfer).await?)
+            }
+            HostCall::MoveAbort { transfer } => {
+                to(moves::move_abort(&self.shared, &transfer).await?)
+            }
+            HostCall::Preflight { root, branch } => {
+                let sealed = host_move::sealed_threads(&self.shared.store.db())?;
+                to(host.preflight(&root, &branch, &sealed).await?)
+            }
             HostCall::WriterModel => to(host.writer_model().await?),
             HostCall::SetWriterModel(choice) => to(host.set_writer_model(&choice).await?),
         }
@@ -705,7 +656,16 @@ impl Session {
     async fn project_call(&self, root: &str, call: ProjectCall) -> Result<Value, String> {
         let project = self.project(root).await?;
         match call {
-            ProjectCall::Threads => to(project.threads().await?),
+            ProjectCall::Threads => {
+                let sealed = host_move::sealed_threads(&self.shared.store.db())?;
+                let mut threads = project.threads().await?;
+                threads.retain(|thread| !sealed.contains(&thread.id));
+                for thread in &mut threads {
+                    thread.moving = host_move::open_move(&self.shared.store.db(), &thread.id)?;
+                }
+                to(threads)
+            }
+            ProjectCall::MoveIn(package) => self.move_in(root, &project, package).await,
             ProjectCall::Start(start) => {
                 let thread = project.start(start).await?;
                 let id = thread.id().to_owned();
@@ -717,6 +677,8 @@ impl Session {
                 to(project.only_thread_in_worktree(&thread).await?)
             }
             ProjectCall::Delete { thread, worktree } => {
+                let handle = self.thread(root, &thread.id).await?;
+                let _gate = self.writable(&handle, false).await?;
                 self.threads
                     .lock()
                     .await
@@ -724,6 +686,8 @@ impl Session {
                 to(project.delete(&thread, worktree).await?)
             }
             ProjectCall::Archive { thread, archived } => {
+                let handle = self.thread(root, &thread).await?;
+                let _gate = self.writable(&handle, false).await?;
                 to(project.archive(&thread, archived).await?)
             }
         }
@@ -753,7 +717,44 @@ impl Session {
         }
     }
 
-    /// Answers stream `id` with its first value, then sends its items until it ends.
+    async fn thread_request(
+        &self,
+        root: &str,
+        id: &str,
+        call: ThreadCall,
+    ) -> Result<Value, String> {
+        let thread = self.thread(root, id).await?;
+        match call {
+            ThreadCall::MoveCheck => self.move_check(&thread).await,
+            ThreadCall::MoveOut {
+                transfer,
+                target_address,
+                target_name,
+                target_environment,
+                commit,
+                message,
+            } => {
+                self.move_out(
+                    &thread,
+                    transfer,
+                    (target_address, target_name, target_environment),
+                    commit,
+                    message,
+                )
+                .await
+            }
+            ThreadCall::MoveFinish { transfer, finish } => {
+                self.move_finish(&thread, transfer, finish).await
+            }
+            ThreadCall::MoveRecord => to(host_move::record(&self.shared.store.db(), id)?),
+            call if writes(&call) => {
+                let _gate = self.writable(&thread, true).await?;
+                thread_call(&thread, call).await
+            }
+            call => thread_call(&thread, call).await,
+        }
+    }
+
     async fn stream(
         &self,
         id: u64,
@@ -765,7 +766,6 @@ impl Session {
         }
         match stream {
             Stream::Subscribe { root, id: thread } => {
-                // The stream holds the thread, so it stays followed however many others open.
                 let followed = self.thread(&root, &thread).await?;
                 let (snapshot, events) = followed.subscribe();
                 let items = unfold(events, |mut events| async move {
@@ -818,6 +818,25 @@ impl Session {
     }
 }
 
+fn writes(call: &ThreadCall) -> bool {
+    !matches!(
+        call,
+        ThreadCall::Title
+            | ThreadCall::Worktree
+            | ThreadCall::Ended
+            | ThreadCall::Snapshot
+            | ThreadCall::Turns
+            | ThreadCall::Statistics
+            | ThreadCall::Context
+            | ThreadCall::Model
+            | ThreadCall::Record
+            | ThreadCall::Diff { .. }
+            | ThreadCall::Stop
+            | ThreadCall::Lineage
+            | ThreadCall::UsageLimits
+    )
+}
+
 async fn thread_call(thread: &Thread, call: ThreadCall) -> Result<Value, String> {
     use crate::RequestId;
     match call {
@@ -867,6 +886,10 @@ async fn thread_call(thread: &Thread, call: ThreadCall) -> Result<Value, String>
         ThreadCall::MergeBack => to(thread.merge_back().await?),
         ThreadCall::Disconnect => to(thread.disconnect().await?),
         ThreadCall::StopSubagent(id) => to(thread.stop_subagent(&id).await?),
+        ThreadCall::MoveCheck
+        | ThreadCall::MoveOut { .. }
+        | ThreadCall::MoveFinish { .. }
+        | ThreadCall::MoveRecord => Err("The service answers a move call itself.".to_owned()),
     }
 }
 

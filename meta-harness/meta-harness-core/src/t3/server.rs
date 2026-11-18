@@ -1,12 +1,9 @@
-//! The pinned T3 Code server Meta-Harness starts on loopback as its owner (ADR-0281).
-
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::Duration;
 
 use futures_util::future::BoxFuture;
 
-/// The T3 Code release Meta-Harness runs, as `meta-harness/t3.lock` pins it.
 pub fn t3_version() -> &'static str {
     include_str!("../../../t3.lock")
         .lines()
@@ -14,37 +11,28 @@ pub fn t3_version() -> &'static str {
         .map_or("", str::trim)
 }
 
-/// Environment that keeps T3 from sending anything to its analytics (ADR-0281). Agent activity
-/// publishing stays off because Meta-Harness never runs `t3 connect`, which stores what
-/// publishing needs.
 pub(crate) const QUIET_ENV: [(&str, &str); 2] = [
     ("T3CODE_TELEMETRY_ENABLED", "false"),
     ("T3CODE_OTEL_SDK_DISABLED", "true"),
 ];
 
-/// A running T3 server.
 pub(crate) struct Server {
     child: tokio::process::Child,
-    /// `http://127.0.0.1:<port>`.
     pub origin: String,
     home: PathBuf,
     binary: PathBuf,
 }
 
 impl Server {
-    /// Starts `binary serve` on 127.0.0.1 with its data in `home` and waits until it listens.
-    /// A T3 server that a dead Meta-Harness left running in `home` is stopped first, since it
-    /// holds the folder.
     pub async fn start(binary: &Path, home: &Path) -> Result<Self, String> {
         let runtime = home.join("userdata").join("server-runtime.json");
-        stop_left_behind(binary, &runtime).await;
-        // T3 picks a free port before it binds it, so a server starting at the same moment can
-        // take it and this one ends; it is started again rather than waited for.
+        stop_left_behind(binary, home).await;
         for attempt in 1..=START_ATTEMPTS {
             let _ = std::fs::remove_file(&runtime);
             let mut command = tokio::process::Command::new(binary);
             command
-                .args(["serve", "--host", "127.0.0.1", "--no-browser"])
+                .args(["serve", "--host", "127.0.0.1", "--no-browser", "--base-dir"])
+                .arg(home)
                 .current_dir(home)
                 .env("T3CODE_HOME", home)
                 .envs(QUIET_ENV)
@@ -73,8 +61,6 @@ impl Server {
         ))
     }
 
-    /// Issues owner bearer tokens with `t3 auth session issue`, which needs no person. A socket
-    /// closes when its session expires, so each connection asks for a new token. Never logged.
     pub fn issuer(
         &self,
     ) -> impl Fn() -> BoxFuture<'static, Result<String, String>> + Send + Sync + 'static {
@@ -82,8 +68,6 @@ impl Server {
         move || Box::pin(issue(binary.clone(), home.clone(), ISSUE_WAIT))
     }
 
-    /// Stops the server as `stop_left_behind` does: TERM, then KILL if it has not exited after
-    /// five seconds. T3 stops its runs and their provider processes on TERM.
     pub async fn stop(&mut self) {
         if let Some(pid) = self
             .child
@@ -101,15 +85,10 @@ impl Server {
     }
 }
 
-/// The lifetime of an owner token: as long as the desktop app's own bootstrap grant (T3's
-/// `DESKTOP_BOOTSTRAP_TTL_HOURS`).
 const OWNER_TTL: &str = "24h";
 
-/// How long T3 may take to issue a token before its process is killed.
 const ISSUE_WAIT: Duration = Duration::from_secs(30);
 
-/// Issues one owner token from the T3 server in `home`, run by `binary`. Past `wait`, or when the
-/// future is dropped, the process is killed.
 async fn issue(binary: PathBuf, home: PathBuf, wait: Duration) -> Result<String, String> {
     let child = tokio::process::Command::new(&binary)
         .args([
@@ -143,16 +122,19 @@ async fn issue(binary: PathBuf, home: PathBuf, wait: Duration) -> Result<String,
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_owned())
 }
 
-/// Whether `command`, as `ps` prints it, runs `binary` as `binary serve ...`. The executable is the
-/// whole path, so `/x/t3backup serve` runs another program.
-fn runs_t3_serve(binary: &Path, command: &str) -> bool {
+fn runs_t3_serve(binary: &Path, home: &Path, command: &str) -> bool {
     command
         .strip_prefix(&*binary.to_string_lossy())
-        .is_some_and(|arguments| arguments.starts_with(" serve "))
+        .is_some_and(|arguments| {
+            arguments.starts_with(" serve ")
+                && arguments
+                    .trim_end()
+                    .ends_with(&format!(" --base-dir {}", home.to_string_lossy()))
+        })
 }
 
-/// Stops the `t3 serve` whose pid `runtime` records, if it still runs `binary`.
-async fn stop_left_behind(binary: &Path, runtime: &Path) {
+async fn stop_left_behind(binary: &Path, home: &Path) {
+    let runtime = home.join("userdata").join("server-runtime.json");
     let Some(pid) = std::fs::read_to_string(runtime)
         .ok()
         .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
@@ -165,7 +147,7 @@ async fn stop_left_behind(binary: &Path, runtime: &Path) {
         std::process::Command::new("ps")
             .args(["-o", "command=", "-p", &pid.as_raw_nonzero().to_string()])
             .output()
-            .is_ok_and(|out| runs_t3_serve(binary, &String::from_utf8_lossy(&out.stdout)))
+            .is_ok_and(|out| runs_t3_serve(binary, home, &String::from_utf8_lossy(&out.stdout)))
     };
     if !runs_t3(pid) {
         return;
@@ -177,13 +159,13 @@ async fn stop_left_behind(binary: &Path, runtime: &Path) {
         }
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
-    let _ = rustix::process::kill_process(pid, rustix::process::Signal::KILL);
+    if runs_t3(pid) {
+        let _ = rustix::process::kill_process(pid, rustix::process::Signal::KILL);
+    }
 }
 
-/// How often a server that ends before it listens is started.
 const START_ATTEMPTS: u32 = 3;
 
-/// The origin the started `child` listens on; `None` once it ended before listening.
 async fn wait_for_origin(
     runtime: &Path,
     child: &mut tokio::process::Child,
@@ -206,9 +188,6 @@ async fn wait_for_origin(
     ))
 }
 
-/// The origin that the runtime file `text` names for the server started as `pid`, once it runs the
-/// pinned release; `None` while it does not listen yet. A server of another release never starts
-/// listening for Meta-Harness, so it fails at once.
 fn listening_origin(text: &str, pid: Option<u32>) -> Result<Option<String>, String> {
     let Ok(value) = serde_json::from_str::<serde_json::Value>(text) else {
         return Ok(None);
@@ -230,8 +209,6 @@ fn listening_origin(text: &str, pid: Option<u32>) -> Result<Option<String>, Stri
 mod tests {
     use super::*;
 
-    /// A stand-in `t3` whose first start ends at once, as one that lost a race for its port does,
-    /// and whose second writes the pinned release's runtime record and serves.
     #[cfg(unix)]
     #[tokio::test]
     async fn a_server_that_ends_during_its_start_is_started_again() {
@@ -272,8 +249,6 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// A stand-in `t3` that never answers ends its token issue at the wait, and its process ends
-    /// with it.
     #[cfg(unix)]
     #[tokio::test]
     async fn a_token_issue_that_never_ends_is_killed_at_its_wait() {
@@ -297,15 +272,29 @@ mod tests {
     }
 
     #[test]
-    fn a_stale_pid_counts_as_t3_only_when_it_runs_the_binary_as_serve() {
-        let binary = Path::new("/x/t3");
+    fn a_stale_pid_counts_as_t3_only_when_it_serves_the_folder_with_the_binary() {
+        let (binary, home) = (Path::new("/x/t3"), Path::new("/data/a"));
         for (command, runs) in [
-            ("/x/t3 serve --host 127.0.0.1 --no-browser\n", true),
-            ("/x/t3backup serve --host 127.0.0.1\n", false),
+            (
+                "/x/t3 serve --host 127.0.0.1 --no-browser --base-dir /data/a\n",
+                true,
+            ),
+            (
+                "/x/t3 serve --host 127.0.0.1 --no-browser --base-dir /data/b\n",
+                false,
+            ),
+            (
+                "/x/t3 serve --host 127.0.0.1 --no-browser --base-dir /data/a2\n",
+                false,
+            ),
+            (
+                "/x/t3backup serve --host 127.0.0.1 --base-dir /data/a\n",
+                false,
+            ),
             ("/x/t3-helper serve --other\n", false),
             ("/x/t3 auth session issue\n", false),
         ] {
-            assert_eq!(runs_t3_serve(binary, command), runs, "{command}");
+            assert_eq!(runs_t3_serve(binary, home, command), runs, "{command}");
         }
     }
 

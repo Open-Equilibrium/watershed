@@ -12,7 +12,9 @@ use crate::{
     tests::helpers::empty_workspace,
 };
 
-pub(super) use super::oauth_credential::{jwt_with_account, jwt_with_account_routing};
+pub(super) use super::oauth_credential::{
+    credential_record, jwt_with_account, jwt_with_account_routing,
+};
 
 #[test]
 fn endpoint_login_status_names_the_stored_base_url() {

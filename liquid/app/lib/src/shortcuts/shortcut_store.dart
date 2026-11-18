@@ -7,13 +7,11 @@ import 'package:flutter/services.dart';
 import '../settings_file.dart';
 import 'keymap.dart';
 
-/// An XDG base folder from `environment`; an empty variable counts as unset.
 String? _xdg(Map<String, String> environment, String name) {
   final value = environment[name];
   return value == null || value.isEmpty ? null : value;
 }
 
-/// The folder for Liquid's settings in the platform's app data location.
 String settingsDirectory(
   Map<String, String> environment,
   TargetPlatform platform,
@@ -25,13 +23,11 @@ String settingsDirectory(
     '${_xdg(environment, 'XDG_CONFIG_HOME') ?? '${environment['HOME']}/.config'}/liquid',
 };
 
-/// Shortcut settings as a JSON file.
 class ShortcutStore {
   ShortcutStore(File file) : _file = SettingsFile(file);
 
   final SettingsFile _file;
 
-  /// The stored settings, or null before the first choice or when the file is unreadable.
   Future<ShortcutSettings?> load() async {
     final json = await _file.load();
     if (json == null) return null;
@@ -42,28 +38,21 @@ class ShortcutStore {
     }
   }
 
-  /// Replaces the file whole, so a crash leaves the old or the new settings.
   Future<void> save(ShortcutSettings settings) => _file.save(settings.toJson());
 }
 
-/// Turns the Liquid key on or off on this computer.
 abstract interface class LiquidKeyHost {
-  /// Whether this computer can have the Liquid key.
   bool get available;
 
   Future<void> apply(bool on);
 }
 
-/// Whether `platform` at `version`, as [Platform.operatingSystemVersion] reports it, has the
-/// Liquid key: macOS 13 or later, which can register its login item. macOS comes first.
 bool liquidKeySupported(TargetPlatform platform, String version) {
   if (platform != TargetPlatform.macOS) return false;
   final major = RegExp(r'(\d+)\.').firstMatch(version)?.group(1);
   return (int.tryParse(major ?? '') ?? 0) >= 13;
 }
 
-/// The macOS runner's Liquid key: it remaps Caps Lock and registers the login item that
-/// listens for it.
 class ChannelLiquidKeyHost implements LiquidKeyHost {
   const ChannelLiquidKeyHost();
 
@@ -80,7 +69,6 @@ class ChannelLiquidKeyHost implements LiquidKeyHost {
       _channel.invokeMethod<void>(on ? 'enable' : 'disable');
 }
 
-/// The shortcut settings in use; changes are applied and saved in order.
 class ShortcutController extends SavedSettings<ShortcutSettings> {
   ShortcutController._(
     ShortcutSettings value,
@@ -90,14 +78,9 @@ class ShortcutController extends SavedSettings<ShortcutSettings> {
   ) : _settled = value,
       super(value, store?.save, 'the shortcuts');
 
-  /// Settings that are neither stored nor applied, for a Liquid without its app data.
   ShortcutController.memory([ShortcutSettings? settings])
     : this._(settings ?? ShortcutSettings.standard(), null, null, false);
 
-  /// The stored settings. A stored Liquid key is turned on again; when its login item was
-  /// turned off, Liquid reports it and continues without the Liquid key. Where the Liquid key
-  /// does not exist, it stays off without changing the stored settings. The first frame does
-  /// not wait for it.
   static Future<ShortcutController> load(
     ShortcutStore store,
     LiquidKeyHost host,
@@ -121,21 +104,17 @@ class ShortcutController extends SavedSettings<ShortcutSettings> {
 
   final LiquidKeyHost? _host;
 
-  /// Whether the user has not chosen a profile yet.
   bool firstStart;
 
   bool get liquidKeyAvailable => _host?.available ?? false;
 
-  /// Whether this computer has the Liquid key on, as far as Liquid turned it.
   bool _applied = false;
 
-  /// The settings that match the computer's Liquid key, which a failed change returns to.
   ShortcutSettings _settled;
   Future<void> _pending = Future.value();
 
   @override
   Future<void> change(ShortcutSettings next) {
-    // Where the Liquid key does not exist, a kept Custom profile with it stays off too.
     value = liquidKeyAvailable || _host == null
         ? next
         : next.withoutLiquidKey();
@@ -144,12 +123,6 @@ class ShortcutController extends SavedSettings<ShortcutSettings> {
     return _sync(store: true);
   }
 
-  /// Turns the Liquid key on or off as the latest settings say, then saves them; one at a
-  /// time, so the last change wins. A Liquid key that cannot be turned on is left off, since
-  /// its profile would otherwise hide every shortcut hint; one that cannot be turned off stays
-  /// on with the settings before, as macOS still maps Caps Lock.
-  /// `_pending` orders both applying and saving, so the chain that [SavedSettings] keeps adds
-  /// no ordering here.
   Future<void> _sync({required bool store}) =>
       _pending = _pending.then((_) async {
         final next = value;
@@ -159,16 +132,12 @@ class ShortcutController extends SavedSettings<ShortcutSettings> {
           if (await _apply(want)) {
             _applied = want;
           } else {
-            // Only the value this turn applied rolls back; a change made meanwhile settles on its own turn.
             if (identical(value, next)) {
               value = want ? _withoutLiquidKey(value) : _settled;
             }
             changed = true;
           }
         }
-        // A newer change may have replaced value meanwhile; what settled is what the computer
-        // has, and the newer change settles on its own turn. When neither matches, the computer
-        // still has the settings settled before.
         if (value.liquidKey == _applied) {
           _settled = value;
         } else if (next.liquidKey == _applied) {
@@ -177,8 +146,6 @@ class ShortcutController extends SavedSettings<ShortcutSettings> {
         if (store || changed) await save();
       });
 
-  /// `settings` without the Liquid key: a chosen Liquid key profile gives way to the profile
-  /// before it, other settings only turn the key off.
   ShortcutSettings _withoutLiquidKey(ShortcutSettings settings) {
     final before = _settled.profile;
     final back =
@@ -188,7 +155,6 @@ class ShortcutController extends SavedSettings<ShortcutSettings> {
     return back.withoutLiquidKey();
   }
 
-  /// Whether the Liquid key is now on or off as asked.
   Future<bool> _apply(bool on) async {
     final host = _host;
     if (host == null || !host.available) return true;
@@ -210,8 +176,6 @@ class ShortcutController extends SavedSettings<ShortcutSettings> {
     this.problem(problem);
   }
 
-  /// Why the Liquid key could not be turned on or off; Settings show it below the profile until
-  /// the next choice, since they cover the status bar.
   final liquidKeyProblem = ValueNotifier<String?>(null);
 
   @override

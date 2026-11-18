@@ -214,8 +214,6 @@ fn execute_unix_tool(
         .stdout(Stdio::from(stdout_writer))
         .stderr(Stdio::from(stderr_writer));
     let workspace_dir = workspace.dir.clone();
-    // SAFETY: `fchdir` is async-signal-safe and the closure only borrows the
-    // already-open directory descriptor retained before the child is spawned.
     unsafe {
         command.pre_exec(move || {
             rustix::process::fchdir(&*workspace_dir)?;
@@ -364,8 +362,6 @@ fn primary_classification(trigger: &PrimaryTrigger) -> Option<ToolTerminalClassi
     }
 }
 
-/// Hands a leader that outlived its forced-reap deadline to a detached thread, which consumes its
-/// status once the group is gone; dropping the unreaped `Child` would leave a zombie.
 fn reap_in_background(mut child: Child) {
     thread::spawn(move || {
         let _ = child.wait();
@@ -379,8 +375,6 @@ fn cleanup_process_group(
     stderr: &mut OutputCollector,
     natural_exit_deadline: Option<Instant>,
 ) -> Result<Option<i32>, CleanupFailure> {
-    // Retain the original leader's PID until every possible group signal ends.
-    // Observing an exit must not release that numeric identity for reuse.
     let leader_status = match natural_exit_deadline {
         Some(deadline) => observe_leader_exit(child, deadline, stdout, stderr)?,
         None => leader_exit(child).map_err(|_| CleanupFailure::Reap)?,
@@ -494,8 +488,6 @@ fn wait_for_process_group(
             Ok(()) => {}
             Err(error) if error == rustix::io::Errno::INTR => continue,
             Err(rustix::io::Errno::SRCH | rustix::io::Errno::PERM) if leader_exited => {
-                // Stop signalling before reaping a possible Darwin zombie-only
-                // group. The caller must still verify disappearance afterward.
                 return Ok(TerminationGraceEnd::GroupUnavailable);
             }
             Err(rustix::io::Errno::SRCH | rustix::io::Errno::PERM) => {}
@@ -519,7 +511,6 @@ fn finish_process_group_cleanup(
     stderr: &mut OutputCollector,
     signal_denied: bool,
 ) -> Result<(), CleanupFailure> {
-    // No caller may signal this group again after releasing the leader.
     ensure_leader_reaped(child, deadline, stdout, stderr)?;
     loop {
         stdout.drain_available();
@@ -567,8 +558,6 @@ fn process_group_exists(process_group: rustix::process::Pid) -> Result<bool, Cle
             Ok(()) => return Ok(true),
             Err(error) if error == rustix::io::Errno::INTR => continue,
             Err(error) if error == rustix::io::Errno::SRCH => return Ok(false),
-            // POSIX defines EPERM as evidence that the group exists. Darwin can
-            // briefly report it for a group whose last members are zombies.
             Err(error) if error == rustix::io::Errno::PERM => return Ok(true),
             Err(_) => return Err(CleanupFailure::Signal),
         }
@@ -590,10 +579,6 @@ fn signal_process_group(
             Ok(()) => return Ok(true),
             Err(error) if error == rustix::io::Errno::INTR => continue,
             Err(error) if error == rustix::io::Errno::SRCH => return Ok(true),
-            // Darwin can report EPERM for a zombie-only group. Keep ownership
-            // throughout the bounded retries; afterward an exited leader may
-            // be reaped only if the caller ends signalling and verifies that
-            // the group disappears. An unsignalable live group still fails.
             Err(error) if error == rustix::io::Errno::PERM && Instant::now() < settle_deadline => {
                 thread::sleep(CONTROLLER_POLL_INTERVAL);
             }

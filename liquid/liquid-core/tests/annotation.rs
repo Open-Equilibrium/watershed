@@ -1,7 +1,3 @@
-//! Annotating Media Blocks (ADR-0307): a PDF's or image's drawing is kept in the Media
-//! Block's entry, page by page, with the Whiteboard's elements and the highlighter.
-
-// Integration tests are test code, but clippy.toml's exemption covers only #[test] items.
 #![allow(clippy::unwrap_used)]
 
 use liquid_core::{
@@ -24,7 +20,6 @@ fn created(workspace: &mut Workspace, mutation: Mutation) -> Created {
     apply(workspace, mutation).unwrap().created.unwrap()
 }
 
-/// A Page holding a PDF's Media Block and a Whiteboard.
 fn agreement() -> (Workspace, PageId, BlockId, BlockId) {
     let mut workspace = Workspace::create(PersonId::new("benni"), MemoryStore::default()).unwrap();
     let Created::Area(area) = created(

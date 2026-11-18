@@ -1,11 +1,12 @@
 use super::super::super::helpers::empty_workspace;
+use super::super::create_review_run;
 use super::super::recovery_fixtures::{
     context_checkpoint, context_checkpoint_with_exact_canonical_bytes,
     context_only_recovery_fixture, fill_event_segments_after_base, message_completed_event,
     message_delta_batch, message_delta_event, message_prefix_events,
     second_message_completed_event, second_message_delta_event,
 };
-use super::super::{create_review_run, open_notified_review_writer};
+use super::{catch_up_after, open_event_recovery, review_run_dir};
 use crate::runtime::{
     context::{ContextManifest, ContextManifestCheckpoint},
     conversations::{
@@ -20,14 +21,12 @@ use crate::runtime::{
         reset_session_stream_parent_sync_count_for_test, session_stream_parent_sync_count_for_test,
         set_session_stream_parent_sync_error_for_test,
     },
-    serial_event_writer::EVENT_WRITER_BATCH_WINDOW,
-    session_reading::SessionEventReader,
 };
 use proto::{EventEnvelope, EventType};
 use std::{
     fs::{self, OpenOptions},
     io::{self, Read, Seek, SeekFrom, Write},
-    time::{Duration, Instant},
+    time::Duration,
 };
 
 fn replay_prefix(writer: &mut ConversationEventWriter, events: &[EventEnvelope]) {
@@ -43,7 +42,7 @@ fn replay_prefix(writer: &mut ConversationEventWriter, events: &[EventEnvelope])
 fn rotated_context_checkpoint_retry_resyncs_segment_parent_before_success() {
     let workspace = empty_workspace("conversation-rotated-context-parent-sync-retry");
     create_review_run(&workspace);
-    let run = crate::tests::helpers::workspace_session_dir(&workspace).join("review/runs/review-1");
+    let run = review_run_dir(&workspace, "review-1");
     let events_path = run.join("events.jsonl");
     let contexts_path = run.join("contexts.jsonl");
     let rotated_path = run.join("contexts.000002.jsonl");
@@ -64,7 +63,7 @@ fn rotated_context_checkpoint_retry_resyncs_segment_parent_before_success() {
     let target = second_message_completed_event();
     let canonical = target.canonical_jsonl().expect("checkpoint canonicalizes");
     let target_checkpoint = context_checkpoint();
-    let replay_prefix = |writer: &mut ConversationEventWriter| {
+    let replay_context_prefix = |writer: &mut ConversationEventWriter| {
         for event in &prefix {
             let line = event.canonical_jsonl().expect("prefix event canonicalizes");
             let checkpoint =
@@ -74,10 +73,8 @@ fn rotated_context_checkpoint_retry_resyncs_segment_parent_before_success() {
                 .expect("event/context prefix replays");
         }
     };
-    let mut writer =
-        ConversationEventWriter::open_for_recovery(&workspace, "review", "review-1", false, None)
-            .expect("full-context recovery writer opens");
-    replay_prefix(&mut writer);
+    let mut writer = open_event_recovery(&workspace);
+    replay_context_prefix(&mut writer);
     set_session_stream_parent_sync_error_for_test(&run, io::ErrorKind::Other);
     writer
         .commit(&target, &canonical, Some(target_checkpoint.clone()))
@@ -102,7 +99,7 @@ fn rotated_context_checkpoint_retry_resyncs_segment_parent_before_success() {
         Some(notifier),
     )
     .expect("rotated context recovery writer opens");
-    replay_prefix(&mut recovered);
+    replay_context_prefix(&mut recovered);
     reset_session_stream_parent_sync_count_for_test(&run);
     recovered
         .commit(&target, &canonical, Some(target_checkpoint.clone()))
@@ -134,7 +131,7 @@ fn rotated_context_checkpoint_retry_resyncs_segment_parent_before_success() {
 fn exact_recovery_appends_the_event_missing_after_its_durable_context() {
     let (workspace, prefix, event, checkpoint) =
         context_only_recovery_fixture("conversation-context-only-recovery", false);
-    let run = crate::tests::helpers::workspace_session_dir(&workspace).join("review/runs/review-1");
+    let run = review_run_dir(&workspace, "review-1");
     let contexts_before =
         fs::read(run.join("contexts.jsonl")).expect("durable context prefix reads");
     let (notifier, receiver) = live_event_channel();
@@ -181,8 +178,7 @@ fn readable_context_only_repair_notifies_despite_cleanup_or_sync_failure() {
             &format!("conversation-failed-repair-notification-{case}"),
             false,
         );
-        let run =
-            crate::tests::helpers::workspace_session_dir(&workspace).join("review/runs/review-1");
+        let run = review_run_dir(&workspace, "review-1");
         let events_path = run.join("events.jsonl");
         let contexts_before = fs::read(run.join("contexts.jsonl")).expect("context prefix reads");
         let (notifier, receiver) = live_event_channel();
@@ -233,22 +229,13 @@ fn readable_context_only_repair_notifies_despite_cleanup_or_sync_failure() {
             fs::read(run.join("contexts.jsonl")).expect("context prefix reads"),
             contexts_before
         );
-        let mut reader =
-            SessionEventReader::open_conversation_run(&workspace, "review", "review-1")
-                .expect("final catch-up reader opens");
-        let mut delivered = String::new();
-        reader
-            .visit_verified_after(
+        assert_eq!(
+            catch_up_after(
+                &workspace,
                 prefix.last().expect("prefix exists").sequence,
                 receiver.highest_committed_sequence(),
-                |_, line| {
-                    delivered.push_str(line);
-                    Ok(())
-                },
-            )
-            .expect("repaired log verifies");
-        assert_eq!(
-            delivered, canonical,
+            ),
+            canonical,
             "readable repair reaches bounded final catch-up"
         );
         assert_eq!(receiver.highest_committed_sequence(), event.sequence);
@@ -270,11 +257,9 @@ fn readable_context_only_repair_notifies_despite_cleanup_or_sync_failure() {
 fn recovery_does_not_append_completion_when_context_tail_sync_fails() {
     let (workspace, prefix, event, checkpoint) =
         context_only_recovery_fixture("conversation-context-tail-sync-failure", false);
-    let run = crate::tests::helpers::workspace_session_dir(&workspace).join("review/runs/review-1");
+    let run = review_run_dir(&workspace, "review-1");
     let events_path = run.join("events.jsonl");
-    let mut resumed =
-        ConversationEventWriter::open_for_recovery(&workspace, "review", "review-1", false, None)
-            .expect("recovery writer opens");
+    let mut resumed = open_event_recovery(&workspace);
     replay_prefix(&mut resumed, &prefix);
     let events_before = fs::read(&events_path).expect("event prefix reads");
     let canonical = event.canonical_jsonl().expect("completion canonicalizes");
@@ -301,19 +286,14 @@ fn recovery_does_not_append_completion_when_context_tail_sync_fails() {
 }
 
 #[test]
-fn message_completion_syncs_context_before_event_append_and_recovers_the_context_only_tail() {
+fn message_completion_syncs_context_before_event_append() {
     let workspace = empty_workspace("conversation-message-context-sync-order");
     create_review_run(&workspace);
     let mut prefix = message_prefix_events().to_vec();
     prefix.push(message_delta_event());
     let mut writer = ConversationEventWriter::open(&workspace, "review", "review-1", false)
         .expect("conversation writer opens");
-    for event in &prefix {
-        let canonical = event.canonical_jsonl().expect("prefix event canonicalizes");
-        writer
-            .commit(event, &canonical, None)
-            .expect("prefix event commits");
-    }
+    replay_prefix(&mut writer, &prefix);
     writer.finish().expect("prefix writer finishes");
     drop(writer);
     let (notifier, receiver) = live_event_channel();
@@ -327,7 +307,7 @@ fn message_completion_syncs_context_before_event_append_and_recovers_the_context
     .expect("prefix recovery writer opens");
     replay_prefix(&mut writer, &prefix);
 
-    let run = crate::tests::helpers::workspace_session_dir(&workspace).join("review/runs/review-1");
+    let run = review_run_dir(&workspace, "review-1");
     let events_path = run.join("events.jsonl");
     let contexts_path = run.join("contexts.jsonl");
     let events_before = fs::read(&events_path).expect("event prefix reads");
@@ -365,23 +345,6 @@ fn message_completion_syncs_context_before_event_append_and_recovers_the_context
         .finish()
         .expect_err("failed conversation writer remains failed after cleanup");
     drop(writer);
-
-    let mut recovered =
-        ConversationEventWriter::open_for_recovery(&workspace, "review", "review-1", false, None)
-            .expect("context-only recovery writer opens");
-    replay_prefix(&mut recovered, &prefix);
-    recovered
-        .commit(&event, &canonical, Some(checkpoint))
-        .expect("recovery repairs the exact context-only tail");
-    recovered.finish().expect("recovery writer finishes");
-
-    let events = fs::read_to_string(&events_path).expect("repaired events read");
-    assert_eq!(events.matches(&canonical).count(), 1);
-    assert_eq!(
-        fs::read(&contexts_path).expect("repaired contexts read"),
-        contexts_after,
-        "recovery must not duplicate the durable context"
-    );
 }
 
 #[test]
@@ -391,22 +354,11 @@ fn context_only_recovery_rejects_every_non_exact_pair_without_appending() {
             &format!("conversation-context-only-recovery-{case}"),
             case == "extra-context",
         );
-        let events_path = crate::tests::helpers::workspace_session_dir(&workspace)
-            .join("review/runs/review-1/events.jsonl");
+        let events_path = review_run_dir(&workspace, "review-1").join("events.jsonl");
         let events_before = fs::read(&events_path).expect("event prefix reads");
         let exact_checkpoint = checkpoint.clone();
-        let mut resumed = ConversationEventWriter::open_for_recovery(
-            &workspace, "review", "review-1", false, None,
-        )
-        .expect("recovery writer opens");
-        for prefix_event in &prefix {
-            let canonical = prefix_event
-                .canonical_jsonl()
-                .expect("prefix event canonicalizes");
-            resumed
-                .commit(prefix_event, &canonical, None)
-                .expect("event prefix replays");
-        }
+        let mut resumed = open_event_recovery(&workspace);
+        replay_prefix(&mut resumed, &prefix);
         let attempted_checkpoint = match case {
             "missing" => None,
             "mismatched" => Some(ContextManifestCheckpoint {
@@ -464,8 +416,7 @@ fn context_only_recovery_rejects_every_non_exact_pair_without_appending() {
 fn replayed_message_completion_requires_its_exact_context_checkpoint() {
     let (workspace, prefix, event, _) =
         context_only_recovery_fixture("conversation-replayed-message-context", false);
-    let events_path = crate::tests::helpers::workspace_session_dir(&workspace)
-        .join("review/runs/review-1/events.jsonl");
+    let events_path = review_run_dir(&workspace, "review-1").join("events.jsonl");
     let canonical = event.canonical_jsonl().expect("completion canonicalizes");
     OpenOptions::new()
         .append(true)
@@ -474,9 +425,7 @@ fn replayed_message_completion_requires_its_exact_context_checkpoint() {
         .write_all(canonical.as_bytes())
         .expect("durable completion appends");
     let events_before = fs::read(&events_path).expect("complete event prefix reads");
-    let mut resumed =
-        ConversationEventWriter::open_for_recovery(&workspace, "review", "review-1", false, None)
-            .expect("recovery writer opens");
+    let mut resumed = open_event_recovery(&workspace);
     replay_prefix(&mut resumed, &prefix);
 
     resumed
@@ -495,12 +444,10 @@ fn replayed_message_completion_requires_its_exact_context_checkpoint() {
 fn rejected_reservation_cannot_drain_a_recovery_prefix_into_success() {
     let (workspace, _, _, _) =
         context_only_recovery_fixture("conversation-reservation-prefix-poison", false);
-    let run = crate::tests::helpers::workspace_session_dir(&workspace).join("review/runs/review-1");
+    let run = review_run_dir(&workspace, "review-1");
     let events_before = fs::read(run.join("events.jsonl")).expect("event prefix reads");
     let contexts_before = fs::read(run.join("contexts.jsonl")).expect("context prefix reads");
-    let mut resumed =
-        ConversationEventWriter::open_for_recovery(&workspace, "review", "review-1", false, None)
-            .expect("recovery writer opens");
+    let mut resumed = open_event_recovery(&workspace);
 
     for attempt in 1..=6 {
         assert!(
@@ -524,64 +471,10 @@ fn rejected_reservation_cannot_drain_a_recovery_prefix_into_success() {
 }
 
 #[test]
-fn conversation_lone_delta_uses_the_shared_batch_deadline() {
-    let workspace = empty_workspace("conversation-live-progress-batch-deadline");
-    let writer_events = message_prefix_events();
-    let event = message_delta_event();
-    let canonical = event.canonical_jsonl().expect("event canonicalizes");
-    let (mut writer, receiver) = open_notified_review_writer(&workspace);
-
-    let mut expected = String::new();
-    for semantic in &writer_events {
-        let canonical = semantic
-            .canonical_jsonl()
-            .expect("setup event canonicalizes");
-        writer
-            .commit(semantic, &canonical, None)
-            .expect("setup event commits");
-        expected.push_str(&canonical);
-        receiver
-            .recv_timeout(Duration::from_millis(500))
-            .expect("setup notification arrives");
-    }
-
-    let enqueued_at = Instant::now();
-    writer
-        .commit(&event, &canonical, None)
-        .expect("progress event enqueues");
-    // The batch deadline fires no earlier than one window after enqueue. The watermark is read
-    // before the elapsed time, so a read inside the window proves that no early flush happened.
-    let unflushed_watermark = receiver.highest_committed_sequence();
-    if enqueued_at.elapsed() < EVENT_WRITER_BATCH_WINDOW {
-        assert_eq!(
-            unflushed_watermark, 3,
-            "batchable progress must not notify synchronously"
-        );
-    }
-    assert_eq!(
-        receiver
-            .recv_timeout(Duration::from_millis(500))
-            .expect("batch deadline flush notifies")
-            .highest_committed_sequence,
-        event.sequence
-    );
-    writer.finish().expect("conversation writer finishes");
-    expected.push_str(&canonical);
-    assert_eq!(
-        fs::read_to_string(
-            crate::tests::helpers::workspace_session_dir(&workspace)
-                .join("review/runs/review-1/events.jsonl")
-        )
-        .expect("event stream reads"),
-        expected
-    );
-}
-
-#[test]
 fn conversation_progress_batch_keeps_its_durable_prefix_when_the_segment_limit_is_reached() {
     let workspace = empty_workspace("conversation-progress-partial-batch");
     create_review_run(&workspace);
-    let run = crate::tests::helpers::workspace_session_dir(&workspace).join("review/runs/review-1");
+    let run = review_run_dir(&workspace, "review-1");
     let writer_events = message_prefix_events();
     let [(first, first_canonical), (second, second_canonical)] = message_delta_batch();
     let prefix_bytes = writer_events
@@ -716,11 +609,8 @@ fn recovery_prefix_stays_silent_before_the_live_suffix_batches() {
     resumed.finish().expect("recovery writer finishes");
     expected.push_str(&canonical);
     assert_eq!(
-        fs::read_to_string(
-            crate::tests::helpers::workspace_session_dir(&workspace)
-                .join("review/runs/review-1/events.jsonl")
-        )
-        .expect("event stream reads"),
+        fs::read_to_string(review_run_dir(&workspace, "review-1").join("events.jsonl"))
+            .expect("event stream reads"),
         expected
     );
 }

@@ -1,6 +1,6 @@
 # Liquid agent-surface performance evidence
 
-Observational evidence for the [agent-surface slice](../../PLAN.md) under the [evidence convention](../../PERFORMANCE.md#evidence-convention). No value here is a threshold; compare only like-for-like runs.
+Observational evidence for the [agent-surface slice](../../PLAN.md), kept under the [evidence convention](../../PERFORMANCE.md#evidence-convention).
 
 ## Environment
 

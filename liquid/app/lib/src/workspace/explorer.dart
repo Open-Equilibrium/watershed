@@ -10,11 +10,8 @@ import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
 import 'workspace_state.dart';
 
-/// What the Explorer and the Page header call a Page without a title, as Notion does.
 const untitled = 'Untitled';
 
-/// The Workspace's areas, each under its own heading with its nested Pages, as Notion shows
-/// teamspaces (approved Pages mockups).
 class Explorer extends StatelessWidget {
   const Explorer({super.key, required this.state});
 
@@ -33,7 +30,6 @@ class Explorer extends StatelessWidget {
   );
 }
 
-/// A heading as the sidebar's sections have it: small and faint.
 class SidebarHeading extends StatelessWidget {
   const SidebarHeading(this.text, {super.key, this.trailing});
 
@@ -80,7 +76,6 @@ class _Area extends StatefulWidget {
 }
 
 class _AreaState extends State<_Area> {
-  /// Pages shown open; the rest show collapsed, as in Notion.
   final _expanded = <String>{};
   bool _hovered = false;
   bool _focused = false;
@@ -97,7 +92,6 @@ class _AreaState extends State<_Area> {
     super.dispose();
   }
 
-  /// The open Page's ancestors expand, so the Page shows in the tree.
   void _revealOpen() {
     final open = widget.state.open.value;
     if (open == null || open.area != widget.area.id) return;
@@ -128,7 +122,6 @@ class _AreaState extends State<_Area> {
           onExit: (_) => setState(() => _hovered = false),
           child: SidebarHeading(
             widget.area.name,
-            // Always there for the keyboard and screen readers; seen on hover or focus.
             trailing: Opacity(
               opacity: _hovered || _focused ? 1 : 0,
               alwaysIncludeSemantics: true,
@@ -167,7 +160,6 @@ class _AreaState extends State<_Area> {
               final depth = depths[page.id] = page.parent == null
                   ? 0
                   : (depths[page.parent] ?? 0) + 1;
-              // Shown only below expanded ancestors.
               var shown = true;
               for (var at = page.parent; at != null; at = parents[at]) {
                 if (!_expanded.contains(at)) shown = false;
@@ -205,7 +197,6 @@ class _AreaState extends State<_Area> {
   }
 }
 
-/// One Page in the tree, indented by its depth, with a disclosure when it nests others.
 class _PageRow extends StatelessWidget {
   const _PageRow({
     super.key,
@@ -240,7 +231,6 @@ class _PageRow extends StatelessWidget {
           child: InkWell(
             onTap: onOpen,
             borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
-            // Ink, so the hover and focus highlights paint above the selected row too.
             child: Ink(
               height: WsMetrics.rowSide,
               padding: EdgeInsets.only(
@@ -259,7 +249,6 @@ class _PageRow extends StatelessWidget {
                         ? Semantics(
                             label: expanded ? 'Collapse' : 'Expand',
                             button: true,
-                            // Reachable with Tab and opened with ⏎ or space too.
                             child: InkWell(
                               key: const Key('disclosure'),
                               onTap: onToggle,

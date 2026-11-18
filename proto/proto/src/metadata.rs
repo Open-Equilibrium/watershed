@@ -1,6 +1,5 @@
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::fmt;
-/// Invalid field in one event envelope's stream-independent metadata.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct EventMetadataError {
     pub(crate) field: &'static str,
@@ -8,7 +7,6 @@ pub struct EventMetadataError {
 }
 
 impl EventMetadataError {
-    /// Returns the invalid envelope field.
     pub const fn field(self) -> &'static str {
         self.field
     }
@@ -22,57 +20,33 @@ impl fmt::Display for EventMetadataError {
 
 impl std::error::Error for EventMetadataError {}
 
-/// v0 normalized runtime event types.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub enum EventType {
-    /// A session started.
     SessionStarted,
-    /// A session paused before reaching a terminal state.
     SessionPaused,
-    /// A previously persisted session resumed.
     SessionResumed,
-    /// A session completed successfully.
     SessionCompleted,
-    /// A session reached a failed terminal state.
     SessionFailed,
-    /// A flow invocation started.
     FlowStarted,
-    /// A flow invocation completed successfully.
     FlowCompleted,
-    /// A flow invocation failed.
     FlowFailed,
-    /// Runtime entered a phase.
     PhaseEntered,
-    /// A phase iteration completed with a validated result.
     PhaseCompleted,
-    /// A phase iteration failed without looping or transitioning.
     PhaseFailed,
-    /// Assistant message content chunk.
     MessageDelta,
-    /// Assistant message completed.
     MessageCompleted,
-    /// Tool invocation started.
     ToolStarted,
-    /// Tool invocation emitted structured progress.
     ToolProgress,
-    /// Tool invocation completed successfully.
     ToolCompleted,
-    /// Tool invocation failed.
     ToolFailed,
-    /// Tool invocation exceeded its runtime limit.
     ToolTimedOut,
-    /// Artifact metadata was recorded.
     ArtifactLogged,
-    /// Human or external attention was requested.
     AttentionRequested,
-    /// Runtime metric sample was emitted.
     MetricSample,
-    /// Runtime error event.
     Error,
 }
 
 impl EventType {
-    /// Every v0 event type in canonical protocol order.
     pub const ALL: [Self; 22] = [
         Self::SessionStarted,
         Self::SessionPaused,
@@ -98,7 +72,6 @@ impl EventType {
         Self::Error,
     ];
 
-    /// Returns whether this event belongs to one Flow and therefore requires `flow_id`.
     pub const fn requires_flow_id(self) -> bool {
         matches!(
             self,
@@ -120,7 +93,6 @@ impl EventType {
 }
 
 impl EventType {
-    /// Returns the stable protocol string for this event type.
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::SessionStarted => "session.started",
@@ -179,7 +151,6 @@ impl<'de> Deserialize<'de> for EventType {
     }
 }
 
-/// Error returned when a string is not a known v0 event type.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct UnknownEventType(String);
 
@@ -191,10 +162,8 @@ impl fmt::Display for UnknownEventType {
 
 impl std::error::Error for UnknownEventType {}
 
-/// Maximum UTF-8 bytes in a protocol session identifier.
 pub const MAX_SESSION_ID_BYTES: usize = 128;
 
-/// Returns whether a value is a lowercase path-safe session id.
 pub fn is_valid_session_id(value: &str) -> bool {
     !value.is_empty()
         && value.len() <= MAX_SESSION_ID_BYTES
@@ -212,7 +181,6 @@ fn is_windows_dos_device_basename(value: &str) -> bool {
             .is_some_and(|suffix| matches!(suffix.as_bytes(), [b'1'..=b'9']))
 }
 
-/// Parses the protocol's canonical RFC 3339 UTC `Z` form to Unix seconds.
 pub fn parse_rfc3339_utc_timestamp(value: &str) -> Option<i64> {
     let value = value.strip_suffix('Z')?;
     let (date, time) = value.split_once('T')?;
@@ -259,7 +227,6 @@ pub fn parse_rfc3339_utc_timestamp(value: &str) -> Option<i64> {
     )
 }
 
-/// Formats Unix seconds as the protocol's canonical four-digit UTC `Z` form.
 pub fn format_rfc3339_utc_timestamp(seconds: i64) -> Option<String> {
     let days = seconds.div_euclid(86_400);
     let seconds_of_day = seconds.rem_euclid(86_400);

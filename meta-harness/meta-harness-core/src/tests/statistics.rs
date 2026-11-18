@@ -1,19 +1,11 @@
-//! A thread's exact statistics and its context window, from T3's records (ADR-0279, ADR-0293).
-
 use serde_json::{Value, json};
 
 use crate::statistics::{context, statistics};
 use crate::t3::Projection;
 use crate::{Context, ModelUsage, ToolCalls, TurnStatistics, Usage};
 
-/// T3's records as `statistics` reads them: the given collections, the rest empty.
 fn projection(records: Value) -> Projection {
-    let mut snapshot = json!({"thread": {}, "runs": [], "attempts": [], "providerTurns": [],
-        "turnItems": [], "messages": []});
-    for (key, value) in records.as_object().into_iter().flatten() {
-        snapshot[key] = value.clone();
-    }
-    Projection::from_snapshot(&snapshot)
+    Projection::from_snapshot(&super::thread::projection(records))
 }
 
 fn run(id: &str, ordinal: u64, status: &str, completed: Value) -> Value {
@@ -41,7 +33,6 @@ fn statistics_count_tokens_tools_and_turns_as_t3_records_them() {
                 "cachedInputTokens": 40, "cacheCreationTokens": 10, "outputTokens": 20, "reasoningTokens": 5})),
             turn("t2", "a1", json!("claude/opus"), json!({"usageStatus": "complete", "inputTokens": 50,
                 "outputTokens": 5})),
-            // Counted by neither: partial usage, no input count, no attempt, a rolled-back run.
             turn("t3", "a1", json!("claude/opus"), json!({"usageStatus": "partial", "inputTokens": 999,
                 "outputTokens": 999})),
             turn("t4", "a1", json!("claude/opus"), json!({"usageStatus": "complete", "outputTokens": 9})),
@@ -49,7 +40,6 @@ fn statistics_count_tokens_tools_and_turns_as_t3_records_them() {
                 "outputTokens": 9})),
             turn("t6", "a3", json!("claude/opus"), json!({"usageStatus": "complete", "inputTokens": 1000,
                 "outputTokens": 1000})),
-            // Turns of r2, the smaller model listed first: each turn lists its models largest first.
             turn("t7", "a2", Value::Null, json!({"usageStatus": "complete", "inputTokens": 2, "outputTokens": 1})),
             turn("t8", "a2", json!("codex/gpt"), json!({"usageStatus": "complete", "inputTokens": 7,
                 "outputTokens": 3})),
@@ -151,22 +141,18 @@ fn a_turns_tool_time_counts_the_longest_call_of_each_response() {
     let timed = projection(json!({
         "runs": [run("r1", 1, "completed", json!("2026-11-15T10:00:10.000Z"))],
         "turnItems": [
-            // Two calls of one response ran in parallel: the response counts the longer one.
             {"id": "p1", "runId": "r1", "providerTurnId": "t1", "type": "command_execution", "status": "completed",
              "exitCode": 0, "input": "a", "startedAt": "2026-11-15T10:00:01.000Z", "completedAt": "2026-11-15T10:00:02.000Z"},
             {"id": "p2", "runId": "r1", "providerTurnId": "t1", "type": "command_execution", "status": "completed",
              "exitCode": 0, "input": "b", "startedAt": "2026-11-15T10:00:01.000Z", "completedAt": "2026-11-15T10:00:04.000Z"},
-            // A later response's call adds its own time.
             {"id": "p3", "runId": "r1", "providerTurnId": "t2", "type": "command_execution", "status": "completed",
              "exitCode": 0, "input": "c", "startedAt": "2026-11-15T10:00:05.000Z", "completedAt": "2026-11-15T10:00:07.000Z"},
         ],
     }));
     let statistics = statistics(&timed);
     assert_eq!(statistics.turns[0].tool_ms, Some(5000));
-    // Each tool's own time is the sum of its calls.
     assert_eq!(statistics.tools[0].duration_ms, Some(6000));
 
-    // A turn without tool calls took no tool time, which is known, not missing.
     let chat_only = projection(json!({
         "runs": [run("r1", 1, "completed", json!("2026-11-15T10:00:10.000Z"))],
         "turnItems": [],
@@ -179,7 +165,6 @@ fn a_turns_tool_time_counts_the_longest_call_of_each_response() {
 
 #[test]
 fn an_unfinished_call_is_open_only_while_its_turn_is_the_last_and_still_runs() {
-    // (the last turn's status, the call's status, whether the call is open)
     let cases = [
         ("running", "running", true),
         ("waiting", "pending", true),
@@ -194,7 +179,6 @@ fn an_unfinished_call_is_open_only_while_its_turn_is_the_last_and_still_runs() {
                 run("r1", 1, "completed", json!("2026-11-15T10:00:10.000Z")),
                 run("r2", 2, turn_status, Value::Null),
             ],
-            // The call in the earlier turn never got a result either: its turn was followed by another.
             "turnItems": [
                 {"id": "c1", "runId": "r1", "type": "command_execution", "status": "running", "input": "a"},
                 {"id": "c2", "runId": "r2", "type": "command_execution", "status": call_status, "input": "b"},
@@ -223,7 +207,6 @@ fn the_context_window_is_the_latest_one_t3_reported() {
             compacts_at: Some(80)
         })
     );
-    // After a compaction T3 reports the window without the tokens it holds.
     assert_eq!(
         window(json!([{"tokenUsage": {"maxTokens": 200}}])),
         Some(Context {
@@ -249,7 +232,6 @@ fn a_queued_turn_behind_the_running_one_leaves_its_unfinished_calls_open() {
     let tools = statistics(&queued).tools;
     assert_eq!((tools[0].open, tools[0].cancelled), (1, 0));
 
-    // A queued prompt the person removed never started: T3 keeps it as cancelled.
     let mut removed = run("r2", 2, "cancelled", Value::Null);
     removed["startedAt"] = Value::Null;
     let removed = projection(json!({

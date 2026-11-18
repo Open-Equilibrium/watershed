@@ -6,26 +6,17 @@ pub use core_script::AllowedParameter as AllowedParameterPolicy;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 
-/// Command-level policy derived from a tool block.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CommandPolicy {
-    /// Allowed command parameters.
     pub allowed_parameters: Vec<AllowedParameterPolicy>,
-    /// Literal argv for predefined commands.
     pub argv: Vec<String>,
-    /// Trusted predefined command id or `script:<tool-id>`.
     pub command_id: String,
-    /// Environment allow policy.
     pub environment: EnvironmentPolicy,
-    /// Executable identity used by the target backend.
     pub executable: String,
-    /// Script runtime for own-script tools.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub script_runtime: Option<ScriptRuntime>,
-    /// Source tool id.
     pub tool_id: String,
-    /// Source tool kind.
     pub tool_kind: ToolKind,
 }
 

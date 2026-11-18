@@ -2,10 +2,10 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 
+import '../rust/api/events.dart';
 import '../rust/api/git.dart';
 import 'backend.dart';
 
-/// What a provider calls a change request: GitLab's merge request, else a pull request.
 typedef Terminology = ({String singular, String short});
 
 Terminology terminologyFor(BridgeGitStatus status) =>
@@ -13,7 +13,6 @@ Terminology terminologyFor(BridgeGitStatus status) =>
     ? (singular: 'merge request', short: 'MR')
     : (singular: 'pull request', short: 'PR');
 
-/// What the split button does when pressed, as T3's `resolveQuickAction` decides.
 enum QuickKind { runAction, runPull, openPublish, showHint }
 
 @immutable
@@ -28,16 +27,12 @@ class QuickAction {
   bool get disabled => kind == QuickKind.showHint;
 }
 
-/// One item of the split button's menu.
 enum MenuItem { commit, push, createPullRequest }
 
-/// A finished action's result, shown in place of the button for ten seconds.
 typedef GitResult = ({String title, String? description});
 
-/// What runs: its phase label, the latest hook line, and when it started.
 typedef GitRunning = ({String label, String? output, DateTime since});
 
-/// The Git state of the session's checkout, from T3's status stream (ADR-0282).
 class GitState {
   GitState(this._git, {required this.onError}) {
     _watch = _git.watch().listen(
@@ -48,7 +43,6 @@ class GitState {
 
   final GitBackend _git;
 
-  /// Reports a failed action as T3's toast does: a title and a message.
   final void Function(String title, String message) onError;
   late final StreamSubscription<BridgeGitStatus> _watch;
 
@@ -62,14 +56,11 @@ class GitState {
 
   GitBackend get backend => _git;
 
-  /// The split button's action for the current status.
   QuickAction quickAction() => resolveQuickAction(status.value, busy: busy);
 
-  /// The menu's items with why each is disabled, or null when it is enabled.
   List<(MenuItem, String?)> menuItems() =>
       buildMenuItems(status.value, busy: busy);
 
-  /// Runs a stacked action, showing its progress and then its result.
   Future<void> run(
     BridgeGitAction action, {
     String? message,
@@ -122,7 +113,6 @@ class GitState {
     }
   }
 
-  /// Pulls the upstream, as T3's quick action does.
   Future<void> pull() async {
     if (busy) return;
     running.value = (
@@ -140,7 +130,6 @@ class GitState {
     }
   }
 
-  /// Initializes Git in the folder.
   Future<void> initialize() async {
     if (busy) return;
     running.value = (
@@ -175,7 +164,6 @@ class GitState {
   }
 }
 
-/// T3's `resolveQuickAction`.
 QuickAction resolveQuickAction(BridgeGitStatus? status, {required bool busy}) {
   if (busy) {
     return const QuickAction(
@@ -280,7 +268,6 @@ QuickAction resolveQuickAction(BridgeGitStatus? status, {required bool busy}) {
   return upToDate;
 }
 
-/// T3's `buildMenuItems` with `getMenuActionDisabledReason`.
 List<(MenuItem, String?)> buildMenuItems(
   BridgeGitStatus? status, {
   required bool busy,
@@ -325,7 +312,6 @@ List<(MenuItem, String?)> buildMenuItems(
   ];
 }
 
-/// The default-branch confirmation's title, description and continue label, as T3 words them.
 ({String title, String description, String continueLabel}) defaultBranchCopy(
   BridgeGitAction action,
   String branch, {
@@ -365,7 +351,6 @@ List<(MenuItem, String?)> buildMenuItems(
         );
 }
 
-/// Why "Check out feature branch & continue" is unavailable, as T3 says it; null when it is.
 String? featureBranchUnavailable(
   BridgeGitAction action,
   String branch, {
@@ -383,9 +368,91 @@ String? featureBranchUnavailable(
   return null;
 }
 
-/// Seconds as T3 shows elapsed time: `12s`, `1m 5s`.
 String elapsed(Duration duration) {
   final seconds = duration.inSeconds;
   if (seconds < 60) return '${seconds}s';
   return '${seconds ~/ 60}m ${seconds % 60}s';
+}
+
+class NoCheckout implements GitBackend {
+  const NoCheckout();
+
+  static final _error = StateError(
+    'No agent host answers, so there is no checkout.',
+  );
+
+  static Never _unanswered() => throw _error;
+
+  @override
+  Future<BridgeGitStatus> status() async => _unanswered();
+  @override
+  Stream<BridgeGitStatus> watch() => Stream.error(_error);
+  @override
+  Future<BridgeRefs> refs(
+    String query, {
+    int cursor = 0,
+    int limit = 50,
+  }) async => _unanswered();
+  @override
+  Future<void> switchTo(String name) async => _unanswered();
+  @override
+  Future<void> createBranch(String name) async => _unanswered();
+  @override
+  Future<void> init() async => _unanswered();
+  @override
+  Future<(String, String)> pull() async => _unanswered();
+  @override
+  Stream<BridgeGitProgress> run(
+    BridgeGitAction action, {
+    String? message,
+    List<String>? files,
+    bool featureBranch = false,
+  }) => Stream.error(_error);
+  @override
+  Future<List<BridgeFileChange>> uncommittedChanges({
+    required bool hideWhitespace,
+  }) async => _unanswered();
+  @override
+  Future<String> uncommittedPatch(
+    String path, {
+    required bool hideWhitespace,
+  }) async => _unanswered();
+  @override
+  Future<BridgeResolvedPullRequest> resolvePullRequest(
+    String reference,
+  ) async => _unanswered();
+  @override
+  Future<BridgeCheckedOut> checkOutPullRequest(
+    String reference, {
+    required bool worktree,
+  }) async => _unanswered();
+  @override
+  Future<void> publish(
+    String provider,
+    String repository, {
+    required bool public,
+  }) async => _unanswered();
+  @override
+  Future<List<BridgeFileChange>> branchChanges({
+    required bool hideWhitespace,
+  }) async => _unanswered();
+  @override
+  Future<String> branchPatch(
+    String path, {
+    required bool hideWhitespace,
+  }) async => _unanswered();
+  @override
+  Future<BridgePullRequestDetail> pullRequest(int number) async =>
+      _unanswered();
+  @override
+  Future<void> runPullRequestAction(
+    int number,
+    String action, {
+    String? mergeMethod,
+  }) async => _unanswered();
+  @override
+  Future<BridgeCheckedOut> pullRequestWorktree(String url) async =>
+      _unanswered();
+  @override
+  void close() {}
 }

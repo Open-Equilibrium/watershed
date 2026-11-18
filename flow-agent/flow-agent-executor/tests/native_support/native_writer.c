@@ -1,4 +1,3 @@
-/* The finite writer from probe-macos-flow-owned-write-protection.py, also used by npm. */
 #include <errno.h>
 #include <stdio.h>
 #include <string.h>

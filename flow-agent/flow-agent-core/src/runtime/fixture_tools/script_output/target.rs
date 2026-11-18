@@ -41,8 +41,6 @@ pub fn anchored_workspace_write_path_from(
 }
 
 pub fn normalize_script_write_target(target: &str) -> Result<String, RuntimeError> {
-    // The deterministic fixture stub accepts only literal workspace-relative outputs.
-    // This is an implementation constraint, not host Tool containment.
     if target.is_empty()
         || target.starts_with('/')
         || target.contains(':')

@@ -6,8 +6,6 @@ void main() {
   test(
     'the card sits beside the chat only where the chat lane keeps its width',
     () {
-      // The chat lane keeps 640 px: the window minus 280 (card), 12 (gap), 32 (clearance) and 48
-      // (lane padding) on each side that T3 Code counts.
       expect(cardFitsBeside(const Size(1011, 600)), isFalse);
       expect(cardFitsBeside(const Size(1012, 600)), isTrue);
     },

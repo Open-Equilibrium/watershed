@@ -2,14 +2,6 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 
-/// Text Liquid assigns to an editable field goes through `writeText` (controls.dart), and the field
-/// then adopts a fresh controller, so ⌘Z cannot bring back the text it replaced. Other writes to a
-/// text controller are a person's own or a field's first text, and each one is listed here with
-/// its reason.
-///
-/// A regex over source lines, not a parser: it finds `x.text =`, `x.value =` and `x.clear()` where
-/// `x` is declared in the same file as a TextEditingController (a field, parameter or getter). A
-/// line starting with `//` is skipped.
 void main() {
   test('every write to a text controller in lib/ is listed with a reason', () {
     final sources = {

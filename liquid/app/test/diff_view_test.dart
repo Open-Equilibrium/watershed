@@ -18,7 +18,6 @@ import 'fake_backend.dart';
 
 const info = SessionInfo(project: 'acme-api');
 
-/// A session whose diffs are over Git's output limit, so they cannot be read.
 class _OversizedSession extends FakeSession {
   @override
   Future<String> turnPatch(
@@ -32,8 +31,6 @@ class _OversizedSession extends FakeSession {
 void main() {
   late FakeProject project;
 
-  /// Shows an open session whose finished `turns` changed `changes`, with each file's `patches`,
-  /// and opens its Diff panel with ⌘D.
   Future<void> show(
     WidgetTester tester, {
     List<BridgeTurn> turns = const [],
@@ -69,9 +66,13 @@ void main() {
     await tester.pumpAndSettle();
   }
 
-  /// Opens the turn menu, the header's button that names the shown scope.
   Future<void> openMenu(WidgetTester tester, String shown) async {
     await tester.tap(find.text(shown));
+    await tester.pumpAndSettle();
+  }
+
+  Future<void> pickScope(WidgetTester tester, String name) async {
+    await tester.tap(find.widgetWithText(PopupMenuItem<DiffScope>, name));
     await tester.pumpAndSettle();
   }
 
@@ -89,7 +90,9 @@ void main() {
 
   Finder code(String text) => find.text(text, findRichText: true);
 
-  /// The color of the span `text` in the shown line that `line` finds.
+  Finder containing(String text) =>
+      find.textContaining(text, findRichText: true);
+
   Color? colorOf(WidgetTester tester, Finder line, String text) {
     Color? color;
     tester.widget<RichText>(line).text.visitChildren((span) {
@@ -116,10 +119,7 @@ void main() {
     expect(find.byType(DiffPanel), findsOneWidget);
     expect(find.text('Latest turn'), findsWidgets);
     expect(find.text('2 files · +2 −0'), findsOneWidget);
-    expect(
-      find.textContaining('first file', findRichText: true),
-      findsOneWidget,
-    );
+    expect(containing('first file'), findsOneWidget);
   });
 
   testWidgets(
@@ -149,16 +149,12 @@ void main() {
     (tester) async {
       await show(tester, turns: twoTurns, changes: [fileOf('a.txt')]);
       await openMenu(tester, 'Latest turn');
-      await tester.tap(find.widgetWithText(PopupMenuItem<DiffScope>, 'Turn 1'));
-      await tester.pumpAndSettle();
+      await pickScope(tester, 'Turn 1');
       expect(find.text('Turn 1'), findsOneWidget);
       expect(project.session.calls, contains('changes 1..1'));
 
       await openMenu(tester, 'Turn 1');
-      await tester.tap(
-        find.widgetWithText(PopupMenuItem<DiffScope>, 'All turns'),
-      );
-      await tester.pumpAndSettle();
+      await pickScope(tester, 'All turns');
       expect(find.text('All turns'), findsOneWidget);
       expect(project.session.calls, contains('changes 1..2'));
     },
@@ -170,15 +166,9 @@ void main() {
       ..changes = [fileOf('notes.md')]
       ..patches = {'notes.md': '@@ -1 +1 @@\n-old\n+written today\n'};
     await openMenu(tester, 'Latest turn');
-    await tester.tap(
-      find.widgetWithText(PopupMenuItem<DiffScope>, 'Uncommitted'),
-    );
-    await tester.pumpAndSettle();
+    await pickScope(tester, 'Uncommitted');
     expect(find.text('notes.md'), findsWidgets);
-    expect(
-      find.textContaining('written today', findRichText: true),
-      findsOneWidget,
-    );
+    expect(containing('written today'), findsOneWidget);
   });
 
   testWidgets(
@@ -189,15 +179,9 @@ void main() {
         ..branchFiles = [fileOf('feature.txt')]
         ..patches = {'feature.txt': '@@ -1 +1 @@\n-old\n+on the branch\n'};
       await openMenu(tester, 'Latest turn');
-      await tester.tap(
-        find.widgetWithText(PopupMenuItem<DiffScope>, 'Changes'),
-      );
-      await tester.pumpAndSettle();
+      await pickScope(tester, 'Changes');
       expect(find.text('feature.txt'), findsWidgets);
-      expect(
-        find.textContaining('on the branch', findRichText: true),
-        findsOneWidget,
-      );
+      expect(containing('on the branch'), findsOneWidget);
       project.session.gitBackend
         ..branchFiles = [fileOf('feature.txt'), fileOf('more.txt')]
         ..change(gitStatusOf(branch: 'feature', defaultBranch: false));
@@ -211,8 +195,7 @@ void main() {
   ) async {
     await show(tester, turns: twoTurns);
     await openMenu(tester, 'Latest turn');
-    await tester.tap(find.widgetWithText(PopupMenuItem<DiffScope>, 'Changes'));
-    await tester.pumpAndSettle();
+    await pickScope(tester, 'Changes');
     expect(find.text('No changes on this branch'), findsOneWidget);
     expect(find.text('The branch is the same as its base.'), findsOneWidget);
   });
@@ -229,11 +212,8 @@ void main() {
     );
     await tester.tap(find.text('b.txt'));
     await tester.pumpAndSettle();
-    expect(
-      find.textContaining('second file', findRichText: true),
-      findsOneWidget,
-    );
-    expect(find.textContaining('first file', findRichText: true), findsNothing);
+    expect(containing('second file'), findsOneWidget);
+    expect(containing('first file'), findsNothing);
   });
 
   testWidgets('W hides whitespace changes, and the control shows them again', (
@@ -419,7 +399,6 @@ void main() {
   testWidgets('a wide panel keeps the switches beside the turn header', (
     tester,
   ) async {
-    // The panel's widest is 70 % of the window, which the shell measures from the view.
     tester.view
       ..physicalSize = const Size(2000, 900)
       ..devicePixelRatio = 1;
@@ -450,7 +429,6 @@ void main() {
   testWidgets(
     'colors the code, marks a Windows line end with a faint ␍ and cuts a very long line',
     (tester) async {
-      // A minified line of about 1 MB, after the Windows lines.
       final bundle = 'let a = 1;' * 100000;
       await show(
         tester,
@@ -506,10 +484,7 @@ void main() {
       expect(project.session.calls, contains('revert 2 files=false'));
 
       await openMenu(tester, 'Latest turn');
-      await tester.tap(
-        find.widgetWithText(PopupMenuItem<DiffScope>, 'All turns'),
-      );
-      await tester.pumpAndSettle();
+      await pickScope(tester, 'All turns');
       expect(find.text('Revert files to before this turn…'), findsNothing);
     },
   );
@@ -529,6 +504,14 @@ void main() {
           .width;
       expect(width(), 540, reason: 'T3 Code’s right panel default');
 
+      await tester.tap(find.byKey(const Key('diff-resize')));
+      await tester.pumpAndSettle();
+      expect(
+        diffSettings.value.width,
+        isNull,
+        reason: 'a press without a drag leaves the width unset',
+      );
+
       await tester.drag(
         find.byKey(const Key('diff-resize')),
         const Offset(-10, 0),
@@ -537,7 +520,6 @@ void main() {
       expect(width(), 550);
       expect(diffSettings.value.width, 550);
 
-      // Widest: the window's 70 %, as T3 Code's right panel allows.
       await tester.drag(
         find.byKey(const Key('diff-resize')),
         const Offset(-3000, 0),
@@ -550,29 +532,12 @@ void main() {
         reason: 'the saved width is the one shown',
       );
 
-      // Narrowest: T3 Code's right panel minimum, which the Diff header fits.
       await tester.drag(
         find.byKey(const Key('diff-resize')),
         const Offset(3000, 0),
       );
       await tester.pumpAndSettle();
       expect(width(), 360);
-    },
-  );
-
-  testWidgets(
-    'a press on the Diff panel’s edge without a drag leaves the width unset',
-    (tester) async {
-      final diffSettings = DiffSettingsController();
-      await show(
-        tester,
-        turns: twoTurns,
-        changes: [fileOf('a.txt')],
-        diffSettings: diffSettings,
-      );
-      await tester.tap(find.byKey(const Key('diff-resize')));
-      await tester.pumpAndSettle();
-      expect(diffSettings.value.width, isNull);
     },
   );
 }

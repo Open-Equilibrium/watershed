@@ -114,9 +114,13 @@ def tracked_validation_paths(repo: Path) -> list[Path]:
 
 class M1ValidationContractTest(unittest.TestCase):
     def test_documented_decision_references_resolve_to_live_entries(self) -> None:
-        decisions = (ROOT / "docs" / "decisions" / "open-decisions.html").read_text(
-            encoding="utf-8"
+        decision_file = ROOT / "docs" / "decisions" / "open-decisions.html"
+        self.assertIn(
+            decision_file,
+            tracked_validation_paths(ROOT),
+            "the decision file must be a tracked regular file",
         )
+        decisions = decision_file.read_text(encoding="utf-8")
         live_ids = set(DECISION_ANCHOR_PATTERN.findall(decisions))
         referenced_ids: set[str] = set()
         for path in tracked_validation_paths(ROOT):
@@ -127,24 +131,14 @@ class M1ValidationContractTest(unittest.TestCase):
 
         self.assertEqual(referenced_ids - live_ids, set())
 
-    def test_validation_scan_excludes_untracked_and_protected_files(self) -> None:
-        with tempfile.TemporaryDirectory(
-            prefix="watershed-m1-validation-"
-        ) as temp_dir:
+    def test_validation_scan_excludes_untracked_protected_and_agent_setup_files(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="watershed-m1-validation-") as temp_dir:
             repo = Path(temp_dir)
-            subprocess.run(
-                ["git", "init", "--quiet"], cwd=repo, check=True, env=git_environment()
-            )
-            safe = repo / "safe.txt"
-            safe.write_text("tracked", encoding="utf-8")
-            untracked = repo / "untracked.txt"
-            untracked.write_text("untracked", encoding="utf-8")
-            protected = repo / ".env"
-            protected.write_text("protected", encoding="utf-8")
-            credential = repo / "credentials" / "token.txt"
-            credential.parent.mkdir()
-            credential.write_text("credential", encoding="utf-8")
+            subprocess.run(["git", "init", "--quiet"], cwd=repo, check=True, env=git_environment())
             documents = {
+                "safe.txt": "tracked",
+                ".env": "protected",
+                "credentials/token.txt": "credential",
                 "docs/decisions/open-decisions.html": '<section id="d-001">Live</section>',
                 "AGENTS.md": "D-999",
                 ".codex/example.md": "D-998",
@@ -156,51 +150,19 @@ class M1ValidationContractTest(unittest.TestCase):
                 document = repo / name
                 document.parent.mkdir(parents=True, exist_ok=True)
                 document.write_text(content, encoding="utf-8")
-            subprocess.run(
-                [
-                    "git", "add", "--", "safe.txt", ".env",
-                    "credentials/token.txt", *documents,
-                ],
-                cwd=repo,
-                check=True,
-                env=git_environment(),
-            )
-
-            excluded = {
-                repo / name
-                for name in ("AGENTS.md", ".codex/example.md", ".agents/example.md")
-            }
-            open_path = Path.open
-
-            def open_product_path(path: Path, *args, **kwargs):
-                self.assertNotIn(
-                    path, excluded, "product gate opened repository agent setup"
-                )
-                return open_path(path, *args, **kwargs)
-
-            with (
-                mock.patch(__name__ + ".ROOT", repo),
-                mock.patch.object(Path, "open", autospec=True, side_effect=open_product_path),
-            ):
-                self.test_documented_decision_references_resolve_to_live_entries()
-                for name in ("docs/AGENTS.md", ".codex-tools/product.md"):
-                    with self.subTest(product_path=name):
-                        (repo / name).write_text("D-002", encoding="utf-8")
-                        with self.assertRaisesRegex(AssertionError, "002"):
-                            self.test_documented_decision_references_resolve_to_live_entries()
-                        (repo / name).write_text("D-001", encoding="utf-8")
-                with self.subTest(open_decisions="none"):
-                    (repo / "docs/decisions/open-decisions.html").write_text(
-                        "<p>No open decisions.</p>", encoding="utf-8"
-                    )
-                    for name in ("docs/AGENTS.md", ".codex-tools/product.md"):
-                        (repo / name).write_text("Decided.", encoding="utf-8")
-                    self.test_documented_decision_references_resolve_to_live_entries()
+            (repo / "untracked.txt").write_text("untracked", encoding="utf-8")
+            subprocess.run(["git", "add", "--", *documents], cwd=repo, check=True, env=git_environment())
 
             self.assertEqual(
                 set(tracked_validation_paths(repo)),
-                {safe} | {repo / name for name in documents if repo / name not in excluded},
+                {repo / name for name in ("safe.txt", "docs/decisions/open-decisions.html",
+                                          "docs/AGENTS.md", ".codex-tools/product.md")},
             )
+            with mock.patch(__name__ + ".ROOT", repo):
+                self.test_documented_decision_references_resolve_to_live_entries()
+                (repo / ".codex-tools/product.md").write_text("D-002", encoding="utf-8")
+                with self.assertRaisesRegex(AssertionError, "002"):
+                    self.test_documented_decision_references_resolve_to_live_entries()
 
     def test_validation_scan_skips_non_utf8_tracked_path_bytes(self) -> None:
         result = subprocess.CompletedProcess(

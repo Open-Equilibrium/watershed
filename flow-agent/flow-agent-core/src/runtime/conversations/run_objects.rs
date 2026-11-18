@@ -329,8 +329,6 @@ impl RunObjectWriter {
             if !object.bytes.starts_with(&bytes) {
                 return self.fail(protocol("existing run object does not match its digest"));
             }
-            // WHY: a strict prefix is an interrupted write; records reference an object only
-            // after it is synchronized, so completing it cannot change committed state.
             if let Err(source) = write_durable(
                 &mut file,
                 path.diagnostic_path(),

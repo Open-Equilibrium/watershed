@@ -53,8 +53,6 @@ mac_assessment() {
   printf 'Code signature integrity: exit 0: %s\n' "$1"
   assessment_status=0
   /usr/sbin/spctl --assess --type execute --verbose=2 "$1" || assessment_status=$?
-  # Preserve the diagnostic and exact exit: nonzero is not an approval, and
-  # must be reviewed as policy rejection or assessment failure, not conflated.
   printf 'Gatekeeper assessment: exit %s: %s\n' "$assessment_status" "$1"
 }
 if [ "$expected_platform" = macos-27-aarch64 ]; then
@@ -65,13 +63,10 @@ if [ "$expected_platform" = macos-27-aarch64 ]; then
   /usr/bin/xattr -w com.apple.quarantine '0083;00000000;WatershedDownloadAcceptance;' "$download/$archive"
   mac_metadata archive-synthetic-quarantine "$download/$archive"
 fi
-# Use only OS tools for the documented pre-execution verification/extraction.
 (cd "$download" && verify_download)
 /usr/bin/tar -xzf "$download/$archive" -C "$acceptance_root"
 printf '%s\n' "$bundle_version" "$expected_platform" | /usr/bin/cmp - "$bundle/bundle-info"
 if [ "$expected_platform" = macos-27-aarch64 ]; then
-  # Observe actual extraction first, then strengthen the private fixture.
-  # Neither step establishes browser transport or Developer ID approval.
   for artifact in install.sh flow flow-executor; do
     mac_metadata extracted "$bundle/$artifact"
     /usr/bin/xattr -w com.apple.quarantine '0083;00000000;WatershedDownloadAcceptance;' "$bundle/$artifact"
@@ -258,7 +253,6 @@ if [ -e "$unavailable_workspace/.flow" ]; then
   exit 1
 fi
 check_custom_selection() {
-  # Use the installed copy; extracted quarantine is assessed separately above.
   run_local "$custom_prefix/bin/flow" executor configure --path "$standard_prefix/bin/flow-executor"
   test -f "$config/flow-agent/executor.json"
   run_local "$custom_prefix/bin/flow" executor check </dev/null
@@ -303,7 +297,6 @@ if [ -n "${M12_COVERAGE_BIN_DIR:-}" ]; then
   install -m 0755 "$coverage_flow" "$coverage_bundle/flow"
   install -m 0755 "$coverage_executor" "$coverage_bundle/flow-executor"
   bundle=$coverage_bundle
-  # Exercise the actual installer with instrumented binaries, not a post-install swap.
   (cd / && run_local /bin/sh "$bundle/install.sh" --prefix "$standard_prefix")
   (cd / && run_local /bin/sh "$bundle/install.sh" --prefix "$custom_prefix" --no-default-executor)
   run_local "$standard_prefix/bin/flow" executor check </dev/null

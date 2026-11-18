@@ -7,13 +7,9 @@ import 'fill_bar.dart';
 import 'session_card_rows.dart';
 import 'session_card_statistics.dart';
 
-/// Whether the usage limits show: the provider reports windows, or says why it has none.
 bool showsLimits(BridgeUsageLimits limits) =>
     limits.windows.isNotEmpty || limits.notice != null;
 
-/// The Usage limits section, as T3 Code's thread details show it, under no heading: each window's
-/// share left, with a warning at 20 % left and an error at 10 %, or the notice when there are no
-/// windows.
 class UsageSection extends StatelessWidget {
   const UsageSection({super.key, required this.limits, required this.divided});
 

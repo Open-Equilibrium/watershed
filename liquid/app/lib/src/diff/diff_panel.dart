@@ -11,9 +11,6 @@ import 'diff_model.dart';
 import 'diff_settings.dart';
 import 'diff_view.dart';
 
-/// The Diff as T3 Code's right panel beside the chat: its tab with a close button, then the
-/// changes. The chat area lays the panel out at its width; its left edge drags that width, which
-/// the Diff settings keep as T3 Code keeps its right panel's.
 class DiffPanel extends StatelessWidget {
   const DiffPanel({
     super.key,
@@ -23,17 +20,12 @@ class DiffPanel extends StatelessWidget {
     required this.onClose,
   });
 
-  /// The width before the panel is dragged, as T3 Code's right panel starts.
   static const double defaultWidth = 540;
 
-  /// The narrowest the panel gets, as T3 Code's right panel goes.
   static const double minWidth = 360;
 
-  /// The room the chat keeps beside the panel, as T3 Code's chat keeps.
   static const double chatMinWidth = 360;
 
-  /// The widest the panel gets in a window `viewport` wide beside a row `container` wide: 70 %
-  /// of the window, and the chat keeps [chatMinWidth].
   static double maxWidthOf(double viewport, double container) =>
       math.max(minWidth, math.min(viewport * 0.7, container - chatMinWidth));
 
@@ -41,18 +33,13 @@ class DiffPanel extends StatelessWidget {
   final DiffSettingsController settings;
   final PatchParser parse;
 
-  /// Closes the panel; the close button and ⌘D both do.
   final VoidCallback onClose;
 
-  /// Dragging the left edge left widens the panel. The drag only sets the width while it runs, so
-  /// the chat area lays the panel out again; the release saves the width it ended at.
   void _dragBy(BuildContext context, double dx) {
     final box = context.findRenderObject()! as RenderBox;
     settings.value = settings.value.copyWith(width: box.size.width - dx);
   }
 
-  /// Saves the width the panel was laid out at, once the drag's last layout has run; a press
-  /// that drags nothing saves nothing.
   void _dragEnded(BuildContext context) =>
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!context.mounted || settings.value.width == null) return;

@@ -24,11 +24,8 @@ pub(crate) struct SseDecoder {
     event_data: Vec<u8>,
     wire_stream_bytes: usize,
     parsed: ParsedSseStream,
-    /// Whether the first terminal Responses event ends the reply; later bytes are then ignored.
     stop_at_terminal_event: bool,
-    /// Whether no line has finished yet, so the first line may start with a byte order mark.
     at_stream_start: bool,
-    /// Whether the next push starts with the LF of a CRLF whose CR ended the previous push.
     skip_lf: bool,
 }
 
@@ -53,7 +50,6 @@ impl Default for SseDecoder {
 }
 
 impl SseDecoder {
-    /// A decoder for a reply that ends at its first terminal event, without a `[DONE]` sentinel.
     pub(crate) fn ending_at_terminal_event() -> Self {
         Self {
             stop_at_terminal_event: true,
@@ -66,7 +62,6 @@ impl SseDecoder {
             return Ok(());
         }
         let mut remaining = bytes;
-        // WHY: an LF that starts this push completes a CRLF whose CR ended the previous push.
         if !remaining.is_empty()
             && std::mem::take(&mut self.skip_lf)
             && let Some(rest) = remaining.strip_prefix(b"\n")
@@ -74,15 +69,11 @@ impl SseDecoder {
             self.charge_wire_bytes(1)?;
             remaining = rest;
         }
-        // The wire budget is charged per consumed line, so bytes after the terminal event are free.
         while let Some(end) = remaining
             .iter()
             .position(|byte| matches!(byte, b'\r' | b'\n'))
         {
             let (line, terminator) = remaining.split_at(end);
-            // WHY: a CR ends the line, and the terminal event ends the consumed prefix, so the LF of a
-            // terminal CRLF is never charged. Charging the LF only when the reply continues keeps the
-            // budget the same whether the CRLF arrives in one push or is split between two.
             self.charge_wire_bytes(end + 1)?;
             self.append_line_fragment(line)?;
             self.finish_line()?;
@@ -121,8 +112,6 @@ impl SseDecoder {
         Ok(self.parsed)
     }
 
-    /// Whether the reply has reached its end: the `[DONE]` sentinel, or a terminal event when the
-    /// decoder stops there.
     pub(crate) fn reply_ended(&self) -> bool {
         self.parsed.terminal_sentinel || self.parsed.terminal_event
     }
@@ -154,7 +143,6 @@ impl SseDecoder {
     }
 
     fn finish_line(&mut self) -> Result<(), RuntimeError> {
-        // WHY: the first line may start with a byte order mark split across pushes, so it is removed here.
         if std::mem::take(&mut self.at_stream_start) && self.pending_line.starts_with(UTF8_BOM) {
             self.pending_line.drain(..UTF8_BOM.len());
         }
@@ -282,7 +270,6 @@ fn dispatch_event(
     Ok(())
 }
 
-/// The events that end a reply: a completion, or one of the failure events.
 fn is_terminal_event(event: &serde_json::Value) -> bool {
     event
         .get("type")
@@ -292,7 +279,6 @@ fn is_terminal_event(event: &serde_json::Value) -> bool {
         })
 }
 
-/// The events that end a reply without completing it: a failure, an incomplete reply or an error.
 pub(crate) fn is_failure_event(event_type: &str) -> bool {
     matches!(
         event_type,

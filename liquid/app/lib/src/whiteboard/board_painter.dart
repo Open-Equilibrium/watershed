@@ -8,8 +8,6 @@ import 'board.dart';
 import 'board_controller.dart';
 import 'ink_geometry.dart';
 
-/// What is being drawn and not yet written: a pen stroke, a shape, a lasso loop or the
-/// eraser's circle, in board points.
 class Draft {
   const Draft({
     this.ink = const [],
@@ -34,8 +32,6 @@ class Draft {
   static const none = Draft();
 }
 
-/// Draws a Whiteboard: only the elements in view (client architecture rule 8), then the
-/// draft, then the selection's frame and handles.
 class BoardPainter extends CustomPainter {
   BoardPainter({
     required this.board,
@@ -51,21 +47,16 @@ class BoardPainter extends CustomPainter {
   final WsPalette ws;
   final Draft draft;
 
-  /// Elements the eraser took and not yet written away, or the text being edited.
   final Set<String> hidden;
   final String? editing;
   final bool dots;
 
-  /// The screen's device pixels per logical pixel, to draw a document's pages sharp.
   final double pixelRatio;
 
-  /// Whether the ink lies on a document's paper rather than a board's canvas.
   bool get paper => board.paged;
 
-  /// The handles' size on screen.
   static const handle = 8.0;
 
-  /// How far above the selection its rotation handle sits, on screen.
   static const rotateReach = 20.0;
 
   @override
@@ -83,7 +74,6 @@ class BoardPainter extends CustomPainter {
     canvas.scale(zoom);
     canvas.translate(-board.origin.dx, -board.origin.dy);
     board.pages?.paint(canvas, view, board.zoom * pixelRatio);
-    // The highlighter's marks lie beneath the rest of the ink.
     for (final beneath in [true, false]) {
       for (final element in board.elements) {
         if (isHighlight(element) != beneath) continue;
@@ -113,7 +103,6 @@ class BoardPainter extends CustomPainter {
     }
   }
 
-  /// Draws one element in board points.
   void paintElement(Canvas canvas, BridgeElement element) {
     final color = inkColor(ws, element.color);
     canvas.save();
@@ -160,8 +149,6 @@ class BoardPainter extends CustomPainter {
     canvas.restore();
   }
 
-  /// Ink's paint; the highlighter's is multiplied onto paper, so text shows through it,
-  /// and translucent on a board's canvas.
   Paint _inkPaint(Color color, {required bool highlight}) {
     final paint = Paint()..color = color;
     if (!highlight) return paint;
@@ -182,7 +169,6 @@ class BoardPainter extends CustomPainter {
     fontSize: textSizes[size.clamp(0, 2)],
     height: 1.25,
     color: color,
-    // Clean text takes Liquid's typeface, also where no theme is around it.
     fontFamily: hand ? handFont : WsMetrics.fontUi.first,
     fontFamilyFallback: hand
         ? WsMetrics.fontUi
@@ -235,7 +221,6 @@ class BoardPainter extends CustomPainter {
     return dashed;
   }
 
-  /// The selection's frame, corner handles and rotation handle, on screen.
   void _selection(Canvas canvas) {
     final box = selectionBox(board);
     if (box == null) return;
@@ -273,15 +258,12 @@ class BoardPainter extends CustomPainter {
       old.pixelRatio != pixelRatio;
 }
 
-/// The selection's frame on the board, as its four corners clockwise from the top left,
-/// and its rotation: one element's own turned frame, or several elements' common box.
 (List<Offset>, double)? selectionBox(BoardController board) {
   final selection = board.selection;
   if (selection.isEmpty) return null;
   if (selection.length == 1) {
     final element = selection.single;
     final frame = frameOf(element);
-    // A line's frame may run backwards; its box is the same.
     final box = Rect.fromPoints(frame.topLeft, frame.bottomRight);
     final turnedCorners = [
       for (final corner in [
@@ -311,7 +293,6 @@ class BoardPainter extends CustomPainter {
   );
 }
 
-/// Where the rotation handle's line starts and its knob sits, on screen.
 (Offset, Offset) rotateHandle(List<Offset> view) {
   final top = Offset.lerp(view[0], view[1], 0.5)!;
   final bottom = Offset.lerp(view[3], view[2], 0.5)!;

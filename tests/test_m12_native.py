@@ -1,5 +1,3 @@
-"""Portable process-boundary tests; these do not certify a native backend."""
-
 import contextlib
 import os
 import pathlib
@@ -120,8 +118,6 @@ class NativeHostTest(unittest.TestCase):
 
 class TimeoutProcessGroupTest(unittest.TestCase):
     def test_run_timeout_kills_term_ignoring_descendants(self):
-        # The parent exits on SIGTERM; its background sleeper ignores SIGTERM and has
-        # its streams redirected, so only a group SIGKILL can stop it.
         script = '(trap "" TERM; exec sleep 30) >/dev/null 2>&1 & echo $! > "$1"; wait'
         for capture in (False, True):
             with self.subTest(capture=capture), tempfile.TemporaryDirectory() as directory:
@@ -141,8 +137,13 @@ class TimeoutProcessGroupTest(unittest.TestCase):
 def wait_until_process_gone(pid, seconds=2):
     deadline = time.monotonic() + seconds
     while True:
-        state = subprocess.run(["ps", "-o", "stat=", "-p", str(pid)],
-                               capture_output=True, text=True).stdout.strip()
+        query = subprocess.run(["ps", "-o", "stat=", "-p", str(pid)],
+                               capture_output=True, text=True)
+        if query.returncode == 1:
+            return True
+        if query.returncode != 0:
+            raise RuntimeError(f"ps could not show process {pid}: {query.stderr.strip()}")
+        state = query.stdout.strip()
         if not state or state.startswith("Z"):
             return True
         if time.monotonic() >= deadline:

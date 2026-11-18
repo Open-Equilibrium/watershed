@@ -18,61 +18,36 @@ mod payload;
 
 pub use payload::{PhaseKind, ToolKind, UnknownPhaseKind, UnknownToolKind};
 
-/// Identifier classes retained or compared across valid v0 events.
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub enum EventStateIdentifierKind {
-    /// Stable event identifier within one stream.
     Event,
-    /// Flow invocation identifier.
     Flow,
-    /// Parent Flow invocation identifier.
     ParentFlow,
-    /// Flow definition identifier.
     FlowDefinition,
-    /// Phase execution identifier.
     PhaseExecution,
-    /// Phase definition identifier.
     Phase,
-    /// Tool definition identifier.
     Tool,
-    /// Tool attempt identifier.
     Attempt,
-    /// Message identifier.
     Message,
 }
 
-/// Maximum state identifiers exposed by one valid v0 Event.
 pub const MAX_EVENT_STATE_IDENTIFIERS_V0: u64 = 5;
 
-/// Maximum payload state identifiers exposed by one valid v0 Event.
 pub const MAX_EVENT_PAYLOAD_STATE_IDENTIFIERS_V0: u64 = 2;
 
-/// Canonical runtime event envelope shared by Flow Agent, Meta-Harness and Liquid.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct EventEnvelope {
-    /// Additive v0 envelope fields not yet understood by this implementation.
     pub additional_fields: BTreeMap<String, Value>,
-    /// Optional cross-event correlation token.
     pub correlation_id: Option<String>,
-    /// Stable event identifier within the session stream.
     pub event_id: String,
-    /// Normalized event family and transition name.
     pub event_type: EventType,
-    /// Flow invocation id for flow-scoped events.
     pub flow_id: Option<String>,
-    /// Parent flow invocation id when this event belongs to a subflow.
     pub parent_flow_id: Option<String>,
-    /// Event-family payload. Payloads must be JSON objects.
     pub payload: Value,
-    /// Protocol version. v0 envelopes must use [`PROTOCOL_VERSION_V0`].
     pub protocol_version: String,
-    /// One-based event order within the session stream.
     pub sequence: u64,
-    /// Lowercase path-safe session id.
     pub session_id: String,
-    /// Producing runtime or adapter name.
     pub source: String,
-    /// Canonical RFC 3339 UTC timestamp ending in literal `Z`.
     pub timestamp: String,
 }
 
@@ -173,7 +148,6 @@ impl EventEnvelope {
         map.end()
     }
 
-    /// Builds a v0 event envelope with no flow, parent-flow or correlation id.
     pub fn new(
         event_id: impl Into<String>,
         event_type: EventType,
@@ -204,10 +178,6 @@ impl EventEnvelope {
         }
     }
 
-    /// Visits each present state identifier in a valid v0 Event.
-    ///
-    /// This does not repeat [`Self::validate_v0`]. Only present string-valued
-    /// identifiers are visited, in stable envelope-then-payload order.
     pub fn try_for_each_state_identifier<E>(
         &self,
         mut visit: impl FnMut(EventStateIdentifierKind, &str) -> Result<(), E>,
@@ -229,10 +199,6 @@ impl EventEnvelope {
         Ok(())
     }
 
-    /// Mutably visits each present state identifier in a valid v0 Event.
-    ///
-    /// This does not repeat [`Self::validate_v0`]. Only present string-valued
-    /// identifiers are visited, in stable envelope-then-payload order.
     pub fn try_for_each_state_identifier_mut<E>(
         &mut self,
         mut visit: impl FnMut(EventStateIdentifierKind, &mut String) -> Result<(), E>,
@@ -254,7 +220,6 @@ impl EventEnvelope {
         Ok(())
     }
 
-    /// Serializes the envelope as canonical JSON plus a trailing newline.
     pub fn canonical_jsonl(&self) -> Result<String, CanonicalJsonError> {
         if !self.payload.is_object() {
             return Err(CanonicalJsonError::NonObjectPayload);
@@ -275,7 +240,6 @@ impl EventEnvelope {
         Ok(out)
     }
 
-    /// Validates metadata that does not depend on other events in the stream.
     pub fn validate_metadata(&self) -> Result<(), EventMetadataError> {
         let invalid = if self.sequence == 0 {
             Some(("sequence", "must be one-based"))
@@ -314,7 +278,6 @@ impl EventEnvelope {
         }
     }
 
-    /// Validates all stream-independent v0 envelope and payload requirements.
     pub fn validate_v0(&self) -> Result<(), EventValidationError> {
         self.validate_metadata()?;
         if self.parent_flow_id.is_some() && self.flow_id.is_none() {

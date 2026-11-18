@@ -165,35 +165,6 @@ fn provider_results_enforce_their_durable_value_contracts() {
 }
 
 #[test]
-fn provider_result_session_objects_must_resolve_to_matching_run_objects() {
-    let bytes = b"provider result object".to_vec();
-    let uri = format!(
-        "session-object:sha256:{}",
-        crate::runtime::digest::sha256_hex(&bytes)
-    );
-    let result = core_script::FlowValue::Map(BTreeMap::from([(
-        "nested".to_owned(),
-        core_script::FlowValue::List(vec![core_script::FlowValue::SessionObject(uri.clone())]),
-    )]));
-
-    assert!(verify_provider_result_session_objects(&result, &ObjectRecovery::default()).is_err());
-    assert!(
-        verify_provider_result_session_objects(
-            &result,
-            &ObjectRecovery(BTreeMap::from([(uri.clone(), bytes)])),
-        )
-        .is_ok()
-    );
-    assert!(
-        verify_provider_result_session_objects(
-            &result,
-            &ObjectRecovery(BTreeMap::from([(uri, b"wrong object".to_vec())])),
-        )
-        .is_err()
-    );
-}
-
-#[test]
 fn string_phase_rejects_object_map_before_reading_objects() {
     let workspace = workspace_copy("smoke-flow");
     let registry = load_test_registry(&workspace, "smoke-flow");
@@ -220,12 +191,9 @@ fn string_phase_rejects_object_map_before_reading_objects() {
 }
 
 #[test]
-fn provider_result_session_objects_are_verified_once_per_distinct_uri() {
+fn provider_result_session_objects_must_match_run_objects_and_are_read_once_per_uri() {
     let bytes = b"repeated provider result object".to_vec();
-    let uri = format!(
-        "session-object:sha256:{}",
-        crate::runtime::digest::sha256_hex(&bytes)
-    );
+    let uri = format!("session-object:sha256:{}", sha256_hex(&bytes));
     let result = core_script::FlowValue::Map(BTreeMap::from([(
         "nested".to_owned(),
         core_script::FlowValue::List(vec![
@@ -237,13 +205,20 @@ fn provider_result_session_objects_are_verified_once_per_distinct_uri() {
         ]),
     )]));
     core_script::validate_flow_value(&result).expect("repeated object references remain valid");
+
+    assert!(verify_provider_result_session_objects(&result, &ObjectRecovery::default()).is_err());
+    assert!(
+        verify_provider_result_session_objects(
+            &result,
+            &ObjectRecovery(BTreeMap::from([(uri.clone(), b"wrong object".to_vec())])),
+        )
+        .is_err()
+    );
     let recovery = CountingObjectRecovery {
         objects: ObjectRecovery(BTreeMap::from([(uri, bytes)])),
         reads: Cell::new(0),
     };
-
     verify_provider_result_session_objects(&result, &recovery)
         .expect("matching repeated object references verify");
-
     assert_eq!(recovery.reads.get(), 1);
 }

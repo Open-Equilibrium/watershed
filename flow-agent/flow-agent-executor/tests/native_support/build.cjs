@@ -1,4 +1,3 @@
-// Finite offline lifecycle adapted from probe-macos-app-sandbox.py.
 const fs = require('node:fs');
 const {spawnSync} = require('node:child_process');
 const settings = JSON.parse(fs.readFileSync('build-settings.json', 'utf8'));

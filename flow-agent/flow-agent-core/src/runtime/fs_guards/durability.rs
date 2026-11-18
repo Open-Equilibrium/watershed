@@ -5,7 +5,6 @@ use std::io::{self, Write as _};
 #[cfg(test)]
 use std::{cell::RefCell, path::PathBuf};
 
-/// Writes all of `bytes` to `file`, opened at `path`: one durable write step (ADR-0266).
 pub(crate) fn write_durable(file: &mut fs::File, path: &Path, bytes: &[u8]) -> io::Result<()> {
     #[cfg(test)]
     durable_step(path, "write");
@@ -16,7 +15,6 @@ pub(crate) fn write_durable(file: &mut fs::File, path: &Path, bytes: &[u8]) -> i
     Ok(())
 }
 
-/// Truncates `file`, opened at `path`, to `len` bytes; the truncation is durable at the next sync.
 pub(crate) fn truncate_durable(file: &fs::File, path: &Path, len: u64) -> io::Result<()> {
     #[cfg(test)]
     durable_step(path, "truncate");
@@ -27,7 +25,6 @@ pub(crate) fn truncate_durable(file: &fs::File, path: &Path, len: u64) -> io::Re
     Ok(())
 }
 
-/// Syncs the data and metadata of `file`, opened at `path`.
 pub(crate) fn sync_durable(file: &fs::File, path: &Path) -> io::Result<()> {
     #[cfg(test)]
     durable_step(path, "sync");

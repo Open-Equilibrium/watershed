@@ -8,8 +8,6 @@ import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
 import 'turn_scope.dart';
 
-/// The Diff's scope menu: the latest turn, each turn, all turns, the branch's changes and the
-/// uncommitted changes, as T3's Diff panel lists them, with the revert action for the shown turn.
 class TurnHeader extends StatelessWidget {
   const TurnHeader({
     super.key,
@@ -26,14 +24,11 @@ class TurnHeader extends StatelessWidget {
   final List<BridgeTurn> turns;
   final DiffScope scope;
 
-  /// The lines all turns added and removed, once read.
   final ({int added, int removed})? allLines;
 
-  /// Whether the project folder is a Git repository, which the uncommitted changes need.
   final bool repository;
   final ValueChanged<DiffScope> onSelect;
 
-  /// Asks to revert the files to before the shown turn; none unless one turn is shown.
   final VoidCallback? onRevert;
 
   @override
@@ -51,7 +46,6 @@ class TurnHeader extends StatelessWidget {
       crossAxisAlignment: WrapCrossAlignment.center,
       children: [
         _menu(context, label),
-        // A narrow panel wraps the action below the menu rather than cutting either.
         if (onRevert case final revert?)
           SecondaryButton(
             label: 'Revert files to before this turn…',
@@ -62,7 +56,6 @@ class TurnHeader extends StatelessWidget {
     );
   }
 
-  /// The menu button, labelled `label`, that chooses the turns and the changes to compare.
   Widget _menu(BuildContext context, String label) {
     final ws = context.ws;
     final ended = finished(turns);

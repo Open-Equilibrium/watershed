@@ -6,7 +6,15 @@ use super::{
 };
 use flow_agent_core::validate_protocol_jsonl_text;
 use proto::EventType;
-use std::{fs, path::Path};
+use std::{fs, path::Path, process::Output};
+
+fn run_smoke_flow(workspace: &Path) -> Output {
+    flow_command()
+        .current_dir(workspace)
+        .args(["run", "smoke-flow", "--emit", "jsonl"])
+        .output()
+        .expect("flow binary should run")
+}
 
 fn replace_fixture_session_with_prefix(workspace: &Path, session_id: &str, prefix: &str) {
     fs::write(
@@ -58,12 +66,7 @@ fn assert_append_only_fixture_resume(prefix: &str, resumed: &str) {
 #[test]
 fn single_id_resume_routes_to_productive_conversation_continuation() {
     let workspace = workspace_copy("smoke-flow");
-    let seed = flow_command()
-        .current_dir(&workspace)
-        .args(["run", "smoke-flow", "--emit", "jsonl"])
-        .output()
-        .expect("fixture run should seed the session");
-    assert!(seed.status.success());
+    assert!(run_smoke_flow(&workspace).status.success());
     let before = fs::read(workspace_session_dir(&workspace).join("smoke-flow.jsonl"))
         .expect("fixture session should exist");
 
@@ -90,12 +93,7 @@ fn single_id_resume_routes_to_productive_conversation_continuation() {
 #[test]
 fn two_id_resume_rejects_a_terminal_fixture_session_without_rewriting_it() {
     let fixture = workspace_copy("smoke-flow");
-    let run = flow_command()
-        .current_dir(&fixture)
-        .args(["run", "smoke-flow", "--emit", "jsonl"])
-        .output()
-        .expect("flow binary should run");
-    assert!(run.status.success());
+    assert!(run_smoke_flow(&fixture).status.success());
     let before = fs::read_to_string(workspace_session_dir(&fixture).join("smoke-flow.jsonl"))
         .expect("session log exists");
 
@@ -122,12 +120,7 @@ fn two_id_resume_rejects_a_terminal_fixture_session_without_rewriting_it() {
 #[test]
 fn two_id_resume_completes_the_current_partial_fixture_session() {
     let workspace = workspace_copy("smoke-flow");
-    let seed = flow_command()
-        .current_dir(&workspace)
-        .args(["run", "smoke-flow", "--emit", "jsonl"])
-        .output()
-        .expect("flow binary should seed fixture metadata");
-    assert!(seed.status.success());
+    assert!(run_smoke_flow(&workspace).status.success());
 
     let prefix = stream_prefix(&expected_stream("smoke-flow", "smoke-flow.jsonl"), 2);
     replace_fixture_session_with_prefix(&workspace, "smoke-flow", &prefix);

@@ -1,6 +1,3 @@
-//! One T3 thread as Meta-Harness follows it: its projection, kept current by T3's events,
-//! and those events in the agent-neutral model (ADR-0290).
-
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -16,6 +13,7 @@ use crate::event::{
 use crate::git::count;
 pub(crate) mod details;
 pub(crate) mod lineage;
+pub(crate) mod move_out;
 
 pub use details::{
     Automation, LocalServer, Pace, RunStatus, Schedule, ScheduleKind, UsageLimits, UsageWindow,
@@ -24,97 +22,59 @@ pub use lineage::{Group, Lineage, LineageChanges, LineageRow, Relation};
 
 use crate::t3::{Change, Client, Projection, fresh_id, millis, prompt_of};
 
-/// Events a subscriber may fall behind by before it is dropped; it then restores from a new
-/// snapshot (ADR-0272, ADR-0290).
 const BACKLOG: usize = 4096;
 
-/// An agent event and its position in the thread's stream.
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct ThreadEvent {
-    /// T3's sequence number of the event it came from.
     pub sequence: u64,
-    /// The event.
     pub event: AgentEvent,
 }
 
-/// How a turn ended, or that it runs.
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TurnStatus {
-    /// Queued behind the running turn.
     Queued,
-    /// Running or waiting for the person.
     Running,
-    /// Ended normally.
     Completed,
-    /// Stopped or failed.
     Aborted,
 }
 
-/// One file a turn changed.
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct TurnFile {
-    /// The path in the checkout.
     pub path: String,
-    /// `added`, `modified`, `deleted` or `renamed`, as T3 reports it.
     pub kind: String,
-    /// Added lines.
     pub added: u32,
-    /// Removed lines.
     pub removed: u32,
 }
 
-/// One turn: a prompt and the agent's work on it, a T3 run.
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct Turn {
-    /// T3's run ordinal, which also numbers its checkpoint and diff.
     pub number: u64,
-    /// Its state.
     pub status: TurnStatus,
-    /// The prompt.
     pub prompt: String,
-    /// When it started, in milliseconds since the Unix epoch.
     pub started_ms: Option<u64>,
-    /// When it ended.
     pub ended_ms: Option<u64>,
-    /// The files its end checkpoint changed; empty until T3 captured it.
     pub files: Vec<TurnFile>,
-    /// Added lines over all files.
     pub added: u32,
-    /// Removed lines over all files.
     pub removed: u32,
-    /// Whether its end checkpoint is ready, so its diff and revert work.
     pub checkpoint: bool,
 }
 
-/// One item of the Chat.
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct ChatItem {
-    /// The item, as the live events name it.
     pub id: ItemId,
-    /// Its turn.
     pub turn: TurnId,
-    /// What it is.
     pub kind: ItemKind,
-    /// Its tool and target, for a tool call.
     pub detail: ItemDetail,
-    /// Its text or tool output so far.
     pub text: String,
-    /// Whether it ended, and how.
     pub status: Option<ItemStatus>,
-    /// How long a tool ran.
     pub duration_ms: Option<u64>,
 }
 
-/// The thread at one stream position: what Liquid shows, and the last event it contains.
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct Snapshot {
-    /// Events up to this sequence are contained; later ones apply on top.
     pub sequence: u64,
-    /// The turns, oldest first, without reverted ones.
     pub turns: Vec<Turn>,
-    /// The Chat's items in T3's order, without reverted ones.
     pub transcript: Vec<ChatItem>,
-    /// Requests the agent waits on, oldest first.
     pub requests: Vec<PendingRequest>,
 }
 
@@ -123,17 +83,12 @@ struct State {
     sequence: u64,
     items: HashMap<String, ItemId>,
     subscribers: Vec<mpsc::Sender<ThreadEvent>>,
-    /// Whether T3 ended the thread's stream, after which no event comes.
     ended: bool,
-    /// Counts T3's thread records and local branch choices, so an older branch answer never
-    /// overwrites a newer one.
     metadata: u64,
-    /// The lineage watches, each woken when the projection changes what the lineage shows.
     lineage: Vec<std::sync::Weak<Notify>>,
 }
 
 impl State {
-    /// Wakes every lineage watch still open, and forgets the dropped ones.
     fn wake_lineage(&mut self) {
         self.lineage.retain(|watch| {
             watch
@@ -152,8 +107,6 @@ impl State {
     }
 }
 
-/// The task that applies T3's stream to a thread. The last clone of the thread ends it, which
-/// drops the stream and so tells T3 to stop sending.
 struct Follower(JoinHandle<()>);
 
 impl Drop for Follower {
@@ -162,19 +115,16 @@ impl Drop for Follower {
     }
 }
 
-/// A followed T3 thread.
 #[derive(Clone)]
 pub struct Thread {
     client: Client,
     id: String,
     root: String,
     state: Arc<Mutex<State>>,
-    // Held only for its drop, which ends the follow task.
     _follower: Arc<Follower>,
 }
 
 impl Thread {
-    /// Subscribes to the thread and returns once T3 sent its snapshot.
     pub(crate) async fn follow(client: Client, id: String, root: String) -> Result<Self, String> {
         let mut stream = client
             .stream(
@@ -202,14 +152,12 @@ impl Thread {
             while let Some(message) = stream.recv().await {
                 let mut state = crate::util::lock(&applied);
                 if message["kind"] == "snapshot" {
-                    // T3 sent the thread again on a new connection; its events go on from there.
                     restore(&mut state, &message);
                     state.wake_lineage();
                 } else {
                     apply(&mut state, &message);
                 }
             }
-            // T3 ended the stream, so the subscribers end with it, and later ones end at once.
             let mut state = crate::util::lock(&applied);
             state.ended = true;
             state.subscribers.clear();
@@ -227,12 +175,14 @@ impl Thread {
         crate::util::lock(&self.state)
     }
 
-    /// T3's thread id.
     pub fn id(&self) -> &str {
         &self.id
     }
 
-    /// Git for the thread's checkout: its worktree, else the project folder.
+    pub(crate) fn root(&self) -> &str {
+        &self.root
+    }
+
     pub fn git(&self) -> crate::Git {
         let cwd = self.worktree().map_or_else(
             || self.root.clone(),
@@ -241,8 +191,6 @@ impl Thread {
         crate::Git::new(self.client.clone(), cwd, Some(self.id.clone()))
     }
 
-    /// Points the thread at `branch`, after the branch picker switched or chose a worktree. The
-    /// thread's [`Git`](crate::Git) follows at once, before T3's event arrives.
     pub async fn set_branch(
         &self,
         branch: &str,
@@ -261,7 +209,6 @@ impl Thread {
         }))
         .await?;
         let mut state = self.state();
-        // T3's record or a later choice since then already holds newer metadata.
         if state.metadata == asked {
             let thread = &mut state.projection.thread;
             thread["branch"] = json!(branch);
@@ -270,61 +217,84 @@ impl Thread {
         Ok(())
     }
 
-    /// The thread's own worktree, if it has one.
     pub fn worktree(&self) -> Option<PathBuf> {
         self.state().projection.thread["worktreePath"]
             .as_str()
             .map(PathBuf::from)
     }
 
-    /// The current snapshot and the events after it, with no gap between them (ADR-0290).
     pub fn subscribe(&self) -> (Snapshot, mpsc::Receiver<ThreadEvent>) {
         let (sender, receiver) = mpsc::channel(BACKLOG);
         let mut state = self.state();
-        // Subscribers that left are dropped here too, not only at the next event, so an idle
-        // thread that Liquid subscribes to again and again keeps no closed channels.
         state
             .subscribers
             .retain(|subscriber| !subscriber.is_closed());
-        // Once T3 ended the stream no event comes, so the receiver ends at once.
         if !state.ended {
             state.subscribers.push(sender);
         }
         (snapshot(&mut state), receiver)
     }
 
-    /// Whether T3 ended the thread's stream for good, so no event comes; a reconnect does not.
     pub fn ended(&self) -> bool {
         self.state().ended
     }
 
-    /// The thread as it is now.
     pub fn snapshot(&self) -> Snapshot {
         snapshot(&mut self.state())
     }
 
-    /// The turns, oldest first, without reverted ones.
     pub fn turns(&self) -> Vec<Turn> {
         turns(&self.state().projection)
     }
 
-    /// Sends `text` as T3's composer does: an idle thread starts a turn with it; a running one
-    /// takes it as a steer with `steer`, else queues it after the turn.
     pub async fn send(&self, text: &str, steer: bool) -> Result<(), String> {
+        self.post(&fresh_id("msg"), text, steer, false).await
+    }
+
+    pub(crate) async fn send_once(&self, id: &str, text: &str, steer: bool) -> Result<(), String> {
+        if self.state().projection.prompts().contains_key(id) {
+            return Ok(());
+        }
+        self.post(id, text, steer, false).await
+    }
+
+    pub(crate) fn message_status(&self, id: &str) -> Option<TurnStatus> {
+        self.state()
+            .projection
+            .runs
+            .iter()
+            .find(|run| run["userMessageId"] == id)
+            .map(turn_status)
+    }
+
+    pub(crate) async fn requeue_once(&self, id: &str, text: &str) -> Result<(), String> {
+        if self.state().projection.prompts().contains_key(id) {
+            return Ok(());
+        }
+        self.post(id, text, false, true).await
+    }
+
+    async fn post(
+        &self,
+        id: &str,
+        text: &str,
+        steer: bool,
+        queue_only: bool,
+    ) -> Result<(), String> {
         let running = self.state().projection.runs.iter().any(|run| {
             matches!(
                 run["status"].as_str(),
                 Some("starting" | "running" | "waiting")
             )
         });
-        let (mode, intent) = match (running, steer) {
-            (true, false) => (json!({"type": "queue_after_active"}), None),
-            (true, true) => (json!({"type": "start_immediately"}), Some("steer")),
-            (false, _) => (json!({"type": "start_immediately"}), Some("auto")),
+        let (mode, intent) = match (running, steer, queue_only) {
+            (_, _, true) | (true, false, _) => (json!({"type": "queue_after_active"}), None),
+            (true, true, _) => (json!({"type": "start_immediately"}), Some("steer")),
+            (false, _, _) => (json!({"type": "start_immediately"}), Some("auto")),
         };
         let mut command = json!({
             "type": "message.dispatch",
-            "messageId": fresh_id("msg"),
+            "messageId": id,
             "text": text,
             "attachments": [],
             "createdBy": "user",
@@ -337,13 +307,10 @@ impl Thread {
         self.dispatch(command).await
     }
 
-    /// Stops the running turn and the thread's delegated work.
     pub async fn stop(&self) -> Result<(), String> {
         self.dispatch(json!({"type": "thread.stop"})).await
     }
 
-    /// The unified diff from the start of turn `from` to the end of turn `to`; `from` starts
-    /// after its predecessor (see `predecessor`).
     pub async fn diff(
         &self,
         from: u64,
@@ -366,13 +333,10 @@ impl Thread {
         Ok(result["diff"].as_str().unwrap_or_default().to_owned())
     }
 
-    /// T3's "Edit from here": rewinds the thread to before turn `turn` and, with
-    /// `restore_files`, its worktree's files too. Returns the turn's prompt for the input area.
     pub async fn revert(&self, turn: u64, restore_files: bool) -> Result<String, String> {
         let (checkpoint, prompt) = {
             let state = self.state();
             let projection = &state.projection;
-            // Only a turn the thread still shows may be reverted; no other dispatches a rollback.
             let prompt = turns(projection)
                 .into_iter()
                 .find(|t| t.number == turn)
@@ -393,17 +357,14 @@ impl Thread {
         Ok(prompt)
     }
 
-    /// The thread's exact statistics (ADR-0279).
     pub fn statistics(&self) -> crate::Statistics {
         crate::statistics::statistics(&self.state().projection)
     }
 
-    /// The context window the latest request filled, if the provider reports it.
     pub fn context(&self) -> Option<crate::Context> {
         crate::statistics::context(&self.state().projection)
     }
 
-    /// The thread's title.
     pub fn title(&self) -> String {
         self.state().projection.thread["title"]
             .as_str()
@@ -411,13 +372,10 @@ impl Thread {
             .to_owned()
     }
 
-    /// T3's record of the thread, as Meta-Harness holds it, for the session record (ADR-0257).
     pub fn record(&self) -> Value {
         self.state().projection.to_json()
     }
 
-    /// T3's "Fork from this response": a new thread that continues from the end of turn
-    /// `turn`. Returns its id.
     pub async fn fork(&self, turn: u64) -> Result<String, String> {
         let (run, title) = {
             let state = self.state();
@@ -454,13 +412,11 @@ impl Thread {
         Ok(target)
     }
 
-    /// Changes what the agent may do without asking, from the next turn on.
     pub async fn set_permissions(&self, permissions: crate::Permissions) -> Result<(), String> {
         self.dispatch(json!({"type": "thread.runtime-mode.set", "runtimeMode": permissions.mode()}))
             .await
     }
 
-    /// Changes the model for the next turn.
     pub async fn set_model(&self, model: &crate::ModelChoice) -> Result<(), String> {
         self.dispatch(
             json!({"type": "thread.model-selection.set", "modelSelection": model.to_t3()}),
@@ -468,12 +424,10 @@ impl Thread {
         .await
     }
 
-    /// The thread's model.
     pub fn model(&self) -> Option<crate::ModelChoice> {
         crate::ModelChoice::from_t3(&self.state().projection.thread["modelSelection"])
     }
 
-    /// "Send now" on a queued turn: starts it when idle, else steers the running turn with it.
     pub async fn send_queued_now(&self, turn: u64) -> Result<(), String> {
         let (queued, running) = {
             let state = self.state();
@@ -506,14 +460,12 @@ impl Thread {
         }
     }
 
-    /// Replaces a queued turn's prompt.
     pub async fn edit_queued(&self, turn: u64, text: &str) -> Result<(), String> {
         let run = self.queued(turn)?;
         self.dispatch(json!({"type": "queued-run.edit", "runId": run, "text": text}))
             .await
     }
 
-    /// Removes a queued turn.
     pub async fn cancel_queued(&self, turn: u64) -> Result<(), String> {
         let run = self.queued(turn)?;
         self.dispatch(json!({"type": "queued-run.cancel", "runId": run}))
@@ -527,7 +479,6 @@ impl Thread {
         .ok_or(format!("Turn {turn} is not queued."))
     }
 
-    /// Answers an approval with one of its options' decisions.
     pub async fn respond(&self, request: &RequestId, decision: &str) -> Result<(), String> {
         self.dispatch(json!({
             "type": "runtime-request.respond",
@@ -537,7 +488,6 @@ impl Thread {
         .await
     }
 
-    /// Answers questions: each question id with its chosen labels or typed text.
     pub async fn answer(
         &self,
         request: &RequestId,
@@ -561,7 +511,6 @@ impl Thread {
         .await
     }
 
-    /// Dismisses questions without answering.
     pub async fn dismiss(&self, request: &RequestId) -> Result<(), String> {
         self.dispatch(json!({"type": "thread.user-input.dismiss", "requestId": request.0}))
             .await
@@ -587,7 +536,6 @@ fn run_id(runs: &[Value], matches: impl Fn(&Value) -> bool) -> Option<Value> {
     runs.iter().find(|r| matches(r)).map(|r| r["id"].clone())
 }
 
-/// The ready checkpoint at the end of turn `number`; turn 0 is the thread's start.
 fn ready_checkpoint(projection: &Projection, number: u64) -> Option<&Value> {
     projection.checkpoints.iter().find(|c| {
         c["status"] == "ready"
@@ -599,9 +547,6 @@ fn ready_checkpoint(projection: &Projection, number: u64) -> Option<&Value> {
     })
 }
 
-/// The turn count turn `turn` starts after: the latest earlier run that is not rolled back and
-/// has a ready checkpoint, or 0 for the thread's start. T3 keeps the numbers of the runs a
-/// rewind rolled back, so the next run's predecessor is the visible one, as in T3's web app.
 fn predecessor(projection: &Projection, turn: u64) -> u64 {
     projection
         .runs
@@ -613,9 +558,6 @@ fn predecessor(projection: &Projection, turn: u64) -> u64 {
         .unwrap_or(0)
 }
 
-/// Restarts the thread from a snapshot that T3 sent again on a new connection. Its subscribers end,
-/// so each one's stream resubscribes behind a fell-behind event and Liquid reloads the Chat
-/// (ADR-0272, ADR-0290).
 fn restore(state: &mut State, snapshot: &Value) {
     state.projection = Projection::from_snapshot(&snapshot["projection"]);
     state.sequence = snapshot["snapshotSequence"].as_u64().unwrap_or_default();
@@ -623,7 +565,6 @@ fn restore(state: &mut State, snapshot: &Value) {
     state.metadata += 1;
 }
 
-/// Applies one message of T3's thread stream and hands its agent events to the subscribers.
 fn apply(state: &mut State, message: &Value) {
     if message["kind"] != "event" {
         return;
@@ -654,7 +595,6 @@ fn apply(state: &mut State, message: &Value) {
     });
 }
 
-/// The agent events one projection change means.
 fn translate(state: &mut State, change: Change, payload: &Value) -> Vec<AgentEvent> {
     match change {
         Change::Run(before) => {
@@ -746,7 +686,6 @@ fn translate(state: &mut State, change: Change, payload: &Value) -> Vec<AgentEve
                 Vec::new()
             }
         }
-        // A new or edited prompt changes a turn's prompt.
         Change::Message(true) => vec![AgentEvent::TurnsChanged],
         Change::Thread | Change::Message(false) | Change::Other => Vec::new(),
     }
@@ -789,6 +728,15 @@ fn snapshot(state: &mut State) -> Snapshot {
     }
 }
 
+fn turn_status(run: &Value) -> TurnStatus {
+    match run["status"].as_str() {
+        Some("queued" | "preparing") => TurnStatus::Queued,
+        Some("completed") => TurnStatus::Completed,
+        Some("interrupted" | "failed" | "cancelled") => TurnStatus::Aborted,
+        _ => TurnStatus::Running,
+    }
+}
+
 fn turns(projection: &Projection) -> Vec<Turn> {
     let prompts = projection.prompts();
     projection
@@ -811,12 +759,7 @@ fn turns(projection: &Projection) -> Vec<Turn> {
                 .collect();
             Turn {
                 number,
-                status: match run["status"].as_str() {
-                    Some("queued" | "preparing") => TurnStatus::Queued,
-                    Some("completed") => TurnStatus::Completed,
-                    Some("interrupted" | "failed" | "cancelled") => TurnStatus::Aborted,
-                    _ => TurnStatus::Running,
-                },
+                status: turn_status(run),
                 prompt: prompt_of(&prompts, run).to_owned(),
                 started_ms: millis(&run["startedAt"]),
                 ended_ms: millis(&run["completedAt"]),
@@ -829,7 +772,6 @@ fn turns(projection: &Projection) -> Vec<Turn> {
         .collect()
 }
 
-/// The request a turn item asks, while T3 still waits for its answer.
 fn pending(projection: &Projection, item: &Value) -> Option<PendingRequest> {
     let id = &item["requestId"];
     let waiting = projection
@@ -853,7 +795,6 @@ fn pending(projection: &Projection, item: &Value) -> Option<PendingRequest> {
                 })
                 .collect();
             if options.is_empty() {
-                // T3's own default choices when the provider offers none.
                 options = [
                     ("cancel", "Cancel"),
                     ("decline", "Decline"),
@@ -903,7 +844,6 @@ fn pending(projection: &Projection, item: &Value) -> Option<PendingRequest> {
     })
 }
 
-/// The turn a turn item or provider turn belongs to: its run's ordinal.
 fn turn_of(projection: &Projection, record: &Value) -> TurnId {
     let run = if record["runId"].is_string() {
         record["runId"].clone()
@@ -938,7 +878,6 @@ pub(crate) fn status_of(item: &Value) -> ItemStatus {
     }
 }
 
-/// Whether a tool call failed: its status, or a command's exit code.
 pub(crate) fn failed(item: &Value) -> bool {
     item["status"] == "failed" || item["exitCode"].as_i64().is_some_and(|code| code != 0)
 }
@@ -947,7 +886,6 @@ pub(crate) fn duration(item: &Value) -> Option<u64> {
     millis(&item["completedAt"])?.checked_sub(millis(&item["startedAt"])?)
 }
 
-/// What a T3 turn item is in the agent-neutral model; `None` for items the Chat does not show.
 pub(crate) fn describe(item: &Value) -> Option<(ItemKind, ItemDetail)> {
     let line = |key: &str| {
         item[key]
@@ -983,8 +921,6 @@ pub(crate) fn describe(item: &Value) -> Option<(ItemKind, ItemDetail)> {
     })
 }
 
-/// A provider turn's tokens; T3's input includes cache reads and writes, which the model
-/// counts apart.
 pub(crate) fn usage_of(turn: &Value) -> Option<Usage> {
     let u = &turn["turnTokenUsage"];
     if u["usageStatus"] != "complete" {

@@ -6,6 +6,18 @@ use crate::runtime::{
     session::run_flow_with_root_input, types::EmitMode, validate::validate_session_log_text,
 };
 use proto::EventType;
+use std::path::Path;
+
+fn write_simple_phase(workspace: &Path, id: &str, output: &str) {
+    write_registry_definition(
+        workspace,
+        "phases",
+        id,
+        &format!(
+            "phase:\n  id: {id}\n  name: {id}\n  instruction_refs: []\n  tool_refs: []\n  output:\n{output}"
+        ),
+    );
+}
 
 #[test]
 fn custom_m11_flow_composes_parameters_loops_transitions_types_and_subflows() {
@@ -74,76 +86,22 @@ fn custom_m11_flow_composes_parameters_loops_transitions_types_and_subflows() {
         value: done
 "#,
     );
-    write_registry_definition(
+    write_simple_phase(&workspace, "must-skip", "    type: boolean\n");
+    write_simple_phase(&workspace, "boolean-value", "    type: boolean\n");
+    write_simple_phase(
         &workspace,
-        "phases",
-        "must-skip",
-        r#"phase:
-  id: must-skip
-  name: MustSkip
-  instruction_refs: []
-  tool_refs: []
-  output:
-    type: boolean
-"#,
-    );
-    write_registry_definition(
-        &workspace,
-        "phases",
-        "boolean-value",
-        r#"phase:
-  id: boolean-value
-  name: BooleanValue
-  instruction_refs: []
-  tool_refs: []
-  output:
-    type: boolean
-"#,
-    );
-    write_registry_definition(
-        &workspace,
-        "phases",
         "integer-value",
-        r#"phase:
-  id: integer-value
-  name: IntegerValue
-  instruction_refs: []
-  tool_refs: []
-  output:
-    type: integer
-    min: 4
-    max: 8
-"#,
+        "    type: integer\n    min: 4\n    max: 8\n",
     );
-    write_registry_definition(
+    write_simple_phase(
         &workspace,
-        "phases",
         "string-value",
-        r#"phase:
-  id: string-value
-  name: StringValue
-  instruction_refs: []
-  tool_refs: []
-  output:
-    type: string
-    max_length: 3
-"#,
+        "    type: string\n    max_length: 3\n",
     );
-    write_registry_definition(
+    write_simple_phase(
         &workspace,
-        "phases",
         "list-value",
-        r#"phase:
-  id: list-value
-  name: ListValue
-  instruction_refs: []
-  tool_refs: []
-  output:
-    type: list
-    items:
-      type: boolean
-    max_items: 2
-"#,
+        "    type: list\n    items:\n      type: boolean\n    max_items: 2\n",
     );
     write_registry_definition(
         &workspace,
@@ -187,19 +145,7 @@ fn custom_m11_flow_composes_parameters_loops_transitions_types_and_subflows() {
           type: string
 "#,
     );
-    write_registry_definition(
-        &workspace,
-        "phases",
-        "object-value",
-        r#"phase:
-  id: object-value
-  name: ObjectValue
-  instruction_refs: []
-  tool_refs: []
-  output:
-    type: session-object
-"#,
-    );
+    write_simple_phase(&workspace, "object-value", "    type: session-object\n");
     write_registry_definition(
         &workspace,
         "phases",
@@ -215,19 +161,7 @@ fn custom_m11_flow_composes_parameters_loops_transitions_types_and_subflows() {
   result_from: object-value
 "#,
     );
-    write_registry_definition(
-        &workspace,
-        "phases",
-        "subflow-leaf",
-        r#"phase:
-  id: subflow-leaf
-  name: SubflowLeaf
-  instruction_refs: []
-  tool_refs: []
-  output:
-    type: boolean
-"#,
-    );
+    write_simple_phase(&workspace, "subflow-leaf", "    type: boolean\n");
     write_registry_definition(
         &workspace,
         "flows",
@@ -288,35 +222,40 @@ fn custom_m11_flow_composes_parameters_loops_transitions_types_and_subflows() {
             .iter()
             .any(|event| event.payload["phase_id"] == "must-skip")
     );
-    assert_eq!(
-        completed_phase_result(&events, "parameterized-input"),
-        &serde_json::json!({"type":"map","value":{"project":{"type":"string","value":"watershed"}}})
-    );
-    assert_eq!(
-        completed_phase_result(&events, "integer-value"),
-        &serde_json::json!({"type":"integer","value":"4"})
-    );
-    assert_eq!(
-        completed_phase_result(&events, "string-value"),
-        &serde_json::json!({"type":"string","value":"hel"})
-    );
-    assert_eq!(
-        completed_phase_result(&events, "list-value"),
-        &serde_json::json!({"type":"list","value":[]})
-    );
-    assert_eq!(
-        completed_phase_result(&events, "map-value"),
-        &serde_json::json!({
-            "type":"map",
-            "value":{
-                "count":{"type":"integer","value":"2"},
-                "flag":{"type":"boolean","value":true},
-                "items":{"type":"list","value":[]},
-                "object":{"type":"session-object","value":format!("session-object:sha256:{}", "0".repeat(64))},
-                "text":{"type":"string","value":"he"}
-            }
-        })
-    );
+    for (phase_id, expected) in [
+        (
+            "parameterized-input",
+            serde_json::json!({"type":"map","value":{"project":{"type":"string","value":"watershed"}}}),
+        ),
+        (
+            "integer-value",
+            serde_json::json!({"type":"integer","value":"4"}),
+        ),
+        (
+            "string-value",
+            serde_json::json!({"type":"string","value":"hel"}),
+        ),
+        ("list-value", serde_json::json!({"type":"list","value":[]})),
+        (
+            "map-value",
+            serde_json::json!({
+                "type":"map",
+                "value":{
+                    "count":{"type":"integer","value":"2"},
+                    "flag":{"type":"boolean","value":true},
+                    "items":{"type":"list","value":[]},
+                    "object":{"type":"session-object","value":format!("session-object:sha256:{}", "0".repeat(64))},
+                    "text":{"type":"string","value":"he"}
+                }
+            }),
+        ),
+    ] {
+        assert_eq!(
+            completed_phase_result(&events, phase_id),
+            &expected,
+            "{phase_id}"
+        );
+    }
     assert!(events.iter().any(|event| {
         event.event_type == EventType::FlowCompleted
             && event.payload["flow_definition_id"] == "custom-child"

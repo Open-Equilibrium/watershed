@@ -1,6 +1,3 @@
-//! The details card's values as the bridge hands them to Liquid: hidden characters written out, and
-//! each server, task, lineage row and usage window in the shape Liquid reads.
-
 use meta_harness_core::{
     Automation, Group, Lineage, LineageRow, LocalServer, Pace, Relation, RunStatus, Schedule,
     ScheduleKind, UsageLimits, UsageWindow,

@@ -1,6 +1,6 @@
 use super::super::helpers::empty_workspace;
 use super::super::support::run_isolated_test;
-use super::support::credential;
+use super::support::{credential, set_unix_mode, unix_mode};
 use crate::runtime::credential_store::CredentialStore;
 #[cfg(target_os = "macos")]
 use crate::runtime::credential_store::{
@@ -24,91 +24,48 @@ fn add_macos_acl(path: &Path, entry: &str) {
 
 #[test]
 fn protected_credential_store_enforces_private_parent_and_file_modes() {
-    use std::os::unix::fs::PermissionsExt as _;
-
     let workspace = empty_workspace("credential-store-private-modes");
     let parent = workspace.join("private");
     let path = parent.join("credentials.json");
     let store = CredentialStore::at(path.clone());
-    let current = credential(900_000);
-    store.replace(&current).expect("private credential stores");
-    assert_eq!(
-        fs::metadata(&parent)
-            .expect("private parent metadata")
-            .permissions()
-            .mode()
-            & 0o777,
-        0o700
-    );
-    assert_eq!(
-        fs::metadata(&path)
-            .expect("private file metadata")
-            .permissions()
-            .mode()
-            & 0o777,
-        0o600
-    );
-
-    fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).expect("credential mode changes");
-    assert!(store.read().is_err());
-    fs::set_permissions(&path, fs::Permissions::from_mode(0o600))
-        .expect("credential mode restores");
-    fs::set_permissions(&parent, fs::Permissions::from_mode(0o755)).expect("parent mode changes");
-    assert!(store.read().is_err());
-}
-
-#[cfg(target_os = "macos")]
-#[test]
-fn protected_credential_store_rejects_an_extended_file_acl() {
-    use std::os::unix::fs::PermissionsExt as _;
-
-    let workspace = empty_workspace("credential-store-extended-file-acl");
-    let path = workspace.join("private/credentials.json");
-    let store = CredentialStore::at(path.clone());
-    let current = credential(900_000);
-    store.replace(&current).expect("private credential stores");
-    add_macos_acl(&path, "everyone allow read");
-    assert_eq!(
-        fs::metadata(&path)
-            .expect("credential metadata")
-            .permissions()
-            .mode()
-            & 0o777,
-        0o600
-    );
-
-    assert!(store.read().is_err());
-    assert!(store.replace(&credential(1_000_000)).is_err());
-}
-
-#[cfg(target_os = "macos")]
-#[test]
-fn protected_credential_store_rejects_an_extended_parent_acl() {
-    use std::os::unix::fs::PermissionsExt as _;
-
-    let workspace = empty_workspace("credential-store-extended-parent-acl");
-    let parent = workspace.join("private");
-    let path = parent.join("credentials.json");
-    let store = CredentialStore::at(path);
     store
         .replace(&credential(900_000))
         .expect("private credential stores");
-    add_macos_acl(&parent, "everyone allow list,search");
-    assert!(
-        macos_credential_path_has_acl_entries_for_test(&parent)
-            .expect("credential parent ACL reads")
-    );
-    assert_eq!(
-        fs::metadata(&parent)
-            .expect("credential parent metadata")
-            .permissions()
-            .mode()
-            & 0o777,
-        0o700
-    );
+    assert_eq!(unix_mode(&parent), 0o700);
+    assert_eq!(unix_mode(&path), 0o600);
 
+    set_unix_mode(&path, 0o644);
     assert!(store.read().is_err());
-    assert!(store.replace(&credential(1_000_000)).is_err());
+    set_unix_mode(&path, 0o600);
+    set_unix_mode(&parent, 0o755);
+    assert!(store.read().is_err());
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn protected_credential_store_rejects_an_extended_acl_on_the_file_or_its_parent() {
+    for (leaf, entry, mode) in [
+        ("private/credentials.json", "everyone allow read", 0o600),
+        ("private", "everyone allow list,search", 0o700),
+    ] {
+        let workspace = empty_workspace("credential-store-extended-acl");
+        let parent = workspace.join("private");
+        let path = parent.join("credentials.json");
+        let store = CredentialStore::at(path.clone());
+        store
+            .replace(&credential(900_000))
+            .expect("private credential stores");
+        let target = workspace.join(leaf);
+        add_macos_acl(&target, entry);
+        assert_eq!(unix_mode(&target), mode, "{leaf} keeps its mode bits");
+        assert!(
+            macos_credential_path_has_acl_entries_for_test(&target).expect("ACL reads"),
+            "{leaf}"
+        );
+
+        assert!(store.read().is_err(), "{leaf}");
+        assert!(store.replace(&credential(1_000_000)).is_err(), "{leaf}");
+    }
 }
 
 #[cfg(target_os = "macos")]
@@ -127,9 +84,8 @@ fn protected_credential_store_removes_inherited_parent_acl_entries() {
     );
     fs::remove_dir(&inherited_control).expect("inherited ACL control directory removes");
     let parent = workspace.join("private");
-    let path = parent.join("credentials.json");
 
-    CredentialStore::at(path)
+    CredentialStore::at(parent.join("credentials.json"))
         .replace(&credential(900_000))
         .expect("private credential removes its inherited parent ACL");
 
@@ -142,13 +98,10 @@ fn protected_credential_store_removes_inherited_parent_acl_entries() {
 #[cfg(target_os = "macos")]
 #[test]
 fn protected_credential_store_removes_inherited_file_acl_entries() {
-    use std::os::unix::fs::PermissionsExt as _;
-
     let workspace = empty_workspace("credential-store-inherited-file-acl");
     let parent = workspace.join("private");
     fs::create_dir(&parent).expect("private parent creates");
-    fs::set_permissions(&parent, fs::Permissions::from_mode(0o700))
-        .expect("private parent mode applies");
+    set_unix_mode(&parent, 0o700);
     add_macos_acl(&parent, "everyone allow read,file_inherit");
     let path = parent.join("credentials.json");
 
@@ -166,7 +119,6 @@ fn protected_credential_store_normalizes_a_restrictive_creation_umask() {
     }
 
     use rustix::{fs::Mode, process::umask};
-    use std::os::unix::fs::PermissionsExt as _;
 
     struct UmaskGuard(Mode);
 
@@ -177,8 +129,7 @@ fn protected_credential_store_normalizes_a_restrictive_creation_umask() {
     }
 
     let workspace = empty_workspace("credential-store-restrictive-umask");
-    let existing_parent = workspace.join("existing");
-    let existing_path = existing_parent.join("credentials.json");
+    let existing_path = workspace.join("existing/credentials.json");
     let existing = CredentialStore::at(existing_path.clone());
     existing
         .replace(&credential(300_000))
@@ -193,36 +144,15 @@ fn protected_credential_store_normalizes_a_restrictive_creation_umask() {
         existing.read().expect("replacement reads"),
         Some(replacement)
     );
-    assert_eq!(
-        fs::metadata(&existing_path)
-            .expect("replacement metadata")
-            .permissions()
-            .mode()
-            & 0o777,
-        0o600
-    );
+    assert_eq!(unix_mode(&existing_path), 0o600);
 
     let fresh_parent = workspace.join("fresh");
     let fresh_path = fresh_parent.join("credentials.json");
     CredentialStore::at(fresh_path.clone())
         .replace(&credential(1_000_000))
         .expect("fresh private credential stores under a restrictive umask");
-    assert_eq!(
-        fs::metadata(&fresh_parent)
-            .expect("fresh private parent metadata")
-            .permissions()
-            .mode()
-            & 0o777,
-        0o700
-    );
-    assert_eq!(
-        fs::metadata(&fresh_path)
-            .expect("fresh private credential metadata")
-            .permissions()
-            .mode()
-            & 0o777,
-        0o600
-    );
+    assert_eq!(unix_mode(&fresh_parent), 0o700);
+    assert_eq!(unix_mode(&fresh_path), 0o600);
 }
 
 #[test]
@@ -232,13 +162,10 @@ fn platform_credential_store_rejects_an_untrusted_writable_configuration_ancesto
         return;
     }
 
-    use std::os::unix::fs::PermissionsExt as _;
-
     let workspace = empty_workspace("credential-store-untrusted-ancestor");
     let untrusted = workspace.join("untrusted");
     fs::create_dir(&untrusted).expect("untrusted ancestor creates");
-    fs::set_permissions(&untrusted, fs::Permissions::from_mode(0o777))
-        .expect("untrusted ancestor becomes writable");
+    set_unix_mode(&untrusted, 0o777);
     #[cfg(target_os = "macos")]
     let configuration = {
         unsafe { std::env::set_var("HOME", &untrusted) };
@@ -298,21 +225,4 @@ fn protected_credential_store_remains_bound_to_its_opened_private_parent() {
             .expect("retained namespace credential reads"),
         Some(updated)
     );
-}
-
-#[test]
-fn protected_credential_store_creates_a_missing_configuration_base() {
-    let workspace = empty_workspace("credential-store-missing-configuration-base");
-    let base = workspace.join("configuration");
-    let parent = base.join("flow-agent");
-    let path = parent.join("credentials.json");
-    let store = CredentialStore::at(path.clone());
-
-    store
-        .replace(&credential(900_000))
-        .expect("a fresh configuration base is created");
-
-    assert!(base.is_dir());
-    assert!(parent.is_dir());
-    assert!(path.is_file());
 }

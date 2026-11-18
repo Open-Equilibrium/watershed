@@ -7,17 +7,13 @@ use crate::runtime::types::RuntimeError;
 use std::path::{Path, PathBuf};
 use std::{env, fs::File};
 
-/// Authority that selected the effective productive Executor.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ExecutorSelectionSource {
-    /// Administrator-supplied protected user override.
     Custom,
-    /// Administrator-owned sibling installed with the running `flow` binary.
     Default,
 }
 
 impl ExecutorSelectionSource {
-    /// Returns the stable human-readable selection name.
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Custom => "custom",
@@ -26,7 +22,6 @@ impl ExecutorSelectionSource {
     }
 }
 
-/// Absolute productive Executor selected by the administrator boundary.
 #[derive(Debug)]
 pub struct ExecutorSelection {
     validated: Option<ProbedExecutor>,
@@ -48,12 +43,10 @@ impl ExecutorSelection {
         self
     }
 
-    /// Returns the selected absolute executable path.
     pub fn path(&self) -> &Path {
         &self.path
     }
 
-    /// Returns whether the path came from protected custom configuration or the installed default.
     pub fn source(&self) -> ExecutorSelectionSource {
         self.source
     }
@@ -87,12 +80,10 @@ impl ExecutorSelection {
     }
 }
 
-/// Performs the no-Tool-spawn readiness check and returns the effective selection.
 pub fn executor_check() -> Result<ExecutorSelection, RuntimeError> {
     resolve_executor_with_roots(&protected_directories(false)?)
 }
 
-/// Validates and atomically selects an administrator-supplied absolute Executor.
 pub fn configure_executor_path(path: &Path) -> Result<ExecutorSelection, RuntimeError> {
     if !path.is_absolute() {
         return Err(RuntimeError::Usage(
@@ -106,7 +97,6 @@ pub fn configure_executor_path(path: &Path) -> Result<ExecutorSelection, Runtime
     Ok(selection.with_probe(probed))
 }
 
-/// Removes only the protected custom override and restores default sibling selection.
 pub fn configure_default_executor() -> Result<bool, RuntimeError> {
     ExecutorConfigStore::platform_default()?.configure_default()
 }

@@ -1,6 +1,3 @@
-//! Contract tests against the pinned T3 Code server (ADR-0281), with a scripted ACP agent in
-//! place of a model. They need the pinned `t3` executable in `META_HARNESS_T3`; CI installs it.
-
 #![allow(clippy::unwrap_used)]
 
 use std::path::{Path, PathBuf};
@@ -11,12 +8,13 @@ use futures_util::FutureExt;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 use meta_harness_core::{
-    Access, CONNECTION_FILE, Change, ClientKind, Service, ServiceConfig, remote, t3_version,
+    Access, Arrival, CONNECTION_FILE, Change, ClientKind, Landing, MoveFinish, MovePackage,
+    MovePhase, Service, ServiceConfig, remote, t3_version,
 };
 use meta_harness_core::{
-    AcpAgent, AgentEvent, GitAction, GitActionRequest, GitProgress, Group, Host, HostConfig,
-    LineCount, ModelChoice, Permissions, Relation, Request, Snapshot, StartThread, Thread,
-    ThreadEvent, TurnStatus, Workspace,
+    AcpAgent, AgentEvent, GitAction, GitActionRequest, GitProgress, Group, Harness, Host,
+    HostConfig, LineCount, ModelChoice, Permissions, Relation, Request, Snapshot, StartThread,
+    Thread, ThreadEvent, TurnStatus, Workspace,
 };
 
 const AGENT: &str = "scripted";
@@ -25,6 +23,15 @@ fn t3() -> PathBuf {
     PathBuf::from(
         std::env::var_os("META_HARNESS_T3")
             .expect("META_HARNESS_T3 names the pinned t3 executable"),
+    )
+}
+
+fn transfer() -> String {
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+    format!(
+        "{:016x}{:016x}",
+        std::process::id(),
+        NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
     )
 }
 
@@ -37,18 +44,20 @@ fn git(dir: &Path, args: &[&str]) {
     assert!(status.success(), "git {args:?}");
 }
 
-/// A repository with one commit on `main`, and a fresh T3 data folder beside it.
+fn seed_repo(repo: &Path) {
+    std::fs::create_dir(repo).unwrap();
+    git(repo, &["init", "-q", "-b", "main"]);
+    std::fs::write(repo.join("README.md"), "contract\n").unwrap();
+    git(repo, &["config", "user.name", "Contract"]);
+    git(repo, &["config", "user.email", "contract@example.invalid"]);
+    git(repo, &["add", "."]);
+    git(repo, &["commit", "-qm", "start"]);
+}
+
 fn fixture() -> (tempdir::Dir, PathBuf, PathBuf) {
     let dir = tempdir::Dir::new();
     let repo = dir.path().join("repo");
-    std::fs::create_dir(&repo).unwrap();
-    git(&repo, &["init", "-q", "-b", "main"]);
-    std::fs::write(repo.join("README.md"), "contract\n").unwrap();
-    // T3's commits need an identity; the host's may have none.
-    git(&repo, &["config", "user.name", "Contract"]);
-    git(&repo, &["config", "user.email", "contract@example.invalid"]);
-    git(&repo, &["add", "."]);
-    git(&repo, &["commit", "-qm", "start"]);
+    seed_repo(&repo);
     let home = dir.path().join("t3");
     (dir, repo, home)
 }
@@ -63,15 +72,15 @@ async fn host(home: &Path) -> Host {
     .expect("T3 starts")
 }
 
-/// Starts a service on `home`, which keeps T3's data in `home/t3`, and connects a client to it.
-/// Its remote listener binds loopback.
 async fn start_service(home: &Path) -> (Service, remote::Host) {
-    let service = Service::start_with_remote(
-        service_config(home),
-        Some(vec![std::net::Ipv4Addr::LOCALHOST.into()]),
-    )
-    .await
-    .expect("the service starts");
+    start_with(service_config(home), home).await
+}
+
+async fn start_with(config: ServiceConfig, home: &Path) -> (Service, remote::Host) {
+    let service =
+        Service::start_with_remote(config, Some(vec![std::net::Ipv4Addr::LOCALHOST.into()]))
+            .await
+            .expect("the service starts");
     let host = remote::Host::connect(home, "contract")
         .await
         .expect("a client connects");
@@ -83,8 +92,6 @@ fn agents(home: &Path) -> Vec<AcpAgent> {
     vec![AcpAgent {
         id: AGENT.to_owned(),
         command: PathBuf::from("/usr/bin/python3"),
-        // The script ignores its arguments; the home folder names this test's agents in the
-        // process list.
         args: vec![
             script.to_string_lossy().into_owned(),
             home.to_string_lossy().into_owned(),
@@ -101,7 +108,6 @@ fn service_config(home: &Path) -> ServiceConfig {
     }
 }
 
-/// A free loopback port, for a remote listener.
 fn free_port() -> u16 {
     std::net::TcpListener::bind("127.0.0.1:0")
         .unwrap()
@@ -110,8 +116,6 @@ fn free_port() -> u16 {
         .port()
 }
 
-/// Turns on `host`'s remote access on a free port and answers that port. A port found free can
-/// be taken by another test before the service binds it, so a taken one is tried again.
 async fn remote_on_free(host: &remote::Host) -> u16 {
     for _ in 0..5 {
         let port = free_port();
@@ -132,6 +136,7 @@ fn worktree() -> Workspace {
 
 fn start(text: &str, workspace: Workspace, permissions: Permissions) -> StartThread {
     StartThread {
+        message_id: None,
         text: text.to_owned(),
         model: ModelChoice {
             instance: AGENT.to_owned(),
@@ -143,7 +148,6 @@ fn start(text: &str, workspace: Workspace, permissions: Permissions) -> StartThr
     }
 }
 
-/// Waits until the thread's snapshot satisfies `done`, failing after a minute.
 async fn wait(thread: &remote::Thread, done: impl Fn(&Snapshot) -> bool) -> Snapshot {
     let waited = tokio::time::timeout(Duration::from_secs(60), async {
         loop {
@@ -161,7 +165,6 @@ async fn wait(thread: &remote::Thread, done: impl Fn(&Snapshot) -> bool) -> Snap
     }
 }
 
-/// `wait` for a thread of the core Host, for the one test that stays on it.
 async fn wait_core(thread: &Thread, done: impl Fn(&Snapshot) -> bool) -> Snapshot {
     let waited = tokio::time::timeout(Duration::from_secs(60), async {
         loop {
@@ -176,7 +179,6 @@ async fn wait_core(thread: &Thread, done: impl Fn(&Snapshot) -> bool) -> Snapsho
     waited.unwrap_or_else(|_| panic!("not there within a minute: {:#?}", thread.snapshot()))
 }
 
-/// Whether `n` turns completed with their checkpoints.
 fn completed(n: usize) -> impl Fn(&Snapshot) -> bool {
     move |s| {
         s.turns
@@ -197,6 +199,15 @@ async fn a_thread_runs_turns_and_reverts_files_in_its_worktree() {
         .await
         .unwrap();
     wait(&thread, completed(1)).await;
+    let statistics = thread.statistics().await.unwrap();
+    assert_eq!(statistics.turns.len(), 1);
+    assert_eq!(statistics.turns[0].prompt, "append first");
+    let edits: u32 = statistics
+        .tools
+        .iter()
+        .map(|t| t.succeeded + t.failed + t.cancelled + t.open)
+        .sum();
+    assert!(edits >= 1, "the append's tool call counts: {statistics:?}");
     thread.send("append second", false).await.unwrap();
     wait(&thread, completed(2)).await;
 
@@ -214,7 +225,6 @@ async fn a_thread_runs_turns_and_reverts_files_in_its_worktree() {
         (2, 1, 0)
     );
     assert!(thread.diff(2, 2, false).await.unwrap().contains("+second"));
-    // The thread's Git reads its own worktree, where the append is still uncommitted.
     let changed = thread.git().status().await.unwrap().changes;
     assert_eq!(
         changed.iter().map(|c| c.path.as_str()).collect::<Vec<_>>(),
@@ -224,36 +234,7 @@ async fn a_thread_runs_turns_and_reverts_files_in_its_worktree() {
     assert_eq!(thread.revert(2, true).await.unwrap(), "append second");
     wait(&thread, |s| s.turns.len() == 1).await;
     assert_eq!(std::fs::read_to_string(&file).unwrap(), "first\n");
-    // Turn 1 reverts to the thread's start, which removes the file it created.
-    assert_eq!(thread.revert(1, true).await.unwrap(), "append first");
-    wait(&thread, |s| s.turns.is_empty()).await;
-    assert!(!file.exists());
 
-    // The branch picker chose the project folder's checkout; Git follows it at once.
-    thread.set_branch("main", Some(&repo)).await.unwrap();
-    assert_eq!(
-        thread.worktree().await.unwrap().as_deref(),
-        Some(repo.as_path())
-    );
-    service.stop().await;
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn a_turn_after_a_rewind_reverts_and_diffs_from_its_visible_predecessor() {
-    let (_dir, repo, home) = fixture();
-    let (service, host) = start_service(&home).await;
-    let project = host.project(&repo).await.unwrap();
-    let thread = project
-        .start(start("append first", worktree(), Permissions::FullAccess))
-        .await
-        .unwrap();
-    wait(&thread, completed(1)).await;
-    thread.send("append second", false).await.unwrap();
-    wait(&thread, completed(2)).await;
-    assert_eq!(thread.revert(2, true).await.unwrap(), "append second");
-    wait(&thread, |s| s.turns.len() == 1).await;
-
-    // T3 numbers the next run after the rolled back one, so the new turn is number 3.
     thread.send("append third", false).await.unwrap();
     wait(&thread, completed(2)).await;
     let numbers: Vec<u64> = thread
@@ -264,17 +245,21 @@ async fn a_turn_after_a_rewind_reverts_and_diffs_from_its_visible_predecessor() 
         .map(|t| t.number)
         .collect();
     assert_eq!(numbers, [1, 3]);
-    let file = thread
-        .worktree()
-        .await
-        .unwrap()
-        .unwrap()
-        .join("contract.txt");
     assert_eq!(std::fs::read_to_string(&file).unwrap(), "first\nthird\n");
     assert!(thread.diff(3, 3, false).await.unwrap().contains("+third"));
     assert_eq!(thread.revert(3, true).await.unwrap(), "append third");
     wait(&thread, |s| s.turns.len() == 1).await;
     assert_eq!(std::fs::read_to_string(&file).unwrap(), "first\n");
+
+    assert_eq!(thread.revert(1, true).await.unwrap(), "append first");
+    wait(&thread, |s| s.turns.is_empty()).await;
+    assert!(!file.exists());
+
+    thread.set_branch("main", Some(&repo)).await.unwrap();
+    assert_eq!(
+        thread.worktree().await.unwrap().as_deref(),
+        Some(repo.as_path())
+    );
     service.stop().await;
 }
 
@@ -301,7 +286,6 @@ async fn shutdown_stops_t3_and_the_agent_processes_it_started() {
     }
     assert!(!agents.is_empty(), "T3 started its agent");
     service.stop().await;
-    // T3 stops its provider processes as it stops; an agent left running would wait forever.
     for _ in 0..50 {
         agents.retain(|pid| running(*pid));
         if agents.is_empty() {
@@ -318,7 +302,6 @@ async fn shutdown_stops_t3_and_the_agent_processes_it_started() {
     );
 }
 
-/// The processes whose command line names `home`, such as the agents T3 started in it.
 fn processes_naming(home: &Path) -> Vec<u32> {
     let listing = Command::new("ps")
         .args(["-axww", "-o", "pid=,command="])
@@ -347,7 +330,6 @@ fn kill(pid: u32) {
 async fn a_restart_stops_the_t3_server_a_dead_host_left_behind() {
     let (_dir, _repo, home) = fixture();
     let first = host(&home).await;
-    // A Meta-Harness that dies leaves its T3 server holding the data folder.
     std::mem::forget(first);
     let second = host(&home).await;
     second.shutdown().await;
@@ -356,7 +338,6 @@ async fn a_restart_stops_the_t3_server_a_dead_host_left_behind() {
 #[tokio::test(flavor = "multi_thread")]
 async fn t3_starts_in_a_data_folder_that_does_not_exist_yet() {
     let (_dir, _repo, home) = fixture();
-    // Liquid's first start: no data folder yet and no ACP agents to write into it.
     let host = Host::start(HostConfig {
         binary: t3(),
         home,
@@ -369,28 +350,43 @@ async fn t3_starts_in_a_data_folder_that_does_not_exist_yet() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn a_stale_server_record_never_stops_another_process() {
-    let (_dir, _repo, home) = fixture();
-    // A server that died left its record behind; its pid now belongs to another program.
-    let mut other = Command::new("sleep").arg("60").spawn().unwrap();
-    std::fs::create_dir_all(home.join("userdata")).unwrap();
-    std::fs::write(
-        home.join("userdata").join("server-runtime.json"),
-        serde_json::json!({"pid": other.id()}).to_string(),
-    )
-    .unwrap();
-    let host = host(&home).await;
-    assert!(
-        other.try_wait().unwrap().is_none(),
-        "the other program still runs"
-    );
-    host.shutdown().await;
-    other.kill().unwrap();
-    other.wait().unwrap();
+    let (dir, _repo, home) = fixture();
+    let other_home = dir.path().join("other");
+    let other = host(&other_home).await;
+    let record = runtime_record(&other_home);
+    let address = record["origin"]
+        .as_str()
+        .unwrap()
+        .trim_start_matches("http://");
+    let mut sleeper = Command::new("sleep").arg("60").spawn().unwrap();
+    for pid in [sleeper.id().into(), record["pid"].clone()] {
+        std::fs::create_dir_all(home.join("userdata")).unwrap();
+        std::fs::write(
+            home.join("userdata").join("server-runtime.json"),
+            serde_json::json!({ "pid": pid }).to_string(),
+        )
+        .unwrap();
+        let host = host(&home).await;
+        assert!(
+            sleeper.try_wait().unwrap().is_none(),
+            "the other program still runs"
+        );
+        assert!(
+            std::net::TcpStream::connect(address).is_ok(),
+            "the other folder's server still listens"
+        );
+        host.shutdown().await;
+    }
+    other.shutdown().await;
+    sleeper.kill().unwrap();
+    sleeper.wait().unwrap();
 }
 
-// Stays on the core Host: the service delivers a subscription's events from its own task, so the
-// remote stream can lag the snapshots its calls return, and the remote API cannot wait until the
-// stream has caught up.
+fn runtime_record(home: &Path) -> serde_json::Value {
+    let text = std::fs::read_to_string(home.join("userdata").join("server-runtime.json")).unwrap();
+    serde_json::from_str(&text).unwrap()
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn a_snapshot_names_the_events_it_already_contains() {
     let (_dir, repo, home) = fixture();
@@ -402,9 +398,6 @@ async fn a_snapshot_names_the_events_it_already_contains() {
         .unwrap();
     let (before, mut events) = thread.subscribe();
     wait_core(&thread, completed(1)).await;
-    // The stream applies each change and sends its events under the lock that snapshots take, so
-    // once `wait` read the turn complete, every later event is already in `events` (ADR-0290).
-    // The turn may also have ended before `before`; then its completion is in the snapshot instead.
     let received: Vec<ThreadEvent> = std::iter::from_fn(|| events.try_recv().ok()).collect();
     let after = thread.snapshot();
     assert!(
@@ -434,12 +427,6 @@ async fn a_snapshot_names_the_events_it_already_contains() {
     host.shutdown().await;
 }
 
-/// The events `events` already holds, without waiting for more. The remote stream has no
-/// non-blocking receive, so this takes only the events that are ready now.
-fn buffered(events: &mut remote::Stream<ThreadEvent>) -> Vec<ThreadEvent> {
-    std::iter::from_fn(|| events.recv().now_or_never().flatten()).collect()
-}
-
 #[tokio::test(flavor = "multi_thread")]
 async fn a_supervised_thread_waits_for_the_person_to_approve() {
     let (_dir, repo, home) = fixture();
@@ -464,34 +451,12 @@ async fn a_supervised_thread_waits_for_the_person_to_approve() {
     let resolved = events.recv().await.unwrap();
     let mut seen = vec![resolved.event];
     let done = wait(&thread, completed(1)).await;
-    seen.extend(buffered(&mut events).into_iter().map(|e| e.event));
+    seen.extend(std::iter::from_fn(|| events.recv().now_or_never().flatten()).map(|e| e.event));
     assert!(seen.contains(&AgentEvent::RequestResolved {
         request: asked.id.clone()
     }));
     assert!(done.requests.is_empty());
     assert!(done.transcript.iter().any(|item| item.text == "Approved."));
-    service.stop().await;
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn statistics_count_a_thread_s_turns_and_tool_calls() {
-    let (_dir, repo, home) = fixture();
-    let (service, host) = start_service(&home).await;
-    let project = host.project(&repo).await.unwrap();
-    let thread = project
-        .start(start("append one", worktree(), Permissions::FullAccess))
-        .await
-        .unwrap();
-    wait(&thread, completed(1)).await;
-    let statistics = thread.statistics().await.unwrap();
-    assert_eq!(statistics.turns.len(), 1);
-    assert_eq!(statistics.turns[0].prompt, "append one");
-    let edits: u32 = statistics
-        .tools
-        .iter()
-        .map(|t| t.succeeded + t.failed + t.cancelled + t.open)
-        .sum();
-    assert!(edits >= 1, "the append's tool call counts: {statistics:?}");
     service.stop().await;
 }
 
@@ -531,7 +496,6 @@ async fn a_prompt_sent_while_a_turn_runs_queues_and_can_be_removed() {
         (later.prompt.as_str(), more.prompt.as_str()),
         ("append later", "append more")
     );
-    // Subscribers learn of an edit, so Liquid's queue shows the new text.
     thread
         .edit_queued(more.number, "append edited")
         .await
@@ -582,30 +546,16 @@ async fn deleting_a_worktree_s_only_thread_can_delete_the_worktree() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn forking_a_response_starts_a_thread_with_the_turns_up_to_it() {
-    let (_dir, repo, home) = fixture();
-    let (service, host) = start_service(&home).await;
-    let project = host.project(&repo).await.unwrap();
-    let thread = project
-        .start(start("append first", worktree(), Permissions::FullAccess))
-        .await
-        .unwrap();
-    wait(&thread, completed(1)).await;
-    thread.send("append second", false).await.unwrap();
-    wait(&thread, completed(2)).await;
-    let fork = project.open(&thread.fork(1).await.unwrap()).await.unwrap();
-    let forked = wait(&fork, |s| {
-        s.transcript.iter().any(|i| i.text == "append first")
-    })
-    .await;
-    assert!(forked.transcript.iter().all(|i| i.text != "append second"));
-    service.stop().await;
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn the_writer_model_is_set_once_for_every_thread() {
+async fn the_host_names_its_machine_kind_and_keeps_one_writer_model() {
     let (_dir, _repo, home) = fixture();
+    std::fs::create_dir_all(home.join("t3/userdata")).unwrap();
+    std::fs::write(
+        home.join("t3/userdata/settings.json"),
+        r#"{"environmentIcon":"laptop"}"#,
+    )
+    .unwrap();
     let (service, host) = start_service(&home).await;
+    assert_eq!(host.environment_machine().await.unwrap(), "laptop");
     let writer = ModelChoice {
         instance: "claudeAgent".to_owned(),
         model: "claude-haiku-5-5".to_owned(),
@@ -623,7 +573,6 @@ async fn the_writer_model_is_set_once_for_every_thread() {
     service.stop().await;
 }
 
-/// Runs a stacked action and returns how it ended.
 async fn run(git: &remote::Git, action: GitAction, message: Option<&str>) -> GitProgress {
     let mut progress = git
         .run(GitActionRequest {
@@ -675,18 +624,16 @@ async fn git_commits_branches_and_pushes_as_t3_does() {
     let status = git.status().await.unwrap();
     assert!(status.changes.is_empty() && status.upstream);
     assert_eq!(status.ahead, 0);
-    let pushed = Command::new("git")
-        .args(["log", "-1", "--format=%s", "feature"])
-        .current_dir(&origin)
-        .output()
-        .unwrap();
-    assert_eq!(
-        String::from_utf8_lossy(&pushed.stdout).trim(),
-        "Change the readme"
-    );
+    assert_eq!(pushed_subject(&origin, "feature"), "Change the readme");
 
     git.switch("main").await.unwrap();
     assert_eq!(git.status().await.unwrap().branch.as_deref(), Some("main"));
+    let plain = dir.path().join("plain");
+    std::fs::create_dir(&plain).unwrap();
+    let plain_git = host.project(&plain).await.unwrap().git();
+    assert!(!plain_git.status().await.unwrap().repository);
+    plain_git.init().await.unwrap();
+    assert!(plain_git.status().await.unwrap().repository);
     service.stop().await;
 }
 
@@ -732,21 +679,7 @@ async fn branch_changes_and_the_branch_diff_compare_the_branch_with_its_base_as_
     service.stop().await;
 }
 
-#[tokio::test(flavor = "multi_thread")]
-async fn git_initializes_a_folder_without_a_repository() {
-    let (dir, _repo, home) = fixture();
-    let plain = dir.path().join("plain");
-    std::fs::create_dir(&plain).unwrap();
-    let (service, host) = start_service(&home).await;
-    let git = host.project(&plain).await.unwrap().git();
-    assert!(!git.status().await.unwrap().repository);
-    git.init().await.unwrap();
-    assert!(git.status().await.unwrap().repository);
-    service.stop().await;
-}
-
 mod tempdir {
-    /// A temporary folder removed on drop.
     pub struct Dir(std::path::PathBuf);
 
     impl Dir {
@@ -754,7 +687,6 @@ mod tempdir {
             let mut bytes = [0u8; 8];
             getrandom::fill(&mut bytes).unwrap();
             let name: String = bytes.iter().map(|b| format!("{b:02x}")).collect();
-            // A short path: T3 derives socket and worktree paths from it.
             let path = std::env::temp_dir().join(format!("mh-{name}"));
             std::fs::create_dir(&path).unwrap();
             Self(path.canonicalize().unwrap())
@@ -786,9 +718,16 @@ async fn a_thread_details_card_reads_t3_and_a_fork_merges_back() {
     assert!(thread.servers().await.unwrap().current().is_empty());
     assert!(thread.automations().await.unwrap().current().is_empty());
     thread.usage_limits().await.unwrap();
+    thread.send("append second", false).await.unwrap();
+    wait(&thread, completed(2)).await;
 
     let fork_id = thread.fork(1).await.unwrap();
     let fork = project.open(&fork_id).await.unwrap();
+    let forked = wait(&fork, |s| {
+        s.transcript.iter().any(|i| i.text == "append first")
+    })
+    .await;
+    assert!(forked.transcript.iter().all(|i| i.text != "append second"));
     fork.send("append in fork", false).await.unwrap();
     wait(&fork, |s| {
         s.turns.iter().any(|t| {
@@ -839,27 +778,6 @@ async fn the_service_admits_only_clients_with_its_token_and_owns_its_folder() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn a_dropped_service_stops_serving_its_clients() {
-    let (dir, _repo, _) = fixture();
-    let home = dir.path().join("meta");
-    let service = Service::start(service_config(&home)).await.unwrap();
-    let (url, token) = (service.url.clone(), service.token.clone());
-    let client = remote::Host::connect(&home, "test").await.unwrap();
-    drop(service);
-    assert!(!home.join(CONNECTION_FILE).exists());
-    tokio::time::timeout(Duration::from_secs(10), async {
-        while client.status().await.is_ok() {
-            tokio::time::sleep(Duration::from_millis(10)).await;
-        }
-        while remote::Host::connect_to(&url, &token, "test").await.is_ok() {
-            tokio::time::sleep(Duration::from_millis(10)).await;
-        }
-    })
-    .await
-    .expect("a dropped service ends its connections and stops listening");
-}
-
-#[tokio::test(flavor = "multi_thread")]
 async fn an_approved_configuration_reaches_the_harness_homes_t3_runs_them_in() {
     let (dir, _repo, _) = fixture();
     let home = dir.path().join("meta");
@@ -893,7 +811,6 @@ async fn an_approved_configuration_reaches_the_harness_homes_t3_runs_them_in() {
     let log = client.log().await.unwrap();
     assert!(log.iter().all(|entry| entry.client == "liquid"), "{log:?}");
 
-    // T3 keeps the homes in its settings, so it starts Claude Code and Codex in them.
     let settings: serde_json::Value = serde_json::from_str(
         &std::fs::read_to_string(home.join("t3/userdata/settings.json")).unwrap(),
     )
@@ -915,11 +832,10 @@ async fn an_approved_configuration_reaches_the_harness_homes_t3_runs_them_in() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn a_dropped_service_takes_its_streams_with_it_and_frees_its_folder() {
+async fn a_dropped_service_ends_its_connections_and_streams_and_frees_its_folder() {
     let (dir, repo, _) = fixture();
     let home = dir.path().join("meta");
     let (service, client) = start_service(&home).await;
-    // A stream the client keeps open, which the dropped service's connection still serves.
     let _statuses = client
         .project(&repo)
         .await
@@ -928,7 +844,22 @@ async fn a_dropped_service_takes_its_streams_with_it_and_frees_its_folder() {
         .watch()
         .await
         .unwrap();
+    let (url, token) = (service.url.clone(), service.token.clone());
     drop(service);
+    assert!(!home.join(CONNECTION_FILE).exists());
+    tokio::time::timeout(Duration::from_secs(10), async {
+        while client.status().await.is_ok() {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        while remote::Host::connect_to(&url, &token, "contract")
+            .await
+            .is_ok()
+        {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("a dropped service ends its connections and stops listening");
     let started = tokio::time::timeout(Duration::from_secs(20), async {
         loop {
             if let Ok(service) = Service::start(service_config(&home)).await {
@@ -968,7 +899,6 @@ async fn a_client_goes_on_after_the_service_restarts() {
     .await;
     assert!(ended.is_ok(), "a stream of the lost connection ends");
 
-    // The login service starts it again with a new port and token; the client finds both.
     let service = Service::start(service_config(&home)).await.unwrap();
     let after = client.status().await.unwrap();
     assert_eq!(after.revision, before.revision);
@@ -999,13 +929,11 @@ async fn the_service_refuses_a_client_that_names_no_api_version_or_another() {
             Err(other) => panic!("{other}"),
         };
         assert_eq!(refused.status(), StatusCode::UPGRADE_REQUIRED);
-        // The refusal names the version the service speaks.
         assert_eq!(refused.headers()["meta-harness-api"], "1");
     }
     service.stop().await;
 }
 
-/// An authenticated client connection to `service`, which the test reads and writes itself.
 async fn open_client(
     service: &Service,
 ) -> tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>> {
@@ -1021,8 +949,6 @@ async fn open_client(
     tokio_tungstenite::connect_async(request).await.unwrap().0
 }
 
-/// Connects as a client that never reads its replies and sends `text` until the service
-/// disconnects it; answers how long that took, or `None` if it did not within `limit`.
 async fn disconnected_after_flood(
     service: &Service,
     text: &str,
@@ -1032,7 +958,6 @@ async fn disconnected_after_flood(
     use tokio_tungstenite::tungstenite::Message;
     let mut socket = open_client(service).await;
     let started = std::time::Instant::now();
-    // Each malformed request is answered, and the answers are never read.
     tokio::time::timeout(limit, async {
         loop {
             if socket
@@ -1050,44 +975,29 @@ async fn disconnected_after_flood(
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn a_client_that_stops_reading_its_replies_is_disconnected() {
+async fn a_client_that_stops_reading_is_disconnected_for_calls_and_malformed_requests() {
     let (dir, _repo, _home) = fixture();
     let (service, _local) = start_service(&dir.path().join("meta")).await;
-    assert!(
-        disconnected_after_flood(
-            &service,
-            r#"{"id":1,"bogus":true}"#,
-            Duration::from_secs(60)
-        )
-        .await
-        .is_some(),
-        "the service disconnects a client that never reads"
-    );
+    for text in [
+        r#"{"id":1,"bogus":true}"#,
+        r#"{"id":1,"call":{"host":"status"}}"#,
+    ] {
+        assert!(
+            disconnected_after_flood(&service, text, Duration::from_secs(8))
+                .await
+                .is_some(),
+            "a client that never reads its replies is disconnected: {text}"
+        );
+    }
     service.stop().await;
 }
 
-#[tokio::test(flavor = "multi_thread")]
-async fn a_malformed_request_while_a_reply_waits_for_room_disconnects_at_once() {
-    let (dir, _repo, _home) = fixture();
-    let (service, _local) = start_service(&dir.path().join("meta")).await;
-    // The first reply that finds the queue full waits up to 10 s, but the next malformed request
-    // closes the connection rather than queueing behind it.
-    assert!(
-        disconnected_after_flood(&service, r#"{"id":1,"bogus":true}"#, Duration::from_secs(8))
-            .await
-            .is_some(),
-        "a second malformed request closes the connection while one reply waits"
-    );
-    service.stop().await;
-}
-
-/// Whether a client named `name` with `token` connects to the remote listener at `url`.
 async fn connects(url: &str, token: &str, name: &str) -> bool {
     remote::Host::connect_to(url, token, name).await.is_ok()
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn a_client_name_keeps_no_control_characters() {
+async fn pairing_names_and_host_addresses_are_checked_before_use() {
     let (dir, _repo, _home) = fixture();
     let (_service, local) = start_service(&dir.path().join("meta")).await;
     let port = remote_on_free(&local).await;
@@ -1102,12 +1012,6 @@ async fn a_client_name_keeps_no_control_characters() {
         clients[0].name, "phonelaptop",
         "meta host list prints the name"
     );
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn a_host_address_names_a_websocket_address() {
-    let (dir, _repo, _home) = fixture();
-    let (_service, local) = start_service(&dir.path().join("meta")).await;
     local.host_agents(true).await.unwrap();
     let error = local
         .host_add("127.0.0.1:3774", "AAAA-AAAA", None)
@@ -1138,14 +1042,12 @@ async fn remote_access_that_cannot_bind_at_start_says_so_and_binds_once_the_port
     let port = remote_on_free(&local).await;
     drop(local);
     service.stop().await;
-    // Another program holds the port while the service starts.
     let holder = std::net::TcpListener::bind(("127.0.0.1", port)).unwrap();
     let (service, local) = start_service(&meta).await;
     let waiting = local.remote_status().await.unwrap().expect("still on");
     assert!(waiting.addresses.is_empty());
     assert!(waiting.waiting.is_some(), "on, not listening yet");
     drop(holder);
-    // Binding is tried again every 30 seconds, so the listener comes up within a minute.
     let listening = tokio::time::timeout(Duration::from_secs(60), async {
         loop {
             let status = local.remote_status().await.unwrap().expect("still on");
@@ -1166,8 +1068,6 @@ async fn the_remote_listener_closes_a_handshake_beyond_its_limit_at_once() {
     let (_service, local) = start_service(&dir.path().join("meta")).await;
     let port = remote_on_free(&local).await;
     let address = format!("127.0.0.1:{port}");
-    // Connections that never complete a handshake take the whole limit. The listener accepts in
-    // order, so the next connection is accepted only after them.
     let idle =
         futures_util::future::join_all((0..32).map(|_| tokio::net::TcpStream::connect(&address)))
             .await;
@@ -1187,14 +1087,7 @@ async fn turning_remote_access_off_ends_the_connections_it_admitted() {
     let (_service, local) = start_service(&dir.path().join("meta")).await;
     let port = remote_on_free(&local).await;
     let url = format!("ws://127.0.0.1:{port}");
-    let code = local
-        .invite(ClientKind::Device, Access::Auto)
-        .await
-        .unwrap();
-    let token = remote::pair(&url, &code, "phone").await.unwrap().token;
-    let device = remote::Host::connect_to(&url, &token, "phone")
-        .await
-        .unwrap();
+    let device = connect_paired(&local, &url, ClientKind::Device, "phone").await;
     device.status().await.unwrap();
 
     local.remote_off().await.unwrap();
@@ -1229,13 +1122,24 @@ async fn a_device_pairs_once_and_keeps_its_access_across_a_restart_while_a_host_
     assert_eq!(used, "That pairing code is wrong, already used or expired.");
     let wrong = remote::pair(&url, "AAAA-AAAA", "tablet").await.unwrap_err();
     assert_eq!(wrong, used);
+    let second = local
+        .invite(ClientKind::Device, Access::Auto)
+        .await
+        .unwrap();
+    let refused = remote::pair(&url, &second, "phone").await.unwrap_err();
+    assert_eq!(
+        refused,
+        "A client named phone is paired already; pair under another name."
+    );
+    remote::pair(&url, &second, "tablet")
+        .await
+        .expect("the code was not spent");
 
     let device = remote::Host::connect_to(&url, &token, "phone")
         .await
         .unwrap();
     device.status().await.unwrap();
     device.config().await.unwrap();
-    // Remote access, invitations, the host list and host agents stay with this computer.
     assert!(device.remote_status().await.is_err());
     assert!(
         device
@@ -1247,7 +1151,6 @@ async fn a_device_pairs_once_and_keeps_its_access_across_a_restart_while_a_host_
     assert!(device.host_agents(true).await.is_err());
     assert!(!may_tunnel(&url, &token).await, "a device is no tunnel");
 
-    // Remote access that is on, and the device's pairing, survive a restart.
     drop(local);
     service.stop().await;
     let (_service, local) = start_service(&home).await;
@@ -1275,7 +1178,6 @@ async fn a_device_pairs_once_and_keeps_its_access_across_a_restart_while_a_host_
     assert!(local.remote_status().await.unwrap().is_none());
 }
 
-/// T3's own list of the environments linked in `home`.
 fn t3_environments(home: &Path) -> Vec<serde_json::Value> {
     let output = Command::new(t3())
         .args(["environment", "list", "--json"])
@@ -1286,8 +1188,6 @@ fn t3_environments(home: &Path) -> Vec<serde_json::Value> {
     serde_json::from_slice(&output.stdout).unwrap()
 }
 
-/// Whether T3's settings file in `home` turns linked environments on. T3 leaves out a setting at
-/// its default, which is off.
 fn linked_environments_setting(home: &Path) -> bool {
     let text = std::fs::read_to_string(home.join("t3/userdata/settings.json")).unwrap();
     serde_json::from_str::<serde_json::Value>(&text).unwrap()["linkedEnvironmentsEnabled"]
@@ -1295,7 +1195,6 @@ fn linked_environments_setting(home: &Path) -> bool {
         .unwrap_or(false)
 }
 
-/// The tunnel port and link time that Meta-Harness keeps for the host `name` in `home`.
 fn peer_row(home: &Path, name: &str) -> (u16, Option<i64>) {
     rusqlite::Connection::open(home.join("meta-harness.sqlite"))
         .unwrap()
@@ -1338,25 +1237,13 @@ async fn a_host_links_another_hosts_t3_through_a_tunnel_behind_the_switch_and_re
     assert_eq!(listed.hosts.len(), 1);
     assert!(listed.hosts[0].reachable);
     assert_eq!(listed.hosts[0].access, Access::Auto);
-    // T3 itself lists the link to B's environment, which answers.
     let linked = t3_environments(&home_a);
     let environment = std::fs::read_to_string(home_b.join("t3/userdata/environment-id")).unwrap();
     assert_eq!(linked.len(), 1);
     assert_eq!(linked[0]["environmentId"], environment.trim());
     assert_eq!(linked[0]["status"], "reachable");
 
-    // The address is linked already, so the add is refused before B pairs with A.
-    let again = b.invite(ClientKind::Host, Access::Auto).await.unwrap();
-    let clients = b.hosts().await.unwrap().clients.len();
-    let error = a
-        .host_add(&address, &again, Some(Access::Auto))
-        .await
-        .unwrap_err();
-    assert!(error.contains("is linked already"), "{error}");
-    assert_eq!(b.hosts().await.unwrap().clients.len(), clients);
-
     let (tunnel, _) = peer_row(&home_a, &name);
-    // The name that B revokes this pairing by, which B still holds (ADR-0301).
     let client = a.host_remove(&name).await.unwrap();
     assert!(host_client_names(&b).await.contains(&client), "{client}");
     assert!(t3_environments(&home_a).is_empty(), "T3 forgets the link");
@@ -1369,14 +1256,7 @@ async fn a_host_links_another_hosts_t3_through_a_tunnel_behind_the_switch_and_re
 #[tokio::test(flavor = "multi_thread")]
 async fn a_link_without_an_access_level_takes_the_level_its_host_invited() {
     let (dir, _repo, _home) = fixture();
-    let (home_a, home_b) = (dir.path().join("a"), dir.path().join("b"));
-    let (_a, a) = start_service(&home_a).await;
-    let (_b, b) = start_service(&home_b).await;
-    remote_on_free(&a).await;
-    let port_b = remote_on_free(&b).await;
-    a.host_agents(true).await.unwrap();
-    b.host_agents(true).await.unwrap();
-    let url_b = format!("ws://127.0.0.1:{port_b}");
+    let ((_a, a), (_b, b), url_b) = two_hosts(dir.path()).await;
     let code = b
         .invite(ClientKind::Host, Access::FullAccess)
         .await
@@ -1389,46 +1269,9 @@ async fn a_link_without_an_access_level_takes_the_level_its_host_invited() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn a_host_invited_at_approval_required_cannot_link_at_auto_but_links_at_that_level() {
-    let (dir, _repo, _home) = fixture();
-    let (home_a, home_b) = (dir.path().join("a"), dir.path().join("b"));
-    let (_a, a) = start_service(&home_a).await;
-    let (_b, b) = start_service(&home_b).await;
-    remote_on_free(&a).await;
-    let port_b = remote_on_free(&b).await;
-    a.host_agents(true).await.unwrap();
-    b.host_agents(true).await.unwrap();
-    let url_b = format!("ws://127.0.0.1:{port_b}");
-    // The tunnel of b refuses T3's approval of a link above the level b invited (ADR-0301).
-    let code = b
-        .invite(ClientKind::Host, Access::ApprovalRequired)
-        .await
-        .unwrap();
-    assert!(a.host_add(&url_b, &code, Some(Access::Auto)).await.is_err());
-    let code = b
-        .invite(ClientKind::Host, Access::ApprovalRequired)
-        .await
-        .unwrap();
-    let (_, access) = a
-        .host_add(&url_b, &code, Some(Access::ApprovalRequired))
-        .await
-        .unwrap();
-    assert_eq!(access, Access::ApprovalRequired);
-    assert!(a.hosts().await.unwrap().hosts[0].reachable);
-}
-
-#[tokio::test(flavor = "multi_thread")]
 async fn a_host_pairs_under_a_tagged_name_that_its_revoke_message_quotes() {
     let (dir, _repo, _home) = fixture();
-    let (home_a, home_b) = (dir.path().join("a"), dir.path().join("b"));
-    let (_a, a) = start_service(&home_a).await;
-    let (_b, b) = start_service(&home_b).await;
-    remote_on_free(&a).await;
-    let port_b = remote_on_free(&b).await;
-    a.host_agents(true).await.unwrap();
-    b.host_agents(true).await.unwrap();
-    let url_b = format!("ws://127.0.0.1:{port_b}");
-    // The link fails after b paired with a, so the message tells b which pairing to revoke.
+    let ((_a, a), (_b, b), url_b) = two_hosts(dir.path()).await;
     let code = b
         .invite(ClientKind::Host, Access::ApprovalRequired)
         .await
@@ -1447,7 +1290,6 @@ async fn a_host_pairs_under_a_tagged_name_that_its_revoke_message_quotes() {
         .find(|client| client.kind == ClientKind::Host)
         .expect("b paired with a")
         .name;
-    // A long host name is cut so that the whole name fits what T3 keeps.
     let (host, tag) = pairing.rsplit_once('-').expect("the host name, then a tag");
     assert!(!host.is_empty() && me.trim().starts_with(host), "{pairing}");
     assert!(
@@ -1463,7 +1305,7 @@ async fn a_host_pairs_under_a_tagged_name_that_its_revoke_message_quotes() {
 #[tokio::test(flavor = "multi_thread")]
 async fn a_host_already_linked_at_an_address_is_not_paired_again() {
     let (dir, _repo, _home) = fixture();
-    let link = linked(dir.path()).await;
+    let (link, name) = linked(dir.path()).await;
     let (_b, b) = &link.b;
     let (_a, a) = &link.a;
     let clients = b.hosts().await.unwrap().clients.len();
@@ -1472,7 +1314,7 @@ async fn a_host_already_linked_at_an_address_is_not_paired_again() {
         .host_add(&link.url_b, &code, Some(Access::Auto))
         .await
         .unwrap_err();
-    assert!(error.contains(&link.name), "{error}");
+    assert!(error.contains(&name), "{error}");
     assert_eq!(
         b.hosts().await.unwrap().clients.len(),
         clients,
@@ -1482,44 +1324,16 @@ async fn a_host_already_linked_at_an_address_is_not_paired_again() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn a_host_invited_read_only_gets_a_pairing_code_that_grants_orchestration_read_only() {
-    let (dir, _repo, _home) = fixture();
-    let home = dir.path().join("b");
-    let (_b, b) = start_service(&home).await;
-    let port = remote_on_free(&b).await;
-    let url = format!("ws://127.0.0.1:{port}");
-    let code = b.invite(ClientKind::Host, Access::ReadOnly).await.unwrap();
-    let paired = remote::pair(&url, &code, "other").await.unwrap();
-    assert_eq!(paired.access, Access::ReadOnly);
-    let host = remote::Host::connect_to(&url, &paired.token, "other")
-        .await
-        .unwrap();
-    let credential = host.t3_pairing().await.unwrap();
-    let answer = exchange(&t3_address(&home), &credential, None);
-    assert_eq!(status_of(&answer), 200, "{answer}");
-    assert_eq!(body_json(&answer)["scope"], "orchestration:read");
-}
-
-#[tokio::test(flavor = "multi_thread")]
 async fn a_host_link_whose_tunnel_port_is_taken_at_restart_moves_to_a_new_port() {
     let (dir, _repo, _home) = fixture();
-    let (home_a, home_b) = (dir.path().join("a"), dir.path().join("b"));
-    let (a_service, a) = start_service(&home_a).await;
-    let (_b, b) = start_service(&home_b).await;
-    remote_on_free(&a).await;
-    let port_b = remote_on_free(&b).await;
-    a.host_agents(true).await.unwrap();
-    b.host_agents(true).await.unwrap();
+    let home_a = dir.path().join("a");
+    let ((a_service, a), (_b, b), url_b) = two_hosts(dir.path()).await;
     let code = b.invite(ClientKind::Host, Access::Auto).await.unwrap();
-    let (name, _) = a
-        .host_add(&format!("ws://127.0.0.1:{port_b}"), &code, None)
-        .await
-        .unwrap();
+    let (name, _) = a.host_add(&url_b, &code, None).await.unwrap();
     let old = peer_row(&home_a, &name).0;
     drop(a);
     a_service.stop().await;
 
-    // Another program takes the tunnel's port while the service is down.
     let holder = std::net::TcpListener::bind(("127.0.0.1", old)).unwrap();
     let (_a_service, a) = start_service(&home_a).await;
     assert_ne!(peer_row(&home_a, &name).0, old, "the tunnel moved");
@@ -1540,9 +1354,6 @@ async fn a_host_link_whose_tunnel_port_is_taken_at_restart_moves_to_a_new_port()
     drop(holder);
 }
 
-/// A peer that answers the pairing of a new host with a name and token, and then accepts every
-/// connection and answers none of them (a peer that stops answering after the handshake).
-// tungstenite's handshake callback returns its own large error response.
 #[allow(clippy::result_large_err)]
 async fn silent_peer() -> String {
     use futures_util::SinkExt;
@@ -1581,67 +1392,31 @@ async fn silent_peer() -> String {
 #[tokio::test(flavor = "multi_thread")]
 async fn a_peer_that_never_answers_a_link_is_given_up_on_and_holds_no_other_change() {
     let (dir, _repo, _home) = fixture();
-    let (home_a, home_b) = (dir.path().join("a"), dir.path().join("b"));
-    let (_a, a) = start_service(&home_a).await;
-    let (_b, b) = start_service(&home_b).await;
-    remote_on_free(&a).await;
-    let port_b = remote_on_free(&b).await;
-    a.host_agents(true).await.unwrap();
-    b.host_agents(true).await.unwrap();
+    let ((_a, a), (_b, b), url_b) = two_hosts(dir.path()).await;
     let silent = silent_peer().await;
     let code = b.invite(ClientKind::Host, Access::Auto).await.unwrap();
     let given_up = tokio::time::timeout(Duration::from_secs(60), a.host_add(&silent, &code, None))
         .await
         .expect("the link gives up on a peer that never answers");
     assert!(given_up.is_err());
-    // The change that waited for it is over, so the next link goes through.
     let code = b.invite(ClientKind::Host, Access::Auto).await.unwrap();
-    let linked = tokio::time::timeout(
-        Duration::from_secs(60),
-        a.host_add(&format!("ws://127.0.0.1:{port_b}"), &code, None),
-    )
-    .await
-    .expect("a link is not held behind the silent one");
+    let linked = tokio::time::timeout(Duration::from_secs(60), a.host_add(&url_b, &code, None))
+        .await
+        .expect("a link is not held behind the silent one");
     assert!(linked.is_ok(), "{linked:?}");
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn a_name_already_paired_is_refused_and_its_code_is_still_good() {
-    let (dir, _repo, _home) = fixture();
-    let (_service, local) = start_service(&dir.path().join("meta")).await;
-    let port = remote_on_free(&local).await;
-    let url = format!("ws://127.0.0.1:{port}");
-    let first = local
-        .invite(ClientKind::Device, Access::Auto)
-        .await
-        .unwrap();
-    remote::pair(&url, &first, "phone").await.unwrap();
-    let second = local
-        .invite(ClientKind::Device, Access::Auto)
-        .await
-        .unwrap();
-    let refused = remote::pair(&url, &second, "phone").await.unwrap_err();
-    assert_eq!(
-        refused,
-        "A client named phone is paired already; pair under another name."
-    );
-    remote::pair(&url, &second, "tablet")
-        .await
-        .expect("the code was not spent");
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn removing_a_host_ends_the_tunnel_connections_open_to_it() {
     let (dir, _repo, _home) = fixture();
-    let link = linked(dir.path()).await;
+    let (link, name) = linked(dir.path()).await;
     let (_a, a) = &link.a;
-    let port = peer_row(&dir.path().join("a"), &link.name).0;
+    let port = peer_row(&dir.path().join("a"), &name).0;
     let mut tunnel = tokio::net::TcpStream::connect(("127.0.0.1", port))
         .await
         .unwrap();
-    // Let the tunnel open its WebSocket before the host is removed.
     tokio::time::sleep(Duration::from_millis(500)).await;
-    a.host_remove(&link.name).await.unwrap();
+    a.host_remove(&name).await.unwrap();
     let ended = tokio::time::timeout(Duration::from_secs(10), async {
         let mut byte = [0u8; 1];
         tunnel.read(&mut byte).await
@@ -1652,22 +1427,40 @@ async fn removing_a_host_ends_the_tunnel_connections_open_to_it() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn a_host_asking_for_more_than_it_was_invited_at_is_refused_before_linking() {
+async fn a_removal_the_store_refuses_keeps_the_tunnel_and_can_be_repeated() {
     let (dir, _repo, _home) = fixture();
-    let (home_a, home_b) = (dir.path().join("a"), dir.path().join("b"));
-    let (_a, a) = start_service(&home_a).await;
-    let (_b, b) = start_service(&home_b).await;
-    remote_on_free(&a).await;
-    let port_b = remote_on_free(&b).await;
-    a.host_agents(true).await.unwrap();
-    b.host_agents(true).await.unwrap();
+    let (link, name) = linked(dir.path()).await;
+    let (_a, a) = &link.a;
+    let home_a = dir.path().join("a");
+    let (tunnel, _) = peer_row(&home_a, &name);
+    let trigger = "CREATE TRIGGER refuse_peer_delete BEFORE DELETE ON peer \
+                   BEGIN SELECT RAISE(ABORT, 'refused'); END;";
+    rusqlite::Connection::open(home_a.join("meta-harness.sqlite"))
+        .unwrap()
+        .execute_batch(trigger)
+        .unwrap();
+
+    assert!(a.host_remove(&name).await.is_err());
+    assert_eq!(a.hosts().await.unwrap().hosts.len(), 1);
+    assert!(std::net::TcpStream::connect(("127.0.0.1", tunnel)).is_ok());
+    assert_eq!(peer_row(&home_a, &name).1, None);
+
+    rusqlite::Connection::open(home_a.join("meta-harness.sqlite"))
+        .unwrap()
+        .execute_batch("DROP TRIGGER refuse_peer_delete")
+        .unwrap();
+    a.host_remove(&name).await.unwrap();
+    assert!(a.hosts().await.unwrap().hosts.is_empty());
+    assert!(std::net::TcpStream::connect(("127.0.0.1", tunnel)).is_err());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_link_asks_for_no_more_than_its_invite_and_names_the_pairing_it_made() {
+    let (dir, _repo, _home) = fixture();
+    let ((_a, a), (_b, b), url_b) = two_hosts(dir.path()).await;
     let code = b.invite(ClientKind::Host, Access::ReadOnly).await.unwrap();
     let error = a
-        .host_add(
-            &format!("ws://127.0.0.1:{port_b}"),
-            &code,
-            Some(Access::Auto),
-        )
+        .host_add(&url_b, &code, Some(Access::Auto))
         .await
         .unwrap_err();
     assert!(
@@ -1678,39 +1471,32 @@ async fn a_host_asking_for_more_than_it_was_invited_at_is_refused_before_linking
         a.hosts().await.unwrap().hosts.is_empty(),
         "nothing is linked"
     );
-}
 
-#[tokio::test(flavor = "multi_thread")]
-async fn a_host_asking_for_less_than_its_invite_names_its_pairing_and_level() {
-    let (dir, _repo, _home) = fixture();
-    let (home_a, home_b) = (dir.path().join("a"), dir.path().join("b"));
-    let (_a, a) = start_service(&home_a).await;
-    let (_b, b) = start_service(&home_b).await;
-    remote_on_free(&a).await;
-    let port_b = remote_on_free(&b).await;
-    a.host_agents(true).await.unwrap();
-    b.host_agents(true).await.unwrap();
     let code = b
         .invite(ClientKind::Host, Access::ApprovalRequired)
         .await
         .unwrap();
-    a.host_add(
-        &format!("ws://127.0.0.1:{port_b}"),
-        &code,
-        Some(Access::ReadOnly),
-    )
-    .await
-    .unwrap();
+    assert!(
+        a.host_add(&url_b, &code, Some(Access::Auto)).await.is_err(),
+        "an approval-required invite does not link at auto"
+    );
+    let code = b
+        .invite(ClientKind::Host, Access::ApprovalRequired)
+        .await
+        .unwrap();
+    a.host_add(&url_b, &code, Some(Access::ReadOnly))
+        .await
+        .unwrap();
     let listed = a.hosts().await.unwrap();
     assert_eq!(listed.hosts[0].access, Access::ReadOnly);
-    let client = &host_client_names(&b).await[0];
+    assert!(listed.hosts[0].reachable);
+    let clients = b.hosts().await.unwrap().clients;
+    let pairing = clients
+        .iter()
+        .find(|client| client.name == listed.hosts[0].client)
+        .expect("the pairing the link made");
     assert_eq!(
-        &listed.hosts[0].client, client,
-        "the pairing a host removal names"
-    );
-    let paired = b.hosts().await.unwrap().clients;
-    assert_eq!(
-        paired[0].access,
+        pairing.access,
         Access::ApprovalRequired,
         "the level the host was invited at"
     );
@@ -1719,14 +1505,8 @@ async fn a_host_asking_for_less_than_its_invite_names_its_pairing_and_level() {
 #[tokio::test(flavor = "multi_thread")]
 async fn a_link_made_is_reported_made_even_when_its_time_cannot_be_stored() {
     let (dir, _repo, _home) = fixture();
-    let (home_a, home_b) = (dir.path().join("a"), dir.path().join("b"));
-    let (_a, a) = start_service(&home_a).await;
-    let (_b, b) = start_service(&home_b).await;
-    remote_on_free(&a).await;
-    let port_b = remote_on_free(&b).await;
-    a.host_agents(true).await.unwrap();
-    b.host_agents(true).await.unwrap();
-    // Every update of a link's row fails, as a store that cannot be written does.
+    let home_a = dir.path().join("a");
+    let ((_a, a), (_b, b), url_b) = two_hosts(dir.path()).await;
     rusqlite::Connection::open(home_a.join("meta-harness.sqlite"))
         .unwrap()
         .execute_batch(
@@ -1736,7 +1516,7 @@ async fn a_link_made_is_reported_made_even_when_its_time_cannot_be_stored() {
         .unwrap();
     let code = b.invite(ClientKind::Host, Access::Auto).await.unwrap();
     let (name, _) = a
-        .host_add(&format!("ws://127.0.0.1:{port_b}"), &code, None)
+        .host_add(&url_b, &code, None)
         .await
         .expect("the link is made, so the add reports it");
     assert!(a.hosts().await.unwrap().hosts[0].reachable, "{name}");
@@ -1745,25 +1525,16 @@ async fn a_link_made_is_reported_made_even_when_its_time_cannot_be_stored() {
 #[tokio::test(flavor = "multi_thread")]
 async fn a_host_link_older_than_25_days_is_made_again_when_the_service_starts() {
     let (dir, _repo, _home) = fixture();
-    let (home_a, home_b) = (dir.path().join("a"), dir.path().join("b"));
-    let (a_service, a) = start_service(&home_a).await;
-    let (_b, b) = start_service(&home_b).await;
-    let port_b = remote_on_free(&b).await;
-    a.host_agents(true).await.unwrap();
-    b.host_agents(true).await.unwrap();
+    let home_a = dir.path().join("a");
+    let ((a_service, a), (_b, b), url_b) = two_hosts(dir.path()).await;
     let code = b.invite(ClientKind::Host, Access::Auto).await.unwrap();
     let (name, _) = a
-        .host_add(
-            &format!("ws://127.0.0.1:{port_b}"),
-            &code,
-            Some(Access::ReadOnly),
-        )
+        .host_add(&url_b, &code, Some(Access::ReadOnly))
         .await
         .unwrap();
     drop(a);
     a_service.stop().await;
 
-    // The link was made 26 days ago; the service makes it again as it starts.
     let aged = peer_row(&home_a, &name).1.unwrap() - 26 * 24 * 3_600_000;
     rusqlite::Connection::open(home_a.join("meta-harness.sqlite"))
         .unwrap()
@@ -1784,8 +1555,6 @@ async fn a_host_link_older_than_25_days_is_made_again_when_the_service_starts() 
     assert_eq!(t3_environments(&home_a)[0]["status"], "reachable");
 }
 
-/// Whether a connection with `token` to the remote listener at `url` may tunnel: it must name the
-/// tunnel header, which only a host may use.
 async fn may_tunnel(url: &str, token: &str) -> bool {
     use tokio_tungstenite::tungstenite::client::IntoClientRequest;
     let mut request = url.into_client_request().unwrap();
@@ -1796,47 +1565,66 @@ async fn may_tunnel(url: &str, token: &str) -> bool {
     tokio_tungstenite::connect_async(request).await.is_ok()
 }
 
-/// Two services, each with its remote listener on loopback and agents from other hosts on, where
-/// `a` has linked `b` at the default access.
-struct Linked {
+struct Hosts {
     a: (Service, remote::Host),
     b: (Service, remote::Host),
-    name: String,
     url_b: String,
 }
 
-async fn linked(dir: &Path) -> Linked {
-    let (home_a, home_b) = (dir.join("a"), dir.join("b"));
-    let (a_service, a) = start_service(&home_a).await;
-    let (b_service, b) = start_service(&home_b).await;
+async fn two_hosts(dir: &Path) -> ((Service, remote::Host), (Service, remote::Host), String) {
+    let (a_service, a) = start_service(&dir.join("a")).await;
+    let (b_service, b) = start_service(&dir.join("b")).await;
     remote_on_free(&a).await;
     let port_b = remote_on_free(&b).await;
     a.host_agents(true).await.unwrap();
     b.host_agents(true).await.unwrap();
-    let url_b = format!("ws://127.0.0.1:{port_b}");
-    let code = b.invite(ClientKind::Host, Access::Auto).await.unwrap();
-    let (name, _) = a.host_add(&url_b, &code, Some(Access::Auto)).await.unwrap();
-    Linked {
-        a: (a_service, a),
-        b: (b_service, b),
-        name,
-        url_b,
-    }
+    (
+        (a_service, a),
+        (b_service, b),
+        format!("ws://127.0.0.1:{port_b}"),
+    )
 }
 
-/// The headers of a form body.
+fn tunnel_addr(home: &Path, name: &str) -> String {
+    format!("127.0.0.1:{}", peer_row(home, name).0)
+}
+
+async fn connect_paired(
+    on: &remote::Host,
+    url: &str,
+    kind: ClientKind,
+    name: &str,
+) -> remote::Host {
+    let code = on.invite(kind, Access::Auto).await.unwrap();
+    let token = remote::pair(url, &code, name).await.unwrap().token;
+    remote::Host::connect_to(url, &token, name).await.unwrap()
+}
+
+async fn linked(dir: &Path) -> (Hosts, String) {
+    let (a, b, url_b) = two_hosts(dir).await;
+    let link = Hosts { a, b, url_b };
+    let code = link
+        .b
+        .1
+        .invite(ClientKind::Host, Access::Auto)
+        .await
+        .unwrap();
+    let (name, _) = link
+        .a
+        .1
+        .host_add(&link.url_b, &code, Some(Access::Auto))
+        .await
+        .unwrap();
+    (link, name)
+}
+
 const FORM: &[(&str, &str)] = &[("Content-Type", "application/x-www-form-urlencoded")];
-/// The headers of a JSON body.
 const JSON: &[(&str, &str)] = &[("Content-Type", "application/json")];
 
-/// Sends one HTTP/1.1 request with `headers` and `body` to `addr` and answers everything sent
-/// back, the connection closing after the answer.
 fn http(addr: &str, method: &str, path: &str, headers: &[(&str, &str)], body: &str) -> String {
     http_at(addr, addr, method, path, headers, body)
 }
 
-/// As [`http`], sent to `connect` with the Host header `host`: a tunnel passes the header on, and
-/// T3 binds a token to the host it was issued for.
 fn http_at(
     connect: &str,
     host: &str,
@@ -1860,15 +1648,12 @@ fn http_at(
     answer
 }
 
-/// Posts `body` with `headers` to `path` at `addr`, which must answer with success; answers its
-/// JSON body.
 fn post(addr: &str, path: &str, headers: &[(&str, &str)], body: &str) -> serde_json::Value {
     let answer = http(addr, "POST", path, headers, body);
     assert!((200..300).contains(&status_of(&answer)), "{path}: {answer}");
     body_json(&answer)
 }
 
-/// The status code of an HTTP answer.
 fn status_of(answer: &str) -> u16 {
     answer
         .split_whitespace()
@@ -1877,13 +1662,11 @@ fn status_of(answer: &str) -> u16 {
         .unwrap_or(0)
 }
 
-/// The JSON object in an HTTP answer's body.
 fn body_json(answer: &str) -> serde_json::Value {
     let body = &answer[answer.find('{').unwrap()..=answer.rfind('}').unwrap()];
     serde_json::from_str(body).unwrap()
 }
 
-/// The address T3 in `home` listens on, from the runtime record it writes.
 fn t3_address(home: &Path) -> String {
     let text = std::fs::read_to_string(home.join("t3/userdata/server-runtime.json")).unwrap();
     let origin = serde_json::from_str::<serde_json::Value>(&text).unwrap()["origin"]
@@ -1893,8 +1676,6 @@ fn t3_address(home: &Path) -> String {
     origin.trim_start_matches("http://").to_owned()
 }
 
-/// Exchanges the bootstrap pairing `credential` at T3 in `origin` for a bearer token, asking for
-/// `scope` when given; answers the HTTP answer.
 fn exchange(origin: &str, credential: &str, scope: Option<&str>) -> String {
     let mut form = format!(
         "grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Atoken-exchange\
@@ -1908,7 +1689,6 @@ fn exchange(origin: &str, credential: &str, scope: Option<&str>) -> String {
     http(origin, "POST", "/oauth/token", FORM, &form)
 }
 
-/// Percent-encodes `text` for a form body, keeping only the unreserved characters.
 fn form_value(text: &str) -> String {
     text.bytes()
         .map(|b| match b {
@@ -1920,23 +1700,6 @@ fn form_value(text: &str) -> String {
         .collect()
 }
 
-/// `bytes` in unpadded base64url, as PKCE writes a code challenge.
-fn base64url(bytes: &[u8]) -> String {
-    const LETTERS: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
-    let mut text = String::new();
-    for chunk in bytes.chunks(3) {
-        let n = chunk
-            .iter()
-            .enumerate()
-            .fold(0u32, |n, (i, b)| n | u32::from(*b) << (16 - 8 * i));
-        for i in 0..=chunk.len() {
-            text.push(char::from(LETTERS[((n >> (18 - 6 * i)) & 63) as usize]));
-        }
-    }
-    text
-}
-
-/// The first `key` in the query of `url`.
 fn query(url: &str, key: &str) -> String {
     let query = url.split_once('?').unwrap().1;
     query
@@ -1949,8 +1712,8 @@ fn query(url: &str, key: &str) -> String {
 #[tokio::test(flavor = "multi_thread")]
 async fn the_tunnel_passes_only_the_paths_a_link_uses() {
     let (dir, _repo, _home) = fixture();
-    let link = linked(dir.path()).await;
-    let port = peer_row(&dir.path().join("a"), &link.name).0;
+    let (_link, name) = linked(dir.path()).await;
+    let port = peer_row(&dir.path().join("a"), &name).0;
     let addr = format!("127.0.0.1:{port}");
     for (method, path) in [
         ("GET", "/api/auth/session"),
@@ -1960,7 +1723,6 @@ async fn the_tunnel_passes_only_the_paths_a_link_uses() {
         ("GET", "/api/projects"),
         ("GET", "/api/orchestration/shell"),
         ("GET", "/ws"),
-        // The paths a link uses, by other methods than T3 serves them with.
         ("POST", "/.well-known/t3/environment"),
         ("GET", "/oauth/mcp/token"),
         ("PUT", "/mcp"),
@@ -1982,44 +1744,40 @@ async fn a_pairing_code_from_a_host_token_redeems_only_orchestration_scopes() {
     let (_b, b) = start_service(&home_b).await;
     b.remote_on(port_b).await.unwrap();
     let url = format!("ws://127.0.0.1:{port_b}");
-    let code = b.invite(ClientKind::Host, Access::Auto).await.unwrap();
-    let token = remote::pair(&url, &code, "other").await.unwrap().token;
-    let host = remote::Host::connect_to(&url, &token, "other")
-        .await
-        .unwrap();
     let origin = t3_address(&home_b);
-    // Each exchange spends its code, so each one takes a new code from the host token.
-    for scope in ["terminal:operate", "filesystem:write", "settings:write"] {
-        let credential = host.t3_pairing().await.unwrap();
-        let answer = exchange(&origin, &credential, Some(scope));
-        assert_ne!(status_of(&answer), 200, "{scope} is refused: {answer}");
+    for (access, name, scope) in [
+        (
+            Access::Auto,
+            "other",
+            "orchestration:read orchestration:operate",
+        ),
+        (Access::ReadOnly, "reader", "orchestration:read"),
+    ] {
+        let code = b.invite(ClientKind::Host, access).await.unwrap();
+        let paired = remote::pair(&url, &code, name).await.unwrap();
+        assert_eq!(paired.access, access);
+        let host = remote::Host::connect_to(&url, &paired.token, name)
+            .await
+            .unwrap();
+        for requested in ["terminal:operate", "filesystem:write", "settings:write"] {
+            let credential = host.t3_pairing().await.unwrap();
+            let answer = exchange(&origin, &credential, Some(requested));
+            assert_ne!(status_of(&answer), 200, "{requested} is refused: {answer}");
+        }
+        let answer = exchange(&origin, &host.t3_pairing().await.unwrap(), None);
+        assert_eq!(status_of(&answer), 200, "{answer}");
+        assert_eq!(body_json(&answer)["scope"], scope);
     }
-    let credential = host.t3_pairing().await.unwrap();
-    let answer = exchange(&origin, &credential, None);
-    assert_eq!(status_of(&answer), 200, "{answer}");
-    assert_eq!(
-        body_json(&answer)["scope"],
-        "orchestration:read orchestration:operate"
-    );
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn revoking_a_client_closes_the_connections_it_has_open() {
     let (dir, _repo, _home) = fixture();
-    let link = linked(dir.path()).await;
-    let (_a, _) = &link.a;
+    let (link, name) = linked(dir.path()).await;
     let (_b, b) = &link.b;
-    let code = b.invite(ClientKind::Device, Access::Auto).await.unwrap();
-    let token = remote::pair(&link.url_b, &code, "phone")
-        .await
-        .unwrap()
-        .token;
-    let device = remote::Host::connect_to(&link.url_b, &token, "phone")
-        .await
-        .unwrap();
+    let device = connect_paired(b, &link.url_b, ClientKind::Device, "phone").await;
     device.status().await.unwrap();
-    // A connection through a's tunnel to b's T3 stays open between requests.
-    let port = peer_row(&dir.path().join("a"), &link.name).0;
+    let port = peer_row(&dir.path().join("a"), &name).0;
     let mut tunnel = tokio::net::TcpStream::connect(("127.0.0.1", port))
         .await
         .unwrap();
@@ -2031,7 +1789,6 @@ async fn revoking_a_client_closes_the_connections_it_has_open() {
     assert_eq!(&answer, b"HTTP/1.1 200");
 
     b.revoke_client("phone").await.unwrap();
-    // The host pairs under its name and a tag, which the revocation names exactly.
     let host = b
         .hosts()
         .await
@@ -2053,68 +1810,21 @@ async fn revoking_a_client_closes_the_connections_it_has_open() {
     assert!(ended.is_ok(), "the tunnel's connection ended");
 }
 
-/// Signs an MCP client in through the tunnel at `addr` with a pairing code of its receiving host,
-/// and answers the bearer token that its requests carry: the sign-in a link makes (ADR-0301).
-fn sign_in(addr: &str, pairing: &str) -> String {
-    use sha2::{Digest, Sha256};
-    let resource = format!("http://{addr}/mcp");
-    let redirect = "http://127.0.0.1/t3code-peer-link";
-    let registered = post(
-        addr,
-        "/oauth/mcp/register",
-        JSON,
-        &serde_json::json!({"client_name": "tester", "redirect_uris": [redirect]}).to_string(),
-    );
-    let client_id = registered["client_id"].as_str().unwrap().to_owned();
-    let verifier = "a".repeat(64);
-    let challenge = base64url(&Sha256::digest(verifier.as_bytes()));
-    let decided = post(
-        addr,
-        "/oauth/mcp/decision",
-        JSON,
-        &serde_json::json!({
-            "authorization": {
-                "response_type": "code",
-                "client_id": client_id,
-                "redirect_uri": redirect,
-                "code_challenge": challenge,
-                "code_challenge_method": "S256",
-                "state": "state",
-                "resource": resource,
-            },
-            "decision": {"_tag": "pairing-code", "access": "auto", "code": pairing},
-        })
-        .to_string(),
-    );
-    let code = query(decided["redirectTo"].as_str().unwrap(), "code");
-    let form = format!(
-        "grant_type=authorization_code&code={}&redirect_uri={}&client_id={}&code_verifier={verifier}&resource={}",
-        form_value(&code),
-        form_value(redirect),
-        form_value(&client_id),
-        form_value(&resource),
-    );
-    let token = post(addr, "/oauth/mcp/token", FORM, &form);
-    format!("Bearer {}", token["access_token"].as_str().unwrap())
-}
+const REDIRECT: &str = "http://127.0.0.1/t3code-peer-link";
 
-/// The `client_id` that a client registered through the tunnel at `addr` is given.
+const PKCE_CHALLENGE: &str = "_-BU_nrgy23GXDr5th1SCfQ5hR20PQulmXM33xVGaOs";
+
 fn register_client(addr: &str) -> String {
     let registered = post(
         addr,
         "/oauth/mcp/register",
         JSON,
-        &serde_json::json!({"client_name": "tester", "redirect_uris": ["http://127.0.0.1/t3code-peer-link"]}).to_string(),
+        &serde_json::json!({"client_name": "tester", "redirect_uris": [REDIRECT]}).to_string(),
     );
     registered["client_id"].as_str().unwrap().to_owned()
 }
 
-/// The answer to a decision that approves the sign-in of `client_id` at auto, with the pairing
-/// code `pairing`, sent through the tunnel at `addr`.
 fn decide(addr: &str, client_id: &str, pairing: &str) -> String {
-    use sha2::{Digest, Sha256};
-    let redirect = "http://127.0.0.1/t3code-peer-link";
-    let challenge = base64url(&Sha256::digest("a".repeat(64).as_bytes()));
     http(
         addr,
         "POST",
@@ -2124,8 +1834,8 @@ fn decide(addr: &str, client_id: &str, pairing: &str) -> String {
             "authorization": {
                 "response_type": "code",
                 "client_id": client_id,
-                "redirect_uri": redirect,
-                "code_challenge": challenge,
+                "redirect_uri": REDIRECT,
+                "code_challenge": PKCE_CHALLENGE,
                 "code_challenge_method": "S256",
                 "state": "state",
                 "resource": format!("http://{addr}/mcp"),
@@ -2136,7 +1846,35 @@ fn decide(addr: &str, client_id: &str, pairing: &str) -> String {
     )
 }
 
-/// The answer to an MCP initialize request that `bearer` makes to `connect` with the Host `host`.
+fn approve(addr: &str, client_id: &str, pairing: &str) -> String {
+    let answer = decide(addr, client_id, pairing);
+    assert_eq!(status_of(&answer), 200, "{answer}");
+    query(body_json(&answer)["redirectTo"].as_str().unwrap(), "code")
+}
+
+fn code_form(code: &str, client_id: &str, addr: &str) -> String {
+    format!(
+        "grant_type=authorization_code&code={}&redirect_uri={}&client_id={}&code_verifier={}&resource={}",
+        form_value(code),
+        form_value(REDIRECT),
+        form_value(client_id),
+        "a".repeat(64),
+        form_value(&format!("http://{addr}/mcp")),
+    )
+}
+
+fn sign_in(addr: &str, pairing: &str) -> String {
+    let client_id = register_client(addr);
+    let code = approve(addr, &client_id, pairing);
+    let token = post(
+        addr,
+        "/oauth/mcp/token",
+        FORM,
+        &code_form(&code, &client_id, addr),
+    );
+    format!("Bearer {}", token["access_token"].as_str().unwrap())
+}
+
 fn mcp_answer(connect: &str, host: &str, bearer: &str) -> String {
     let initialize = serde_json::json!({
         "jsonrpc": "2.0",
@@ -2162,7 +1900,6 @@ fn mcp_answer(connect: &str, host: &str, bearer: &str) -> String {
     )
 }
 
-/// The active T3 sessions in `home`, as `t3 auth session list --json` lists them.
 fn t3_sessions(home: &Path) -> Vec<serde_json::Value> {
     let output = Command::new(t3())
         .args(["auth", "session", "list", "--json"])
@@ -2176,25 +1913,15 @@ fn t3_sessions(home: &Path) -> Vec<serde_json::Value> {
 #[tokio::test(flavor = "multi_thread")]
 async fn a_linked_agents_mcp_request_reaches_t3_through_the_tunnel() {
     let (dir, _repo, _home) = fixture();
-    let link = linked(dir.path()).await;
-    let (_b, b) = &link.b;
-    let port = peer_row(&dir.path().join("a"), &link.name).0;
-    let addr = format!("127.0.0.1:{port}");
-    let code = b.invite(ClientKind::Host, Access::Auto).await.unwrap();
-    let host_token = remote::pair(&link.url_b, &code, "tester")
-        .await
-        .unwrap()
-        .token;
-    let host = remote::Host::connect_to(&link.url_b, &host_token, "tester")
-        .await
-        .unwrap();
+    let (link, name) = linked(dir.path()).await;
+    let host = connect_paired(&link.b.1, &link.url_b, ClientKind::Host, "tester").await;
+    let addr = tunnel_addr(&dir.path().join("a"), &name);
     let bearer = sign_in(&addr, &host.t3_pairing().await.unwrap());
     let answer = mcp_answer(&addr, &addr, &bearer);
     assert_eq!(status_of(&answer), 200, "{answer}");
     assert!(answer.contains("protocolVersion"), "{answer}");
 }
 
-/// The names of the host clients paired with `on`.
 async fn host_client_names(on: &remote::Host) -> Vec<String> {
     on.hosts()
         .await
@@ -2207,117 +1934,55 @@ async fn host_client_names(on: &remote::Host) -> Vec<String> {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn a_decision_with_another_pairings_client_id_is_refused_by_the_tunnel() {
+async fn a_decision_or_token_exchange_with_another_pairings_client_id_is_refused_by_the_tunnel() {
     let (dir, _repo, _home) = fixture();
-    let (home_a, home_b, home_c) = (
-        dir.path().join("a"),
-        dir.path().join("b"),
-        dir.path().join("c"),
-    );
-    let (_a, a) = start_service(&home_a).await;
-    let (_b, b) = start_service(&home_b).await;
+    let (link, name_a) = linked(dir.path()).await;
+    let home_c = dir.path().join("c");
     let (_c, c) = start_service(&home_c).await;
-    let port_b = remote_on_free(&b).await;
-    for host in [&a, &b, &c] {
-        host.host_agents(true).await.unwrap();
-    }
-    let url_b = format!("ws://127.0.0.1:{port_b}");
-    let code = b.invite(ClientKind::Host, Access::Auto).await.unwrap();
-    let (name_a, _) = a.host_add(&url_b, &code, None).await.unwrap();
-    let code = b.invite(ClientKind::Host, Access::Auto).await.unwrap();
-    let (name_c, _) = c.host_add(&url_b, &code, None).await.unwrap();
-    let addr_a = format!("127.0.0.1:{}", peer_row(&home_a, &name_a).0);
-    let addr_c = format!("127.0.0.1:{}", peer_row(&home_c, &name_c).0);
-    // A's client_id names A's pairing; presented through C's tunnel it names another pairing.
-    let client_id = register_client(&addr_a);
-    let code = b.invite(ClientKind::Host, Access::Auto).await.unwrap();
-    let tester = remote::pair(&url_b, &code, "tester").await.unwrap().token;
-    let tester = remote::Host::connect_to(&url_b, &tester, "tester")
+    c.host_agents(true).await.unwrap();
+    let code = link
+        .b
+        .1
+        .invite(ClientKind::Host, Access::Auto)
         .await
         .unwrap();
-    let pairing = tester.t3_pairing().await.unwrap();
-    let answer = decide(&addr_c, &client_id, &pairing);
-    assert_eq!(status_of(&answer), 403, "{answer}");
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn a_token_exchange_with_another_pairings_client_id_is_refused_by_the_tunnel() {
-    let (dir, _repo, _home) = fixture();
-    let (home_a, home_b, home_c) = (
-        dir.path().join("a"),
-        dir.path().join("b"),
-        dir.path().join("c"),
-    );
-    let (_a, a) = start_service(&home_a).await;
-    let (_b, b) = start_service(&home_b).await;
-    let (_c, c) = start_service(&home_c).await;
-    let port_b = remote_on_free(&b).await;
-    for host in [&a, &b, &c] {
-        host.host_agents(true).await.unwrap();
-    }
-    let url_b = format!("ws://127.0.0.1:{port_b}");
-    let code = b.invite(ClientKind::Host, Access::Auto).await.unwrap();
-    let (name_a, _) = a.host_add(&url_b, &code, None).await.unwrap();
-    let code = b.invite(ClientKind::Host, Access::Auto).await.unwrap();
-    let (name_c, _) = c.host_add(&url_b, &code, None).await.unwrap();
-    let addr_a = format!("127.0.0.1:{}", peer_row(&home_a, &name_a).0);
-    let addr_c = format!("127.0.0.1:{}", peer_row(&home_c, &name_c).0);
-    // A's sign-in is approved through A's tunnel, as an agent of A would.
+    let (name_c, _) = c.host_add(&link.url_b, &code, None).await.unwrap();
+    let addr_a = tunnel_addr(&dir.path().join("a"), &name_a);
+    let addr_c = tunnel_addr(&home_c, &name_c);
     let client_id = register_client(&addr_a);
-    let code = b.invite(ClientKind::Host, Access::Auto).await.unwrap();
-    let tester = remote::pair(&url_b, &code, "tester").await.unwrap().token;
-    let tester = remote::Host::connect_to(&url_b, &tester, "tester")
-        .await
-        .unwrap();
-    let decided = body_json(&decide(
+    let tester = connect_paired(&link.b.1, &link.url_b, ClientKind::Host, "tester").await;
+    let refused = decide(&addr_c, &client_id, &tester.t3_pairing().await.unwrap());
+    assert_eq!(status_of(&refused), 403, "a decision: {refused}");
+    let code = approve(&addr_a, &client_id, &tester.t3_pairing().await.unwrap());
+    let answer = http_at(
+        &addr_c,
         &addr_a,
-        &client_id,
-        &tester.t3_pairing().await.unwrap(),
-    ));
-    let approved = query(decided["redirectTo"].as_str().unwrap(), "code");
-    // The exchange reaches C's tunnel with A's client_id and A's Host, so the token would bind to A.
-    let verifier = "a".repeat(64);
-    let form = format!(
-        "grant_type=authorization_code&code={}&redirect_uri={}&client_id={}&code_verifier={verifier}&resource={}",
-        form_value(&approved),
-        form_value("http://127.0.0.1/t3code-peer-link"),
-        form_value(&client_id),
-        form_value(&format!("http://{addr_a}/mcp")),
+        "POST",
+        "/oauth/mcp/token",
+        FORM,
+        &code_form(&code, &client_id, &addr_a),
     );
-    let answer = http_at(&addr_c, &addr_a, "POST", "/oauth/mcp/token", FORM, &form);
-    assert_eq!(status_of(&answer), 403, "{answer}");
+    assert_eq!(status_of(&answer), 403, "a token exchange: {answer}");
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn revoking_a_name_with_no_client_still_ends_the_sign_ins_made_under_it() {
     let (dir, _repo, _home) = fixture();
-    let (home_a, home_b) = (dir.path().join("a"), dir.path().join("b"));
-    let (_a, a) = start_service(&home_a).await;
-    let (_b, b) = start_service(&home_b).await;
-    remote_on_free(&a).await;
-    let port_b = remote_on_free(&b).await;
-    a.host_agents(true).await.unwrap();
-    b.host_agents(true).await.unwrap();
-    let url_b = format!("ws://127.0.0.1:{port_b}");
-    let code = b.invite(ClientKind::Host, Access::Auto).await.unwrap();
-    let (name_a, _) = a.host_add(&url_b, &code, None).await.unwrap();
-    let addr_a = format!("127.0.0.1:{}", peer_row(&home_a, &name_a).0);
-    let clients = host_client_names(&b).await;
+    let (link, name) = linked(dir.path()).await;
+    let (_b, b) = &link.b;
+    let home_b = dir.path().join("b");
+    let addr_a = tunnel_addr(&dir.path().join("a"), &name);
+    let clients = host_client_names(b).await;
     let [client] = clients.as_slice() else {
         panic!("one host pairs with b: {clients:?}")
     };
-    let code = b.invite(ClientKind::Host, Access::Auto).await.unwrap();
-    let tester = remote::pair(&url_b, &code, "tester").await.unwrap().token;
-    let tester = remote::Host::connect_to(&url_b, &tester, "tester")
-        .await
-        .unwrap();
+    let tester = connect_paired(b, &link.url_b, ClientKind::Host, "tester").await;
     let _ = sign_in(&addr_a, &tester.t3_pairing().await.unwrap());
     assert!(
         t3_sessions(&home_b)
             .iter()
             .any(|s| s["client"]["label"] == client.as_str())
     );
-    // The client row is gone while its session stays, as after a revoke that failed midway.
     rusqlite::Connection::open(home_b.join("meta-harness.sqlite"))
         .unwrap()
         .execute("DELETE FROM client WHERE name = ?1", [client])
@@ -2334,42 +1999,30 @@ async fn revoking_a_name_with_no_client_still_ends_the_sign_ins_made_under_it() 
 #[tokio::test(flavor = "multi_thread")]
 async fn revoking_a_host_ends_the_t3_sessions_its_link_made() {
     let (dir, _repo, _home) = fixture();
-    let (home_a, home_b, home_c) = (
-        dir.path().join("a"),
-        dir.path().join("b"),
-        dir.path().join("c"),
-    );
-    let (_a, a) = start_service(&home_a).await;
-    let (_b, b) = start_service(&home_b).await;
-    let (_c, c) = start_service(&home_c).await;
-    let port_b = remote_on_free(&b).await;
-    for host in [&a, &b, &c] {
-        host.host_agents(true).await.unwrap();
-    }
-    let url_b = format!("ws://127.0.0.1:{port_b}");
-    let code = b.invite(ClientKind::Host, Access::Auto).await.unwrap();
-    let (name_a, _) = a.host_add(&url_b, &code, None).await.unwrap();
-    // The hosts share one environment name, so A's pairing is named by the only pairing B holds.
-    let a_clients = host_client_names(&b).await;
+    let (link, name_a) = linked(dir.path()).await;
+    let a_clients = host_client_names(&link.b.1).await;
     assert_eq!(a_clients.len(), 1, "{a_clients:?}");
     let a_client = a_clients[0].clone();
-    let code = b.invite(ClientKind::Host, Access::Auto).await.unwrap();
-    let (name_c, _) = c.host_add(&url_b, &code, None).await.unwrap();
-
-    // A signs an agent in through its own tunnel; C's tunnel is another valid way to reach B's T3.
-    let code = b.invite(ClientKind::Host, Access::Auto).await.unwrap();
-    let tester = remote::pair(&url_b, &code, "tester").await.unwrap().token;
-    let tester = remote::Host::connect_to(&url_b, &tester, "tester")
+    let home_c = dir.path().join("c");
+    let (_c, c) = start_service(&home_c).await;
+    c.host_agents(true).await.unwrap();
+    let code = link
+        .b
+        .1
+        .invite(ClientKind::Host, Access::Auto)
         .await
         .unwrap();
-    let addr_a = format!("127.0.0.1:{}", peer_row(&home_a, &name_a).0);
-    let addr_c = format!("127.0.0.1:{}", peer_row(&home_c, &name_c).0);
+    let (name_c, _) = c.host_add(&link.url_b, &code, None).await.unwrap();
+
+    let tester = connect_paired(&link.b.1, &link.url_b, ClientKind::Host, "tester").await;
+    let addr_a = tunnel_addr(&dir.path().join("a"), &name_a);
+    let addr_c = tunnel_addr(&home_c, &name_c);
     let bearer = sign_in(&addr_a, &tester.t3_pairing().await.unwrap());
     assert_eq!(status_of(&mcp_answer(&addr_c, &addr_a, &bearer)), 200);
 
-    b.revoke_client(&a_client).await.unwrap();
+    link.b.1.revoke_client(&a_client).await.unwrap();
     assert!(
-        t3_sessions(&home_b)
+        t3_sessions(&dir.path().join("b"))
             .iter()
             .all(|session| session["client"]["label"] != a_client.as_str()),
         "A's T3 sessions end with its pairing"
@@ -2383,33 +2036,28 @@ async fn revoking_a_host_ends_the_t3_sessions_its_link_made() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn a_client_that_stops_reading_while_it_sends_calls_is_disconnected() {
-    let (dir, _repo, _home) = fixture();
-    let (service, _local) = start_service(&dir.path().join("meta")).await;
-    // Each call is answered by the service at once, so the replies fill the queue and then the
-    // calls wait in tasks, which the service bounds per connection.
-    assert!(
-        disconnected_after_flood(
-            &service,
-            r#"{"id":1,"call":{"host":"status"}}"#,
-            Duration::from_secs(8)
-        )
-        .await
-        .is_some(),
-        "a client that never reads its replies is disconnected"
-    );
-    service.stop().await;
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn a_client_that_reads_each_reply_is_not_limited_by_the_calls_before_it() {
+async fn a_client_that_reads_its_replies_gets_each_burst_answered_and_no_call_limit() {
     use futures_util::{SinkExt, StreamExt};
     use tokio_tungstenite::tungstenite::Message;
     let (dir, _repo, _home) = fixture();
     let (service, _local) = start_service(&dir.path().join("meta")).await;
     let mut socket = open_client(&service).await;
-    // Each call is answered before the next is sent, so none waits behind another.
-    for id in 1..=300u64 {
+    for id in [1u64, 2] {
+        let bogus = serde_json::json!({"id": id, "bogus": true});
+        socket
+            .send(Message::Text(bogus.to_string().into()))
+            .await
+            .unwrap();
+    }
+    for id in [1u64, 2] {
+        let Message::Text(text) = socket.next().await.unwrap().unwrap() else {
+            panic!("a reply is text");
+        };
+        let reply: serde_json::Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(reply["id"], id);
+        assert!(reply.get("error").is_some(), "{reply}");
+    }
+    for id in 3..=302u64 {
         let call = serde_json::json!({"id": id, "call": {"host": "status"}});
         socket
             .send(Message::Text(call.to_string().into()))
@@ -2425,45 +2073,2214 @@ async fn a_client_that_reads_each_reply_is_not_limited_by_the_calls_before_it() 
     service.stop().await;
 }
 
+async fn start_codex(home: &Path) -> (Service, remote::Host) {
+    let mut config = service_config(home);
+    for agent in &mut config.acp_agents {
+        agent.id = "codex".to_owned();
+    }
+    start_with(config, home).await
+}
+
+fn codex_start(text: &str) -> StartThread {
+    let mut thread = start(text, Workspace::Checkout, Permissions::FullAccess);
+    thread.model.instance = "codex".to_owned();
+    thread
+}
+
+fn shared_remote(dir: &Path) -> (PathBuf, String) {
+    let origin = dir.join("origin.git");
+    git(dir, &["init", "-q", "--bare", "-b", "main", "origin.git"]);
+    let seed = dir.join("seed");
+    seed_repo(&seed);
+    git(&seed, &["push", "-q", &origin.to_string_lossy(), "main"]);
+    let transport = dir.join("fake-ssh");
+    std::fs::write(
+        &transport,
+        "#!/bin/sh\nfor last; do :; done\nexec sh -c \"$last\"\n",
+    )
+    .unwrap();
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(&transport, std::fs::Permissions::from_mode(0o755)).unwrap();
+    (
+        origin.clone(),
+        format!("git@example.invalid:{}", origin.display()),
+    )
+}
+
+fn pushed_subject(origin: &Path, branch: &str) -> String {
+    let log = Command::new("git")
+        .args(["log", "-1", "--format=%s", branch])
+        .current_dir(origin)
+        .output()
+        .unwrap();
+    String::from_utf8_lossy(&log.stdout).trim().to_owned()
+}
+
+fn clone_project(dir: &Path, origin: &Path, url: &str, name: &str) -> PathBuf {
+    let repo = dir.join(name);
+    git(dir, &["clone", "-q", &origin.to_string_lossy(), name]);
+    git(&repo, &["remote", "set-url", "origin", url]);
+    git(
+        &repo,
+        &[
+            "config",
+            "core.sshCommand",
+            &dir.join("fake-ssh").to_string_lossy(),
+        ],
+    );
+    git(&repo, &["config", "user.name", "Contract"]);
+    git(&repo, &["config", "user.email", "contract@example.invalid"]);
+    repo
+}
+
 #[tokio::test(flavor = "multi_thread")]
-async fn a_client_that_reads_gets_two_malformed_requests_in_one_burst_answered() {
-    use futures_util::{SinkExt, StreamExt};
-    use tokio_tungstenite::tungstenite::Message;
-    let (dir, _repo, _home) = fixture();
-    let (service, _local) = start_service(&dir.path().join("meta")).await;
-    let mut socket = open_client(&service).await;
-    // Both frames go out before either reply is read: a newer client sends several calls at once.
-    for id in [1u64, 2] {
-        socket
-            .send(Message::Text(
-                serde_json::json!({"id": id, "bogus": true})
-                    .to_string()
-                    .into(),
-            ))
-            .await
-            .unwrap();
-    }
-    for id in [1u64, 2] {
-        let Message::Text(text) = socket.next().await.unwrap().unwrap() else {
-            panic!("a reply is text");
-        };
-        let reply: serde_json::Value = serde_json::from_str(&text).unwrap();
-        assert_eq!(reply["id"], id);
-        assert!(reply.get("error").is_some(), "{reply}");
-    }
-    // The connection is still open: a valid call is answered on it.
-    socket
-        .send(Message::Text(
-            serde_json::json!({"id": 3, "call": {"host": "status"}})
-                .to_string()
-                .into(),
-        ))
+async fn a_session_moves_to_another_host_with_its_branch_and_its_source_is_sealed() {
+    let dir = tempdir::Dir::new();
+    let (origin, url) = shared_remote(dir.path());
+    let repo_a = clone_project(dir.path(), &origin, &url, "a");
+    let repo_b = clone_project(dir.path(), &origin, &url, "b");
+    git(&repo_a, &["checkout", "-q", "-b", "feature/move"]);
+    git(&repo_a, &["push", "-q", "-u", "origin", "feature/move"]);
+
+    let (service_a, host_a) = start_codex(&dir.path().join("host-a")).await;
+    let (service_b, host_b) = start_codex(&dir.path().join("host-b")).await;
+    let project_a = host_a.project(&repo_a).await.unwrap();
+    let project_b = host_b.project(&repo_b).await.unwrap();
+    let thread = project_a.start(codex_start("append first")).await.unwrap();
+    wait(&thread, completed(1)).await;
+    let listed = project_a.threads().await.unwrap();
+    let summary = listed.iter().find(|t| t.id == thread.id()).unwrap();
+    assert_eq!(summary.harness, Some(Harness::Codex));
+    assert!(summary.harness_known, "the service reports the harness");
+
+    thread.send("wait", false).await.unwrap();
+    wait(&thread, |s| {
+        s.turns.iter().any(|t| t.status == TurnStatus::Running)
+    })
+    .await;
+    thread.send("append one", false).await.unwrap();
+    thread.send("append two", false).await.unwrap();
+    wait(&thread, |s| {
+        s.turns
+            .iter()
+            .filter(|t| t.status == TurnStatus::Queued && !t.prompt.is_empty())
+            .count()
+            == 2
+    })
+    .await;
+    let check = thread.move_check().await.unwrap();
+    assert_eq!(check.harness, Some(Harness::Codex));
+    assert_eq!(check.branch.as_deref(), Some("feature/move"));
+    assert_eq!((check.uncommitted_files, check.running), (1, true));
+    assert_eq!(check.remote_url.as_deref(), Some(url.as_str()));
+    assert_eq!(check.blocked, None);
+
+    let package = thread
+        .move_out(
+            &transfer(),
+            "host-b",
+            "studio",
+            "environment-target",
+            true,
+            Some("Append the contract text".to_owned()),
+        )
         .await
         .unwrap();
-    let Message::Text(text) = socket.next().await.unwrap().unwrap() else {
-        panic!("a reply is text");
-    };
-    let reply: serde_json::Value = serde_json::from_str(&text).unwrap();
-    assert_eq!(reply["id"], 3);
+    assert_eq!(package.branch, "feature/move");
+    assert_eq!(package.remote_url, url);
+    assert_eq!(package.queued, ["append one", "append two"]);
+    assert!(
+        thread
+            .turns()
+            .await
+            .unwrap()
+            .iter()
+            .all(|t| t.status != TurnStatus::Queued)
+    );
+    assert!(package.handoff.contains("feature/move"));
+    assert!(
+        package
+            .transcript
+            .iter()
+            .any(|item| item.text == "append first")
+    );
+    assert!(!package.transcript_capped);
+    assert_eq!(
+        pushed_subject(&origin, "feature/move"),
+        "Append the contract text"
+    );
+    let refused = thread.send("append late", false).await.unwrap_err();
+    assert!(refused.contains("moving to another host"), "{refused}");
+
+    let moved = project_b.move_in(package.clone()).await.unwrap();
+    let file = moved
+        .worktree()
+        .await
+        .unwrap()
+        .expect("the branch has its own worktree")
+        .join("contract.txt");
+    wait(&moved, completed(3)).await;
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), "first\none\ntwo\n");
+    assert!(
+        moved
+            .snapshot()
+            .await
+            .unwrap()
+            .transcript
+            .iter()
+            .any(|item| item.text == package.handoff)
+    );
+    let record = moved
+        .move_record()
+        .await
+        .unwrap()
+        .expect("the new host keeps the move");
+    assert_eq!(record.from_host, package.from_host);
+    assert_eq!(
+        record.to_host,
+        host_b.environment_name().await.unwrap().to_lowercase()
+    );
+    assert!(
+        record
+            .transcript
+            .iter()
+            .any(|item| item.text == "append first")
+    );
+
+    thread
+        .move_finish(
+            &package.transfer,
+            MoveFinish::Seal {
+                to_host: record.to_host.clone(),
+            },
+        )
+        .await
+        .unwrap();
+    assert!(
+        project_a
+            .threads()
+            .await
+            .unwrap()
+            .iter()
+            .all(|t| t.id != thread.id())
+    );
+    let sealed = thread.send("append late", false).await.unwrap_err();
+    assert!(sealed.contains("moved to another host"), "{sealed}");
+    assert!(thread.move_check().await.unwrap().blocked.is_some());
+    service_a.stop().await;
+    service_b.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_move_the_new_host_refuses_leaves_the_session_on_its_host() {
+    let dir = tempdir::Dir::new();
+    let (origin, url) = shared_remote(dir.path());
+    let repo_a = clone_project(dir.path(), &origin, &url, "a");
+    let repo_b = clone_project(dir.path(), &origin, &url, "b");
+    let (service_a, host_a) = start_codex(&dir.path().join("host-a")).await;
+    let (service_b, host_b) = start_codex(&dir.path().join("host-b")).await;
+    let project_a = host_a.project(&repo_a).await.unwrap();
+    let project_b = host_b.project(&repo_b).await.unwrap();
+    let thread = project_a.start(codex_start("append first")).await.unwrap();
+    wait(&thread, completed(1)).await;
+    let package = thread
+        .move_out(
+            &transfer(),
+            "host-b",
+            "studio",
+            "environment-target",
+            true,
+            Some("Append".to_owned()),
+        )
+        .await
+        .unwrap();
+
+    let mut unknown = package.clone();
+    unknown.branch = "no-such-branch".to_owned();
+    assert!(project_b.move_in(unknown.clone()).await.is_err());
+    assert_eq!(
+        host_b.move_status(&unknown.transfer).await.unwrap(),
+        Arrival::Starting
+    );
+    assert_eq!(
+        host_b.move_abort(&unknown.transfer).await.unwrap(),
+        Arrival::Refused
+    );
+    assert!(project_b.threads().await.unwrap().is_empty());
+    let mut same = package.clone();
+    same.transfer = transfer();
+    same.branch = "main".to_owned();
+    std::fs::write(repo_b.join("README.md"), "changed here\n").unwrap();
+    let refused = project_b.move_in(same).await.err().unwrap();
+    assert!(refused.contains("uncommitted changes"), "{refused}");
+    git(&repo_b, &["checkout", "-q", "--", "README.md"]);
+    let other_url = format!("{url}-other");
+    let other = clone_project(dir.path(), &origin, &other_url, "c");
+    let project_c = host_b.project(&other).await.unwrap();
+    let mut foreign = package.clone();
+    foreign.transfer = transfer();
+    let refused = project_c.move_in(foreign).await.err();
+    assert_eq!(
+        refused.as_deref(),
+        Some(
+            "This project's Git remote is not the session's remote, so the session cannot move here."
+        )
+    );
+    let listed = host_b.projects().await.unwrap();
+    assert!(listed.iter().any(|p| {
+        p.root == other.to_string_lossy().into_owned()
+            && p.remote_url.as_deref() == Some(other_url.as_str())
+    }));
+
+    thread
+        .move_finish(&package.transfer, MoveFinish::Release)
+        .await
+        .unwrap();
+    assert_eq!(thread.move_check().await.unwrap().blocked, None);
+    thread.send("append again", false).await.unwrap();
+    wait(&thread, completed(2)).await;
+    service_a.stop().await;
+    service_b.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_host_clones_a_remote_into_a_project_and_names_it() {
+    let dir = tempdir::Dir::new();
+    let (origin, _url) = shared_remote(dir.path());
+    let (service, host) = start_codex(&dir.path().join("host")).await;
+    let destination = dir.path().join("cloned");
+    let cloned = host
+        .clone_project(&origin.to_string_lossy(), &destination.to_string_lossy())
+        .await
+        .unwrap();
+    assert_eq!(cloned.root, destination.to_string_lossy());
+    assert!(destination.join("README.md").exists());
+    let folder = dir.path().join("plain");
+    std::fs::create_dir(&folder).unwrap();
+    let added = host.add_project(&folder.to_string_lossy()).await.unwrap();
+    assert_eq!(added.root, folder.to_string_lossy().into_owned());
+    assert!(
+        host.projects()
+            .await
+            .unwrap()
+            .iter()
+            .any(|p| p.root == cloned.root)
+    );
     service.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_preparing_move_is_kept_through_a_restart_until_its_finish() {
+    let dir = tempdir::Dir::new();
+    let (origin, url) = shared_remote(dir.path());
+    let repo_a = clone_project(dir.path(), &origin, &url, "a");
+    let home_a = dir.path().join("host-a");
+    let (service, host) = start_codex(&home_a).await;
+    let project = host.project(&repo_a).await.unwrap();
+    let thread = project.start(codex_start("append first")).await.unwrap();
+    wait(&thread, completed(1)).await;
+    let id = thread.id().to_owned();
+    let transfer = transfer();
+    thread
+        .move_out(
+            &transfer,
+            "host-b",
+            "studio",
+            "environment-target",
+            true,
+            Some("Append".to_owned()),
+        )
+        .await
+        .unwrap();
+    service.stop().await;
+    rusqlite::Connection::open(home_a.join("meta-harness.sqlite"))
+        .unwrap()
+        .execute("UPDATE moved_thread SET state = 'preparing'", [])
+        .unwrap();
+
+    let (service, host) = start_codex(&home_a).await;
+    let thread = host
+        .project(&repo_a)
+        .await
+        .unwrap()
+        .open(&id)
+        .await
+        .unwrap();
+    assert_eq!(
+        thread
+            .move_check()
+            .await
+            .unwrap()
+            .moving
+            .map(|m| m.transfer),
+        Some(transfer.clone())
+    );
+    assert!(thread.send("append late", false).await.is_err());
+    let resumed = thread
+        .move_out(
+            &transfer,
+            "host-b",
+            "studio",
+            "environment-target",
+            true,
+            Some("Append".to_owned()),
+        )
+        .await
+        .expect("a repeat resumes the preparing move");
+    assert_eq!(resumed.transfer, transfer);
+    thread
+        .move_finish(&transfer, MoveFinish::Release)
+        .await
+        .unwrap();
+    assert_eq!(thread.move_check().await.unwrap().blocked, None);
+    service.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_finish_repeats_and_refuses_the_other_outcome_by_name() {
+    let dir = tempdir::Dir::new();
+    let (origin, url) = shared_remote(dir.path());
+    let repo_a = clone_project(dir.path(), &origin, &url, "a");
+    let (service, host) = start_codex(&dir.path().join("host-a")).await;
+    let project = host.project(&repo_a).await.unwrap();
+    let thread = project.start(codex_start("append first")).await.unwrap();
+    wait(&thread, completed(1)).await;
+
+    let released = transfer();
+    thread
+        .move_out(
+            &released,
+            "host-b",
+            "studio",
+            "environment-target",
+            true,
+            Some("Append".to_owned()),
+        )
+        .await
+        .unwrap();
+    thread
+        .move_finish(&released, MoveFinish::Release)
+        .await
+        .unwrap();
+    thread
+        .move_finish(&released, MoveFinish::Release)
+        .await
+        .expect("a repeated release is answered again");
+    let refused = thread
+        .move_finish(
+            &released,
+            MoveFinish::Seal {
+                to_host: "studio".to_owned(),
+            },
+        )
+        .await
+        .unwrap_err();
+    assert!(refused.contains("released"), "{refused}");
+
+    let sealed = transfer();
+    let package = thread
+        .move_out(
+            &sealed,
+            "host-b",
+            "studio",
+            "environment-target",
+            true,
+            Some("Append".to_owned()),
+        )
+        .await
+        .unwrap();
+    let seal = MoveFinish::Seal {
+        to_host: "studio".to_owned(),
+    };
+    thread.move_finish(&sealed, seal.clone()).await.unwrap();
+    thread
+        .move_finish(&sealed, seal)
+        .await
+        .expect("a repeated seal is answered again");
+    let refused = thread
+        .move_finish(&sealed, MoveFinish::Release)
+        .await
+        .unwrap_err();
+    assert!(refused.contains("sealed"), "{refused}");
+    assert_eq!(package.transfer, sealed);
+    service.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_released_message_is_returned_exactly_once() {
+    let dir = tempdir::Dir::new();
+    let (origin, url) = shared_remote(dir.path());
+    let repo_a = clone_project(dir.path(), &origin, &url, "a");
+    let (service, host) = start_codex(&dir.path().join("host-a")).await;
+    let project = host.project(&repo_a).await.unwrap();
+    let thread = project.start(codex_start("append first")).await.unwrap();
+    wait(&thread, completed(1)).await;
+    thread.send("wait", false).await.unwrap();
+    wait(&thread, |s| {
+        s.turns.iter().any(|t| t.status == TurnStatus::Running)
+    })
+    .await;
+    thread.send("append one", false).await.unwrap();
+    wait(&thread, |s| {
+        s.turns
+            .iter()
+            .any(|t| t.status == TurnStatus::Queued && t.prompt == "append one")
+    })
+    .await;
+    let transfer = transfer();
+    thread
+        .move_out(
+            &transfer,
+            "host-b",
+            "studio",
+            "environment-target",
+            true,
+            Some("Append".to_owned()),
+        )
+        .await
+        .unwrap();
+    thread
+        .move_finish(&transfer, MoveFinish::Release)
+        .await
+        .unwrap();
+    thread
+        .move_finish(&transfer, MoveFinish::Release)
+        .await
+        .unwrap();
+    wait(&thread, |s| {
+        s.turns.iter().any(|t| {
+            t.prompt == "append one"
+                && matches!(t.status, TurnStatus::Running | TurnStatus::Completed)
+        })
+    })
+    .await;
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    let runs = thread
+        .turns()
+        .await
+        .unwrap()
+        .iter()
+        .filter(|t| {
+            t.prompt == "append one"
+                && matches!(t.status, TurnStatus::Running | TurnStatus::Completed)
+        })
+        .count();
+    assert_eq!(runs, 1);
+    service.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_handed_move_waits_for_its_finish_through_a_restart() {
+    let dir = tempdir::Dir::new();
+    let (origin, url) = shared_remote(dir.path());
+    let repo_a = clone_project(dir.path(), &origin, &url, "a");
+    let home_a = dir.path().join("host-a");
+    let (service, host) = start_codex(&home_a).await;
+    let project = host.project(&repo_a).await.unwrap();
+    let thread = project.start(codex_start("append first")).await.unwrap();
+    wait(&thread, completed(1)).await;
+    let id = thread.id().to_owned();
+    let package = thread
+        .move_out(
+            &transfer(),
+            "host-b",
+            "studio",
+            "environment-target",
+            true,
+            Some("Append".to_owned()),
+        )
+        .await
+        .unwrap();
+    service.stop().await;
+
+    let (service, host) = start_codex(&home_a).await;
+    let thread = host
+        .project(&repo_a)
+        .await
+        .unwrap()
+        .open(&id)
+        .await
+        .unwrap();
+    assert!(thread.move_check().await.unwrap().blocked.is_some());
+    assert!(thread.send("append late", false).await.is_err());
+    thread
+        .move_finish(&package.transfer, MoveFinish::Release)
+        .await
+        .unwrap();
+    assert_eq!(thread.move_check().await.unwrap().blocked, None);
+    thread
+        .send("append again", false)
+        .await
+        .expect("the session takes messages once its move is released");
+    service.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_queued_message_comes_back_to_its_session_when_its_move_is_released() {
+    let dir = tempdir::Dir::new();
+    let (origin, url) = shared_remote(dir.path());
+    let repo_a = clone_project(dir.path(), &origin, &url, "a");
+    let (service, host) = start_codex(&dir.path().join("host-a")).await;
+    let project = host.project(&repo_a).await.unwrap();
+    let thread = project.start(codex_start("append first")).await.unwrap();
+    wait(&thread, completed(1)).await;
+    thread.send("wait", false).await.unwrap();
+    wait(&thread, |s| {
+        s.turns.iter().any(|t| t.status == TurnStatus::Running)
+    })
+    .await;
+    thread.send("append one", false).await.unwrap();
+    wait(&thread, |s| {
+        s.turns
+            .iter()
+            .any(|t| t.status == TurnStatus::Queued && t.prompt == "append one")
+    })
+    .await;
+
+    let package = thread
+        .move_out(
+            &transfer(),
+            "host-b",
+            "studio",
+            "environment-target",
+            true,
+            Some("Append".to_owned()),
+        )
+        .await
+        .unwrap();
+    assert_eq!(package.queued, ["append one"]);
+    thread
+        .move_finish(&package.transfer, MoveFinish::Release)
+        .await
+        .unwrap();
+    wait(&thread, |s| {
+        s.turns.iter().any(|t| {
+            t.prompt == "append one"
+                && matches!(t.status, TurnStatus::Running | TurnStatus::Completed)
+        })
+    })
+    .await;
+    service.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_queued_message_comes_back_when_its_preparing_move_is_released_after_a_restart() {
+    let dir = tempdir::Dir::new();
+    let (origin, url) = shared_remote(dir.path());
+    let repo_a = clone_project(dir.path(), &origin, &url, "a");
+    let home_a = dir.path().join("host-a");
+    let (service, host) = start_codex(&home_a).await;
+    let project = host.project(&repo_a).await.unwrap();
+    let thread = project.start(codex_start("append first")).await.unwrap();
+    wait(&thread, completed(1)).await;
+    thread.send("wait", false).await.unwrap();
+    wait(&thread, |s| {
+        s.turns.iter().any(|t| t.status == TurnStatus::Running)
+    })
+    .await;
+    thread.send("append one", false).await.unwrap();
+    wait(&thread, |s| {
+        s.turns
+            .iter()
+            .any(|t| t.status == TurnStatus::Queued && t.prompt == "append one")
+    })
+    .await;
+    let id = thread.id().to_owned();
+    let transfer = transfer();
+    thread
+        .move_out(
+            &transfer,
+            "host-b",
+            "studio",
+            "environment-target",
+            true,
+            Some("Append".to_owned()),
+        )
+        .await
+        .unwrap();
+    service.stop().await;
+    rusqlite::Connection::open(home_a.join("meta-harness.sqlite"))
+        .unwrap()
+        .execute("UPDATE moved_thread SET state = 'preparing'", [])
+        .unwrap();
+
+    let (service, host) = start_codex(&home_a).await;
+    let thread = host
+        .project(&repo_a)
+        .await
+        .unwrap()
+        .open(&id)
+        .await
+        .unwrap();
+    thread
+        .move_finish(&transfer, MoveFinish::Release)
+        .await
+        .unwrap();
+    wait(&thread, |s| {
+        s.turns.iter().any(|t| {
+            t.prompt == "append one"
+                && matches!(t.status, TurnStatus::Running | TurnStatus::Completed)
+        })
+    })
+    .await;
+    service.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_session_moved_again_carries_the_transcript_of_its_earlier_host() {
+    let dir = tempdir::Dir::new();
+    let (origin, url) = shared_remote(dir.path());
+    let repo_a = clone_project(dir.path(), &origin, &url, "a");
+    let repo_b = clone_project(dir.path(), &origin, &url, "b");
+    git(&repo_a, &["checkout", "-q", "-b", "feature/again"]);
+    git(&repo_a, &["push", "-q", "-u", "origin", "feature/again"]);
+    let (service_a, host_a) = start_codex(&dir.path().join("host-a")).await;
+    let (service_b, host_b) = start_codex(&dir.path().join("host-b")).await;
+    let project_a = host_a.project(&repo_a).await.unwrap();
+    let project_b = host_b.project(&repo_b).await.unwrap();
+    let thread = project_a.start(codex_start("append first")).await.unwrap();
+    wait(&thread, completed(1)).await;
+    let package = thread
+        .move_out(
+            &transfer(),
+            "host-b",
+            "studio",
+            "environment-target",
+            true,
+            Some("Append".to_owned()),
+        )
+        .await
+        .unwrap();
+    let moved = project_b.move_in(package.clone()).await.unwrap();
+    wait(&moved, completed(1)).await;
+
+    let again = moved
+        .move_out(
+            &transfer(),
+            "host-b",
+            "studio",
+            "environment-target",
+            true,
+            Some("Append again".to_owned()),
+        )
+        .await
+        .unwrap();
+    assert!(
+        again
+            .transcript
+            .iter()
+            .any(|item| item.text == "append first"),
+        "the earlier host's transcript is carried"
+    );
+    assert!(
+        again
+            .transcript
+            .iter()
+            .all(|item| item.text != package.handoff),
+        "the handoff is not carried twice"
+    );
+    service_a.stop().await;
+    service_b.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_move_in_whose_record_cannot_be_kept_stays_retryable_until_it_is_withdrawn() {
+    let dir = tempdir::Dir::new();
+    let (origin, url) = shared_remote(dir.path());
+    let repo_a = clone_project(dir.path(), &origin, &url, "a");
+    let repo_b = clone_project(dir.path(), &origin, &url, "b");
+    git(&repo_a, &["checkout", "-q", "-b", "feature/unrecorded"]);
+    git(
+        &repo_a,
+        &["push", "-q", "-u", "origin", "feature/unrecorded"],
+    );
+    let (service_a, host_a) = start_codex(&dir.path().join("host-a")).await;
+    let home_b = dir.path().join("host-b");
+    let (service_b, host_b) = start_codex(&home_b).await;
+    let project_a = host_a.project(&repo_a).await.unwrap();
+    let project_b = host_b.project(&repo_b).await.unwrap();
+    let thread = project_a.start(codex_start("append first")).await.unwrap();
+    wait(&thread, completed(1)).await;
+    let package = thread
+        .move_out(
+            &transfer(),
+            "host-b",
+            "studio",
+            "environment-target",
+            true,
+            Some("Append".to_owned()),
+        )
+        .await
+        .unwrap();
+    rusqlite::Connection::open(home_b.join("meta-harness.sqlite"))
+        .unwrap()
+        .execute_batch(
+            "CREATE TRIGGER refuse BEFORE INSERT ON move_record \
+             BEGIN SELECT RAISE(ABORT, 'refused'); END;",
+        )
+        .unwrap();
+
+    let refused = project_b.move_in(package.clone()).await.err().unwrap();
+    assert!(refused.contains("refused"), "{refused}");
+    assert_eq!(
+        host_b.move_status(&package.transfer).await.unwrap(),
+        Arrival::Starting
+    );
+    assert_eq!(
+        host_b.move_abort(&package.transfer).await.unwrap(),
+        Arrival::Refused
+    );
+    assert!(project_b.threads().await.unwrap().is_empty());
+    let worktrees = Command::new("git")
+        .args(["worktree", "list", "--porcelain"])
+        .current_dir(&repo_b)
+        .output()
+        .unwrap();
+    assert_eq!(
+        String::from_utf8_lossy(&worktrees.stdout)
+            .matches("worktree ")
+            .count(),
+        2,
+        "the launch's worktree stays: a move never removes a worktree"
+    );
+    service_a.stop().await;
+    service_b.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn concurrent_repeats_of_one_move_out_return_the_same_package() {
+    let dir = tempdir::Dir::new();
+    let (origin, url) = shared_remote(dir.path());
+    let repo_a = clone_project(dir.path(), &origin, &url, "a");
+    git(&repo_a, &["checkout", "-q", "-b", "feature/repeated"]);
+    git(&repo_a, &["push", "-q", "-u", "origin", "feature/repeated"]);
+    let (service_a, host_a) = start_codex(&dir.path().join("host-a")).await;
+    let project_a = host_a.project(&repo_a).await.unwrap();
+    let thread = project_a.start(codex_start("append first")).await.unwrap();
+    thread.send("append second", false).await.unwrap();
+    wait(&thread, |s| {
+        s.turns.iter().any(|t| t.status == TurnStatus::Queued)
+    })
+    .await;
+    let transfer = transfer();
+    let (first, second) = tokio::join!(
+        thread.move_out(
+            &transfer,
+            "host-b",
+            "studio",
+            "environment-target",
+            true,
+            Some("Append".to_owned())
+        ),
+        thread.move_out(
+            &transfer,
+            "host-b",
+            "studio",
+            "environment-target",
+            true,
+            Some("Append".to_owned())
+        ),
+    );
+    let first = first.unwrap();
+    let second = second.unwrap();
+    assert_eq!(first.handoff, second.handoff);
+    assert_eq!(first.queued, second.queued);
+    service_a.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_branch_that_tracks_another_is_not_attached_by_a_move() {
+    let dir = tempdir::Dir::new();
+    let (origin, url) = shared_remote(dir.path());
+    let repo_a = clone_project(dir.path(), &origin, &url, "a");
+    let repo_b = clone_project(dir.path(), &origin, &url, "b");
+    git(&repo_a, &["checkout", "-q", "-b", "feature/tracked"]);
+    git(&repo_a, &["push", "-q", "-u", "origin", "feature/tracked"]);
+    git(
+        &repo_b,
+        &["branch", "--track", "feature/tracked", "origin/main"],
+    );
+    let (service_a, host_a) = start_codex(&dir.path().join("host-a")).await;
+    let (service_b, host_b) = start_codex(&dir.path().join("host-b")).await;
+    let project_a = host_a.project(&repo_a).await.unwrap();
+    let project_b = host_b.project(&repo_b).await.unwrap();
+    let thread = project_a.start(codex_start("append first")).await.unwrap();
+    wait(&thread, completed(1)).await;
+    let package = thread
+        .move_out(
+            &transfer(),
+            "host-b",
+            "studio",
+            "environment-target",
+            true,
+            Some("Append".to_owned()),
+        )
+        .await
+        .unwrap();
+    let refused = project_b.move_in(package).await.err().unwrap();
+    assert!(refused.contains("tracks another branch"), "{refused}");
+    service_a.stop().await;
+    service_b.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_move_whose_arrival_cannot_be_recorded_keeps_its_worktree_and_refuses() {
+    let dir = tempdir::Dir::new();
+    let (origin, url) = shared_remote(dir.path());
+    let repo_a = clone_project(dir.path(), &origin, &url, "a");
+    let repo_b = clone_project(dir.path(), &origin, &url, "b");
+    git(&repo_a, &["checkout", "-q", "-b", "feature/late-record"]);
+    git(
+        &repo_a,
+        &["push", "-q", "-u", "origin", "feature/late-record"],
+    );
+    git(&repo_b, &["fetch", "-q", "origin"]);
+    git(
+        &repo_b,
+        &[
+            "branch",
+            "feature/late-record",
+            "origin/feature/late-record",
+        ],
+    );
+    let (service_a, host_a) = start_codex(&dir.path().join("host-a")).await;
+    let home_b = dir.path().join("host-b");
+    let (service_b, host_b) = start_codex(&home_b).await;
+    let project_a = host_a.project(&repo_a).await.unwrap();
+    let project_b = host_b.project(&repo_b).await.unwrap();
+    let thread = project_a.start(codex_start("append first")).await.unwrap();
+    wait(&thread, completed(1)).await;
+    let package = thread
+        .move_out(
+            &transfer(),
+            "host-b",
+            "studio",
+            "environment-target",
+            true,
+            Some("Append".to_owned()),
+        )
+        .await
+        .unwrap();
+    let raw = rusqlite::Connection::open(home_b.join("meta-harness.sqlite")).unwrap();
+    raw.execute_batch(
+        "CREATE TRIGGER refuse_row BEFORE INSERT ON arrival \
+         WHEN NEW.state = 'starting' BEGIN SELECT RAISE(ABORT, 'refused'); END;",
+    )
+    .unwrap();
+
+    let refused = project_b.move_in(package.clone()).await.err().unwrap();
+    assert!(refused.contains("refused"), "{refused}");
+    raw.execute_batch("DROP TRIGGER refuse_row").unwrap();
+    assert_eq!(
+        host_b.move_abort(&package.transfer).await.unwrap(),
+        Arrival::Refused
+    );
+    let worktrees = Command::new("git")
+        .args(["worktree", "list", "--porcelain"])
+        .current_dir(&repo_b)
+        .output()
+        .unwrap();
+    assert_eq!(
+        String::from_utf8_lossy(&worktrees.stdout)
+            .matches("worktree ")
+            .count(),
+        2,
+        "the worktree the move made stays: a move never removes a worktree"
+    );
+    service_a.stop().await;
+    service_b.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_attached_branch_with_unpushed_commits_is_refused() {
+    let dir = tempdir::Dir::new();
+    let (origin, url) = shared_remote(dir.path());
+    let repo_a = clone_project(dir.path(), &origin, &url, "a");
+    let repo_b = clone_project(dir.path(), &origin, &url, "b");
+    git(&repo_a, &["checkout", "-q", "-b", "feature/unpushed"]);
+    git(&repo_a, &["push", "-q", "-u", "origin", "feature/unpushed"]);
+    git(&repo_b, &["fetch", "-q", "origin"]);
+    git(
+        &repo_b,
+        &["branch", "feature/unpushed", "origin/feature/unpushed"],
+    );
+    git(&repo_b, &["checkout", "-q", "feature/unpushed"]);
+    std::fs::write(repo_b.join("local.txt"), "local only\n").unwrap();
+    git(&repo_b, &["add", "local.txt"]);
+    git(&repo_b, &["commit", "-q", "-m", "local only"]);
+    git(&repo_b, &["checkout", "-q", "main"]);
+    let (service_a, host_a) = start_codex(&dir.path().join("host-a")).await;
+    let (service_b, host_b) = start_codex(&dir.path().join("host-b")).await;
+    let project_a = host_a.project(&repo_a).await.unwrap();
+    let project_b = host_b.project(&repo_b).await.unwrap();
+    let thread = project_a.start(codex_start("append first")).await.unwrap();
+    wait(&thread, completed(1)).await;
+    let package = thread
+        .move_out(
+            &transfer(),
+            "host-b",
+            "studio",
+            "environment-target",
+            true,
+            Some("Append".to_owned()),
+        )
+        .await
+        .unwrap();
+
+    let refused = project_b.move_in(package).await.err().unwrap();
+    assert!(
+        refused.contains("has commits that are not pushed"),
+        "{refused}"
+    );
+    service_a.stop().await;
+    service_b.stop().await;
+}
+
+async fn moving_with_queued(host_a: &remote::Host, repo_a: &Path, texts: &[&str]) -> MovePackage {
+    let project_a = host_a.project(repo_a).await.unwrap();
+    let thread = project_a.start(codex_start("append first")).await.unwrap();
+    wait(&thread, completed(1)).await;
+    thread.send("wait", false).await.unwrap();
+    wait(&thread, |s| {
+        s.turns.iter().any(|t| t.status == TurnStatus::Running)
+    })
+    .await;
+    for text in texts {
+        thread.send(text, false).await.unwrap();
+    }
+    let queued = texts.len();
+    wait(&thread, move |s| {
+        s.turns
+            .iter()
+            .filter(|t| t.status == TurnStatus::Queued)
+            .count()
+            == queued
+    })
+    .await;
+    thread
+        .move_out(
+            &transfer(),
+            "host-b",
+            "studio",
+            "environment-target",
+            true,
+            Some("Append".to_owned()),
+        )
+        .await
+        .unwrap()
+}
+
+fn carried_prompts(snapshot: &Snapshot) -> Vec<String> {
+    let mut turns: Vec<_> = snapshot
+        .turns
+        .iter()
+        .filter(|t| t.prompt.starts_with("carry "))
+        .collect();
+    turns.sort_by_key(|t| t.number);
+    turns.iter().map(|t| t.prompt.clone()).collect()
+}
+
+fn carried_done(snapshot: &Snapshot) -> usize {
+    snapshot
+        .turns
+        .iter()
+        .filter(|t| t.prompt.starts_with("carry ") && t.status == TurnStatus::Completed)
+        .count()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn carried_messages_reach_the_target_only_after_it_lands() {
+    let dir = tempdir::Dir::new();
+    let (origin, url) = shared_remote(dir.path());
+    let repo_a = clone_project(dir.path(), &origin, &url, "a");
+    let repo_b = clone_project(dir.path(), &origin, &url, "b");
+    git(&repo_a, &["checkout", "-q", "-b", "feature/carried"]);
+    git(&repo_a, &["push", "-q", "-u", "origin", "feature/carried"]);
+    let (service_a, host_a) = start_codex(&dir.path().join("host-a")).await;
+    let home_b = dir.path().join("host-b");
+    let (service_b, host_b) = start_codex(&home_b).await;
+    let project_b = host_b.project(&repo_b).await.unwrap();
+    let package = moving_with_queued(&host_a, &repo_a, &["carry one"]).await;
+    let raw = rusqlite::Connection::open(home_b.join("meta-harness.sqlite")).unwrap();
+    raw.execute_batch(
+        "CREATE TRIGGER refuse_record BEFORE INSERT ON move_record \
+         BEGIN SELECT RAISE(ABORT, 'refused'); END;",
+    )
+    .unwrap();
+    assert!(project_b.move_in(package.clone()).await.is_err());
+    raw.execute_batch("DROP TRIGGER refuse_record").unwrap();
+    let listed = project_b.threads().await.unwrap();
+    let held = project_b.open(&listed[0].id).await.unwrap();
+    let snapshot = wait(&held, completed(1)).await;
+    assert!(
+        carried_prompts(&snapshot).is_empty(),
+        "a carried message reached a session that never landed"
+    );
+    service_a.stop().await;
+    service_b.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn carried_messages_run_on_the_landed_session_once_each_and_in_order() {
+    let dir = tempdir::Dir::new();
+    let (origin, url) = shared_remote(dir.path());
+    let repo_a = clone_project(dir.path(), &origin, &url, "a");
+    let repo_b = clone_project(dir.path(), &origin, &url, "b");
+    git(&repo_a, &["checkout", "-q", "-b", "feature/ordered"]);
+    git(&repo_a, &["push", "-q", "-u", "origin", "feature/ordered"]);
+    let (service_a, host_a) = start_codex(&dir.path().join("host-a")).await;
+    let (service_b, host_b) = start_codex(&dir.path().join("host-b")).await;
+    let project_b = host_b.project(&repo_b).await.unwrap();
+    let package = moving_with_queued(&host_a, &repo_a, &["carry one", "carry two"]).await;
+    let landed = project_b.move_in(package.clone()).await.unwrap();
+    wait(&landed, |s| carried_done(s) == 2).await;
+    let snapshot = wait(&landed, |s| carried_done(s) == 2).await;
+    assert_eq!(carried_prompts(&snapshot), ["carry one", "carry two"]);
+    service_a.stop().await;
+    service_b.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_interrupted_delivery_resumes_on_move_status_and_a_repeated_move_in() {
+    let dir = tempdir::Dir::new();
+    let (origin, url) = shared_remote(dir.path());
+    let repo_a = clone_project(dir.path(), &origin, &url, "a");
+    let repo_b = clone_project(dir.path(), &origin, &url, "b");
+    git(&repo_a, &["checkout", "-q", "-b", "feature/resumed"]);
+    git(&repo_a, &["push", "-q", "-u", "origin", "feature/resumed"]);
+    let (service_a, host_a) = start_codex(&dir.path().join("host-a")).await;
+    let home_b = dir.path().join("host-b");
+    let (service_b, host_b) = start_codex(&home_b).await;
+    let project_b = host_b.project(&repo_b).await.unwrap();
+    let package = moving_with_queued(&host_a, &repo_a, &["carry one", "carry two"]).await;
+    let raw = rusqlite::Connection::open(home_b.join("meta-harness.sqlite")).unwrap();
+    raw.execute_batch(
+        "CREATE TRIGGER refuse_progress BEFORE UPDATE OF delivered ON arrival \
+         WHEN NEW.delivered = 1 BEGIN SELECT RAISE(ABORT, 'refused'); END;",
+    )
+    .unwrap();
+    assert!(project_b.move_in(package.clone()).await.is_err());
+    raw.execute_batch("DROP TRIGGER refuse_progress").unwrap();
+    assert!(matches!(
+        host_b.move_status(&package.transfer).await.unwrap(),
+        Arrival::Landed { .. }
+    ));
+    let listed = project_b.threads().await.unwrap();
+    let landed = project_b.open(&listed[0].id).await.unwrap();
+    let snapshot = wait(&landed, |s| carried_done(s) == 2).await;
+    assert_eq!(carried_prompts(&snapshot), ["carry one", "carry two"]);
+    let again = project_b.move_in(package.clone()).await.unwrap();
+    assert_eq!(again.id(), landed.id());
+    let snapshot = wait(&landed, |s| carried_done(s) == 2).await;
+    assert_eq!(carried_prompts(&snapshot), ["carry one", "carry two"]);
+    service_a.stop().await;
+    service_b.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_landed_move_with_an_undelivered_message_answers_starting_until_it_is_delivered() {
+    let dir = tempdir::Dir::new();
+    let (origin, url) = shared_remote(dir.path());
+    let repo_a = clone_project(dir.path(), &origin, &url, "a");
+    let repo_b = clone_project(dir.path(), &origin, &url, "b");
+    git(&repo_a, &["checkout", "-q", "-b", "feature/unfinished"]);
+    git(
+        &repo_a,
+        &["push", "-q", "-u", "origin", "feature/unfinished"],
+    );
+    let (service_a, host_a) = start_codex(&dir.path().join("host-a")).await;
+    let home_b = dir.path().join("host-b");
+    let (service_b, host_b) = start_codex(&home_b).await;
+    let project_b = host_b.project(&repo_b).await.unwrap();
+    let package = moving_with_queued(&host_a, &repo_a, &["carry one", "carry two"]).await;
+    let raw = rusqlite::Connection::open(home_b.join("meta-harness.sqlite")).unwrap();
+    raw.execute_batch(
+        "CREATE TRIGGER refuse_progress BEFORE UPDATE OF delivered ON arrival \
+         WHEN NEW.delivered = 1 BEGIN SELECT RAISE(ABORT, 'refused'); END;",
+    )
+    .unwrap();
+    assert!(project_b.move_in(package.clone()).await.is_err());
+    assert_eq!(
+        host_b.move_status(&package.transfer).await.unwrap(),
+        Arrival::Starting
+    );
+    assert_eq!(
+        host_b.move_abort(&package.transfer).await.unwrap(),
+        Arrival::Starting,
+        "an abort on a landed transfer never refuses it"
+    );
+    raw.execute_batch("DROP TRIGGER refuse_progress").unwrap();
+    assert!(matches!(
+        host_b.move_status(&package.transfer).await.unwrap(),
+        Arrival::Landed { .. }
+    ));
+    let listed = project_b.threads().await.unwrap();
+    let landed = project_b.open(&listed[0].id).await.unwrap();
+    let snapshot = wait(&landed, |s| carried_done(s) == 2).await;
+    assert_eq!(carried_prompts(&snapshot), ["carry one", "carry two"]);
+    service_a.stop().await;
+    service_b.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_repeated_move_in_is_refused_while_a_carried_message_is_undelivered() {
+    let dir = tempdir::Dir::new();
+    let (origin, url) = shared_remote(dir.path());
+    let repo_a = clone_project(dir.path(), &origin, &url, "a");
+    let repo_b = clone_project(dir.path(), &origin, &url, "b");
+    git(&repo_a, &["checkout", "-q", "-b", "feature/refused-early"]);
+    git(
+        &repo_a,
+        &["push", "-q", "-u", "origin", "feature/refused-early"],
+    );
+    let (service_a, host_a) = start_codex(&dir.path().join("host-a")).await;
+    let home_b = dir.path().join("host-b");
+    let (service_b, host_b) = start_codex(&home_b).await;
+    let project_b = host_b.project(&repo_b).await.unwrap();
+    let package = moving_with_queued(&host_a, &repo_a, &["carry one", "carry two"]).await;
+    let raw = rusqlite::Connection::open(home_b.join("meta-harness.sqlite")).unwrap();
+    raw.execute_batch(
+        "CREATE TRIGGER refuse_progress BEFORE UPDATE OF delivered ON arrival \
+         WHEN NEW.delivered = 1 BEGIN SELECT RAISE(ABORT, 'refused'); END;",
+    )
+    .unwrap();
+    assert!(project_b.move_in(package.clone()).await.is_err());
+    let refused = project_b.move_in(package.clone()).await.err().unwrap();
+    assert!(
+        refused.contains("not all delivered yet"),
+        "a repeat does not finish the move early: {refused}"
+    );
+    raw.execute_batch("DROP TRIGGER refuse_progress").unwrap();
+    let landed = project_b.move_in(package.clone()).await.unwrap();
+    let snapshot = wait(&landed, |s| carried_done(s) == 2).await;
+    assert_eq!(carried_prompts(&snapshot), ["carry one", "carry two"]);
+    service_a.stop().await;
+    service_b.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_release_during_a_move_out_waits_for_it_and_loses_no_message() {
+    let dir = tempdir::Dir::new();
+    let (origin, url) = shared_remote(dir.path());
+    let repo_a = clone_project(dir.path(), &origin, &url, "a");
+    git(&repo_a, &["checkout", "-q", "-b", "feature/released-late"]);
+    git(
+        &repo_a,
+        &["push", "-q", "-u", "origin", "feature/released-late"],
+    );
+    let (service_a, host_a) = start_codex(&dir.path().join("host-a")).await;
+    let project_a = host_a.project(&repo_a).await.unwrap();
+    let thread = project_a.start(codex_start("append first")).await.unwrap();
+    wait(&thread, completed(1)).await;
+    thread.send("wait", false).await.unwrap();
+    wait(&thread, |s| {
+        s.turns.iter().any(|t| t.status == TurnStatus::Running)
+    })
+    .await;
+    thread.send("keep one", false).await.unwrap();
+    thread.send("keep two", false).await.unwrap();
+    wait(&thread, |s| {
+        s.turns
+            .iter()
+            .filter(|t| t.status == TurnStatus::Queued)
+            .count()
+            == 2
+    })
+    .await;
+    let transfer = transfer();
+    let (moved, released) = tokio::join!(
+        thread.move_out(
+            &transfer,
+            "host-b",
+            "studio",
+            "environment-target",
+            true,
+            Some("Append".to_owned())
+        ),
+        async {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            thread.move_finish(&transfer, MoveFinish::Release).await
+        },
+    );
+    let package = moved.unwrap();
+    released.unwrap();
+    assert_eq!(package.queued, ["keep one", "keep two"]);
+    wait(&thread, |s| {
+        ["keep one", "keep two"]
+            .iter()
+            .all(|text| s.turns.iter().any(|t| t.prompt == *text))
+    })
+    .await;
+    service_a.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_branch_that_tracks_a_local_branch_is_not_attached_by_a_move() {
+    let dir = tempdir::Dir::new();
+    let (origin, url) = shared_remote(dir.path());
+    let repo_a = clone_project(dir.path(), &origin, &url, "a");
+    let repo_b = clone_project(dir.path(), &origin, &url, "b");
+    git(&repo_a, &["checkout", "-q", "-b", "feature/local-tracked"]);
+    git(
+        &repo_a,
+        &["push", "-q", "-u", "origin", "feature/local-tracked"],
+    );
+    git(
+        &repo_b,
+        &["branch", "--track", "feature/local-tracked", "main"],
+    );
+    let (service_a, host_a) = start_codex(&dir.path().join("host-a")).await;
+    let (service_b, host_b) = start_codex(&dir.path().join("host-b")).await;
+    let project_a = host_a.project(&repo_a).await.unwrap();
+    let project_b = host_b.project(&repo_b).await.unwrap();
+    let thread = project_a.start(codex_start("append first")).await.unwrap();
+    wait(&thread, completed(1)).await;
+    let package = thread
+        .move_out(
+            &transfer(),
+            "host-b",
+            "studio",
+            "environment-target",
+            true,
+            Some("Append".to_owned()),
+        )
+        .await
+        .unwrap();
+    let refused = project_b.move_in(package).await.err().unwrap();
+    assert!(refused.contains("tracks another branch"), "{refused}");
+    service_a.stop().await;
+    service_b.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_moving_session_is_not_deleted_or_archived_but_can_be_stopped() {
+    let dir = tempdir::Dir::new();
+    let (origin, url) = shared_remote(dir.path());
+    let repo_a = clone_project(dir.path(), &origin, &url, "a");
+    git(&repo_a, &["checkout", "-q", "-b", "feature/held"]);
+    git(&repo_a, &["push", "-q", "-u", "origin", "feature/held"]);
+    let (service, host) = start_codex(&dir.path().join("host-a")).await;
+    let project = host.project(&repo_a).await.unwrap();
+    let thread = project.start(codex_start("append first")).await.unwrap();
+    wait(&thread, completed(1)).await;
+    let id = thread.id().to_owned();
+    let package = thread
+        .move_out(
+            &transfer(),
+            "host-b",
+            "studio",
+            "environment-target",
+            true,
+            Some("Append".to_owned()),
+        )
+        .await
+        .unwrap();
+    let summary = project
+        .threads()
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|t| t.id == id)
+        .unwrap();
+
+    let deleted = project.delete(&summary, false).await.err().unwrap();
+    assert!(deleted.contains("moving to another host"), "{deleted}");
+    let archived = project.archive(&id, true).await.err().unwrap();
+    assert!(archived.contains("moving to another host"), "{archived}");
+    thread.stop().await.expect("stop stays allowed");
+
+    thread
+        .move_finish(&package.transfer, MoveFinish::Release)
+        .await
+        .unwrap();
+    project
+        .delete(&summary, false)
+        .await
+        .expect("a released session can be deleted");
+    service.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_move_in_repeated_or_concurrent_lands_the_session_once() {
+    let dir = tempdir::Dir::new();
+    let (origin, url) = shared_remote(dir.path());
+    let repo_a = clone_project(dir.path(), &origin, &url, "a");
+    let repo_b = clone_project(dir.path(), &origin, &url, "b");
+    git(&repo_a, &["checkout", "-q", "-b", "feature/landed"]);
+    git(&repo_a, &["push", "-q", "-u", "origin", "feature/landed"]);
+    let (service_a, host_a) = start_codex(&dir.path().join("host-a")).await;
+    let (service_b, host_b) = start_codex(&dir.path().join("host-b")).await;
+    let project_a = host_a.project(&repo_a).await.unwrap();
+    let project_b = host_b.project(&repo_b).await.unwrap();
+    let thread = project_a.start(codex_start("append first")).await.unwrap();
+    wait(&thread, completed(1)).await;
+    let package = thread
+        .move_out(
+            &transfer(),
+            "host-b",
+            "studio",
+            "environment-target",
+            true,
+            Some("Append".to_owned()),
+        )
+        .await
+        .unwrap();
+
+    let (first, second) = tokio::join!(
+        project_b.move_in(package.clone()),
+        project_b.move_in(package.clone())
+    );
+    let landed = first.unwrap();
+    assert_eq!(second.unwrap().id(), landed.id());
+    assert_eq!(project_b.threads().await.unwrap().len(), 1);
+    let again = project_b.move_in(package.clone()).await.unwrap();
+    assert_eq!(again.id(), landed.id());
+    assert_eq!(
+        host_b.move_status(&package.transfer).await.unwrap(),
+        Arrival::Landed {
+            thread: landed.id().to_owned()
+        }
+    );
+    assert_eq!(
+        host_b.move_status("unknown").await.unwrap(),
+        Arrival::Unknown
+    );
+    service_a.stop().await;
+    service_b.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_preflight_says_where_a_branch_would_land_and_why_it_cannot() {
+    let dir = tempdir::Dir::new();
+    let (origin, url) = shared_remote(dir.path());
+    let repo_b = clone_project(dir.path(), &origin, &url, "b");
+    let (service_b, host_b) = start_codex(&dir.path().join("host-b")).await;
+    let project_b = host_b.project(&repo_b).await.unwrap();
+    let root = repo_b.to_string_lossy().into_owned();
+
+    assert_eq!(
+        host_b.preflight(&root, "feature/new").await.unwrap(),
+        Landing::NewWorktree
+    );
+    assert_eq!(
+        host_b.preflight(&root, "main").await.unwrap(),
+        Landing::Continue { path: root.clone() }
+    );
+    project_b.git().create_branch("feature/side").await.unwrap();
+    project_b.git().switch("main").await.unwrap();
+    let Landing::Blocked { reason } = host_b.preflight(&root, "feature/side").await.unwrap() else {
+        panic!("a branch without an upstream is not attached");
+    };
+    assert!(reason.contains("has no upstream branch"), "{reason}");
+    git(&repo_b, &["push", "-q", "-u", "origin", "feature/side"]);
+    let attached = tokio::time::timeout(Duration::from_secs(30), async {
+        loop {
+            match host_b.preflight(&root, "feature/side").await.unwrap() {
+                Landing::Attach => break,
+                _ => tokio::time::sleep(Duration::from_millis(500)).await,
+            }
+        }
+    })
+    .await;
+    assert!(attached.is_ok(), "the pushed branch is attached");
+    std::fs::write(repo_b.join("README.md"), "changed here\n").unwrap();
+    let Landing::Blocked { reason } = host_b.preflight(&root, "main").await.unwrap() else {
+        panic!("a dirty checkout blocks the move");
+    };
+    assert!(reason.contains("uncommitted changes"), "{reason}");
+    service_b.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_move_lands_in_the_clean_checkout_the_target_has_on_its_branch() {
+    let dir = tempdir::Dir::new();
+    let (origin, url) = shared_remote(dir.path());
+    let repo_a = clone_project(dir.path(), &origin, &url, "a");
+    let repo_b = clone_project(dir.path(), &origin, &url, "b");
+    let (service_a, host_a) = start_codex(&dir.path().join("host-a")).await;
+    let (service_b, host_b) = start_codex(&dir.path().join("host-b")).await;
+    let project_a = host_a.project(&repo_a).await.unwrap();
+    let project_b = host_b.project(&repo_b).await.unwrap();
+    let thread = project_a.start(codex_start("append first")).await.unwrap();
+    wait(&thread, completed(1)).await;
+    let package = thread
+        .move_out(
+            &transfer(),
+            "host-b",
+            "studio",
+            "environment-target",
+            true,
+            Some("Append".to_owned()),
+        )
+        .await
+        .unwrap();
+    assert_eq!(package.branch, "main");
+
+    std::fs::write(repo_b.join("README.md"), "changed here\n").unwrap();
+    let refused = project_b.move_in(package.clone()).await.err().unwrap();
+    assert!(refused.contains("uncommitted changes"), "{refused}");
+    assert!(project_b.threads().await.unwrap().is_empty());
+    git(&repo_b, &["checkout", "-q", "--", "README.md"]);
+
+    let landed = project_b.move_in(package.clone()).await.unwrap();
+    assert_eq!(
+        landed.worktree().await.unwrap().as_deref(),
+        Some(repo_b.as_path()),
+        "the session continues in the checkout"
+    );
+    service_a.stop().await;
+    service_b.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_move_onto_a_local_branch_that_is_not_checked_out_attaches_a_worktree() {
+    let dir = tempdir::Dir::new();
+    let (origin, url) = shared_remote(dir.path());
+    let repo_a = clone_project(dir.path(), &origin, &url, "a");
+    let repo_b = clone_project(dir.path(), &origin, &url, "b");
+    git(&repo_a, &["checkout", "-q", "-b", "feature/attach"]);
+    git(&repo_a, &["push", "-q", "-u", "origin", "feature/attach"]);
+    git(&repo_b, &["fetch", "-q", "origin"]);
+    git(
+        &repo_b,
+        &["branch", "feature/attach", "origin/feature/attach"],
+    );
+    let (service_a, host_a) = start_codex(&dir.path().join("host-a")).await;
+    let (service_b, host_b) = start_codex(&dir.path().join("host-b")).await;
+    let project_a = host_a.project(&repo_a).await.unwrap();
+    let project_b = host_b.project(&repo_b).await.unwrap();
+    let thread = project_a.start(codex_start("append first")).await.unwrap();
+    wait(&thread, completed(1)).await;
+    let package = thread
+        .move_out(
+            &transfer(),
+            "host-b",
+            "studio",
+            "environment-target",
+            true,
+            Some("Append".to_owned()),
+        )
+        .await
+        .unwrap();
+
+    let landed = project_b.move_in(package.clone()).await.unwrap();
+    let worktree = landed
+        .worktree()
+        .await
+        .unwrap()
+        .expect("the branch has its own worktree");
+    assert_ne!(worktree, repo_b);
+    service_a.stop().await;
+    service_b.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_sealed_session_can_be_archived_and_deleted() {
+    let dir = tempdir::Dir::new();
+    let (origin, url) = shared_remote(dir.path());
+    let repo_a = clone_project(dir.path(), &origin, &url, "a");
+    git(&repo_a, &["checkout", "-q", "-b", "feature/sealed"]);
+    git(&repo_a, &["push", "-q", "-u", "origin", "feature/sealed"]);
+    let (service, host) = start_codex(&dir.path().join("host-a")).await;
+    let project = host.project(&repo_a).await.unwrap();
+    let thread = project.start(codex_start("append first")).await.unwrap();
+    wait(&thread, completed(1)).await;
+    let id = thread.id().to_owned();
+    let package = thread
+        .move_out(
+            &transfer(),
+            "host-b",
+            "studio",
+            "environment-target",
+            true,
+            Some("Append".to_owned()),
+        )
+        .await
+        .unwrap();
+    let summary = project
+        .threads()
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|t| t.id == id)
+        .unwrap();
+    thread
+        .move_finish(
+            &package.transfer,
+            MoveFinish::Seal {
+                to_host: "studio".to_owned(),
+            },
+        )
+        .await
+        .unwrap();
+
+    project
+        .archive(&id, true)
+        .await
+        .expect("a sealed session can be archived");
+    project
+        .delete(&summary, false)
+        .await
+        .expect("a sealed session can be deleted");
+    service.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_session_moved_back_to_the_host_it_left_continues_in_its_checkout() {
+    let dir = tempdir::Dir::new();
+    let (origin, url) = shared_remote(dir.path());
+    let repo_a = clone_project(dir.path(), &origin, &url, "a");
+    let repo_b = clone_project(dir.path(), &origin, &url, "b");
+    git(&repo_a, &["checkout", "-q", "-b", "feature/loop"]);
+    git(&repo_a, &["push", "-q", "-u", "origin", "feature/loop"]);
+    let (service_a, host_a) = start_codex(&dir.path().join("host-a")).await;
+    let (service_b, host_b) = start_codex(&dir.path().join("host-b")).await;
+    let project_a = host_a.project(&repo_a).await.unwrap();
+    let project_b = host_b.project(&repo_b).await.unwrap();
+    let thread = project_a.start(codex_start("append first")).await.unwrap();
+    wait(&thread, completed(1)).await;
+    let first = thread
+        .move_out(
+            &transfer(),
+            "host-b",
+            "studio",
+            "environment-target",
+            true,
+            Some("Append".to_owned()),
+        )
+        .await
+        .unwrap();
+    let there = project_b.move_in(first.clone()).await.unwrap();
+    wait(&there, completed(1)).await;
+    thread
+        .move_finish(
+            &first.transfer,
+            MoveFinish::Seal {
+                to_host: host_b.environment_name().await.unwrap(),
+            },
+        )
+        .await
+        .unwrap();
+
+    let back = there
+        .move_out(
+            &transfer(),
+            "host-b",
+            "studio",
+            "environment-target",
+            true,
+            Some("Append again".to_owned()),
+        )
+        .await
+        .unwrap();
+    there
+        .move_finish(
+            &back.transfer,
+            MoveFinish::Seal {
+                to_host: host_a.environment_name().await.unwrap(),
+            },
+        )
+        .await
+        .unwrap();
+    let home = project_a.move_in(back.clone()).await.unwrap();
+    assert_eq!(
+        home.worktree().await.unwrap().as_deref(),
+        Some(repo_a.as_path())
+    );
+    service_a.stop().await;
+    service_b.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_move_whose_reply_was_lost_is_open_on_the_session_and_can_be_released() {
+    let dir = tempdir::Dir::new();
+    let (origin, url) = shared_remote(dir.path());
+    let repo_a = clone_project(dir.path(), &origin, &url, "a");
+    let (service, host) = start_codex(&dir.path().join("host-a")).await;
+    let project = host.project(&repo_a).await.unwrap();
+    let thread = project.start(codex_start("append first")).await.unwrap();
+    wait(&thread, completed(1)).await;
+    thread.send("wait", false).await.unwrap();
+    wait(&thread, |s| {
+        s.turns.iter().any(|t| t.status == TurnStatus::Running)
+    })
+    .await;
+    thread.send("append one", false).await.unwrap();
+    wait(&thread, |s| {
+        s.turns
+            .iter()
+            .any(|t| t.status == TurnStatus::Queued && t.prompt == "append one")
+    })
+    .await;
+    let package = thread
+        .move_out(
+            &transfer(),
+            "host-b",
+            "studio",
+            "environment-target",
+            true,
+            Some("Append".to_owned()),
+        )
+        .await
+        .unwrap();
+
+    let open = thread
+        .move_check()
+        .await
+        .unwrap()
+        .moving
+        .expect("the handed move is open on the session");
+    assert_eq!(open.transfer, package.transfer);
+    thread
+        .move_finish(&open.transfer, MoveFinish::Release)
+        .await
+        .unwrap();
+    let after = thread.move_check().await.unwrap();
+    assert_eq!((after.moving, after.blocked), (None, None));
+    wait(&thread, |s| {
+        s.turns.iter().any(|t| {
+            t.prompt == "append one"
+                && matches!(t.status, TurnStatus::Running | TurnStatus::Completed)
+        })
+    })
+    .await;
+    service.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_repeated_move_out_returns_the_stored_package_and_a_second_transfer_is_refused() {
+    let dir = tempdir::Dir::new();
+    let (origin, url) = shared_remote(dir.path());
+    let repo_a = clone_project(dir.path(), &origin, &url, "a");
+    let (service, host) = start_codex(&dir.path().join("host-a")).await;
+    let project = host.project(&repo_a).await.unwrap();
+    let thread = project.start(codex_start("append first")).await.unwrap();
+    wait(&thread, completed(1)).await;
+    let first_transfer = transfer();
+    let first = thread
+        .move_out(
+            &first_transfer,
+            "host-b",
+            "studio",
+            "environment-target",
+            true,
+            Some("Append".to_owned()),
+        )
+        .await
+        .unwrap();
+    let again = thread
+        .move_out(
+            &first_transfer,
+            "host-b",
+            "studio",
+            "environment-target",
+            true,
+            Some("Append".to_owned()),
+        )
+        .await
+        .expect("a repeat of the same transfer returns its package");
+    assert_eq!(again, first);
+    let second = transfer();
+    let other = thread
+        .move_out(
+            &second,
+            "host-b",
+            "studio",
+            "environment-target",
+            true,
+            None,
+        )
+        .await
+        .unwrap_err();
+    assert!(other.contains("already moving"), "{other}");
+    service.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_starting_arrival_launches_its_chosen_thread_id_when_no_thread_exists_yet() {
+    let dir = tempdir::Dir::new();
+    let (origin, url) = shared_remote(dir.path());
+    let repo_a = clone_project(dir.path(), &origin, &url, "a");
+    let repo_b = clone_project(dir.path(), &origin, &url, "b");
+    git(&repo_a, &["checkout", "-q", "-b", "feature/chosen"]);
+    git(&repo_a, &["push", "-q", "-u", "origin", "feature/chosen"]);
+    let (service_a, host_a) = start_codex(&dir.path().join("host-a")).await;
+    let home_b = dir.path().join("host-b");
+    let (service_b, host_b) = start_codex(&home_b).await;
+    let project_a = host_a.project(&repo_a).await.unwrap();
+    let project_b = host_b.project(&repo_b).await.unwrap();
+    let thread = project_a.start(codex_start("append first")).await.unwrap();
+    wait(&thread, completed(1)).await;
+    let package = thread
+        .move_out(
+            &transfer(),
+            "host-b",
+            "studio",
+            "environment-target",
+            true,
+            Some("Append".to_owned()),
+        )
+        .await
+        .unwrap();
+    rusqlite::Connection::open(home_b.join("meta-harness.sqlite"))
+        .unwrap()
+        .execute(
+            "INSERT INTO arrival (transfer, state, root, thread, at_ms) \
+             VALUES (?1, 'starting', ?2, 'thread-chosen-before-launch', 0)",
+            rusqlite::params![package.transfer, repo_b.to_string_lossy()],
+        )
+        .unwrap();
+
+    let landed = project_b.move_in(package.clone()).await.unwrap();
+    assert_eq!(landed.id(), "thread-chosen-before-launch");
+    assert_eq!(
+        host_b.move_status(&package.transfer).await.unwrap(),
+        Arrival::Landed {
+            thread: "thread-chosen-before-launch".to_owned()
+        }
+    );
+    service_a.stop().await;
+    service_b.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_starting_arrival_adopts_the_thread_it_already_launched() {
+    let dir = tempdir::Dir::new();
+    let (origin, url) = shared_remote(dir.path());
+    let repo_a = clone_project(dir.path(), &origin, &url, "a");
+    let repo_b = clone_project(dir.path(), &origin, &url, "b");
+    git(&repo_a, &["checkout", "-q", "-b", "feature/adopted"]);
+    git(&repo_a, &["push", "-q", "-u", "origin", "feature/adopted"]);
+    let (service_a, host_a) = start_codex(&dir.path().join("host-a")).await;
+    let home_b = dir.path().join("host-b");
+    let (service_b, host_b) = start_codex(&home_b).await;
+    let project_a = host_a.project(&repo_a).await.unwrap();
+    let project_b = host_b.project(&repo_b).await.unwrap();
+    let thread = project_a.start(codex_start("append first")).await.unwrap();
+    wait(&thread, completed(1)).await;
+    let package = thread
+        .move_out(
+            &transfer(),
+            "host-b",
+            "studio",
+            "environment-target",
+            true,
+            Some("Append".to_owned()),
+        )
+        .await
+        .unwrap();
+    let landed = project_b.move_in(package.clone()).await.unwrap();
+    rusqlite::Connection::open(home_b.join("meta-harness.sqlite"))
+        .unwrap()
+        .execute("UPDATE arrival SET state = 'starting'", [])
+        .unwrap();
+
+    let adopted = project_b.move_in(package.clone()).await.unwrap();
+    assert_eq!(adopted.id(), landed.id());
+    assert_eq!(project_b.threads().await.unwrap().len(), 1);
+    service_a.stop().await;
+    service_b.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_move_abort_removes_the_thread_keeps_the_worktree_and_refuses_the_transfer() {
+    let dir = tempdir::Dir::new();
+    let (origin, url) = shared_remote(dir.path());
+    let repo_a = clone_project(dir.path(), &origin, &url, "a");
+    let repo_b = clone_project(dir.path(), &origin, &url, "b");
+    git(&repo_a, &["checkout", "-q", "-b", "feature/withdrawn"]);
+    git(
+        &repo_a,
+        &["push", "-q", "-u", "origin", "feature/withdrawn"],
+    );
+    let (service_a, host_a) = start_codex(&dir.path().join("host-a")).await;
+    let home_b = dir.path().join("host-b");
+    let (service_b, host_b) = start_codex(&home_b).await;
+    let project_a = host_a.project(&repo_a).await.unwrap();
+    let project_b = host_b.project(&repo_b).await.unwrap();
+    let thread = project_a.start(codex_start("append first")).await.unwrap();
+    wait(&thread, completed(1)).await;
+    let package = thread
+        .move_out(
+            &transfer(),
+            "host-b",
+            "studio",
+            "environment-target",
+            true,
+            Some("Append".to_owned()),
+        )
+        .await
+        .unwrap();
+    let landed = project_b.move_in(package.clone()).await.unwrap();
+    let worktree = landed.worktree().await.unwrap().expect("its own worktree");
+    rusqlite::Connection::open(home_b.join("meta-harness.sqlite"))
+        .unwrap()
+        .execute("UPDATE arrival SET state = 'starting'", [])
+        .unwrap();
+    assert_eq!(
+        host_b.move_status(&package.transfer).await.unwrap(),
+        Arrival::Starting
+    );
+
+    assert_eq!(
+        host_b.move_abort(&package.transfer).await.unwrap(),
+        Arrival::Refused
+    );
+    assert_eq!(
+        host_b.move_abort(&package.transfer).await.unwrap(),
+        Arrival::Refused
+    );
+    assert!(project_b.threads().await.unwrap().is_empty());
+    assert!(worktree.exists(), "a move never removes a worktree");
+    assert_eq!(
+        host_b.move_status(&package.transfer).await.unwrap(),
+        Arrival::Unknown
+    );
+    assert!(project_b.move_in(package.clone()).await.is_err());
+    service_a.stop().await;
+    service_b.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_move_abort_racing_a_landing_answers_what_landed() {
+    let dir = tempdir::Dir::new();
+    let (origin, url) = shared_remote(dir.path());
+    let repo_a = clone_project(dir.path(), &origin, &url, "a");
+    let repo_b = clone_project(dir.path(), &origin, &url, "b");
+    git(&repo_a, &["checkout", "-q", "-b", "feature/raced"]);
+    git(&repo_a, &["push", "-q", "-u", "origin", "feature/raced"]);
+    let (service_a, host_a) = start_codex(&dir.path().join("host-a")).await;
+    let (service_b, host_b) = start_codex(&dir.path().join("host-b")).await;
+    let project_a = host_a.project(&repo_a).await.unwrap();
+    let project_b = host_b.project(&repo_b).await.unwrap();
+    let thread = project_a.start(codex_start("append first")).await.unwrap();
+    wait(&thread, completed(1)).await;
+    let package = thread
+        .move_out(
+            &transfer(),
+            "host-b",
+            "studio",
+            "environment-target",
+            true,
+            Some("Append".to_owned()),
+        )
+        .await
+        .unwrap();
+
+    let (arrived, withdrawn) = tokio::join!(
+        project_b.move_in(package.clone()),
+        host_b.move_abort(&package.transfer)
+    );
+    match (arrived, withdrawn.unwrap()) {
+        (Ok(landed), Arrival::Landed { thread }) => assert_eq!(landed.id(), thread),
+        (Err(_), Arrival::Refused) => {}
+        (arrived, withdrawn) => panic!(
+            "landing {} and abort {withdrawn:?} disagree",
+            arrived.is_ok()
+        ),
+    }
+    service_a.stop().await;
+    service_b.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_moving_session_stays_listed_with_its_open_move() {
+    let dir = tempdir::Dir::new();
+    let (origin, url) = shared_remote(dir.path());
+    let repo_a = clone_project(dir.path(), &origin, &url, "a");
+    let (service, host) = start_codex(&dir.path().join("host-a")).await;
+    let project = host.project(&repo_a).await.unwrap();
+    let thread = project.start(codex_start("append first")).await.unwrap();
+    wait(&thread, completed(1)).await;
+    let id = thread.id().to_owned();
+    let transfer = transfer();
+    thread
+        .move_out(
+            &transfer,
+            "host-b",
+            "studio",
+            "environment-target",
+            true,
+            Some("Append".to_owned()),
+        )
+        .await
+        .unwrap();
+
+    let summary = project
+        .threads()
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|t| t.id == id)
+        .expect("a moving session stays listed");
+    let moving = summary.moving.expect("the summary names the open move");
+    assert_eq!(moving.transfer, transfer);
+    assert_eq!(moving.phase, MovePhase::Handed);
+    assert_eq!(moving.target_address, "host-b");
+    assert_eq!(moving.target_name, "studio");
+    assert_eq!(
+        thread.move_check().await.unwrap().moving.map(|m| m.phase),
+        Some(MovePhase::Handed)
+    );
+    thread
+        .move_finish(&transfer, MoveFinish::Release)
+        .await
+        .unwrap();
+    service.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_move_is_refused_while_a_live_session_uses_the_checkout_it_would_continue_in() {
+    let dir = tempdir::Dir::new();
+    let (origin, url) = shared_remote(dir.path());
+    let repo_a = clone_project(dir.path(), &origin, &url, "a");
+    let repo_b = clone_project(dir.path(), &origin, &url, "b");
+    let (service_a, host_a) = start_codex(&dir.path().join("host-a")).await;
+    let (service_b, host_b) = start_codex(&dir.path().join("host-b")).await;
+    let project_a = host_a.project(&repo_a).await.unwrap();
+    let project_b = host_b.project(&repo_b).await.unwrap();
+    let thread = project_a.start(codex_start("append first")).await.unwrap();
+    wait(&thread, completed(1)).await;
+    let package = thread
+        .move_out(
+            &transfer(),
+            "host-b",
+            "studio",
+            "environment-target",
+            true,
+            Some("Append".to_owned()),
+        )
+        .await
+        .unwrap();
+    let live = project_b.start(codex_start("work in b")).await.unwrap();
+    wait(&live, completed(1)).await;
+
+    let refused = project_b.move_in(package.clone()).await.err().unwrap();
+    assert!(refused.contains("checked out"), "{refused}");
+    assert_eq!(project_b.threads().await.unwrap().len(), 1);
+    service_a.stop().await;
+    service_b.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_move_is_refused_onto_a_checkout_that_tracks_another_branch() {
+    let dir = tempdir::Dir::new();
+    let (origin, url) = shared_remote(dir.path());
+    let repo_a = clone_project(dir.path(), &origin, &url, "a");
+    let repo_b = clone_project(dir.path(), &origin, &url, "b");
+    git(&repo_a, &["push", "-q", "origin", "main:refs/heads/side"]);
+    git(&repo_b, &["fetch", "-q", "origin"]);
+    git(
+        &repo_b,
+        &["branch", "--set-upstream-to=origin/side", "main"],
+    );
+    let (service_a, host_a) = start_codex(&dir.path().join("host-a")).await;
+    let (service_b, host_b) = start_codex(&dir.path().join("host-b")).await;
+    let project_a = host_a.project(&repo_a).await.unwrap();
+    let project_b = host_b.project(&repo_b).await.unwrap();
+    let thread = project_a.start(codex_start("append first")).await.unwrap();
+    wait(&thread, completed(1)).await;
+    let package = thread
+        .move_out(
+            &transfer(),
+            "host-b",
+            "studio",
+            "environment-target",
+            true,
+            Some("Append".to_owned()),
+        )
+        .await
+        .unwrap();
+
+    let refused = project_b.move_in(package.clone()).await.err().unwrap();
+    assert!(refused.contains("tracks"), "{refused}");
+    assert!(project_b.threads().await.unwrap().is_empty());
+    service_a.stop().await;
+    service_b.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_branch_in_a_project_with_two_remotes_is_blocked_and_an_absent_branch_still_gets_a_worktree()
+ {
+    let dir = tempdir::Dir::new();
+    let (origin, url) = shared_remote(dir.path());
+    let repo_a = clone_project(dir.path(), &origin, &url, "a");
+    let repo_b = clone_project(dir.path(), &origin, &url, "b");
+    git(
+        &repo_b,
+        &["remote", "add", "second", &origin.to_string_lossy()],
+    );
+    git(&repo_b, &["fetch", "-q", "second"]);
+    let (service_a, host_a) = start_codex(&dir.path().join("host-a")).await;
+    let (service_b, host_b) = start_codex(&dir.path().join("host-b")).await;
+    let project_a = host_a.project(&repo_a).await.unwrap();
+    let project_b = host_b.project(&repo_b).await.unwrap();
+    let root = repo_b.to_string_lossy().into_owned();
+    let thread = project_a.start(codex_start("append first")).await.unwrap();
+    wait(&thread, completed(1)).await;
+    let package = thread
+        .move_out(
+            &transfer(),
+            "host-b",
+            "studio",
+            "environment-target",
+            true,
+            Some("Append".to_owned()),
+        )
+        .await
+        .unwrap();
+
+    let Landing::Blocked { reason } = host_b.preflight(&root, "main").await.unwrap() else {
+        panic!("a branch that exists in a project with two remotes is blocked");
+    };
+    assert!(reason.contains("more than one Git remote"), "{reason}");
+    assert_eq!(
+        host_b.preflight(&root, "feature/absent").await.unwrap(),
+        Landing::NewWorktree
+    );
+    let refused = project_b.move_in(package.clone()).await.err().unwrap();
+    assert!(refused.contains("more than one Git remote"), "{refused}");
+    assert!(project_b.threads().await.unwrap().is_empty());
+    service_a.stop().await;
+    service_b.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_host_reports_a_stable_environment_id_and_a_move_keeps_its_target() {
+    let dir = tempdir::Dir::new();
+    let (origin, url) = shared_remote(dir.path());
+    let repo_a = clone_project(dir.path(), &origin, &url, "a");
+    let home_b = dir.path().join("host-b");
+    let (service_b, host_b) = start_codex(&home_b).await;
+    let environment = host_b.environment_id().await.unwrap();
+    assert_eq!(environment.len(), 36, "{environment}");
+    assert_eq!(environment.matches('-').count(), 4, "{environment}");
+    service_b.stop().await;
+    let (service_b, host_b) = start_codex(&home_b).await;
+    assert_eq!(host_b.environment_id().await.unwrap(), environment);
+    service_b.stop().await;
+
+    let (service_a, host_a) = start_codex(&dir.path().join("host-a")).await;
+    let project = host_a.project(&repo_a).await.unwrap();
+    let thread = project.start(codex_start("append first")).await.unwrap();
+    wait(&thread, completed(1)).await;
+    thread
+        .move_out(
+            &transfer(),
+            "host-b",
+            "studio",
+            &environment,
+            true,
+            Some("Append".to_owned()),
+        )
+        .await
+        .unwrap();
+    let moving = thread.move_check().await.unwrap().moving.unwrap();
+    assert_eq!(moving.target_environment, environment);
+    service_a.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_failed_record_store_is_retried_on_the_same_thread_and_lands_listed() {
+    let dir = tempdir::Dir::new();
+    let (origin, url) = shared_remote(dir.path());
+    let repo_a = clone_project(dir.path(), &origin, &url, "a");
+    let repo_b = clone_project(dir.path(), &origin, &url, "b");
+    git(&repo_a, &["checkout", "-q", "-b", "feature/recorded"]);
+    git(&repo_a, &["push", "-q", "-u", "origin", "feature/recorded"]);
+    let (service_a, host_a) = start_codex(&dir.path().join("host-a")).await;
+    let home_b = dir.path().join("host-b");
+    let (service_b, host_b) = start_codex(&home_b).await;
+    let project_a = host_a.project(&repo_a).await.unwrap();
+    let project_b = host_b.project(&repo_b).await.unwrap();
+    let thread = project_a.start(codex_start("append first")).await.unwrap();
+    wait(&thread, completed(1)).await;
+    let package = thread
+        .move_out(
+            &transfer(),
+            "host-b",
+            "studio",
+            "environment-target",
+            true,
+            Some("Append".to_owned()),
+        )
+        .await
+        .unwrap();
+    let raw = rusqlite::Connection::open(home_b.join("meta-harness.sqlite")).unwrap();
+    raw.execute_batch(
+        "CREATE TRIGGER refuse BEFORE INSERT ON move_record BEGIN SELECT RAISE(ABORT, 'refused'); END;",
+    )
+    .unwrap();
+    assert!(project_b.move_in(package.clone()).await.is_err());
+    raw.execute_batch("DROP TRIGGER refuse").unwrap();
+
+    let landed = project_b.move_in(package.clone()).await.unwrap();
+    let listed = project_b.threads().await.unwrap();
+    assert!(listed.iter().any(|t| t.id == landed.id()));
+    assert_eq!(
+        host_b.move_status(&package.transfer).await.unwrap(),
+        Arrival::Landed {
+            thread: landed.id().to_owned()
+        }
+    );
+    service_a.stop().await;
+    service_b.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_withdrawal_interrupted_after_its_delete_refuses_a_late_move_in_and_never_reports_landed()
+{
+    let dir = tempdir::Dir::new();
+    let (origin, url) = shared_remote(dir.path());
+    let repo_a = clone_project(dir.path(), &origin, &url, "a");
+    let repo_b = clone_project(dir.path(), &origin, &url, "b");
+    git(&repo_a, &["checkout", "-q", "-b", "feature/withdrawn-late"]);
+    git(
+        &repo_a,
+        &["push", "-q", "-u", "origin", "feature/withdrawn-late"],
+    );
+    let (service_a, host_a) = start_codex(&dir.path().join("host-a")).await;
+    let home_b = dir.path().join("host-b");
+    let (service_b, host_b) = start_codex(&home_b).await;
+    let project_a = host_a.project(&repo_a).await.unwrap();
+    let project_b = host_b.project(&repo_b).await.unwrap();
+    let thread = project_a.start(codex_start("append first")).await.unwrap();
+    wait(&thread, completed(1)).await;
+    let package = thread
+        .move_out(
+            &transfer(),
+            "host-b",
+            "studio",
+            "environment-target",
+            true,
+            Some("Append".to_owned()),
+        )
+        .await
+        .unwrap();
+    let landed = project_b.move_in(package.clone()).await.unwrap();
+    let summary = project_b
+        .threads()
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|t| t.id == landed.id())
+        .unwrap();
+    project_b.delete(&summary, false).await.unwrap();
+    let raw = rusqlite::Connection::open(home_b.join("meta-harness.sqlite")).unwrap();
+    raw.execute("UPDATE arrival SET state = 'landed'", [])
+        .unwrap();
+    assert_eq!(
+        host_b.move_status(&package.transfer).await.unwrap(),
+        Arrival::Unknown,
+        "a deleted thread is never reported as landed"
+    );
+    raw.execute("UPDATE arrival SET state = 'starting'", [])
+        .unwrap();
+    let late = project_b.move_in(package.clone()).await;
+    assert!(
+        late.as_ref().map_or(true, |t| t.id() != landed.id()),
+        "a deleted thread is not adopted"
+    );
+    service_a.stop().await;
+    service_b.stop().await;
 }

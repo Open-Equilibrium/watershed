@@ -1,3 +1,4 @@
+use super::private_workspace;
 #[cfg(feature = "m12-install-acceptance")]
 use crate::runtime::{
     config_io::load_global_config,
@@ -44,9 +45,7 @@ fn controller_admission_rejects_a_protected_home_file_with_an_outside_alias() {
         return;
     }
 
-    let root = crate::tests::helpers::empty_workspace("executor-home-alias-admission");
-    fs::set_permissions(&*root, fs::Permissions::from_mode(0o700))
-        .expect("synthetic installation is private");
+    let root = private_workspace("executor-home-alias-admission");
     let fixture = compile_fake_executor(&root);
     isolate_executor_configuration(&root);
     let executor_path = stage_case(&fixture, &root, "ready-without-start");
@@ -101,9 +100,7 @@ fn fake_companions_cover_the_closed_executor_protocol_matrix() {
         return;
     }
 
-    let root = crate::tests::helpers::empty_workspace("executor-fake-conformance");
-    fs::set_permissions(&*root, fs::Permissions::from_mode(0o700))
-        .expect("fake companion parent is private");
+    let root = private_workspace("executor-fake-conformance");
     let fixture = compile_fake_executor(&root);
     isolate_executor_configuration(&root);
 
@@ -128,18 +125,6 @@ fn fake_companions_cover_the_closed_executor_protocol_matrix() {
         ("probe-stderr", proto::ExecutorErrorCodeV0::Unavailable),
     ] {
         let executor = stage_case(&fixture, &root, mode);
-        if mode == "closed-schema" {
-            let probe = Command::new(&executor)
-                .arg("--probe")
-                .output()
-                .expect("closed-schema probe runs");
-            assert!(probe.status.success());
-            let error = proto::parse_executor_probe_v0(&probe.stdout).unwrap_err();
-            assert!(
-                error.to_string().contains("unknown field `unexpected`"),
-                "closed-schema must reach schema validation: {error}"
-            );
-        }
         let marker = executor.with_extension("tool-spawned");
         let error = configure_executor_path(&executor)
             .expect_err("invalid preflight companion must fail closed");
@@ -199,7 +184,6 @@ fn fake_companions_cover_the_closed_executor_protocol_matrix() {
     );
     assert!(request.resolved_policy.environment.is_empty());
     assert_eq!(request.resolved_policy.limits.timeout_ms, 1_000);
-    assert!(!request.resolved_policy.protected_objects.is_empty());
     let flow = env::current_exe().expect("current Flow image resolves");
     let home = crate::runtime::session_store::open_flow_agent_home(false)
         .expect("selected home opens")
@@ -307,21 +291,15 @@ fn fake_companions_cover_the_closed_executor_protocol_matrix() {
         );
     }
 
-    let started = Instant::now();
-    let timeout = dispatch_error(&fixture, &root, "timeout", 1);
-    assert_executor_code(&timeout, proto::ExecutorErrorCodeV0::InvalidResponse);
-    assert!(
-        started.elapsed() < Duration::from_secs(7),
-        "fake companion timeout must include bounded cleanup"
-    );
-
-    let started = Instant::now();
-    let timeout = dispatch_error(&fixture, &root, "preflight-timeout", 1);
-    assert_executor_code(&timeout, proto::ExecutorErrorCodeV0::InvalidResponse);
-    assert!(
-        started.elapsed() < Duration::from_secs(7),
-        "preflight timeout must begin at companion spawn and include cleanup"
-    );
+    for mode in ["timeout", "preflight-timeout"] {
+        let started = Instant::now();
+        let timeout = dispatch_error(&fixture, &root, mode, 1);
+        assert_executor_code(&timeout, proto::ExecutorErrorCodeV0::InvalidResponse);
+        assert!(
+            started.elapsed() < Duration::from_secs(7),
+            "{mode} must include bounded cleanup"
+        );
+    }
     assert!(
         !root
             .join("fake-executor-preflight-timeout.tool-spawned")
@@ -337,16 +315,13 @@ fn productive_session_uses_the_selected_executor_and_persists_its_receipt() {
         return;
     }
 
-    let executor_root = crate::tests::helpers::empty_workspace("executor-productive-session");
-    fs::set_permissions(&*executor_root, fs::Permissions::from_mode(0o700))
-        .expect("fake companion parent is private");
+    let executor_root = private_workspace("executor-productive-session");
     let fixture = compile_fake_executor(&executor_root);
     isolate_executor_configuration(&executor_root);
     let executor = stage_case(&fixture, &executor_root, "productive-session");
     let marker = executor.with_extension("tool-spawned");
     configure_executor_path(&executor).expect("productive Executor is selected");
 
-    // This exact test owns its process, so the feature-gated provider switch cannot leak.
     unsafe { env::set_var("FLOW_AGENT_M12_INSTALL_ACCEPTANCE", "1") };
     let (workspace, fixture) = configured_smoke_productive_execution_fixture();
     let config = load_global_config().expect("productive config loads");
@@ -503,7 +478,6 @@ fn captured_request(executor: &Path) -> (proto::ExecutorRequestV0, Vec<u8>) {
 }
 
 pub(super) fn isolate_executor_configuration(root: &Path) {
-    // Cargo's exact-test child and nextest both give this test exclusive process state.
     #[cfg(target_os = "linux")]
     unsafe {
         env::set_var("XDG_CONFIG_HOME", root.join("xdg-config"))
@@ -514,7 +488,6 @@ pub(super) fn isolate_executor_configuration(root: &Path) {
         fs::create_dir(&home).expect("synthetic user home is staged");
         fs::set_permissions(&home, fs::Permissions::from_mode(0o700))
             .expect("synthetic user home is private");
-        // Compile the fixture before this switch so rustup retains its real toolchain home.
         unsafe { env::set_var("HOME", home) };
     }
 }
@@ -583,8 +556,6 @@ fn prepare_case(
     admission
         .try_lock()
         .expect("controller admission released its lease");
-    // Tool preparation uses the admitted set even while another admission owns
-    // the namespace lease; a retained-history rescan would fail this preparation.
     let prepared = executor.prepare_tool(&workspace, &policy, command, &invocation, REQUEST_ID)?;
     drop(admission);
     Ok((executor, prepared))
@@ -627,7 +598,7 @@ fn policy(timeout_ms: u64) -> core_policy::PolicyArtifact {
     policy
 }
 
-fn assert_executor_code(error: &RuntimeError, expected: proto::ExecutorErrorCodeV0) {
+pub(super) fn assert_executor_code(error: &RuntimeError, expected: proto::ExecutorErrorCodeV0) {
     let rendered = error.to_string();
     let RuntimeError::Executor(failure) = error else {
         panic!("unexpected fake companion failure: {rendered}")

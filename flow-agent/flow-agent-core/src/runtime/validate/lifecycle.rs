@@ -202,7 +202,6 @@ impl SessionLifecycleState {
         Ok(())
     }
 
-    /// Validates a flow.completed or flow.failed event: same definition, no open Phase or child Flow.
     fn validate_flow_terminal(
         &self,
         path: &Path,
@@ -245,7 +244,6 @@ impl SessionLifecycleState {
         Ok(())
     }
 
-    /// Validates a phase.entered event: the Phase is new, unique among active Phases, and not below a leaf.
     fn validate_phase_entered(
         &self,
         path: &Path,
@@ -290,7 +288,6 @@ impl SessionLifecycleState {
         Ok(())
     }
 
-    /// Validates a phase.completed or phase.failed event against the innermost active Phase.
     fn validate_phase_terminal(
         &self,
         path: &Path,
@@ -350,7 +347,6 @@ impl SessionLifecycleState {
         Ok(())
     }
 
-    /// Validates a tool.started event: it needs an active leaf Phase and a fresh, non-terminal tool.
     fn validate_tool_started(
         &self,
         path: &Path,
@@ -370,7 +366,6 @@ impl SessionLifecycleState {
         Ok(())
     }
 
-    /// Validates a tool.progress, tool.completed or tool.timed_out event against its started tool.
     fn validate_tool_update(
         &self,
         path: &Path,
@@ -390,7 +385,6 @@ impl SessionLifecycleState {
         Ok(())
     }
 
-    /// Validates a tool.failed event; a tool that never started may fail only before its Phase.
     fn validate_tool_failed(
         &self,
         path: &Path,
@@ -567,8 +561,6 @@ fn open_lifecycle_error(path: &Path, kind: &str, id: &str) -> RuntimeError {
     ))
 }
 
-/// Ensures parent flow references are already started, still active, and
-/// consistent with the parent recorded by flow.started.
 fn validate_lifecycle_parent(
     path: &Path,
     line_number: usize,

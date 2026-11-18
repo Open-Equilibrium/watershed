@@ -5,6 +5,7 @@ mod details;
 mod drawing;
 mod hosts;
 mod media;
+mod moves;
 mod record;
 mod session;
 mod stream;

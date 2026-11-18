@@ -136,7 +136,7 @@ impl ProductiveRecovery for InjectedAttemptRecovery {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub(in super::super) enum FailingRecoveryBoundary {
     RecordAttempt,
     Phase,
@@ -148,8 +148,14 @@ pub(in super::super) enum FailingRecoveryBoundary {
 pub(in super::super) struct FailingBoundaryRecovery(pub(in super::super) FailingRecoveryBoundary);
 
 impl FailingBoundaryRecovery {
-    fn failure(&self, boundary: &str) -> RuntimeError {
-        RuntimeError::Protocol(format!("fixture {boundary} recovery failure"))
+    fn fail_at(&self, boundary: FailingRecoveryBoundary, label: &str) -> Result<(), RuntimeError> {
+        if self.0 == boundary {
+            Err(RuntimeError::Protocol(format!(
+                "fixture {label} recovery failure"
+            )))
+        } else {
+            Ok(())
+        }
     }
 }
 
@@ -160,10 +166,7 @@ impl ProductiveRecovery for FailingBoundaryRecovery {
         _request_hash: &str,
         _result: &RunAttemptResult,
     ) -> Result<(), RuntimeError> {
-        match self.0 {
-            FailingRecoveryBoundary::RecordAttempt => Err(self.failure("attempt")),
-            _ => Ok(()),
-        }
+        self.fail_at(FailingRecoveryBoundary::RecordAttempt, "attempt")
     }
 
     fn phase_boundary(
@@ -175,10 +178,7 @@ impl ProductiveRecovery for FailingBoundaryRecovery {
         _result: &core_script::FlowValue,
         _will_repeat: bool,
     ) -> Result<(), RuntimeError> {
-        match self.0 {
-            FailingRecoveryBoundary::Phase => Err(self.failure("Phase")),
-            _ => Ok(()),
-        }
+        self.fail_at(FailingRecoveryBoundary::Phase, "Phase")
     }
 
     fn transition_boundary(
@@ -187,10 +187,7 @@ impl ProductiveRecovery for FailingBoundaryRecovery {
         _from_phase_id: &str,
         _to_phase_id: Option<&str>,
     ) -> Result<(), RuntimeError> {
-        match self.0 {
-            FailingRecoveryBoundary::Transition => Err(self.failure("Transition")),
-            _ => Ok(()),
-        }
+        self.fail_at(FailingRecoveryBoundary::Transition, "Transition")
     }
 
     fn flow_boundary(
@@ -198,10 +195,7 @@ impl ProductiveRecovery for FailingBoundaryRecovery {
         _flow_execution_id: &str,
         _result: Option<&core_script::FlowValue>,
     ) -> Result<(), RuntimeError> {
-        match self.0 {
-            FailingRecoveryBoundary::Flow => Err(self.failure("Flow")),
-            _ => Ok(()),
-        }
+        self.fail_at(FailingRecoveryBoundary::Flow, "Flow")
     }
 
     fn terminal_boundary(
@@ -210,9 +204,6 @@ impl ProductiveRecovery for FailingBoundaryRecovery {
         _failed: bool,
         _run_event_count: u64,
     ) -> Result<(), RuntimeError> {
-        match self.0 {
-            FailingRecoveryBoundary::Terminal => Err(self.failure("terminal")),
-            _ => Ok(()),
-        }
+        self.fail_at(FailingRecoveryBoundary::Terminal, "terminal")
     }
 }

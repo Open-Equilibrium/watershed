@@ -5,17 +5,12 @@ import 'package:flutter/widgets.dart';
 
 import 'keymap.dart';
 
-/// Shows contextual shortcut hints while the reveal key alone is held for a moment, so they
-/// stay out of the GUI otherwise: the Liquid key while it is on, ⌘ otherwise. Pressing
-/// another key meanwhile, as for a shortcut, shows nothing.
 class ShortcutReveal extends StatefulWidget {
   const ShortcutReveal({super.key, required this.liquid, required this.child});
 
-  /// Whether the Liquid key reveals the hints instead of ⌘.
   final bool liquid;
   final Widget child;
 
-  /// Whether hints below `context` show now; the caller rebuilds when this changes.
   static bool shown(BuildContext context) =>
       context.dependOnInheritedWidgetOfExactType<_Shown>()?.notifier?.value ??
       false;
@@ -38,7 +33,6 @@ class _ShortcutRevealState extends State<ShortcutReveal> {
   @override
   void didUpdateWidget(ShortcutReveal old) {
     super.didUpdateWidget(old);
-    // Hints shown or pending for the other reveal key end with it.
     if (old.liquid != widget.liquid) {
       _timer?.cancel();
       _shown.value = false;
@@ -59,7 +53,6 @@ class _ShortcutRevealState extends State<ShortcutReveal> {
         ? key == liquidKey
         : key == LogicalKeyboardKey.metaLeft ||
               key == LogicalKeyboardKey.metaRight;
-    // The Liquid key itself must not reach a text field.
     final handled = widget.liquid && key == liquidKey;
     if (event is KeyRepeatEvent) return handled;
     _timer?.cancel();
@@ -68,7 +61,6 @@ class _ShortcutRevealState extends State<ShortcutReveal> {
         HardwareKeyboard.instance.logicalKeysPressed.length == 1) {
       _timer = Timer(_delay, () => _shown.value = true);
     } else {
-      // Another key, or letting go of the reveal key, ends it.
       _shown.value = false;
     }
     return handled;

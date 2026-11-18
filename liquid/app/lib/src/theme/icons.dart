@@ -1,8 +1,5 @@
 import 'package:flutter/widgets.dart';
 
-/// Lucide icons (ISC) from the vendored font `assets/fonts/lucide.ttf` of
-/// lucide-static 1.61.0; the codepoints come from its `font/codepoints.json`. Release builds
-/// keep only the glyphs used here.
 abstract final class LucideIcons {
   static const _family = 'Lucide';
   static const check = IconData(0xe06c, fontFamily: _family);
@@ -70,6 +67,8 @@ abstract final class LucideIcons {
   static const arrowUpRight = IconData(0xe04d, fontFamily: _family);
   static const folderGit = IconData(0xe409, fontFamily: _family);
   static const server = IconData(0xe153, fontFamily: _family);
+  static const cloud = IconData(0xe088, fontFamily: _family);
+  static const monitor = IconData(0xe11d, fontFamily: _family);
   static const globe = IconData(0xe0e8, fontFamily: _family);
   static const square = IconData(0xe167, fontFamily: _family);
   static const calendarClock = IconData(0xe304, fontFamily: _family);

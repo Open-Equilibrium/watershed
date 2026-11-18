@@ -1,15 +1,12 @@
-/// Returns whether `value` is a valid v0 block id.
 pub fn is_valid_block_id(value: &str) -> bool {
     proto::is_valid_session_id(value)
 }
 
-/// Returns whether `value` is a valid predefined command id.
 pub fn is_valid_command_id(value: &str) -> bool {
     matches_lower_token(value, 1, 64)
         && value.as_bytes().first().is_some_and(u8::is_ascii_lowercase)
 }
 
-/// Returns whether `value` is a valid allowed-parameter name.
 pub fn is_valid_allowed_parameter_name(value: &str) -> bool {
     let Some(rest) = value.strip_prefix("--") else {
         return false;
@@ -22,7 +19,6 @@ pub fn is_valid_allowed_parameter_name(value: &str) -> bool {
         && bytes.all(|byte| byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'-')
 }
 
-/// Normalizes a safe slash-separated relative path or rejects unsafe aliases.
 pub fn normalize_safe_relative_path(value: &str) -> Option<String> {
     if value.is_empty()
         || value.starts_with('/')
@@ -45,7 +41,6 @@ pub fn normalize_safe_relative_path(value: &str) -> Option<String> {
     Some(value.to_owned())
 }
 
-/// Returns whether `path` is equal to or contained under `scope`.
 pub fn relative_path_is_inside_scope(path: &str, scope: &str) -> bool {
     normalize_safe_relative_path(path).as_deref() == Some(path)
         && normalize_safe_relative_path(scope).as_deref() == Some(scope)
@@ -55,7 +50,6 @@ pub fn relative_path_is_inside_scope(path: &str, scope: &str) -> bool {
                 .is_some_and(|suffix| suffix.starts_with('/')))
 }
 
-/// Returns whether any path component would alias a Windows device or trimmed name.
 pub fn relative_path_has_windows_alias(value: &str) -> bool {
     value.split('/').any(|component| {
         !matches!(component, "" | "." | "..") && path_component_has_windows_alias(component)

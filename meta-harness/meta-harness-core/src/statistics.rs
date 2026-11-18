@@ -1,7 +1,3 @@
-//! A thread's exact statistics from T3's records (ADR-0279, ADR-0293): tokens per provider
-//! turn, tool calls by name and outcome, and each turn's working and tool time. T3 reports no
-//! cost per turn and no timing of single model requests, so neither is counted.
-
 use std::collections::HashMap;
 
 use serde_json::Value;
@@ -10,72 +6,43 @@ use crate::t3::{Projection, millis, prompt_of};
 use crate::thread::{describe, duration, failed, usage_of};
 use crate::{Context, ItemDetail, Usage};
 
-/// What one model used.
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone, Default, PartialEq, Eq)]
 pub struct ModelUsage {
-    /// The model as `provider/id`; empty for usage no model produced, such as a compaction summary.
     pub model: String,
-    /// Its tokens.
     pub usage: Usage,
-    /// Responses that reported usage.
     pub responses: u32,
 }
 
-/// The calls of one tool, by outcome.
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone, Default, PartialEq, Eq)]
 pub struct ToolCalls {
-    /// The tool's name as Watershed shows it.
     pub name: String,
-    /// Calls whose result succeeded.
     pub succeeded: u32,
-    /// Calls whose result failed.
     pub failed: u32,
-    /// Calls without a result, whose turn ended or was followed by a later turn.
     pub cancelled: u32,
-    /// Calls without a result in the turn that still runs.
     pub open: u32,
-    /// Time its calls took, summed over the calls whose timing entries say how long; `None` when
-    /// none of them does.
     pub duration_ms: Option<u64>,
 }
 
-/// One turn and what it counted to.
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone, Default, PartialEq, Eq)]
 pub struct TurnStatistics {
-    /// T3's run ordinal, as text.
     pub entry: String,
-    /// The first line of its first prompt.
     pub prompt: String,
-    /// When its first entry was stored, in Unix milliseconds.
     pub started_ms: Option<u64>,
-    /// When its clock stopped: at its end checkpoint, or else at its last entry before the next turn.
     pub ended_ms: Option<u64>,
-    /// What each model used, sorted as [`Statistics::models`].
     pub models: Vec<ModelUsage>,
-    /// Time its tools took: for each response, the longest of its tools, summed; zero for a turn
-    /// without tool calls, and `None` when its tool calls carry no timing.
     pub tool_ms: Option<u64>,
-    /// Tool calls whose result failed.
     pub failed: u32,
 }
 
-/// What a session's stored entries count to.
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone, Default, PartialEq, Eq)]
 pub struct Statistics {
-    /// What each model used over the whole session, the entries before the first turn included,
-    /// largest first by tokens.
     pub models: Vec<ModelUsage>,
-    /// The calls of each tool over the whole session, largest total first.
     pub tools: Vec<ToolCalls>,
-    /// The turns, oldest first.
     pub turns: Vec<TurnStatistics>,
-    /// When the session's first entry was stored, in Unix milliseconds.
     pub started_ms: Option<u64>,
-    /// When its last entry was stored.
     pub ended_ms: Option<u64>,
 }
 
-/// Counts the thread's turns that were not reverted.
 pub(crate) fn statistics(projection: &Projection) -> Statistics {
     let mut models = Vec::new();
     let mut tools: Vec<ToolCalls> = Vec::new();
@@ -85,15 +52,11 @@ pub(crate) fn statistics(projection: &Projection) -> Statistics {
         .iter()
         .filter(|r| r["status"] != "rolled_back")
         .collect();
-    // Only the turn that still runs may have unfinished calls: the last one that started, as turns
-    // queued behind it, or removed from the queue, never did.
     let started: Vec<&Value> = visible
         .iter()
         .copied()
         .filter(|r| r["status"] != "queued" && !r["startedAt"].is_null())
         .collect();
-    // Each record grouped by its run once, so the work stays linear in the thread's history; this
-    // runs while the thread's state is locked.
     let attempt_runs: HashMap<&str, &str> = projection
         .attempts
         .iter()
@@ -130,7 +93,6 @@ pub(crate) fn statistics(projection: &Projection) -> Statistics {
                 add(&mut models, model, usage);
             }
         }
-        // Each response's longest timed call: the calls of one response may run in parallel.
         let mut response_ms: HashMap<String, u64> = HashMap::new();
         let mut had_tools = false;
         let mut failures = 0;
@@ -161,7 +123,6 @@ pub(crate) fn statistics(projection: &Projection) -> Statistics {
             }
             if let Some(ms) = duration(item) {
                 calls.duration_ms = Some(calls.duration_ms.unwrap_or_default() + ms);
-                // A call T3 did not tag with its response stands for its own.
                 let response = match item["providerTurnId"].as_str() {
                     Some(turn) => turn.to_owned(),
                     None => item["id"].to_string(),
@@ -180,7 +141,6 @@ pub(crate) fn statistics(projection: &Projection) -> Statistics {
             started_ms: millis(&run["startedAt"]),
             ended_ms: millis(&run["completedAt"]),
             models: turn_models,
-            // Unknown only when the turn's tool calls carry no timing; no calls take no time.
             tool_ms: (!response_ms.is_empty() || !had_tools).then(|| response_ms.values().sum()),
             failed: failures,
         });
@@ -199,14 +159,12 @@ pub(crate) fn statistics(projection: &Projection) -> Statistics {
     }
 }
 
-/// Orders models largest first by the tokens they used.
 fn sort_models(models: &mut [ModelUsage]) {
     let total =
         |m: &ModelUsage| m.usage.input + m.usage.output + m.usage.cache_read + m.usage.cache_write;
     models.sort_by_key(|m| std::cmp::Reverse(total(m)));
 }
 
-/// The context window from the latest provider turn that reported one.
 pub(crate) fn context(projection: &Projection) -> Option<Context> {
     let usage = projection
         .provider_turns

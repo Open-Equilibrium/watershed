@@ -10,7 +10,7 @@ use super::{
 };
 use crate::runtime::{
     conversations::{
-        HistoryScratchFault, HistoryScratchMemberStage, HistoryScratchStage,
+        ConversationEntry, HistoryScratchFault, HistoryScratchMemberStage, HistoryScratchStage,
         MAX_CONVERSATION_SCAN_RECORDS, abandon_history_index_scratch_for_test,
         abandon_history_index_scratches_for_test, append_run_attempt_result,
         complete_history_index_scratch_for_test, create_conversation_run,
@@ -32,11 +32,8 @@ use std::{
     time::{Duration, Instant},
 };
 
-#[test]
-fn conversation_history_scratch_budget() {
-    let workspace = empty_workspace("conversation-history-active-read-bound");
-    create_terminal_review_run(&workspace);
-    let records = (0..=MAX_CONVERSATION_SCAN_RECORDS)
+fn linear_history(count: usize) -> Vec<ConversationEntry> {
+    (0..count)
         .map(|index| {
             let parent = (index > 0).then(|| format!("entry-{:04}", index - 1));
             entry(
@@ -46,8 +43,18 @@ fn conversation_history_scratch_budget() {
                 1,
             )
         })
-        .collect::<Vec<_>>();
-    write_history_records(&workspace, "review", &records);
+        .collect()
+}
+
+#[test]
+fn conversation_history_scratch_budget() {
+    let workspace = empty_workspace("conversation-history-active-read-bound");
+    create_terminal_review_run(&workspace);
+    write_history_records(
+        &workspace,
+        "review",
+        linear_history(MAX_CONVERSATION_SCAN_RECORDS + 1),
+    );
 
     let history = read_conversation_history(&workspace, "review")
         .expect("valid history continues across scan quanta");
@@ -79,47 +86,34 @@ fn conversation_history_scratch_budget() {
 fn conversation_history_rejects_graph_corruption_across_a_scan_quantum() {
     let workspace = empty_workspace("conversation-history-cross-quantum-corruption");
     create_terminal_review_run(&workspace);
-    let valid_prefix = (0..=MAX_CONVERSATION_SCAN_RECORDS)
-        .map(|index| {
-            let parent = (index > 0).then(|| format!("entry-{:04}", index - 1));
-            entry(
-                &format!("entry-{index:04}"),
-                parent.as_deref(),
-                "review-1",
-                1,
-            )
-        })
-        .collect::<Vec<_>>();
-    for (name, invalid) in [
+    for (name, suffix, expected) in [
         (
             "duplicate",
-            entry("entry-0000", Some("entry-4096"), "review-1", 1),
+            vec![entry("entry-0000", Some("entry-4096"), "review-1", 1)],
+            "duplicated",
         ),
         (
             "missing-parent",
-            entry("entry-4097", Some("missing"), "review-1", 1),
+            vec![entry("entry-4097", Some("missing"), "review-1", 1)],
+            "does not precede",
         ),
         (
             "later-parent",
-            entry("entry-4097", Some("entry-4098"), "review-1", 1),
+            vec![
+                entry("entry-4097", Some("entry-4098"), "review-1", 1),
+                entry("entry-4098", Some("entry-4096"), "review-1", 1),
+            ],
+            "does not precede",
         ),
     ] {
-        let mut records = valid_prefix.clone();
-        records.push(invalid);
-        if name == "later-parent" {
-            records.push(entry("entry-4098", Some("entry-4096"), "review-1", 1));
-        }
-        write_history_records(&workspace, "review", &records);
+        let records = linear_history(MAX_CONVERSATION_SCAN_RECORDS + 1)
+            .into_iter()
+            .chain(suffix)
+            .collect::<Vec<_>>();
+        write_history_records(&workspace, "review", records);
         let error = read_conversation_history(&workspace, "review")
             .expect_err("cross-quantum graph corruption must fail");
-        assert!(
-            error.to_string().contains(if name == "duplicate" {
-                "duplicated"
-            } else {
-                "does not precede"
-            }),
-            "{name}: {error}"
-        );
+        assert!(error.to_string().contains(expected), "{name}: {error}");
         assert_history_validation_scratch_is_empty(&workspace);
     }
 }
@@ -306,19 +300,19 @@ fn history_scratch_cleanup_validates_members_before_effects() {
 }
 
 #[test]
-fn history_scratch_publication_excludes_a_peer_stale_sweep() {
-    assert_history_scratch_root_serializes(
-        "history-scratch-publication-serialization",
-        HistoryScratchStage::DirectoryCreated,
-    );
-}
-
-#[test]
-fn history_scratch_removal_excludes_a_peer_stale_sweep() {
-    assert_history_scratch_root_serializes(
-        "history-scratch-removal-serialization",
-        HistoryScratchStage::UnlockedForRemoval,
-    );
+fn history_scratch_root_lease_excludes_a_peer_stale_sweep_at_publication_and_removal() {
+    for (label, boundary) in [
+        (
+            "history-scratch-publication-serialization",
+            HistoryScratchStage::DirectoryCreated,
+        ),
+        (
+            "history-scratch-removal-serialization",
+            HistoryScratchStage::UnlockedForRemoval,
+        ),
+    ] {
+        assert_history_scratch_root_serializes(label, boundary);
+    }
 }
 
 #[test]
@@ -676,154 +670,95 @@ fn assert_history_scratch_root_serializes(label: &str, owner_boundary: HistorySc
 }
 
 #[test]
-fn conversation_history_preserves_stale_scratch_with_a_foreign_marker_identity() {
-    let (workspace, stale) =
-        stale_history_validation_scratch("conversation-history-foreign-scratch-marker");
-    let marker_path = stale.join("marker.json");
-    let mut marker = serde_json::from_slice::<serde_json::Value>(
-        &fs::read(&marker_path).expect("scratch marker reads"),
-    )
-    .expect("scratch marker parses");
-    let inode = marker["inode"]
-        .as_u64()
-        .expect("scratch marker inode is an unsigned integer");
-    marker["inode"] = serde_json::json!(inode ^ 1);
-    let foreign_marker = format!(
-        "{}\n",
-        serde_json::to_string(&marker).expect("foreign marker serializes")
-    );
-    fs::write(&marker_path, &foreign_marker).expect("foreign marker writes");
-    let lease_path = stale.join("lease");
-    let lease_bytes = fs::read(&lease_path).expect("scratch lease reads");
-
-    let error = read_conversation_history(&workspace, "review")
-        .expect_err("a foreign marker identity must fail closed");
-    assert!(error.to_string().contains("scratch identity is invalid"));
-    assert!(stale.is_dir());
-    assert_eq!(
-        fs::read(&marker_path).expect("foreign marker remains"),
-        foreign_marker.as_bytes()
-    );
-    assert_eq!(
-        fs::read(&lease_path).expect("scratch lease remains"),
-        lease_bytes
-    );
-    assert_eq!(
-        fs::read_dir(&stale).expect("foreign scratch reads").count(),
-        2
-    );
-}
-
-#[test]
-fn conversation_history_preserves_stale_scratch_with_a_foreign_marker_schema() {
-    let (workspace, stale) =
-        stale_history_validation_scratch("conversation-history-foreign-scratch-schema");
-    let marker_path = stale.join("marker.json");
-    let mut marker = serde_json::from_slice::<serde_json::Value>(
-        &fs::read(&marker_path).expect("scratch marker reads"),
-    )
-    .expect("scratch marker parses");
-    marker["schema"] = serde_json::json!("foreign-history-index-schema-v0");
-    let foreign_marker = format!(
-        "{}\n",
-        serde_json::to_string(&marker).expect("foreign marker serializes")
-    );
-    fs::write(&marker_path, &foreign_marker).expect("foreign marker writes");
-
-    let error = read_conversation_history(&workspace, "review")
-        .expect_err("a foreign marker schema must fail closed");
-    assert!(
-        error
-            .to_string()
-            .contains("scratch marker schema is invalid")
-    );
-    assert!(stale.is_dir());
-    assert_eq!(
-        fs::read(&marker_path).expect("foreign marker remains"),
-        foreign_marker.as_bytes()
-    );
-    assert_eq!(
-        fs::read_dir(&stale).expect("foreign scratch reads").count(),
-        2
-    );
-}
-
-#[test]
-fn conversation_history_preserves_stale_scratch_with_a_foreign_member() {
-    let (workspace, stale) =
-        stale_history_validation_scratch("conversation-history-foreign-scratch-member");
-    let foreign_path = stale.join("foreign.bin");
-    let foreign_bytes = b"foreign scratch bytes";
-    fs::write(&foreign_path, foreign_bytes).expect("foreign scratch member writes");
-
-    let error = read_conversation_history(&workspace, "review")
-        .expect_err("a foreign scratch member must fail closed");
-    assert!(error.to_string().contains("scratch contains foreign bytes"));
-    assert!(stale.is_dir());
-    assert_eq!(
-        fs::read(&foreign_path).expect("foreign scratch member remains"),
-        foreign_bytes
-    );
-    assert_eq!(
-        fs::read_dir(&stale).expect("foreign scratch reads").count(),
-        3
-    );
-}
-
-#[test]
-fn malformed_stale_scratch_markers_fail_closed_and_remain_unchanged() {
-    type MarkerCase = (&'static str, fn(Vec<u8>) -> Vec<u8>, &'static str);
-    let cases: [MarkerCase; 3] = [
+fn conversation_history_preserves_unsafe_stale_scratch_unchanged() {
+    type Corruption = fn(&Path);
+    let cases: [(&str, Corruption, &str); 6] = [
         (
-            "invalid-utf8",
-            |_| vec![0xff, b'\n'],
+            "foreign-marker-identity",
+            |stale| {
+                let path = stale.join("marker.json");
+                let mut marker = serde_json::from_slice::<serde_json::Value>(
+                    &fs::read(&path).expect("scratch marker reads"),
+                )
+                .expect("scratch marker parses");
+                let inode = marker["inode"]
+                    .as_u64()
+                    .expect("scratch marker inode is an unsigned integer");
+                marker["inode"] = serde_json::json!(inode ^ 1);
+                let foreign = format!(
+                    "{}\n",
+                    serde_json::to_string(&marker).expect("foreign marker serializes")
+                );
+                fs::write(&path, foreign).expect("foreign marker writes");
+            },
+            "scratch identity is invalid",
+        ),
+        (
+            "foreign-marker-schema",
+            |stale| {
+                let path = stale.join("marker.json");
+                let mut marker = serde_json::from_slice::<serde_json::Value>(
+                    &fs::read(&path).expect("scratch marker reads"),
+                )
+                .expect("scratch marker parses");
+                marker["schema"] = serde_json::json!("foreign-history-index-schema-v0");
+                let foreign = format!(
+                    "{}\n",
+                    serde_json::to_string(&marker).expect("foreign marker serializes")
+                );
+                fs::write(&path, foreign).expect("foreign marker writes");
+            },
+            "scratch marker schema is invalid",
+        ),
+        (
+            "foreign-member",
+            |stale| {
+                fs::write(stale.join("foreign.bin"), b"foreign scratch bytes")
+                    .expect("foreign scratch member writes");
+            },
+            "scratch contains foreign bytes",
+        ),
+        (
+            "invalid-utf8-marker",
+            |stale| {
+                fs::write(stale.join("marker.json"), [0xff, b'\n'])
+                    .expect("malformed marker writes");
+            },
             "scratch marker is not UTF-8",
         ),
         (
-            "missing-lf",
-            |mut marker| {
+            "missing-lf-marker",
+            |stale| {
+                let path = stale.join("marker.json");
+                let mut marker = fs::read(&path).expect("scratch marker reads");
                 assert_eq!(marker.pop(), Some(b'\n'));
-                marker
+                fs::write(&path, marker).expect("malformed marker writes");
             },
             "scratch marker framing is invalid",
         ),
         (
-            "invalid-json",
-            |_| b"{}\n".to_vec(),
+            "invalid-json-marker",
+            |stale| {
+                fs::write(stale.join("marker.json"), b"{}\n").expect("malformed marker writes");
+            },
             "scratch marker is invalid",
         ),
     ];
 
     for (name, corrupt, expected) in cases {
-        let (workspace, stale) = stale_history_validation_scratch(&format!(
-            "conversation-history-malformed-scratch-marker-{name}"
-        ));
-        let marker_path = stale.join("marker.json");
-        let marker = corrupt(fs::read(&marker_path).expect("scratch marker reads"));
-        fs::write(&marker_path, &marker).expect("malformed marker writes");
-        let lease_path = stale.join("lease");
-        let lease = fs::read(&lease_path).expect("scratch lease reads");
+        let (workspace, stale) =
+            stale_history_validation_scratch(&format!("conversation-history-unsafe-stale-{name}"));
+        corrupt(&stale);
+        let before = file_tree_bytes(&stale);
 
         let error = read_conversation_history(&workspace, "review")
-            .expect_err("a malformed scratch marker must fail closed");
+            .expect_err("unsafe stale scratch must fail closed");
         assert!(error.to_string().contains(expected), "{name}: {error}");
         assert!(stale.is_dir(), "{name}");
         assert_eq!(
-            fs::read(&marker_path).expect("malformed marker remains"),
-            marker,
-            "{name}"
-        );
-        assert_eq!(
-            fs::read(&lease_path).expect("scratch lease remains"),
-            lease,
-            "{name}"
-        );
-        assert_eq!(
-            fs::read_dir(&stale)
-                .expect("malformed scratch reads")
-                .count(),
-            2,
-            "{name}"
+            file_tree_bytes(&stale),
+            before,
+            "{name}: unsafe scratch is preserved byte for byte"
         );
     }
 }

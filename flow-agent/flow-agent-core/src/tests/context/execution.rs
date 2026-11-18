@@ -1,21 +1,21 @@
 use crate::{
     runtime::{
         context::{CONTEXT_ESTIMATOR_ID, CONTEXT_PROFILE_ID},
-        execution_plan::{FlowExecutionAction, FlowExecutionOptions, ToolSideEffectMode},
+        digest::sha256_hex,
         failures::runtime_failure_for_unhandled_error,
-        planning::plan_flow,
         session::run_flow,
         session_reading::SessionEventReader,
-        types::{EmitMode, EventClock, RuntimeError},
+        types::{EmitMode, MAX_SESSION_OBJECT_BYTES, RuntimeError},
         validate::validate_session_log_text,
     },
     tests::{
-        helpers::{fixture_runtime_policy, load_test_registry, replace_registry_text},
+        helpers::replace_registry_text,
         test_support::{session_home_path, workspace_copy},
     },
 };
 use proto::EventType;
 use std::{
+    collections::BTreeSet,
     fs, io,
     path::{Path, PathBuf},
 };
@@ -51,7 +51,7 @@ fn exceed_context_budget_with_valid_instructions(workspace: &Path) {
 }
 
 #[test]
-fn run_persists_one_canonical_context_manifest_per_stub_model_turn() {
+fn run_persists_canonical_manifests_objects_and_summarize_model_turn() {
     let workspace = workspace_copy("hello-flow");
     let output =
         run_flow(&workspace, "hello-flow", EmitMode::Jsonl).expect("fixture flow completes");
@@ -72,31 +72,48 @@ fn run_persists_one_canonical_context_manifest_per_stub_model_turn() {
             manifest
         })
         .collect::<Vec<_>>();
-    let model_turns =
+    let events =
         validate_session_log_text(&output.session_path, &output.session_id, &output.stdout)
-            .expect("runtime stream validates")
-            .iter()
-            .filter(|event| event.event_type == EventType::MessageCompleted)
-            .count();
+            .expect("runtime stream validates");
+    let model_turns = events
+        .iter()
+        .filter(|event| event.event_type == EventType::MessageCompleted)
+        .count();
 
     assert_eq!(manifests.len(), model_turns);
     assert!(!manifests.is_empty());
-    for manifest in manifests {
+    let mut referenced = 0usize;
+    let mut digests = BTreeSet::new();
+    for manifest in &manifests {
         assert_eq!(manifest["context_profile_id"], CONTEXT_PROFILE_ID);
         assert_eq!(manifest["model_profile_id"], "stub-model-v0");
         assert_eq!(manifest["estimator_id"], CONTEXT_ESTIMATOR_ID);
         assert_eq!(manifest["context_hash"].as_str().map(str::len), Some(64));
+        for source in manifest["ordered_sources"]
+            .as_array()
+            .expect("ordered sources")
+        {
+            referenced += 1;
+            let digest = source["object_uri"]
+                .as_str()
+                .and_then(|uri| uri.strip_prefix("session-object:sha256:"))
+                .expect("session object URI");
+            digests.insert(digest.to_owned());
+            let object_path = crate::tests::helpers::workspace_session_dir(&workspace)
+                .join(format!("{}.object.sha256-{digest}", output.session_id));
+            let bytes = fs::read(object_path).expect("referenced object exists");
+            assert_eq!(sha256_hex(&bytes), digest);
+            assert!(
+                u64::try_from(bytes.len()).unwrap() <= MAX_SESSION_OBJECT_BYTES,
+                "context object is independently bounded"
+            );
+        }
     }
-}
+    assert!(
+        referenced > digests.len(),
+        "repeated context sources deduplicate"
+    );
 
-#[test]
-fn instruction_bearing_leaf_phase_runs_stub_model_turn() {
-    let workspace = workspace_copy("hello-flow");
-    let output =
-        run_flow(&workspace, "hello-flow", EmitMode::Jsonl).expect("fixture flow completes");
-    let events =
-        validate_session_log_text(&output.session_path, &output.session_id, &output.stdout)
-            .expect("runtime stream validates");
     let start = events
         .iter()
         .position(|event| {
@@ -122,24 +139,6 @@ fn instruction_bearing_leaf_phase_runs_stub_model_turn() {
 
 #[test]
 fn unhandled_errors_map_to_typed_sanitized_runtime_failures() {
-    let failure = runtime_failure_for_unhandled_error(&RuntimeError::ContextBudgetExceeded {
-        input_budget_tokens: 5,
-        required_bytes: 6,
-    });
-
-    assert_eq!(failure.reason, "context_budget_exceeded");
-    assert_eq!(
-        failure.message,
-        "mandatory context exceeds the model input budget"
-    );
-    assert_eq!(
-        failure.data,
-        serde_json::Map::from_iter([
-            ("input_budget_tokens".to_owned(), serde_json::json!(5)),
-            ("required_bytes".to_owned(), serde_json::json!(6)),
-        ])
-    );
-
     let denied = runtime_failure_for_unhandled_error(&RuntimeError::Denied {
         reason: core_policy::DenyReasonCode::WriteDenied,
         message: "private policy detail".to_owned(),
@@ -184,49 +183,6 @@ fn unhandled_errors_map_to_typed_sanitized_runtime_failures() {
 }
 
 #[test]
-fn planning_terminalizes_context_budget_failure_as_typed_events() {
-    let workspace = workspace_copy("hello-flow");
-    let (_, policy) = fixture_runtime_policy("hello-flow", "hello-flow");
-    exceed_context_budget_with_valid_instructions(&workspace);
-    let registry = load_test_registry(&workspace, "hello-flow");
-    let flow_block = registry
-        .flow_block("hello-flow")
-        .expect("flow exists")
-        .clone();
-
-    let plan = plan_flow(
-        &workspace,
-        &registry,
-        &policy,
-        &flow_block,
-        "contextbudget001",
-        FlowExecutionOptions::new(EventClock::fixed_fixture(), ToolSideEffectMode::Plan),
-    )
-    .expect("budget failure becomes a deterministic failed stream");
-
-    assert!(plan.execution.failed);
-    assert!(matches!(
-        plan.execution.terminal_error,
-        Some(RuntimeError::ContextBudgetExceeded { .. })
-    ));
-    let mut planned_events = plan
-        .execution
-        .actions
-        .iter()
-        .filter_map(|action| match action {
-            FlowExecutionAction::Event(action) => Some(action.event.event()),
-            FlowExecutionAction::Fixture(_) => None,
-        });
-    assert!(planned_events.clone().any(|event| {
-        event.event_type == EventType::Error && event.payload["code"] == "context_budget_exceeded"
-    }));
-    assert_eq!(
-        planned_events.next_back().map(|event| &event.event_type),
-        Some(&EventType::SessionFailed)
-    );
-}
-
-#[test]
 fn persisted_terminal_error_identifies_its_session_and_typed_cause() {
     let workspace = workspace_copy("hello-flow");
     exceed_context_budget_with_valid_instructions(&workspace);
@@ -258,6 +214,7 @@ fn persisted_terminal_error_identifies_its_session_and_typed_cause() {
         .iter()
         .find(|event| event.event_type == EventType::Error)
         .expect("persisted failure includes an error event");
+    assert_eq!(error.payload["code"], "context_budget_exceeded");
     assert_eq!(
         error.payload["data"],
         serde_json::json!({

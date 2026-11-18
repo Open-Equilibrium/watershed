@@ -14,8 +14,6 @@ use std::{
     time::{Duration, Instant},
 };
 
-/// The inner Executor writes this instead of a Tool status when it fails before
-/// any Tool launch. It is longer than a status, so no truncated status matches it.
 const NOT_LAUNCHED_RECORD: &[u8] = b"tool-not-launched";
 
 pub(crate) struct PreparedExecution {
@@ -92,8 +90,6 @@ pub(super) fn execute(prepared: PreparedExecution) -> Result<ExecutorResponseV0,
         inherited,
         Some(cancellation),
     )?;
-    // Only the trusted inner supervisor retains the status writer. A missing
-    // record never becomes an invented Tool completion, including cancellation.
     let status = receiver
         .recv_timeout(proto::TOOL_OUTPUT_DRAIN_DEADLINE_V0)
         .map_err(|_| BackendError::uncertain("Tool root status was not received within its bound"))?
@@ -130,7 +126,6 @@ pub(super) fn apply_inner_status(
         BackendError::uncertain("Flow-owned write protection did not prove a reaped Tool root")
     })?;
     let status = ExitStatus::from_raw(i32::from_ne_bytes(status));
-    // WHY: a stopped or continued root is neither exited nor signaled, so it proves no termination.
     if status.code().is_none() && status.signal().is_none() {
         return Err(BackendError::uncertain(
             "Flow-owned write protection did not prove a reaped Tool root",
@@ -170,21 +165,15 @@ pub(crate) fn run_inner(status_descriptor: &str, input: impl Read) -> Result<(),
     let (mut child, cancelled, deadline) = match launch(&status_file, input) {
         Ok(launched) => launched,
         Err(error) => {
-            // No Tool exists, so the outer Executor may report a setup failure.
             let _ = status_file.write_all(NOT_LAUNCHED_RECORD);
             return Err(error);
         }
     };
     let mut cleanup = None;
     loop {
-        // On Linux the inner Executor is PID 1 of the Tool's PID namespace and
-        // inherits orphaned descendants; reaping any child keeps them from
-        // lingering as zombies. Only this loop reaps, and it returns on the
-        // root, so its PID is never reused while it is still compared.
         while let Some((pid, status)) = rustix::process::wait(rustix::process::WaitOptions::NOHANG)
             .map_err(|error| format!("failed to reap Tool: {error}"))?
         {
-            // WHY: a traced root reports its stops here too; only its exit or signal ends the Tool.
             if pid.as_raw_nonzero().get() as u32 == child.id()
                 && (status.exited() || status.signaled())
             {

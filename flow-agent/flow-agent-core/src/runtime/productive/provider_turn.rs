@@ -323,7 +323,6 @@ where
                     .ensure_input_budget(responses_request_input_bytes(&body)?)?;
                 Ok((compiled, body))
             };
-        // WHY: optional history yields first; the retry still passes the whole-request check.
         let (compiled, body) = match build_request(true) {
             Err(RuntimeError::ContextBudgetExceeded { .. }) => build_request(false)?,
             request => request?,

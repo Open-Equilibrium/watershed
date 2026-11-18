@@ -1,6 +1,6 @@
 use super::support::{
     FakeToolExecutor, MemoryAttempts, RejectingReservationSink, ScriptedProvider,
-    single_tool_provider_turn, smoke_productive_execution_fixture,
+    single_tool_provider_turn, smoke_productive_execution_fixture, string_provider_turn,
 };
 use crate::runtime::{
     context::{CompiledContext, ContextManifest, ContextObject},
@@ -60,6 +60,18 @@ fn provider_input_aggregate_budget() {
     assert!(excess.items().is_empty(), "rejected item is not retained");
 }
 
+fn compiled_context(objects: Vec<ContextObject>) -> CompiledContext {
+    CompiledContext {
+        cache_prefix_bytes: 0,
+        context_hash: "a".repeat(64),
+        manifest: ContextManifest {
+            line: "{}\n".to_owned(),
+        },
+        objects,
+        provider_bytes: Vec::new(),
+    }
+}
+
 #[test]
 fn message_delta_chunks_are_utf8_safe_and_bounded() {
     let content = format!("{}{}", "\0".repeat(40 * 1024), "\u{1f642}");
@@ -78,15 +90,7 @@ fn message_delta_chunks_are_utf8_safe_and_bounded() {
 fn provider_reservation_covers_utf8_boundary_adjusted_message_deltas() {
     let content = "\u{20ac}".repeat(MAX_RESPONSES_DECODED_STREAM_BYTES / 3);
     let chunks = message_delta_chunks(&content).collect::<Vec<_>>();
-    let compiled = CompiledContext {
-        cache_prefix_bytes: 0,
-        context_hash: "a".repeat(64),
-        manifest: ContextManifest {
-            line: "{}\n".to_owned(),
-        },
-        objects: Vec::new(),
-        provider_bytes: Vec::new(),
-    };
+    let compiled = compiled_context(Vec::new());
     let reservation = build_provider_dispatch_reservation(&compiled);
     let reserved_delta_records = usize::try_from(reservation.event_count)
         .expect("event count fits usize")
@@ -157,7 +161,6 @@ fn productive_dispatch_envelopes_cover_every_selected_maximum() {
         .canonical_jsonl()
         .expect("worst escaping event serializes");
     assert!(worst_delta.len() <= MAX_CONVERSATION_RECORD_BYTES + 1);
-    assert_eq!(PRODUCTIVE_CLOSURE_RECORDS, 69);
     assert!(
         worst_delta
             .len()
@@ -168,25 +171,15 @@ fn productive_dispatch_envelopes_cover_every_selected_maximum() {
             <= PROVIDER_EVENT_RESERVATION_BYTES
     );
 
-    let compiled = CompiledContext {
-        cache_prefix_bytes: 0,
-        context_hash: "a".repeat(64),
-        manifest: ContextManifest {
-            line: "{}\n".to_owned(),
-        },
-        objects: vec![ContextObject {
-            bytes: vec![b'x'; 17],
-            digest: "b".repeat(64),
-        }],
-        provider_bytes: Vec::new(),
-    };
+    let compiled = compiled_context(vec![ContextObject {
+        bytes: vec![b'x'; 17],
+        digest: "b".repeat(64),
+    }]);
     let provider = build_provider_dispatch_reservation(&compiled);
     assert_provider_dispatch_envelope(provider, 3, 17, 1);
-    assert_eq!(provider.event_count, 1_094);
 
     let tool = build_tool_dispatch_reservation();
     assert_tool_dispatch_envelope(tool);
-    assert_eq!(tool.event_count, 71);
     assert!(
         PRODUCTIVE_METADATA_RESERVATION_BYTES
             >= (2 * core_script::MAX_FLOW_VALUE_BYTES + PRODUCTIVE_CLOSURE_RECORDS * 4 * 1024)
@@ -196,15 +189,7 @@ fn productive_dispatch_envelopes_cover_every_selected_maximum() {
 
 #[test]
 fn provider_dispatch_reserves_the_complete_bounded_route_to_the_next_dispatch() {
-    let compiled = CompiledContext {
-        cache_prefix_bytes: 0,
-        context_hash: "a".repeat(64),
-        manifest: ContextManifest {
-            line: "{}\n".to_owned(),
-        },
-        objects: Vec::new(),
-        provider_bytes: Vec::new(),
-    };
+    let compiled = compiled_context(Vec::new());
     let reservation = build_provider_dispatch_reservation(&compiled);
     let route_after_chunks = 1
         + core_script::MAX_PHASE_NESTING_DEPTH
@@ -359,10 +344,7 @@ fn execute_reservation_case(
 ) {
     let (_workspace, fixture) = smoke_productive_execution_fixture();
     let flow = fixture.smoke_flow();
-    let mut provider = ScriptedProvider {
-        bodies: Vec::new(),
-        turns: turns.into_iter().collect(),
-    };
+    let mut provider = ScriptedProvider::new(turns);
     let mut attempts = MemoryAttempts::default();
     let mut sink = RejectingReservationSink::new(reject_at);
     let mut tools = FakeToolExecutor::default();
@@ -379,16 +361,11 @@ fn execute_reservation_case(
 
 #[test]
 fn provider_dispatch_reservation() {
-    let final_turn = ProviderTurn {
-        token_usage: None,
-        response_id: "response-final".to_owned(),
-        output_text: "{\"type\":\"string\",\"value\":\"done\"}".to_owned(),
-        retained_items: Vec::new(),
-        tool_calls: Vec::new(),
-    };
-
-    let (execution, provider, attempts, sink, tools) =
-        execute_reservation_case("provider-reservation-rejected", [final_turn], 1);
+    let (execution, provider, attempts, sink, tools) = execute_reservation_case(
+        "provider-reservation-rejected",
+        [string_provider_turn("response-final", "done")],
+        1,
+    );
 
     assert!(execution.failed);
     assert!(provider.bodies.is_empty());

@@ -3,7 +3,6 @@ import Foundation
 import IOKit.hid
 import IOKit.hidsystem
 
-/// Caps Lock as the Liquid key: every keyboard sends F18 for it while the key is on.
 enum Mapping {
     static let capsLock: UInt64 = 0x7_0000_0039
     static let f18: UInt64 = 0x7_0000_006D
@@ -11,8 +10,6 @@ enum Mapping {
     static let destination = "HIDKeyboardModifierMappingDst"
     private static let userKey = "UserKeyMapping" as CFString
 
-    /// A keyboard's mappings with the Liquid key on or off; other mappings stay. On replaces any
-    /// other Caps Lock mapping, off removes only Liquid's.
     static func merged(_ current: [[String: Any]], on: Bool) -> [[String: Any]] {
         let kept = current.filter { entry in
             guard number(entry, source) == capsLock else { return true }
@@ -21,9 +18,6 @@ enum Mapping {
         return on ? kept + [[source: capsLock, destination: f18]] : kept
     }
 
-    /// Whether an active helper sets the Liquid key again on a keyboard with these mappings: only
-    /// one that lost it, as when another session's helper gave the remapping back. An inactive
-    /// helper leaves keyboards alone, since another user's helper may hold them.
     static func needsReapply(_ current: [[String: Any]], active: Bool) -> Bool {
         let holds = current.contains { entry in
             number(entry, source) == capsLock && number(entry, destination) == f18
@@ -35,22 +29,14 @@ enum Mapping {
         (entry[key] as? NSNumber)?.uint64Value
     }
 
-    /// Whether a helper gives the remapping back: only one it set, while its session is in front,
-    /// since another user's helper may hold the keyboards otherwise.
     static func givesBack(mapped: Bool, active: Bool) -> Bool {
         mapped && active
     }
 
-    /// Whether the session a helper starts in is in front, from the session dictionary. One the
-    /// system does not report, or one in the background, leaves the keyboards to the session in
-    /// front.
     static func initiallyActive(session: [String: Any]?) -> Bool {
         (session?[kCGSessionOnConsoleKey as String] as? Bool) ?? false
     }
 
-    /// The helper's start: its observers are registered first and the session is read only then,
-    /// so a session that changes during the start is heard by them or shows in the read. `remap`
-    /// runs only while that session is in front.
     static func start(
         readSession: () -> [String: Any]?, observe: () -> Void, remap: () -> Void
     ) {
@@ -58,24 +44,18 @@ enum Mapping {
         if initiallyActive(session: readSession()) { remap() }
     }
 
-    /// Applies the Liquid key to every keyboard attached now; needs no permission. Returns
-    /// whether macOS listed the keyboards and each one took it.
     @discardableResult
     static func apply(on: Bool) -> Bool {
         guard let keyboards = attachedKeyboards() else { return false }
         return apply(on: on, to: keyboards, read: readMappings, write: writeMappings)
     }
 
-    /// Sets the Liquid key again on each attached keyboard that lost it, while `active`; needs no
-    /// permission. Returns whether macOS listed the keyboards and each one that needed it took it.
     @discardableResult
     static func reapply(active: Bool) -> Bool {
         guard let keyboards = attachedKeyboards() else { return false }
         return reapply(active: active, to: keyboards, read: readMappings, write: writeMappings)
     }
 
-    /// Applies the Liquid key to each keyboard that `needsReapply` names; returns whether all of
-    /// those took it.
     @discardableResult
     static func reapply<Keyboard>(
         active: Bool, to keyboards: [Keyboard], read: (Keyboard) -> [[String: Any]],
@@ -86,7 +66,6 @@ enum Mapping {
             read: read, write: write)
     }
 
-    /// The keyboards macOS lists now, or nil when it lists none.
     private static func attachedKeyboards() -> [IOHIDServiceClient]? {
         let client = IOHIDEventSystemClientCreateSimpleClient(kCFAllocatorDefault)
         guard let services = IOHIDEventSystemClientCopyServices(client) as? [IOHIDServiceClient]
@@ -107,8 +86,6 @@ enum Mapping {
         IOHIDServiceClientSetProperty(keyboard, userKey, mappings as CFArray)
     }
 
-    /// Applies the Liquid key to each keyboard, also after one refuses it; returns whether all
-    /// took it.
     static func apply<Keyboard>(
         on: Bool, to keyboards: [Keyboard], read: (Keyboard) -> [[String: Any]],
         write: (Keyboard, [[String: Any]]) -> Bool
@@ -117,14 +94,8 @@ enum Mapping {
     }
 }
 
-/// A press of the Liquid key: a tap, which opens Liquid, when released soon with no other key
-/// pressed meanwhile. Without permission macOS reports only the latest press of any key,
-/// `lastKeyDown`, so each of the key's own repeats checks for another key since the press
-/// before it, as the release does. A key pressed within 50 ms of the Liquid key's press or
-/// repeat passes for the Liquid key's own, so such a fast chord still counts as a tap.
 struct Press {
     let pressed: TimeInterval
-    /// The key's latest press, its own repeats included.
     private var lastPress: TimeInterval
     private var otherKey = false
 
@@ -133,19 +104,15 @@ struct Press {
         lastPress = time
     }
 
-    /// The key's own repeat at `time`.
     mutating func repeated(at time: TimeInterval, lastKeyDown: TimeInterval) {
         otherKey = otherKey || otherKeyDown(lastKeyDown)
         lastPress = time
     }
 
-    /// Whether a release at `time` ends a tap.
     func isTap(released time: TimeInterval, lastKeyDown: TimeInterval) -> Bool {
         time - pressed < 0.6 && !otherKey && !otherKeyDown(lastKeyDown)
     }
 
-    /// The Liquid key's own press lands a moment after the hotkey reports it; another key
-    /// within that moment cannot be told apart from it.
     private func otherKeyDown(_ lastKeyDown: TimeInterval) -> Bool {
         lastKeyDown - lastPress >= 0.05
     }

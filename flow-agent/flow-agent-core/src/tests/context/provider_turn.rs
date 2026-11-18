@@ -14,6 +14,13 @@ use crate::{
 };
 use std::{collections::BTreeMap, fs};
 
+fn flow_invocation(flow_id: &str) -> FlowInvocation {
+    FlowInvocation {
+        flow_id: flow_id.to_owned(),
+        parent_flow_id: None,
+    }
+}
+
 fn compile_summarize_turn_context(
     registry: &core_script::ResolvedRegistry,
     flow_id: &str,
@@ -27,10 +34,7 @@ fn compile_summarize_turn_context(
         phase,
         "phase-test-001",
         None,
-        &FlowInvocation {
-            flow_id: flow_id.to_owned(),
-            parent_flow_id: None,
-        },
+        &flow_invocation(flow_id),
         "contextdirection001",
         &ContextHistory::default(),
     )
@@ -156,10 +160,7 @@ fn complete_typed_phase_input_is_visible_without_projection() {
         phase,
         "phase-test-001",
         Some(&input),
-        &FlowInvocation {
-            flow_id: "flow-001".to_owned(),
-            parent_flow_id: None,
-        },
+        &flow_invocation("flow-001"),
         "contextinput001",
         &ContextHistory::default(),
     )
@@ -219,10 +220,7 @@ fn instruction_parameters_require_a_complete_typed_phase_input_map() {
     let registry = load_test_registry(&workspace, "smoke-flow");
     let flow = registry.flow_block("smoke-flow").expect("Flow exists");
     let phase = registry.phase_block("smoke").expect("Phase exists");
-    let invocation = FlowInvocation {
-        flow_id: "flow-001".to_owned(),
-        parent_flow_id: None,
-    };
+    let invocation = flow_invocation("flow-001");
     let compile = |input: Option<&core_script::FlowValue>| {
         compile_provider_turn_context_with_agent_instructions(
             &ContextModelProfile::stub_v0(),
@@ -275,54 +273,42 @@ fn instruction_parameters_require_a_complete_typed_phase_input_map() {
 }
 
 #[test]
-fn provider_context_rejects_a_phase_outside_the_active_flow() {
-    let (registry, _) = fixture_runtime_policy("hello-flow", "hello-flow");
-    let flow = registry
-        .flow_block("hello-subflow")
-        .expect("subflow exists");
-    let phase = registry.phase_block("summarize").expect("phase exists");
-
-    let error = compile_provider_turn_context(
-        &ContextModelProfile::stub_v0(),
-        &registry,
-        flow,
-        phase,
-        "phase-test-001",
-        None,
-        &FlowInvocation {
-            flow_id: "flow-001".to_owned(),
-            parent_flow_id: None,
-        },
-        "contextscope001",
-        &ContextHistory::default(),
-    )
-    .expect_err("a phase outside the active Flow must fail closed");
-
-    assert!(error.to_string().contains("active Flow"), "{error}");
-}
-
-#[test]
-fn provider_context_rejects_a_phase_from_another_registry() {
+fn provider_context_rejects_a_phase_outside_its_flow_or_registry() {
     let (registry, _) = fixture_runtime_policy("hello-flow", "hello-flow");
     let (other_registry, _) = fixture_runtime_policy("smoke-flow", "smoke-flow");
-    let flow = registry.flow_block("hello-flow").expect("flow exists");
-    let phase = other_registry.phase_block("smoke").expect("phase exists");
+    let hello_flow = registry.flow_block("hello-flow").expect("flow exists");
+    let hello_subflow = registry
+        .flow_block("hello-subflow")
+        .expect("subflow exists");
+    let summarize = registry.phase_block("summarize").expect("phase exists");
+    let smoke = other_registry.phase_block("smoke").expect("phase exists");
 
-    let error = compile_provider_turn_context(
-        &ContextModelProfile::stub_v0(),
-        &registry,
-        flow,
-        phase,
-        "phase-test-001",
-        None,
-        &FlowInvocation {
-            flow_id: "flow-001".to_owned(),
-            parent_flow_id: None,
-        },
-        "contextregistry001",
-        &ContextHistory::default(),
-    )
-    .expect_err("a Phase from another registry must fail closed");
-
-    assert!(error.to_string().contains("active registry"), "{error}");
+    for (case, flow, phase, expected) in [
+        (
+            "phase outside the active Flow",
+            hello_subflow,
+            summarize,
+            "active Flow",
+        ),
+        (
+            "phase from another registry",
+            hello_flow,
+            smoke,
+            "active registry",
+        ),
+    ] {
+        let error = compile_provider_turn_context(
+            &ContextModelProfile::stub_v0(),
+            &registry,
+            flow,
+            phase,
+            "phase-test-001",
+            None,
+            &flow_invocation("flow-001"),
+            "contextboundary001",
+            &ContextHistory::default(),
+        )
+        .expect_err(case);
+        assert!(error.to_string().contains(expected), "{case}: {error}");
+    }
 }

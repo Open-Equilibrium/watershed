@@ -6,6 +6,48 @@ use super::super::semantics::validate_tool_semantics;
 use super::super::values::parameter_pattern_matches;
 use super::own_script_tool;
 
+fn identity(id: &str, name: &str) -> BlockIdentity {
+    BlockIdentity {
+        id: id.to_owned(),
+        name: name.to_owned(),
+    }
+}
+
+fn parameter(name: &str, value_type: ParameterValueType) -> AllowedParameter {
+    AllowedParameter {
+        name: name.to_owned(),
+        value_type,
+        required: true,
+        allowed_values: Vec::new(),
+        value_pattern: None,
+        max_length: None,
+        min: None,
+        max: None,
+    }
+}
+
+fn label_parameter(value_pattern: &str) -> AllowedParameter {
+    AllowedParameter {
+        value_pattern: Some(value_pattern.to_owned()),
+        max_length: Some(32),
+        ..parameter("--label", ParameterValueType::String)
+    }
+}
+
+fn predefined_tool(argv: Vec<String>, script_body: Option<String>) -> ToolBlock {
+    ToolBlock {
+        allowed_parameters: Vec::new(),
+        command: ToolCommand::Predefined {
+            command_id: "agent-echo".to_owned(),
+            argv,
+        },
+        identity: identity("echo", "Echo"),
+        script_body,
+        script_runtime: None,
+        tool_kind: ToolKind::PredefinedCommand,
+    }
+}
+
 #[test]
 fn semantic_validation_requires_own_script_command_to_match_tool_id() {
     let mut tool = own_script_tool("write-summary", "script:other-tool");
@@ -39,20 +81,7 @@ fn semantic_validation_enforces_tool_kind_specific_script_fields() {
             if message.contains("script_runtime")
     ));
 
-    let mut predefined = ToolBlock {
-        allowed_parameters: Vec::new(),
-        command: ToolCommand::Predefined {
-            command_id: "agent-echo".to_owned(),
-            argv: Vec::new(),
-        },
-        identity: BlockIdentity {
-            id: "echo".to_owned(),
-            name: "Echo".to_owned(),
-        },
-        script_body: Some("echo unexpected".to_owned()),
-        script_runtime: None,
-        tool_kind: ToolKind::PredefinedCommand,
-    };
+    let mut predefined = predefined_tool(Vec::new(), Some("echo unexpected".to_owned()));
 
     let err =
         validate_tool_semantics(&predefined).expect_err("predefined tools must omit script fields");
@@ -75,34 +104,14 @@ fn semantic_validation_rejects_nul_bearing_tool_execution_fields() {
     let error = validate_tool_semantics(&script).expect_err("NUL script body is rejected");
     assert!(error.to_string().contains("NUL"));
 
-    let predefined = ToolBlock {
-        allowed_parameters: Vec::new(),
-        command: ToolCommand::Predefined {
-            command_id: "agent-echo".to_owned(),
-            argv: vec!["unsafe\0argument".to_owned()],
-        },
-        identity: BlockIdentity {
-            id: "echo".to_owned(),
-            name: "Echo".to_owned(),
-        },
-        script_body: None,
-        script_runtime: None,
-        tool_kind: ToolKind::PredefinedCommand,
-    };
+    let predefined = predefined_tool(vec!["unsafe\0argument".to_owned()], None);
     let error = validate_tool_semantics(&predefined).expect_err("NUL argv is rejected");
     assert!(error.to_string().contains("NUL"));
 
     let mut parameterized = own_script_tool("parameterized", "script:parameterized");
-    parameterized.allowed_parameters.push(AllowedParameter {
-        name: "--mode".to_owned(),
-        value_type: ParameterValueType::Enum,
-        required: true,
-        allowed_values: vec!["unsafe\0value".to_owned()],
-        value_pattern: None,
-        max_length: None,
-        min: None,
-        max: None,
-    });
+    let mut mode = parameter("--mode", ParameterValueType::Enum);
+    mode.allowed_values = vec!["unsafe\0value".to_owned()];
+    parameterized.allowed_parameters.push(mode);
     let error = validate_tool_semantics(&parameterized)
         .expect_err("NUL enum parameter values are rejected");
     assert!(error.to_string().contains("NUL"));
@@ -111,16 +120,7 @@ fn semantic_validation_rejects_nul_bearing_tool_execution_fields() {
 #[test]
 fn semantic_validation_compiles_tool_parameter_patterns() {
     let mut tool = own_script_tool("pattern-tool", "script:pattern-tool");
-    tool.allowed_parameters.push(AllowedParameter {
-        name: "--label".to_owned(),
-        value_type: ParameterValueType::String,
-        required: true,
-        allowed_values: Vec::new(),
-        value_pattern: Some("[a-z]+".to_owned()),
-        max_length: Some(32),
-        min: None,
-        max: None,
-    });
+    tool.allowed_parameters.push(label_parameter("[a-z]+"));
     validate_tool_semantics(&tool).expect("finite regular expression is accepted");
     assert!(!parameter_pattern_matches("safe|evil", "prefixevil").expect("valid alternation"));
 
@@ -142,16 +142,10 @@ fn semantic_validation_compiles_tool_parameter_patterns() {
             if message.contains("value_pattern")
     ));
 
-    tool.allowed_parameters[0] = AllowedParameter {
-        name: "--count".to_owned(),
-        value_type: ParameterValueType::Integer,
-        required: true,
-        allowed_values: Vec::new(),
-        value_pattern: None,
-        max_length: None,
-        min: Some(2),
-        max: Some(1),
-    };
+    let mut count = parameter("--count", ParameterValueType::Integer);
+    count.min = Some(2);
+    count.max = Some(1);
+    tool.allowed_parameters[0] = count;
     let error = validate_tool_semantics(&tool).expect_err("integer bounds must be ordered");
     assert!(matches!(
         error,
@@ -162,7 +156,6 @@ fn semantic_validation_compiles_tool_parameter_patterns() {
 
 #[test]
 fn tool_parameter_pattern_with_verbose_flag_is_refused() {
-    // The anchors wrap the pattern; a comment under the verbose flag would swallow them.
     for pattern in ["(?x)safe # c", "(?ix:safe)"] {
         let error = parameter_pattern_matches(pattern, "safe").expect_err("verbose flag");
         assert!(
@@ -173,16 +166,8 @@ fn tool_parameter_pattern_with_verbose_flag_is_refused() {
     assert!(parameter_pattern_matches("safe|evil", "evil").expect("ordinary pattern"));
 
     let mut tool = own_script_tool("verbose-tool", "script:verbose-tool");
-    tool.allowed_parameters.push(AllowedParameter {
-        name: "--label".to_owned(),
-        value_type: ParameterValueType::String,
-        required: true,
-        allowed_values: Vec::new(),
-        value_pattern: Some("(?x)safe # c".to_owned()),
-        max_length: Some(32),
-        min: None,
-        max: None,
-    });
+    tool.allowed_parameters
+        .push(label_parameter("(?x)safe # c"));
     let error = validate_tool_semantics(&tool).expect_err("verbose flag is refused");
     assert!(matches!(
         error,

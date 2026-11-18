@@ -7,7 +7,6 @@ import 'package:liquid/src/diff/turn_scope.dart';
 import 'card_harness.dart';
 import 'fake_backend.dart';
 
-/// A session in a worktree on a feature branch with two changed files and an open pull request.
 FakeSession dirtySession() {
   final git = FakeGit(
     status: gitStatusOf(
@@ -25,7 +24,6 @@ FakeSession dirtySession() {
   return FakeSession()..gitBackend = git;
 }
 
-/// Every row the card can hide: all of them that are shown by default.
 final allDefaultRowsHidden = SessionCardSettings(
   hidden: CardItem.values.where((item) => item.shownByDefault).toSet(),
 );

@@ -38,15 +38,10 @@ use std::{
 pub(crate) const CREDENTIAL_STORE_MAX_BYTES: u64 = 256 * 1024;
 const REFRESH_WINDOW_MILLISECONDS: u64 = 5 * 60 * 1_000;
 
-/// A stored document as raw JSON. Every entry keeps its stored bytes until a write changes it.
 type RawDocument = BTreeMap<String, Box<RawValue>>;
 
-/// One provider slot's record, or why it does not decode or validate. Only a document that passed
-/// every file-safety check is decoded, so a locked mutation may replace an undecodable slot.
 type SlotResult<T> = Result<Option<T>, RuntimeError>;
 
-/// Both provider slots, each decoded on its own so that a broken slot does not hide the other one.
-/// `raw` keeps every entry as stored, so a write keeps each entry it does not change.
 struct DecodedDocument {
     raw: RawDocument,
     openai_codex: SlotResult<CredentialRecord>,
@@ -62,7 +57,6 @@ impl DecodedDocument {
         }
     }
 
-    /// A document that is not a JSON object with unique keys has no slots to keep.
     fn undecodable() -> Self {
         Self {
             raw: RawDocument::new(),
@@ -72,7 +66,6 @@ impl DecodedDocument {
     }
 }
 
-/// The one slot a locked mutation changes; every other entry is kept as stored.
 enum Slot {
     OpenAiCodex(Option<CredentialRecord>),
     OpenAiCompatible(Option<EndpointCredential>),
@@ -115,7 +108,6 @@ fn decode_slot<T: DeserializeOwned>(
     Ok(Some(credential))
 }
 
-/// Sets one entry of a raw document, or removes it for `None`; every other entry is kept as stored.
 fn set_entry<T: Serialize>(
     document: &mut RawDocument,
     provider_id: &str,
@@ -148,11 +140,9 @@ pub(crate) struct CredentialStore {
     protected_parent: OnceLock<ProtectedParent>,
 }
 
-/// The bound credential directory and its chain from the durable ancestor.
 struct ProtectedParent {
     parent: AnchoredDir,
     chain: Vec<AnchoredDir>,
-    /// A read may bind the chain before any mutation has made it durable.
     chain_synced: AtomicBool,
 }
 
@@ -190,7 +180,6 @@ impl CredentialStore {
             .map_or(Ok(None), |document| document.openai_codex)
     }
 
-    /// The endpoint record a Run uses; an absent or undecodable one requires reauthentication.
     pub(crate) fn resolve_endpoint(&self) -> Result<EndpointCredential, RuntimeError> {
         let slot = self
             .read_document()?
@@ -273,7 +262,6 @@ impl CredentialStore {
         let decoded = self.read_anchored_and_finalize(&parent)?;
         let mut document = decoded.raw.clone();
         let current = require_record(decoded.openai_codex, OPENAI_CODEX_PROVIDER_ID)?;
-        // Waiting for the lock may have consumed the refresh window, so expiry is judged now.
         if !needs_refresh(&current, now_epoch_milliseconds()?) {
             return Ok(current);
         }
@@ -298,8 +286,6 @@ impl CredentialStore {
         self.logout_with_clock(|| started.elapsed(), thread::sleep)
     }
 
-    /// Changes one slot under the lock, keeps the other, and reports whether the changed slot held a
-    /// record.
     fn mutate_with_clock(
         &self,
         now: impl FnMut() -> Duration,
@@ -490,12 +476,10 @@ fn needs_refresh(credential: &CredentialRecord, now_epoch_milliseconds: u64) -> 
     credential.expires <= now_epoch_milliseconds.saturating_add(REFRESH_WINDOW_MILLISECONDS)
 }
 
-/// An absent or undecodable record fails closed and requires reauthentication.
 fn require_record<T>(slot: SlotResult<T>, provider_id: &str) -> Result<T, RuntimeError> {
     slot?.ok_or_else(|| authentication_required(provider_id))
 }
 
-/// Whether a slot holds a record; one that does not decode still counts, so it is reported and replaced.
 fn slot_present<T>(slot: &SlotResult<T>) -> bool {
     !matches!(slot, Ok(None))
 }

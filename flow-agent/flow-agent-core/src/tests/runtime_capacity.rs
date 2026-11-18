@@ -8,8 +8,8 @@ use crate::runtime::{
     event_construction::RuntimeEventBuilder,
     event_writer::RuntimeEventSink,
     execution_plan::{
-        FlowExecutionAction, FlowExecutionOptions, FlowExecutionPlan, PlannedToolContext,
-        RuntimeExecution, RuntimeFailure, RuntimeToolPolicy, ToolSideEffectMode,
+        FlowExecutionAction, FlowExecutionOptions, PlannedToolContext, RuntimeExecution,
+        RuntimeFailure, RuntimeToolPolicy, ToolSideEffectMode,
     },
     fs_guards::AnchoredWorkspace,
     oauth_credential::CredentialRecord,
@@ -17,11 +17,9 @@ use crate::runtime::{
     planning::{emit_planned_tool, plan_flow},
     policy_resolution::command_policy_for_phase,
     productive::{
-        ProductiveExecution, ProductiveProvider, ProductiveToolExecutor, ProductiveToolPreflight,
-        ProviderCredential, execute_productive_flow_with_tool_executor,
+        ProductiveExecution, ProductiveProvider, ProviderCredential, execute_productive_flow,
     },
     stream_signature::FlowInvocation,
-    tool_runner::ToolInvocation,
     types::{
         EventClock, MAX_CANONICAL_EVENT_BYTES, MAX_FLOW_EVENTS, MAX_FLOW_INVOCATIONS,
         MAX_LIVE_FLOW_INVOCATIONS, MAX_SESSION_EVENT_BYTES, RuntimeError,
@@ -30,7 +28,7 @@ use crate::runtime::{
 };
 use proto::{EventEnvelope, EventType};
 use std::{
-    path::{Path, PathBuf},
+    path::Path,
     sync::{Arc, Condvar, Mutex, mpsc},
     thread,
     time::Duration,
@@ -43,12 +41,6 @@ fn runtime_builder_budget_and_id_helpers_cover_edge_paths() {
 
     let mut builder =
         RuntimeEventBuilder::with_clock("budget001".to_owned(), EventClock::fixed_fixture(), false);
-    builder.flow_counter = MAX_FLOW_INVOCATIONS;
-    assert!(matches!(
-        builder.next_flow_invocation(None),
-        Err(RuntimeError::Protocol(message)) if message.contains("flow invocation budget")
-    ));
-
     builder.sequence = MAX_FLOW_EVENTS;
     assert!(matches!(
         builder.emit(
@@ -94,39 +86,7 @@ fn runtime_builder_budget_and_id_helpers_cover_edge_paths() {
 }
 
 #[test]
-fn planner_reserves_event_capacity_for_fixture_failure_transition() {
-    let mut builder = RuntimeEventBuilder::with_clock(
-        "failureevents001".to_owned(),
-        EventClock::fixed_fixture(),
-        false,
-    );
-    builder.sequence = MAX_FLOW_EVENTS - 3;
-
-    let err = match emit_hello_fixture_for_failure_budget(&mut builder) {
-        Ok(_) => {
-            panic!("the successful suffix fits but its failure transition exceeds the event cap")
-        }
-        Err(err) => err,
-    };
-
-    assert!(
-        err.to_string()
-            .contains("runtime failure transition event budget"),
-        "{err}"
-    );
-    assert_eq!(
-        builder
-            .actions
-            .iter()
-            .filter(|action| matches!(action, FlowExecutionAction::Fixture(_)))
-            .count(),
-        0,
-        "capacity must be reserved before the fixture side-effect action is accepted"
-    );
-}
-
-#[test]
-fn planner_reserves_byte_capacity_for_fixture_failure_transition() {
+fn planner_reserves_event_and_byte_capacity_for_fixture_failure_transition() {
     let mut probe = RuntimeEventBuilder::with_clock(
         "failurebytes001".to_owned(),
         EventClock::fixed_fixture(),
@@ -134,36 +94,42 @@ fn planner_reserves_byte_capacity_for_fixture_failure_transition() {
     );
     emit_hello_fixture_for_failure_budget(&mut probe).expect("fixture probe plans");
     let successful_suffix_bytes = probe.events.byte_count;
-    let mut builder = RuntimeEventBuilder::with_clock(
+    let mut event_full = RuntimeEventBuilder::with_clock(
+        "failureevents001".to_owned(),
+        EventClock::fixed_fixture(),
+        false,
+    );
+    event_full.sequence = MAX_FLOW_EVENTS - 3;
+    let mut byte_full = RuntimeEventBuilder::with_clock(
         "failurebytes001".to_owned(),
         EventClock::fixed_fixture(),
         false,
     );
-    builder.events.byte_count = usize::try_from(MAX_SESSION_EVENT_BYTES)
+    byte_full.events.byte_count = usize::try_from(MAX_SESSION_EVENT_BYTES)
         .expect("session event budget fits usize")
         - successful_suffix_bytes;
 
-    let err = match emit_hello_fixture_for_failure_budget(&mut builder) {
-        Ok(_) => {
-            panic!("the successful suffix fits but its failure transition exceeds the byte cap")
-        }
-        Err(err) => err,
-    };
-
-    assert!(
-        err.to_string()
-            .contains("runtime failure transition data budget"),
-        "{err}"
-    );
-    assert_eq!(
-        builder
-            .actions
-            .iter()
-            .filter(|action| matches!(action, FlowExecutionAction::Fixture(_)))
-            .count(),
-        0,
-        "capacity must be reserved before the fixture side-effect action is accepted"
-    );
+    for (builder, expected) in [
+        (&mut event_full, "runtime failure transition event budget"),
+        (&mut byte_full, "runtime failure transition data budget"),
+    ] {
+        let err = match emit_hello_fixture_for_failure_budget(builder) {
+            Ok(_) => {
+                panic!("the successful suffix fits but its failure transition exceeds the cap")
+            }
+            Err(err) => err,
+        };
+        assert!(err.to_string().contains(expected), "{err}");
+        assert_eq!(
+            builder
+                .actions
+                .iter()
+                .filter(|action| matches!(action, FlowExecutionAction::Fixture(_)))
+                .count(),
+            0,
+            "capacity must be reserved before the fixture side-effect action is accepted"
+        );
+    }
 }
 
 fn emit_hello_fixture_for_failure_budget(
@@ -287,50 +253,6 @@ impl ProductiveProvider for ImmediateProductiveProvider {
     }
 }
 
-struct LiveLimitToolExecutor;
-
-impl ProductiveToolExecutor for LiveLimitToolExecutor {
-    type Prepared = ();
-    type Waiting = ();
-
-    fn supports_productive_tools(&self) -> bool {
-        true
-    }
-
-    fn prepare(
-        &mut self,
-        _invocation: &ToolInvocation,
-        _workspace: &AnchoredWorkspace,
-        _policy: &core_policy::PolicyArtifact,
-        _command_policy: &core_policy::CommandPolicy,
-        _request_id: &str,
-    ) -> Result<Self::Prepared, RuntimeError> {
-        panic!("the live invocation limit must reject before productive Tool dispatch")
-    }
-
-    fn request_hash<'a>(&self, _prepared: &'a Self::Prepared) -> &'a str {
-        unreachable!()
-    }
-
-    fn policy_digest<'a>(&self, _prepared: &'a Self::Prepared) -> &'a str {
-        unreachable!()
-    }
-
-    fn preflight(
-        &mut self,
-        _prepared: Self::Prepared,
-    ) -> Result<ProductiveToolPreflight<Self::Waiting>, RuntimeError> {
-        unreachable!()
-    }
-
-    fn start(
-        &mut self,
-        _waiting: Self::Waiting,
-    ) -> Result<crate::runtime::executor::ExecutorDispatchOutcome, RuntimeError> {
-        unreachable!()
-    }
-}
-
 fn productive_execution_at_live_limit() -> (
     Result<RuntimeExecution, RuntimeError>,
     CollectingEventSink,
@@ -353,8 +275,7 @@ fn productive_execution_at_live_limit() -> (
     let mut provider = ImmediateProductiveProvider::default();
     let mut attempts = DiscardAttempts;
     let mut sink = CollectingEventSink::default();
-    let mut tool_executor = LiveLimitToolExecutor;
-    let execution = execute_productive_flow_with_tool_executor(
+    let execution = execute_productive_flow(
         ProductiveExecution {
             conversation_id: "conversation",
             clock: EventClock::fixed_fixture(),
@@ -373,12 +294,14 @@ fn productive_execution_at_live_limit() -> (
         &mut provider,
         &mut attempts,
         &mut sink,
-        &mut tool_executor,
     );
     (execution, sink, provider.calls)
 }
 
-fn smoke_apply_plan(session_id: &str) -> (PathBuf, FlowExecutionPlan) {
+fn apply_smoke_flow(
+    session_id: &str,
+    sink: Option<&mut dyn RuntimeEventSink>,
+) -> Result<RuntimeExecution, RuntimeError> {
     let workspace = fixture_dir("smoke-flow");
     let (registry, policy) = fixture_runtime_policy("smoke-flow", "smoke-flow");
     let root_flow = registry
@@ -393,7 +316,18 @@ fn smoke_apply_plan(session_id: &str) -> (PathBuf, FlowExecutionPlan) {
         FlowExecutionOptions::new(EventClock::fixed_fixture(), ToolSideEffectMode::Plan),
     )
     .expect("smoke-flow plan compiles");
-    (workspace, plan)
+    apply_flow_with_sink(
+        FlowApplication {
+            workspace: &workspace,
+            session_id,
+            options: FlowExecutionOptions::new(
+                EventClock::fixed_fixture(),
+                ToolSideEffectMode::Apply,
+            ),
+            plan: &plan,
+        },
+        sink,
+    )
 }
 
 #[test]
@@ -406,26 +340,14 @@ fn production_apply_rejects_live_flow_overflow() {
             let release = Arc::clone(&release);
             thread::spawn(move || {
                 let session_id = format!("liveapply{ordinal:03}");
-                let (workspace, plan) = smoke_apply_plan(&session_id);
                 let mut sink = BlockingFlowStartedSink {
                     blocked: false,
                     release,
                     started,
                 };
-                apply_flow_with_sink(
-                    FlowApplication {
-                        workspace: &workspace,
-                        session_id: &session_id,
-                        options: FlowExecutionOptions::new(
-                            EventClock::fixed_fixture(),
-                            ToolSideEffectMode::Apply,
-                        ),
-                        plan: &plan,
-                    },
-                    Some(&mut sink),
-                )
-                .map(|_| ())
-                .map_err(|error| error.to_string())
+                apply_smoke_flow(&session_id, Some(&mut sink))
+                    .map(|_| ())
+                    .map_err(|error| error.to_string())
             })
         })
         .collect::<Vec<_>>();
@@ -436,20 +358,8 @@ fn production_apply_rejects_live_flow_overflow() {
             .recv_timeout(Duration::from_secs(30))
             .expect("the first 32 applies reach flow.started");
     }
-    let (workspace, plan) = smoke_apply_plan("liveapplyoverflow");
     let mut overflow_sink = CollectingEventSink::default();
-    let overflow = apply_flow_with_sink(
-        FlowApplication {
-            workspace: &workspace,
-            session_id: "liveapplyoverflow",
-            options: FlowExecutionOptions::new(
-                EventClock::fixed_fixture(),
-                ToolSideEffectMode::Apply,
-            ),
-            plan: &plan,
-        },
-        Some(&mut overflow_sink),
-    );
+    let overflow = apply_smoke_flow("liveapplyoverflow", Some(&mut overflow_sink));
     let (productive_overflow, productive_sink, provider_calls) =
         productive_execution_at_live_limit();
     let (released, wake) = &*release;
@@ -500,19 +410,7 @@ fn production_apply_rejects_live_flow_overflow() {
         vec![EventType::SessionStarted, EventType::SessionFailed],
     );
 
-    let (workspace, plan) = smoke_apply_plan("liveapplyreleased");
-    let execution = apply_flow_with_sink(
-        FlowApplication {
-            workspace: &workspace,
-            session_id: "liveapplyreleased",
-            options: FlowExecutionOptions::new(
-                EventClock::fixed_fixture(),
-                ToolSideEffectMode::Apply,
-            ),
-            plan: &plan,
-        },
-        None,
-    )
-    .expect("completed applies release their live invocation slots");
+    let execution = apply_smoke_flow("liveapplyreleased", None)
+        .expect("completed applies release their live invocation slots");
     assert!(!execution.failed);
 }

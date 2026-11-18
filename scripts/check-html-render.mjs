@@ -42,8 +42,6 @@ function ensurePlaywrightChromium() {
     );
   }
 
-  // chromium.executablePath() names full Chromium, but headless launch() uses the
-  // headless shell. Install skips whichever of the two is already present.
   runPlaywrightCli(["install", "chromium"], "Playwright browser install");
 }
 

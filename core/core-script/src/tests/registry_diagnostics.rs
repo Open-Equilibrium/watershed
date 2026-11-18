@@ -42,13 +42,6 @@ fn registry_diagnostics_preserve_operator_context_and_error_sources() {
             "invalid instruction definition review: missing parameter",
         ),
         (
-            SemanticValidationError::InvalidPhaseDefinition {
-                phase_id: "review".to_owned(),
-                message: "invalid child".to_owned(),
-            },
-            "invalid phase definition review: invalid child",
-        ),
-        (
             SemanticValidationError::InvalidFlowDefinition {
                 flow_id: "review".to_owned(),
                 message: "invalid root".to_owned(),

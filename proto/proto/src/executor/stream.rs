@@ -1,6 +1,5 @@
 use super::ExecutorProtocolError;
 
-/// Encodes arbitrary Tool stream bytes as canonical padded standard base64.
 pub fn encode_executor_stream_v0(bytes: &[u8]) -> String {
     const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut encoded = String::with_capacity(bytes.len().div_ceil(3) * 4);
@@ -24,7 +23,6 @@ pub fn encode_executor_stream_v0(bytes: &[u8]) -> String {
     encoded
 }
 
-/// Decodes canonical padded standard base64 Tool stream bytes.
 pub fn decode_executor_stream_v0(encoded: &str) -> Result<Vec<u8>, ExecutorProtocolError> {
     if !encoded.len().is_multiple_of(4) || !encoded.is_ascii() {
         return Err(invalid_base64());

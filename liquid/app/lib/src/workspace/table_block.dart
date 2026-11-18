@@ -25,15 +25,12 @@ import 'page_views.dart';
 import 'windowed_list.dart';
 import 'workspace_state.dart';
 
-/// Rows a Table shows before it scrolls inside, as the Chat Block keeps a fixed height.
 const _shownRows = 10;
 const _headerHeight = 32.0;
 const _footerHeight = 30.0;
 
-/// The narrowest the first field gets; it takes the width the others leave.
 const _firstWidth = 200.0;
 
-/// The column after the last field, with + for a new one.
 const _addWidth = 40.0;
 
 double _width(BridgeFieldKind kind) => switch (kind) {
@@ -45,10 +42,6 @@ double _width(BridgeFieldKind kind) => switch (kind) {
   BridgeFieldKind.file => 180,
 };
 
-/// A Table on its Page: its name, a header of
-/// its fields, its rows, read in windows and scrolling inside a fixed height, and their
-/// count. Fields wider than the reading column scroll sideways with the first field in
-/// view. It follows only its own Block (client architecture rule 6).
 class TableBlock extends StatefulWidget {
   const TableBlock({super.key, required this.views, required this.view});
 
@@ -95,24 +88,17 @@ class _TableBlockState extends State<TableBlock> implements CellDrop {
   final _sideways = ScrollController();
   final _down = ScrollController();
 
-  /// How many rows the Table holds, whatever the View's filter keeps.
   int? _allRows;
 
-  /// The field panel + opens, under that +.
   final _panel = OverlayPortalController();
   final _plus = LayerLink();
 
-  /// After + New the rows scroll to their end on a read begun once every row add on its
-  /// way returned; the Table starts that read itself, so it holds the rows added.
   var _rowAdded = false;
   int _rowsWriting = 0;
   int _readsAtRowAdd = 0;
 
-  /// The field the last add made, shown once a read holds it.
   String? _fieldAdded;
 
-  /// The reads started when the last field add returned; a later one without it means
-  /// the field went elsewhere.
   int _readsAtFieldAdd = 0;
 
   late final _cells = CellSelection(
@@ -122,20 +108,16 @@ class _TableBlockState extends State<TableBlock> implements CellDrop {
     write: _setCell,
     reveal: _reveal,
     leave: _leave,
-    // Also from dispose, so after the frame, when the Page may show it.
     report: (problem) => scheduleMicrotask(() => _state.report(problem)),
     addOption: _addOption,
     attach: (sources) => attachAll(_state, sources),
     save: (file) => saveCopy(_state, file),
   )..addListener(_changed);
 
-  /// The rows' box, to find the file cell under dropped files.
   final _rowsKey = GlobalKey(debugLabel: 'Table rows');
 
-  /// The file cell files are dragged over, as row and field positions.
   (int, int)? _dropAt;
 
-  /// The file cell at a point on screen, if one is there.
   (int, int)? _fileCellAt(Offset global) {
     final box = _rowsKey.currentContext?.findRenderObject();
     final fields = _database?.fields ?? const <BridgeField>[];
@@ -144,7 +126,6 @@ class _TableBlockState extends State<TableBlock> implements CellDrop {
     if (!(Offset.zero & box.size).contains(local)) return null;
     final row = ((local.dy + _down.offset) / WsMetrics.rowTable).floor();
     if (row < 0 || row >= (_rows.count ?? 0)) return null;
-    // The first field stays in view while the others scroll sideways.
     final offset = _sideways.hasClients ? _sideways.offset : 0.0;
     var field = 0;
     if (local.dx - offset >= _first) {
@@ -175,22 +156,17 @@ class _TableBlockState extends State<TableBlock> implements CellDrop {
     }
   }
 
-  /// The grid's geometry as last built, to reveal a cell.
   List<double> _starts = const [0];
   double _first = 0;
 
-  /// Times the field panel opened, so an add closes only the panel it came from.
   int _panelOpened = 0;
 
-  /// Field adds on their way; + they push out of view comes back with the scroll to them.
   int _fieldsWriting = 0;
 
-  /// Whether to scroll to the last row or field once the next build laid it out.
   var _toLastRow = false;
   var _toLastField = false;
   StreamSubscription<BridgeChange>? _followed;
 
-  /// The footer: the rows there are or, under a filter, how many of them pass.
   String _rowCount(NumberFormat format, int count, BridgeFilter? filter) {
     final all = _allRows ?? count;
     return filter == null
@@ -199,7 +175,6 @@ class _TableBlockState extends State<TableBlock> implements CellDrop {
               '${all == 1 ? 'row' : 'rows'}';
   }
 
-  /// The name as typed; a name changed elsewhere shows unless the person is typing one.
   late final _name = StoredName(
     '',
     rename: (name) => widget.views.write(
@@ -219,11 +194,9 @@ class _TableBlockState extends State<TableBlock> implements CellDrop {
   );
   final _nameFocus = FocusNode(debugLabel: 'Table name');
 
-  /// The renames sent when the name shown last was read.
   int _readSent = 0;
   StreamSubscription<String>? _settled;
 
-  /// Reads asked for, so only the latest shows.
   int _reads = 0;
 
   WorkspaceState get _state => widget.views.state;
@@ -235,7 +208,6 @@ class _TableBlockState extends State<TableBlock> implements CellDrop {
     super.initState();
     _rows.addListener(_changed);
     widget.views.cellDrops[widget.view.id] = this;
-    // A sideways scroll moves + away from the field panel, which closes.
     _sideways
       ..addListener(_closePanel)
       ..addListener(_scrolled);
@@ -244,12 +216,10 @@ class _TableBlockState extends State<TableBlock> implements CellDrop {
     _state.finishing.add(_cells.finish);
     _state.finishing.add(_fieldMenus.renameTyped);
     _nameFocus.addListener(_left);
-    // Once every rename arrived, the name is read again.
     _settled = widget.views.settled
         .where((settled) => settled == _block)
         .listen((_) => unawaited(_read()));
     widget.views.caret.addListener(_takeCaret);
-    // Built after the caret was handed to it, as a new Table is.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _takeCaret();
     });
@@ -270,7 +240,6 @@ class _TableBlockState extends State<TableBlock> implements CellDrop {
         sameFilter(widget.view.filter, old.view.filter)) {
       return;
     }
-    // The rows now start elsewhere.
     if (_down.hasClients) {
       _scrollingItself = true;
       _down.jumpTo(0);
@@ -279,7 +248,6 @@ class _TableBlockState extends State<TableBlock> implements CellDrop {
     unawaited(_rows.reread());
   }
 
-  /// Writes the View's sort or filter; a refused one shows on the Page.
   void _setQuery(BridgeMutation change) => unawaited(
     widget.views.write(change, const []).then((_) {}, onError: (Object _) {}),
   );
@@ -341,7 +309,6 @@ class _TableBlockState extends State<TableBlock> implements CellDrop {
   bool _isField(String id) =>
       _database?.fields.any((field) => field.id == id) ?? false;
 
-  /// The View's sort and filter, unless their field is gone, when they do nothing.
   BridgeSort? get _liveSort => switch (widget.view.sort) {
     final sort? when _isField(sort.field) => sort,
     _ => null,
@@ -351,8 +318,6 @@ class _TableBlockState extends State<TableBlock> implements CellDrop {
     _ => null,
   };
 
-  /// The Page's scroll and the window's size, which move the Table and so close what
-  /// hangs under it, as Flutter's menus close.
   ScrollPosition? _pageScroll;
   Size? _window;
 
@@ -393,15 +358,12 @@ class _TableBlockState extends State<TableBlock> implements CellDrop {
     _rows.dispose();
     _sideways.dispose();
     _down.dispose();
-    // A composition still open is written as it stands.
     _name.dispose();
     _nameFocus.dispose();
-    // A name typed in a field's menu is kept as it stands.
     _fieldMenus.renameTyped();
     _state.finishing.remove(_fieldMenus.renameTyped);
     _fieldMenus.dispose();
     _rowHandles.dispose();
-    // An edit still open is written as it stands.
     _cells.removeListener(_changed);
     _cells.finish();
     _state.finishing.remove(_cells.finish);
@@ -411,7 +373,6 @@ class _TableBlockState extends State<TableBlock> implements CellDrop {
 
   void _panelOutOfView() {
     if (!_panel.isShowing || _fieldsWriting > 0) return;
-    // Checked once laid out, after any scroll to a new field, which brings + back.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted || !_sideways.hasClients) return;
       final position = _sideways.position;
@@ -427,11 +388,8 @@ class _TableBlockState extends State<TableBlock> implements CellDrop {
     _fieldMenus.close();
   }
 
-  /// While the Table scrolls itself, to a new row or field or to reveal a cell, which
-  /// moves + and a picker's cell along.
   var _scrollingItself = false;
 
-  /// The person scrolling the rows closes a select cell's picker, as its cell moves away.
   void _scrolled() {
     if (_scrollingItself) return;
     _cells.closePick();
@@ -448,7 +406,6 @@ class _TableBlockState extends State<TableBlock> implements CellDrop {
     setState(() {});
   }
 
-  /// A hovered row's handle, left of the Table, and the row's menu.
   late final _rowHandles = RowHandles(
     indexOf: (row) => _rows.indexWhere((shown) => shown.id == row),
     idAt: (index) async => (await _rows.load(index))?.id,
@@ -463,7 +420,6 @@ class _TableBlockState extends State<TableBlock> implements CellDrop {
     ),
   )..addListener(_menusChanged);
 
-  /// Adds a row after `after`, or first; a refused write shows on the Page.
   Future<void> _insertRow(String? after) async {
     try {
       final added = await widget.views.write(
@@ -481,7 +437,6 @@ class _TableBlockState extends State<TableBlock> implements CellDrop {
     }
   }
 
-  /// A new row takes the value the filter asks for, so it stays in view, as in Notion.
   Future<void> _takeFilterValue(String? row) async {
     if (_liveFilter case BridgeFilter(:final field, value: final value?)
         when value.kind != BridgeCellKind.checkbox || value.checked) {
@@ -499,7 +454,6 @@ class _TableBlockState extends State<TableBlock> implements CellDrop {
     }
   }
 
-  /// Writes a change to rows; a refused one shows on the Page.
   Future<void> _writeRows(BridgeMutation change) =>
       widget.views.write(change, const []).then((_) {}, onError: (Object _) {});
 
@@ -518,15 +472,12 @@ class _TableBlockState extends State<TableBlock> implements CellDrop {
     return added.option!;
   }
 
-  /// Brings the picked cell into the Page's view, as an editor's caret does.
   void _placed(RenderObject cell) {
     _scrollingItself = true;
     cell.showOnScreen();
     _scrollingItself = false;
   }
 
-  /// + New adds a row last, which the core places as it applies the write (ADR-0247),
-  /// and shows it.
   Future<void> _addRow() async {
     _rowsWriting++;
     try {
@@ -541,8 +492,7 @@ class _TableBlockState extends State<TableBlock> implements CellDrop {
       );
       _rowAdded = true;
       await _takeFilterValue(added.row);
-    } on Object {
-      // The problem shows on the Page.
+    } on Object catch (_) {
     } finally {
       _rowsWriting--;
       _readsAtRowAdd = _reads;
@@ -557,7 +507,6 @@ class _TableBlockState extends State<TableBlock> implements CellDrop {
     _panel.show();
   }
 
-  /// A field's menu, under its header.
   late final _fieldMenus = FieldMenus(
     fieldOf: (id) =>
         _database?.fields.where((field) => field.id == id).firstOrNull,
@@ -583,8 +532,6 @@ class _TableBlockState extends State<TableBlock> implements CellDrop {
     confirm: (field) => confirmDeleteField(context, field, _allRows),
   )..addListener(_menusChanged);
 
-  /// Writes a change to a field and reads the Table again; a refused one shows on the
-  /// Page.
   Future<void> _writeField(BridgeMutation change) =>
       widget.views.write(change, const []).then((_) {
         if (mounted) unawaited(_read());
@@ -594,8 +541,6 @@ class _TableBlockState extends State<TableBlock> implements CellDrop {
     if (mounted) setState(() {});
   }
 
-  /// Adds a field last (ADR-0247) and shows it once a read holds it; a refused one keeps
-  /// the panel open.
   Future<void> _addField(String name, BridgeFieldKind kind) async {
     final opened = _panelOpened;
     final BridgeApplied added;
@@ -614,7 +559,6 @@ class _TableBlockState extends State<TableBlock> implements CellDrop {
       );
     } finally {
       _fieldsWriting--;
-      // + may have left the view meanwhile; the header checks again.
       if (mounted && _panel.isShowing) setState(() {});
     }
     if (!mounted) return;
@@ -622,7 +566,6 @@ class _TableBlockState extends State<TableBlock> implements CellDrop {
     if (_database?.fields.any((field) => field.id == added.field) ?? false) {
       setState(() => _toLastField = true);
     } else {
-      // A read begun now holds the field, or it went elsewhere.
       _fieldAdded = added.field;
       _readsAtFieldAdd = _reads;
       unawaited(_read());
@@ -642,7 +585,6 @@ class _TableBlockState extends State<TableBlock> implements CellDrop {
         const [],
       );
 
-  /// Scrolls a cell into view, below and beside the first field.
   void _reveal(int row, int field) =>
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
@@ -670,7 +612,6 @@ class _TableBlockState extends State<TableBlock> implements CellDrop {
         }
       });
 
-  /// esc leaves the Table; the caret goes to the Text Block below it, if any.
   void _leave() {
     final views = widget.views;
     final at = views.indexOf(widget.view.id);
@@ -686,20 +627,16 @@ class _TableBlockState extends State<TableBlock> implements CellDrop {
     if (mounted) _state.readFailed(error);
   }
 
-  /// A caret handed to this Table goes to its name, as for a new Table.
   void _takeCaret() {
     final caret = widget.views.caret.value;
     if (caret == null || caret.view != widget.view.id) return;
     widget.views.caret.value = null;
-    // What was typed in the line it took the place of is its name.
     final (text, written) =
         widget.views.naming.remove(widget.view.id)?.call() ?? ('', false);
     if (text.isNotEmpty) _name.handOver(text, written: written);
     _nameFocus.requestFocus();
   }
 
-  /// Leaving the name writes a composition still open as it stands; a name changed
-  /// elsewhere meanwhile then shows, unless the person's own rename is on its way.
   void _left() {
     if (_nameFocus.hasFocus) return;
     _name.write();
@@ -708,11 +645,9 @@ class _TableBlockState extends State<TableBlock> implements CellDrop {
     _name.show(_database?.name ?? '');
   }
 
-  /// Reads the name and fields, then the rows read so far.
   Future<void> _read() async {
     final read = ++_reads;
     final views = widget.views;
-    // A read that crosses a rename on its way may miss it, whenever it answers.
     final clean = views.pending(_block) == 0;
     final sent = views.sent(_block);
     try {
@@ -721,8 +656,6 @@ class _TableBlockState extends State<TableBlock> implements CellDrop {
       );
       if (!mounted || read != _reads) return;
       if (_fieldAdded case final field?) {
-        // A read that holds it shows it; one begun after the add without it means the
-        // field went elsewhere, so there is nothing to show.
         if (answer.database?.fields.any((shown) => shown.id == field) ??
             false) {
           _fieldAdded = null;
@@ -739,7 +672,6 @@ class _TableBlockState extends State<TableBlock> implements CellDrop {
       _fieldMenus.read();
       _cells.relocate((id) => _rows.indexWhere((row) => row.id == id));
     } on Object catch (error) {
-      // What an add made is not shown later by surprise.
       if (read > _readsAtRowAdd) _rowAdded = false;
       if (read > _readsAtFieldAdd) _fieldAdded = null;
       _report(error);
@@ -770,7 +702,6 @@ class _TableBlockState extends State<TableBlock> implements CellDrop {
       _toLastRow = _toLastField = false;
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
-        // The rows' end follows from their fixed height.
         if (down && _down.hasClients) {
           _scrollingItself = true;
           _down.jumpTo(
@@ -810,7 +741,6 @@ class _TableBlockState extends State<TableBlock> implements CellDrop {
                         child: TextField(
                           controller: _name.take(),
                           focusNode: _nameFocus,
-                          // The caret stays where Liquid puts it; desktop Flutter would select all on focus.
                           selectAllOnFocus: false,
                           style: TextStyle(
                             fontSize: WsMetrics.fsProse,
@@ -899,7 +829,6 @@ class _TableBlockState extends State<TableBlock> implements CellDrop {
                 if (database != null)
                   Focus(
                     focusNode: _cells.cellsFocus,
-                    // The keys of a selected cell, without a node of its own for readers.
                     includeSemantics: false,
                     child: ClipRRect(
                       borderRadius: BorderRadius.circular(WsMetrics.radiusLg),
@@ -913,8 +842,6 @@ class _TableBlockState extends State<TableBlock> implements CellDrop {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
-                            // A Table may lose all its fields, as when another device removes
-                            // them; its rows still count.
                             if (database.fields.isEmpty)
                               Container(
                                 height: _headerHeight,
@@ -960,7 +887,6 @@ class _TableBlockState extends State<TableBlock> implements CellDrop {
                       ),
                     ),
                   ),
-                // A value refused in place says why, under the Table (approved mockups).
                 if (_cells.error case final error?)
                   Padding(
                     padding: const EdgeInsets.only(top: WsMetrics.space2),
@@ -980,7 +906,6 @@ class _TableBlockState extends State<TableBlock> implements CellDrop {
     );
   }
 
-  /// The header and the rows, scrolling sideways together when wider than `width`.
   Widget _grid(
     List<BridgeField> fields,
     double width,
@@ -995,8 +920,6 @@ class _TableBlockState extends State<TableBlock> implements CellDrop {
     final others = rest.fold(0.0, (sum, width) => sum + width);
     final first = math.max(_firstWidth, width - others);
     final widths = [first, ...rest];
-    // Where each field starts, to build only the fields in view (client architecture
-    // rule 8).
     final starts = [0.0];
     for (final width in widths) {
       starts.add(starts.last + width);
@@ -1064,7 +987,6 @@ class _TableBlockState extends State<TableBlock> implements CellDrop {
             onTap: () => onTap(index),
             child: box,
           );
-          // A field's menu hangs under its header.
           if (menu?.call(index) ?? false) {
             return AnchoredMenu(
               onTapOutside: (_) => _fieldMenus.close(),
@@ -1072,18 +994,14 @@ class _TableBlockState extends State<TableBlock> implements CellDrop {
               child: tapped,
             );
           }
-          // The picker hangs from its cell.
           if (picking?.call(index) ?? false) {
             return PickedCell(cells: _cells, onPlaced: _placed, child: tapped);
           }
-          // A click in the edited cell beside its text is no click outside the editor.
           return editing?.call(index) ?? false
               ? TextFieldTapRegion(child: tapped)
               : tapped;
         }
 
-        // The first field stays in view while the others scroll sideways; fields out of
-        // view are not built.
         var from = 1;
         while (from < widths.length && starts[from + 1] <= offset + first) {
           from++;
@@ -1097,7 +1015,6 @@ class _TableBlockState extends State<TableBlock> implements CellDrop {
           children: [
             Row(
               children: [
-                // Also gives the line its height when only the first field is built.
                 SizedBox(width: starts[from], height: height),
                 for (var index = from; index < to; index++) box(index),
               ],
@@ -1106,7 +1023,6 @@ class _TableBlockState extends State<TableBlock> implements CellDrop {
               left: offset,
               top: 0,
               bottom: 0,
-              // A hovered row's handle hangs left of its first field.
               child: handle == null
                   ? box(0)
                   : CompositedTransformTarget(link: handle, child: box(0)),
@@ -1124,7 +1040,6 @@ class _TableBlockState extends State<TableBlock> implements CellDrop {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            // Over the cells, so the first field's cell keeps the line too.
             DecoratedBox(
               position: DecorationPosition.foreground,
               decoration: BoxDecoration(
@@ -1138,7 +1053,6 @@ class _TableBlockState extends State<TableBlock> implements CellDrop {
                 child: line(
                   height: _headerHeight,
                   color: ws.subtle,
-                  // The field panel follows +, so it closes once + is out of view.
                   addOutOfView: _panelOutOfView,
                   onTap: (index) {
                     if (index >= fields.length) return;
@@ -1239,8 +1153,6 @@ class _TableBlockState extends State<TableBlock> implements CellDrop {
                     ),
                   );
                   if (row == null) return shown;
-                  // A hovered row shows its handle (section 5).
-                  // Keyed by row, so a row moving under a still pointer is entered anew.
                   return HoverRegion(
                     key: ValueKey('row ${row.id}'),
                     onHover: (hovered, region) =>
@@ -1257,7 +1169,6 @@ class _TableBlockState extends State<TableBlock> implements CellDrop {
   }
 }
 
-/// + New under the last row, which adds a row there.
 class _NewRow extends StatelessWidget {
   const _NewRow({required this.onTap});
 

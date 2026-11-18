@@ -9,8 +9,6 @@ import '../session/session_state.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
 
-/// T3 Code's "Commit changes" dialog: the checkout's uncommitted files, with those to leave out,
-/// and an optional message. Committing closes it and runs the commit.
 Future<void> showCommitDialog(BuildContext context, SessionState state) {
   final git = state.git.value;
   return showDialog<void>(
@@ -39,7 +37,6 @@ class _CommitDialogState extends State<_CommitDialog> {
     super.dispose();
   }
 
-  /// Commits the files not left out; the whole set passes no file list.
   void _commit({bool onNewBranch = false}) {
     final files = widget.git.status.value?.changes ?? const [];
     final chosen = [
@@ -228,7 +225,6 @@ class _CommitDialogState extends State<_CommitDialog> {
     },
   );
 
-  /// One file: its path, and its added and removed lines or Excluded.
   Widget _row(BuildContext context, BridgeFileChange file) {
     final ws = context.ws;
     final excluded = _excluded.contains(file.path);

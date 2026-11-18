@@ -218,8 +218,6 @@ impl ContextManifestWriter {
         Ok(())
     }
 
-    /// Checks only the final record, which this writer last wrote. Earlier records are rescanned
-    /// when the Run finishes, so persisting does not grow with the manifest stream.
     fn verify_last_record(&self, path: &AnchoredFile) -> Result<(), RuntimeError> {
         let Some(last) = self.last_manifest.as_deref() else {
             return Ok(());
@@ -236,7 +234,6 @@ impl ContextManifestWriter {
         Ok(())
     }
 
-    /// Rescans the whole manifest stream once when the Run finishes.
     pub(crate) fn finish(&self, path: &AnchoredFile) -> Result<(), RuntimeError> {
         let (_, _, observed_bytes, observed_signature) = context_manifest_inventory(path)?;
         if observed_bytes != self.byte_count

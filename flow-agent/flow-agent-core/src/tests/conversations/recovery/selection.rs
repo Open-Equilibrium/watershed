@@ -7,6 +7,7 @@ use super::super::{
     append_uncertain_provider_intent, create_review_run, create_terminal_review_run,
     write_terminal_run,
 };
+use super::review_run_dir;
 use crate::runtime::{
     conversations::{
         MAX_CONVERSATION_RECORD_BYTES, append_productive_run_checkpoint, canonical_json,
@@ -23,8 +24,8 @@ fn productive_recovery_header_reader_rejects_every_uncommitted_or_foreign_header
     create_review_run(&base);
     write_terminal_recovery_snapshot(&base, "review", "review-1");
     write_terminal_run(&base, "review", "review-1");
-    let base_run = crate::tests::helpers::workspace_session_dir(&base).join("review/runs/review-1");
-    let base_bytes = fs::read(base_run.join("recovery.jsonl")).expect("recovery reads");
+    let base_bytes =
+        fs::read(review_run_dir(&base, "review-1").join("recovery.jsonl")).expect("recovery reads");
     let first_lf = base_bytes
         .iter()
         .position(|byte| *byte == b'\n')
@@ -95,40 +96,28 @@ fn productive_recovery_header_reader_rejects_every_uncommitted_or_foreign_header
     for (name, bytes, expected) in cases {
         let workspace = empty_workspace(&format!("conversation-recovery-header-{name}"));
         copy_workspace_runtime(&base, &workspace);
-        let run =
-            crate::tests::helpers::workspace_session_dir(&workspace).join("review/runs/review-1");
-        fs::write(run.join("recovery.jsonl"), bytes).expect("invalid header fixture writes");
-        let error = match reserve_conversation_run_recovery(&workspace, "review", "review-1") {
-            Ok(reservation) => {
-                reservation
-                    .release()
-                    .expect("unexpected reservation releases");
-                panic!("invalid recovery header must fail closed")
-            }
-            Err(error) => error,
+        fs::write(
+            review_run_dir(&workspace, "review-1").join("recovery.jsonl"),
+            bytes,
+        )
+        .expect("invalid header fixture writes");
+        let Err(error) = reserve_conversation_run_recovery(&workspace, "review", "review-1") else {
+            panic!("invalid recovery header must fail closed")
         };
         assert!(error.to_string().contains(expected), "{name}: {error}");
     }
 
     let oversized = empty_workspace("conversation-recovery-header-total-limit");
     copy_workspace_runtime(&base, &oversized);
-    let oversized_run =
-        crate::tests::helpers::workspace_session_dir(&oversized).join("review/runs/review-1");
     OpenOptions::new()
         .write(true)
         .truncate(true)
-        .open(oversized_run.join("recovery.jsonl"))
+        .open(review_run_dir(&oversized, "review-1").join("recovery.jsonl"))
         .expect("recovery opens")
         .set_len(MAX_SESSION_METADATA_BYTES + 1)
         .expect("sparse oversized recovery writes");
-    let error = match reserve_conversation_run_recovery(&oversized, "review", "review-1") {
-        Ok(reservation) => {
-            reservation
-                .release()
-                .expect("unexpected reservation releases");
-            panic!("oversized recovery must fail before reading")
-        }
-        Err(error) => error,
+    let Err(error) = reserve_conversation_run_recovery(&oversized, "review", "review-1") else {
+        panic!("oversized recovery must fail before reading")
     };
     assert!(
         error
@@ -147,13 +136,15 @@ fn selected_continuation_rejects_every_incomplete_or_foreign_recovery_snapshot()
         "no-terminal",
         "missing-history-object",
         "invalid-history-object",
+        "flow-definition-id",
+        "registry-hash",
+        "flow-definition-hash",
     ] {
         let workspace = empty_workspace(&format!("conversation-selected-recovery-{case}"));
         create_review_run(&workspace);
         write_terminal_recovery_fixture(&workspace, "review", "review-1", "root");
         write_terminal_run(&workspace, "review", "review-1");
-        let recovery_path = crate::tests::helpers::workspace_session_dir(&workspace)
-            .join("review/runs/review-1/recovery.jsonl");
+        let recovery_path = review_run_dir(&workspace, "review-1").join("recovery.jsonl");
         let mut records = fs::read_to_string(&recovery_path)
             .expect("recovery reads")
             .lines()
@@ -189,8 +180,8 @@ fn selected_continuation_rejects_every_incomplete_or_foreign_recovery_snapshot()
                 let invalid_history = b"{}";
                 let digest = sha256_hex(invalid_history);
                 fs::write(
-                    crate::tests::helpers::workspace_session_dir(&workspace)
-                        .join("review/runs/review-1/objects")
+                    review_run_dir(&workspace, "review-1")
+                        .join("objects")
                         .join(&digest),
                     invalid_history,
                 )
@@ -200,67 +191,26 @@ fn selected_continuation_rejects_every_incomplete_or_foreign_recovery_snapshot()
                 replace_terminal_recovery_snapshot(&workspace, "review", "review-1", &records);
                 "missing field"
             }
+            "flow-definition-id" | "registry-hash" | "flow-definition-hash" => {
+                let field = case.replace('-', "_");
+                records[0][&field] = if case == "flow-definition-id" {
+                    serde_json::json!("other-flow")
+                } else {
+                    serde_json::json!(prefixed_sha256_hex(b"other definition"))
+                };
+                replace_terminal_recovery_snapshot(&workspace, "review", "review-1", &records);
+                "conflicts with the run definition"
+            }
             _ => unreachable!("bounded selected recovery matrix"),
         };
 
-        let error = match reserve_conversation_continuation(&workspace, "review", None) {
-            Ok(reservation) => {
-                reservation
-                    .release()
-                    .expect("unexpected reservation releases");
-                panic!("incomplete or foreign snapshot must fail closed")
-            }
-            Err(error) => error,
+        let Err(error) = reserve_conversation_continuation(&workspace, "review", None) else {
+            panic!("incomplete or foreign snapshot must fail closed")
         };
         assert!(error.to_string().contains(expected), "{case}: {error}");
-    }
-}
-
-#[test]
-fn continuation_rejects_a_snapshot_header_that_conflicts_with_the_run_definition() {
-    for field in [
-        "flow_definition_id",
-        "registry_hash",
-        "flow_definition_hash",
-    ] {
-        let workspace = empty_workspace(&format!("conversation-continuation-definition-{field}"));
-        create_review_run(&workspace);
-        write_terminal_recovery_fixture(&workspace, "review", "review-1", "root");
-        write_terminal_run(&workspace, "review", "review-1");
-        let recovery_path = crate::tests::helpers::workspace_session_dir(&workspace)
-            .join("review/runs/review-1/recovery.jsonl");
-        let mut records = fs::read_to_string(&recovery_path)
-            .expect("recovery reads")
-            .lines()
-            .map(|line| serde_json::from_str(line).expect("recovery record parses"))
-            .collect::<Vec<serde_json::Value>>();
-        records[0][field] = if field == "flow_definition_id" {
-            serde_json::json!("other-flow")
-        } else {
-            serde_json::json!(prefixed_sha256_hex(b"other definition"))
-        };
-        replace_terminal_recovery_snapshot(&workspace, "review", "review-1", &records);
-
-        let error = match reserve_conversation_continuation(&workspace, "review", None) {
-            Ok(reservation) => {
-                reservation
-                    .release()
-                    .expect("unexpected reservation releases");
-                panic!("a snapshot that conflicts with its run definition must fail closed")
-            }
-            Err(error) => error,
-        };
         assert!(
-            error
-                .to_string()
-                .contains("conflicts with the run definition"),
-            "{field}: {error}"
-        );
-        assert!(
-            !crate::tests::helpers::workspace_session_dir(&workspace)
-                .join("review/runs/review-2")
-                .exists(),
-            "{field}: no Run is allocated"
+            !review_run_dir(&workspace, "review-2").exists(),
+            "{case}: no Run is allocated"
         );
     }
 }
@@ -287,9 +237,5 @@ fn continuation_refuses_an_uncertain_attempt_in_its_selected_ancestry() {
     };
     assert_eq!(error.exit_code(), 65);
     assert!(error.to_string().contains("uncertain"));
-    assert!(
-        !crate::tests::helpers::workspace_session_dir(&workspace)
-            .join("review/runs/review-2")
-            .exists()
-    );
+    assert!(!review_run_dir(&workspace, "review-2").exists());
 }

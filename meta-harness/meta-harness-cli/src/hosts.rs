@@ -1,11 +1,7 @@
-//! The commands that link this Meta-Harness to other hosts and devices (ADR-0285, ADR-0299,
-//! ADR-0300): remote access, pairing codes, and the hosts this one links to.
-
 use meta_harness_core::{Access, ClientKind, DEFAULT_REMOTE_PORT, remote};
 
 use crate::USAGE;
 
-/// `meta remote on [--port N] | off | status`.
 pub async fn remote(host: &remote::Host, args: &[&str]) -> Result<(), String> {
     match args {
         ["on", rest @ ..] => {
@@ -32,8 +28,6 @@ pub async fn remote(host: &remote::Host, args: &[&str]) -> Result<(), String> {
     }
 }
 
-/// `meta invite --device | --host [--access LEVEL]`: a pairing code, with the addresses to pair
-/// with. A host's code gives its link the level, `auto` by default (ADR-0300).
 pub async fn invite(host: &remote::Host, args: &[&str]) -> Result<(), String> {
     let (kind, access) = match args {
         ["--device"] => (ClientKind::Device, Access::default()),
@@ -58,7 +52,6 @@ pub async fn invite(host: &remote::Host, args: &[&str]) -> Result<(), String> {
     Ok(())
 }
 
-/// `meta host add|list|remove|revoke|agents`.
 pub async fn host(host: &remote::Host, args: &[&str]) -> Result<(), String> {
     match args {
         ["add", address, code, rest @ ..] => {
@@ -100,7 +93,6 @@ pub async fn host(host: &remote::Host, args: &[&str]) -> Result<(), String> {
     }
 }
 
-/// The port that `--port` names in `args`, or the default.
 pub(crate) fn port(args: &[&str]) -> Result<u16, String> {
     match args {
         [] => Ok(DEFAULT_REMOTE_PORT),
@@ -111,8 +103,6 @@ pub(crate) fn port(args: &[&str]) -> Result<u16, String> {
     }
 }
 
-/// The access level that `--access` names in `args`, if it names one; `command` names the command
-/// in the error.
 pub(crate) fn access(command: &str, args: &[&str]) -> Result<Option<Access>, String> {
     match args {
         [] => Ok(None),

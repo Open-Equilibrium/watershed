@@ -1,15 +1,8 @@
-//! Guard: production runtime code writes and syncs files only through the write-and-sync helper in
-//! `fs_guards/durability.rs` (ADR-0266), so the power-loss ledger sees every durable byte.
-//!
-//! A source scan, not a parser: it skips `#[cfg(test)]` items by brace counting, ignores comment
-//! lines and flags write calls, sync calls and write-mode opens. Each exemption names its reason.
-
 use std::{
     fs,
     path::{Path, PathBuf},
 };
 
-/// Source files outside the helper, with the write or open each one is exempt for and why.
 const EXEMPT_FILES: &[(&str, &[&str], &str)] = &[
     (
         "runtime/fs_guards/durability.rs",
@@ -135,10 +128,6 @@ fn collect_rust_files(directory: &Path, files: &mut Vec<PathBuf>) {
     }
 }
 
-/// The 1-based numbered lines of `source` outside test-only items and comment lines.
-///
-/// rustfmt indents an item's closing line to the item's own indentation, so a test-only item
-/// ends at the first line at or left of its indentation that closes a block or ends a statement.
 fn production_lines(source: &str) -> Vec<(usize, &str)> {
     let indent = |line: &str| line.len() - line.trim_start().len();
     let mut lines = Vec::new();
@@ -178,33 +167,27 @@ fn is_test_attribute(trimmed: &str) -> bool {
 }
 
 #[test]
-fn production_lines_skip_test_items_and_comments() {
-    let source = "fn kept() {\n    // file.sync_all();\n}\n#[cfg(test)]\nmod tests {\n    fn scratch() {\n        f.sync_all();\n    }\n}\nlet kept = 1;\n";
+fn production_lines_skip_test_items_and_comments_but_keep_cfg_items_outside_test() {
+    for (source, expected) in [
+        (
+            "fn kept() {\n    // file.sync_all();\n}\n#[cfg(test)]\nmod tests {\n    fn scratch() {\n        f.sync_all();\n    }\n}\nlet kept = 1;\n",
+            vec!["fn kept() {", "}", "let kept = 1;"],
+        ),
+        (
+            "#[cfg(any(test, unix))]\nfn p(f:&File){\n    f.sync_all().unwrap();\n}\n",
+            vec![
+                "#[cfg(any(test, unix))]",
+                "fn p(f:&File){",
+                "    f.sync_all().unwrap();",
+                "}",
+            ],
+        ),
+    ] {
+        let lines: Vec<&str> = production_lines(source)
+            .into_iter()
+            .map(|(_, line)| line)
+            .collect();
 
-    let lines: Vec<&str> = production_lines(source)
-        .into_iter()
-        .map(|(_, line)| line)
-        .collect();
-
-    assert_eq!(lines, vec!["fn kept() {", "}", "let kept = 1;"]);
-}
-
-#[test]
-fn production_lines_keep_items_enabled_outside_test() {
-    let source = "#[cfg(any(test, unix))]\nfn p(f:&File){\n    f.sync_all().unwrap();\n}\n";
-
-    let lines: Vec<&str> = production_lines(source)
-        .into_iter()
-        .map(|(_, line)| line)
-        .collect();
-
-    assert_eq!(
-        lines,
-        vec![
-            "#[cfg(any(test, unix))]",
-            "fn p(f:&File){",
-            "    f.sync_all().unwrap();",
-            "}"
-        ]
-    );
+        assert_eq!(lines, expected);
+    }
 }

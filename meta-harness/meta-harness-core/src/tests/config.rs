@@ -1,53 +1,28 @@
-//! The central configuration's store: proposals take effect only once approved, every step is
-//! logged append-only, and a revert restores an earlier revision (ADR-0298).
-
 use std::collections::BTreeMap;
-use std::path::PathBuf;
 
-use crate::config::{Action, Blocks, Change, McpServer, Proposed, Store};
+use super::Dir;
+use crate::config::{
+    Action, Blocks, Change, Difference, Direction, McpServer, Proposed, Store, diff_blocks,
+};
 
-/// A store in a fresh folder. Fields drop in declaration order, so the store closes before its
-/// folder is removed.
 struct Fixture {
     store: Store,
-    dir: Folder,
-}
-
-/// A folder removed on drop; a failed removal is printed, not ignored.
-struct Folder(PathBuf);
-
-impl std::ops::Deref for Folder {
-    type Target = PathBuf;
-
-    fn deref(&self) -> &PathBuf {
-        &self.0
-    }
-}
-
-impl Drop for Folder {
-    fn drop(&mut self) {
-        if let Err(error) = std::fs::remove_dir_all(&self.0) {
-            eprintln!("could not remove {}: {error}", self.0.display());
-        }
-    }
+    dir: Dir,
 }
 
 impl Fixture {
     fn new() -> Self {
-        let mut bytes = [0u8; 8];
-        getrandom::fill(&mut bytes).unwrap();
-        let name: String = bytes.iter().map(|b| format!("{b:02x}")).collect();
-        let dir = std::env::temp_dir().join(format!("mh-config-{name}"));
-        std::fs::create_dir_all(&dir).unwrap();
+        let dir = Dir::new();
         let store = Store::open(&dir.join("meta-harness.sqlite")).unwrap();
-        Self {
-            store,
-            dir: Folder(dir),
-        }
+        Self { store, dir }
     }
 
     fn reopen(&self) -> Store {
         Store::open(&self.dir.join("meta-harness.sqlite")).unwrap()
+    }
+
+    fn raw(&self) -> rusqlite::Connection {
+        rusqlite::Connection::open(self.dir.join("meta-harness.sqlite")).unwrap()
     }
 }
 
@@ -68,6 +43,18 @@ fn skill(name: &str) -> Change {
     }
 }
 
+fn skill_files(pairs: &[(&str, &str)]) -> Change {
+    Change::Skill {
+        name: "s".to_owned(),
+        files: Some(
+            pairs
+                .iter()
+                .map(|(path, text)| ((*path).to_owned(), (*text).to_owned()))
+                .collect(),
+        ),
+    }
+}
+
 fn server(name: &str) -> Change {
     Change::McpServer {
         name: name.to_owned(),
@@ -75,6 +62,20 @@ fn server(name: &str) -> Change {
             command: "/usr/local/bin/docs-mcp".to_owned(),
             args: vec!["--stdio".to_owned()],
             env: BTreeMap::from([("DOCS_ROOT".to_owned(), "/srv/docs".to_owned())]),
+        }),
+    }
+}
+
+fn command_server(command: &str, env: &[(&str, &str)]) -> Change {
+    Change::McpServer {
+        name: "m".to_owned(),
+        server: Some(McpServer::Command {
+            command: command.to_owned(),
+            args: vec![],
+            env: env
+                .iter()
+                .map(|(key, value)| ((*key).to_owned(), (*value).to_owned()))
+                .collect(),
         }),
     }
 }
@@ -130,7 +131,6 @@ fn a_proposal_takes_effect_only_once_approved_and_every_step_is_logged() {
             ("liquid".to_owned(), Action::Approved, number, Some(1)),
         ]
     );
-    // The state outlives the store.
     assert_eq!(fixture.reopen().current().unwrap(), current);
 }
 
@@ -182,7 +182,6 @@ fn a_restore_brings_back_an_earlier_revision_exactly() {
     let restore = store
         .propose("cli", "back", Proposed::Restore(kept.revision))
         .unwrap();
-    // A change approved after the restore was proposed is undone by it too.
     let third = propose(store, vec![instruction("late", "x")]);
     store.approve("cli", third, |_| Ok(())).unwrap();
     let restored = store.approve("cli", restore, |_| Ok(())).unwrap();
@@ -201,7 +200,7 @@ fn the_log_and_revisions_refuse_changes_in_place() {
     let number = propose(&fixture.store, vec![instruction("a", "x")]);
     fixture.store.approve("cli", number, |_| Ok(())).unwrap();
     drop(fixture.store.log());
-    let raw = rusqlite::Connection::open(fixture.dir.join("meta-harness.sqlite")).unwrap();
+    let raw = fixture.raw();
     for statement in [
         "DELETE FROM log",
         "UPDATE log SET client = 'agent'",
@@ -217,78 +216,28 @@ fn the_log_and_revisions_refuse_changes_in_place() {
 #[test]
 fn an_invalid_change_is_refused_with_its_reason() {
     let fixture = Fixture::new();
-    let files = |pairs: &[(&str, &str)]| {
-        Some(
-            pairs
-                .iter()
-                .map(|(p, t)| ((*p).to_owned(), (*t).to_owned()))
-                .collect::<BTreeMap<_, _>>(),
-        )
-    };
     let big = "x".repeat(300 * 1024);
     let cases = [
         (instruction("", "x"), "name"),
         (instruction("a b", "x"), "name"),
         (instruction(&"n".repeat(65), "x"), "name"),
         (instruction("a", &big), "too large"),
+        (skill_files(&[("README.md", "x")]), "SKILL.md"),
         (
-            Change::Skill {
-                name: "s".to_owned(),
-                files: files(&[("README.md", "x")]),
-            },
-            "SKILL.md",
-        ),
-        (
-            Change::Skill {
-                name: "s".to_owned(),
-                files: files(&[("SKILL.md", "x"), ("../escape", "x")]),
-            },
+            skill_files(&[("SKILL.md", "x"), ("../escape", "x")]),
             "path",
         ),
+        (skill_files(&[("SKILL.md", "x"), ("/etc/x", "x")]), "path"),
         (
-            Change::Skill {
-                name: "s".to_owned(),
-                files: files(&[("SKILL.md", "x"), ("/etc/x", "x")]),
-            },
-            "path",
-        ),
-        (
-            Change::Skill {
-                name: "s".to_owned(),
-                files: files(&[("SKILL.md", "x"), ("x", "x"), ("x/y", "x")]),
-            },
-            "clash",
-        ),
-        // Case-insensitive file systems, such as macOS's default, make these one folder.
-        (
-            Change::Skill {
-                name: "s".to_owned(),
-                files: files(&[("SKILL.md", "x"), ("A/b", "x"), ("a", "x")]),
-            },
+            skill_files(&[("SKILL.md", "x"), ("x", "x"), ("x/y", "x")]),
             "clash",
         ),
         (
-            Change::McpServer {
-                name: "m".to_owned(),
-                server: Some(McpServer::Command {
-                    command: String::new(),
-                    args: vec![],
-                    env: BTreeMap::new(),
-                }),
-            },
-            "command",
+            skill_files(&[("SKILL.md", "x"), ("A/b", "x"), ("a", "x")]),
+            "clash",
         ),
-        (
-            Change::McpServer {
-                name: "m".to_owned(),
-                server: Some(McpServer::Command {
-                    command: "x".to_owned(),
-                    args: vec![],
-                    env: BTreeMap::from([("BAD KEY".to_owned(), "v".to_owned())]),
-                }),
-            },
-            "variable",
-        ),
+        (command_server("", &[]), "command"),
+        (command_server("x", &[("BAD KEY", "v")]), "variable"),
         (
             Change::McpServer {
                 name: "m".to_owned(),
@@ -308,7 +257,6 @@ fn an_invalid_change_is_refused_with_its_reason() {
     }
     assert!(fixture.store.pending().unwrap().is_empty());
 
-    // Skills that differ only in case would share a folder on macOS's default file system.
     let both = propose(&fixture.store, vec![skill("review"), skill("Review")]);
     let error = fixture.store.approve("cli", both, |_| Ok(())).unwrap_err();
     assert!(error.contains("only in case"), "{error}");
@@ -324,7 +272,6 @@ fn a_revision_the_homes_cannot_take_is_not_approved() {
         written
             .borrow_mut()
             .push(blocks.instructions.contains_key("a"));
-        // The new revision fails to write; the current one is put back.
         if blocks.instructions.is_empty() {
             Ok(())
         } else {
@@ -344,13 +291,11 @@ fn a_revision_the_homes_cannot_take_is_not_approved() {
 
 #[test]
 fn a_failure_after_the_homes_took_the_revision_puts_the_current_one_back() {
-    // Each fault strikes after the homes took the proposed blocks: the revision row, the log row
-    // or the commit, which a reader holding its snapshot blocks.
     for fault in ["revision", "log", "commit"] {
         let fixture = Fixture::new();
         let store = &fixture.store;
         let number = propose(store, vec![instruction("rules", "x")]);
-        let raw = rusqlite::Connection::open(fixture.dir.join("meta-harness.sqlite")).unwrap();
+        let raw = fixture.raw();
         match fault {
             "commit" => raw
                 .execute_batch("BEGIN; SELECT count(*) FROM revision;")
@@ -378,44 +323,16 @@ fn a_failure_after_the_homes_took_the_revision_puts_the_current_one_back() {
 }
 
 #[test]
-fn a_failed_rollback_is_reported_with_the_failure_that_caused_it() {
-    let fixture = Fixture::new();
-    let store = &fixture.store;
-    let number = propose(store, vec![instruction("rules", "x")]);
-    let raw = rusqlite::Connection::open(fixture.dir.join("meta-harness.sqlite")).unwrap();
-    raw.execute_batch(
-        "CREATE TRIGGER refuse BEFORE INSERT ON revision BEGIN SELECT RAISE(ABORT, 'refused'); END;",
-    )
-    .unwrap();
-    // The homes take the proposed blocks, then refuse the restore of the current ones.
-    let calls = std::cell::Cell::new(0);
-    let result = store.approve("cli", number, |_| {
-        calls.set(calls.get() + 1);
-        if calls.get() == 1 {
-            Ok(())
-        } else {
-            Err("the homes refuse writes".to_owned())
-        }
-    });
-    let error = result.unwrap_err();
-    assert!(
-        error.contains("refused") && error.contains("the homes refuse writes"),
-        "{error}"
-    );
-}
-
-#[test]
 fn a_failed_rollback_leaves_the_homes_unreconciled_until_an_approval_writes_them() {
     let fixture = Fixture::new();
     let store = &fixture.store;
     let first = propose(store, vec![instruction("rules", "x")]);
     let second = propose(store, vec![instruction("more", "y")]);
-    let raw = rusqlite::Connection::open(fixture.dir.join("meta-harness.sqlite")).unwrap();
+    let raw = fixture.raw();
     raw.execute_batch(
         "CREATE TRIGGER refuse BEFORE INSERT ON revision BEGIN SELECT RAISE(ABORT, 'refused'); END;",
     )
     .unwrap();
-    // The approved revision reaches the homes, then the commit and the restore both fail.
     let calls = std::cell::Cell::new(0);
     let failed = store.approve("cli", first, |_| {
         calls.set(calls.get() + 1);
@@ -425,18 +342,20 @@ fn a_failed_rollback_leaves_the_homes_unreconciled_until_an_approval_writes_them
             Err("the homes refuse writes".to_owned())
         }
     });
-    assert!(failed.is_err());
+    let error = failed.unwrap_err();
+    assert!(
+        error.contains("refused") && error.contains("the homes refuse writes"),
+        "{error}"
+    );
     assert!(!store.reconciled());
 
     raw.execute_batch("DROP TRIGGER refuse").unwrap();
-    // The homes still refuse writes, so the next approval's own write fails and it is refused.
     let refused = store
         .approve("cli", second, |_| Err("the homes refuse writes".to_owned()))
         .unwrap_err();
     assert!(refused.contains("the homes refuse writes"), "{refused}");
     assert!(!store.reconciled());
 
-    // Once the homes take the approved revision, the approval's write puts it in and reconciles.
     let written = std::cell::RefCell::new(Vec::new());
     store
         .approve("cli", second, |blocks| {
@@ -450,13 +369,13 @@ fn a_failed_rollback_leaves_the_homes_unreconciled_until_an_approval_writes_them
     assert!(store.reconciled());
     assert_eq!(store.current().unwrap().revision, 1);
 }
+
 #[test]
 fn a_revert_is_approved_while_the_homes_refuse_the_current_revision() {
     let fixture = Fixture::new();
     let store = &fixture.store;
     let rules = propose(store, vec![instruction("rules", "x")]);
     store.approve("cli", rules, |_| Ok(())).unwrap();
-    // The service starts with homes that refuse the current revision, which records it.
     store.set_reconciled(false);
     let revert = store
         .propose("cli", "back to the start", Proposed::Restore(0))
@@ -474,6 +393,64 @@ fn a_revert_is_approved_while_the_homes_refuse_the_current_revision() {
         .unwrap();
     assert_eq!(approved.revision, 2);
     assert!(store.reconciled());
-    // Only the approval's own write reached the homes.
     assert_eq!(written.into_inner(), vec![Blocks::default()]);
+}
+
+#[test]
+fn a_diff_names_each_change_with_its_direction_and_identical_blocks_need_none() {
+    let files = BTreeMap::from([("SKILL.md".to_owned(), "review".to_owned())]);
+    let docs = McpServer::Url {
+        url: "https://docs".to_owned(),
+    };
+    let mut from = Blocks::default();
+    from.instructions.insert("AGENTS.md".into(), "rules".into());
+    from.skills.insert("review".into(), files.clone());
+    from.mcp_servers.insert("docs".into(), docs.clone());
+    let mut to = Blocks::default();
+    to.instructions
+        .insert("AGENTS.md".into(), "old rules".into());
+    to.instructions
+        .insert("notes.md".into(), "kept elsewhere".into());
+    to.mcp_servers.insert("docs".into(), docs.clone());
+    to.mcp_servers.insert(
+        "old".into(),
+        McpServer::Url {
+            url: "https://old".to_owned(),
+        },
+    );
+
+    assert!(diff_blocks(&from, &from.clone()).is_empty());
+    assert_eq!(
+        diff_blocks(&from, &to),
+        vec![
+            Difference {
+                direction: Direction::Replace,
+                change: Change::Instruction {
+                    name: "AGENTS.md".into(),
+                    text: Some("rules".into()),
+                },
+            },
+            Difference {
+                direction: Direction::Remove,
+                change: Change::Instruction {
+                    name: "notes.md".into(),
+                    text: None,
+                },
+            },
+            Difference {
+                direction: Direction::Add,
+                change: Change::Skill {
+                    name: "review".into(),
+                    files: Some(files),
+                },
+            },
+            Difference {
+                direction: Direction::Remove,
+                change: Change::McpServer {
+                    name: "old".into(),
+                    server: None,
+                },
+            },
+        ]
+    );
 }

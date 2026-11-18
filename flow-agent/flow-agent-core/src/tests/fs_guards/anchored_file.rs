@@ -2,7 +2,7 @@ use super::super::helpers::empty_workspace;
 use crate::runtime::{
     fixture_tools::{anchored_workspace_write_path, replace_script_output_atomically},
     fs_guards::{
-        create_anchored_file_for_update, open_anchored_session_log_append_file,
+        AnchoredFile, create_anchored_file_for_update, open_anchored_session_log_append_file,
         with_anchored_replacement_temp,
     },
     session_store::ensure_runtime_dirs,
@@ -13,7 +13,15 @@ use crate::runtime::fs_guards::validate_real_file;
 use std::{
     fs,
     io::{Read, Seek, Write},
+    path::Path,
 };
+
+fn session_file(workspace: &Path, name: &str) -> AnchoredFile {
+    ensure_runtime_dirs(workspace)
+        .expect("runtime dirs")
+        .sessions
+        .file(name)
+}
 
 #[test]
 fn real_file_validation_rejects_a_directory() {
@@ -29,10 +37,7 @@ fn real_file_validation_rejects_a_directory() {
 #[test]
 fn create_for_update_opens_one_new_validated_file_for_read_and_write() {
     let workspace = empty_workspace("create-anchored-file-for-update");
-    let path = ensure_runtime_dirs(&workspace)
-        .expect("runtime dirs")
-        .sessions
-        .file("scratch");
+    let path = session_file(&workspace, "scratch");
     let mut file = create_anchored_file_for_update(&path).expect("new file opens for update");
 
     file.write_all(b"value").expect("new file writes");
@@ -95,12 +100,9 @@ fn replacement_temp_cleanup_failure_preserves_both_causes_and_allows_retry() {
 fn append_rejects_hardlinked_leaf_without_changing_target() {
     let workspace = empty_workspace("session-hardlink");
     let outside = empty_workspace("outside-session-hardlink");
-    let session_dir = ensure_runtime_dirs(&workspace)
-        .expect("runtime dirs")
-        .sessions;
+    let session_path = session_file(&workspace, "race001.jsonl");
     let outside_target = outside.join("victim.jsonl");
     fs::write(&outside_target, "outside\n").expect("outside target written");
-    let session_path = session_dir.file("race001.jsonl");
     fs::hard_link(&outside_target, session_path.diagnostic_path()).expect("session hard link");
 
     let err = open_anchored_session_log_append_file(&session_path)
@@ -115,10 +117,7 @@ fn append_rejects_hardlinked_leaf_without_changing_target() {
 #[test]
 fn session_log_append_rejects_a_fifo_without_blocking() {
     let workspace = empty_workspace("session-append-fifo");
-    let session_path = ensure_runtime_dirs(&workspace)
-        .expect("runtime dirs")
-        .sessions
-        .file("fifo001.jsonl");
+    let session_path = session_file(&workspace, "fifo001.jsonl");
     let status = std::process::Command::new("mkfifo")
         .arg(session_path.diagnostic_path())
         .status()
@@ -138,10 +137,7 @@ fn session_log_append_rejects_a_fifo_without_blocking() {
 #[test]
 fn session_log_append_handle_cannot_overwrite_existing_records() {
     let workspace = empty_workspace("session-append-semantics");
-    let session_path = ensure_runtime_dirs(&workspace)
-        .expect("runtime dirs")
-        .sessions
-        .file("append001.jsonl");
+    let session_path = session_file(&workspace, "append001.jsonl");
     fs::write(session_path.diagnostic_path(), b"old\n").expect("existing record written");
     let mut file = open_anchored_session_log_append_file(&session_path).expect("session log opens");
 

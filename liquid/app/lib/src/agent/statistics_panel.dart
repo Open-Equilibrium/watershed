@@ -13,16 +13,12 @@ import 'session_card_statistics.dart';
 import 'statistics_chart.dart';
 import 'statistics_table.dart';
 
-/// The text the Ask button puts in the input; the user completes it and sends it.
 const askStart = 'About this session: ';
 
 enum _View { cost, tokens, time }
 
 enum _Breakdown { model, tool, turn }
 
-/// The statistics panel of a session (ADR-0279): what T3 reports for it, by tokens or time, with a
-/// chart per turn and the breakdowns. T3 reports no cost, so the Cost view says so (ADR-0293). It
-/// opens over the session card, and Escape or ✕ closes it.
 class StatisticsPanel extends StatefulWidget {
   const StatisticsPanel({
     super.key,
@@ -34,7 +30,6 @@ class StatisticsPanel extends StatefulWidget {
   final SessionState state;
   final VoidCallback onClose;
 
-  /// Called after the Ask button puts its text in the input, which then takes the keys.
   final VoidCallback onAsk;
 
   @override
@@ -45,7 +40,6 @@ class _StatisticsPanelState extends State<StatisticsPanel> {
   _View _view = _View.cost;
   _Breakdown _breakdown = _Breakdown.tool;
 
-  /// Takes the keys once shown, so Escape closes the panel whatever held focus before.
   final _focus = FocusNode(debugLabel: 'statistics panel');
 
   @override
@@ -133,7 +127,6 @@ class _StatisticsPanelState extends State<StatisticsPanel> {
     );
   }
 
-  /// The panel until the statistics are read, or why they were not.
   Widget _unread(WsPalette ws, ({String title, String text})? problem) =>
       Padding(
         padding: const EdgeInsets.all(20),
@@ -210,7 +203,6 @@ class _StatisticsPanelState extends State<StatisticsPanel> {
     );
   }
 
-  /// T3 Code reports no cost, so no figure is shown (ADR-0293).
   List<Widget> _costView(WsPalette ws) => [
     Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -225,7 +217,6 @@ class _StatisticsPanelState extends State<StatisticsPanel> {
     ),
   ];
 
-  /// The headline and its per-model or per-part rows on the left, the chart on the right.
   Widget _top(
     WsPalette ws, {
     required String title,
@@ -280,7 +271,6 @@ class _StatisticsPanelState extends State<StatisticsPanel> {
     ],
   );
 
-  /// A total's share bar and legend, split into input, cache read, cache write and output.
   Widget _byType(
     WsPalette ws,
     String title, {
@@ -427,7 +417,6 @@ class _StatisticsPanelState extends State<StatisticsPanel> {
       '${plural(statistics.responses, 'response')} · '
       '${plural(statistics.turns.length, 'turn')} · as T3 Code reports it';
 
-  /// The chart of the turns: one column per turn, its parts stacked as `columnParts` gives them.
   TurnChart _chart(
     WsPalette ws,
     SessionStatistics statistics, {
@@ -598,7 +587,6 @@ class _StatisticsPanelState extends State<StatisticsPanel> {
     );
   }
 
-  /// Shows a turn in the Chat: the Chat scrolls to its prompt and the panel closes.
   void _selectTurn(TurnStatistics turn) {
     widget.state.scrollChatTo.value = turn.stats.number;
     widget.onClose();

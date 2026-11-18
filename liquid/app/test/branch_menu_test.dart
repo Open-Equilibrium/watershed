@@ -11,7 +11,6 @@ import 'package:liquid/src/theme/theme.dart';
 
 import 'fake_backend.dart';
 
-/// A checkout whose status stream fails, as a broken repository does.
 class _BrokenGit extends FakeGit {
   @override
   Stream<BridgeGitStatus> watch() => Stream.error(Exception('no repository'));
@@ -22,8 +21,6 @@ void main() {
   late FakeGit git;
   late SessionState state;
 
-  /// Opens a session on the feature branch, with its refs, and shows the branch row. The
-  /// session's turns are `turns`.
   Future<void> pump(
     WidgetTester tester, {
     FakeGit? checkout,
@@ -59,17 +56,25 @@ void main() {
     await tester.pumpAndSettle();
   }
 
-  Future<void> openPicker(WidgetTester tester) async {
-    await tester.tap(find.byKey(const Key('branch-chevron')));
+  Future<void> tap(WidgetTester tester, Finder finder) async {
+    await tester.tap(finder);
     await tester.pumpAndSettle();
+  }
+
+  Future<void> search(WidgetTester tester, String text) async {
+    await tester.enterText(find.byKey(const Key('branch-search')), text);
+    await tester.pumpAndSettle();
+  }
+
+  Future<void> openPicker(WidgetTester tester) async {
+    await tap(tester, find.byKey(const Key('branch-chevron')));
   }
 
   testWidgets('the branch name and its chevron both open the ref picker', (
     tester,
   ) async {
     await pump(tester);
-    await tester.tap(find.byKey(const Key('branch-name')));
-    await tester.pumpAndSettle();
+    await tap(tester, find.byKey(const Key('branch-name')));
     expect(find.byKey(const Key('branch-search')), findsOneWidget);
     await tester.tapAt(const Offset(5, 5));
     await tester.pumpAndSettle();
@@ -85,8 +90,7 @@ void main() {
       for (final detail in ['current', 'default', 'worktree', 'remote']) {
         expect(find.text(detail), findsOneWidget);
       }
-      await tester.enterText(find.byKey(const Key('branch-search')), 'fea');
-      await tester.pumpAndSettle();
+      await search(tester, 'fea');
       expect(find.text('main'), findsNothing);
       expect(find.text('Create new ref "fea"'), findsOneWidget);
     },
@@ -97,8 +101,7 @@ void main() {
   ) async {
     await pump(tester);
     await openPicker(tester);
-    await tester.enterText(find.byKey(const Key('branch-search')), 'main');
-    await tester.pumpAndSettle();
+    await search(tester, 'main');
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     await tester.pumpAndSettle();
     expect(git.calls, ['switch main']);
@@ -109,8 +112,7 @@ void main() {
   ) async {
     await pump(tester);
     await openPicker(tester);
-    await tester.tap(find.text('origin/fix'));
-    await tester.pumpAndSettle();
+    await tap(tester, find.text('origin/fix'));
     expect(git.calls, ['switch fix']);
   });
 
@@ -119,8 +121,7 @@ void main() {
     (tester) async {
       await pump(tester);
       await openPicker(tester);
-      await tester.tap(find.text('fix'));
-      await tester.pumpAndSettle();
+      await tap(tester, find.text('fix'));
       expect(session.calls, ['branch fix worktree=/worktrees/fix']);
     },
   );
@@ -138,17 +139,13 @@ void main() {
       );
       await tester.pumpAndSettle();
       await openPicker(tester);
-      await tester.tap(find.text('main'));
-      await tester.pumpAndSettle();
+      await tap(tester, find.text('main'));
       expect(find.text('Switch to main?'), findsOneWidget);
-      await tester.tap(find.widgetWithText(SecondaryButton, 'Cancel'));
-      await tester.pumpAndSettle();
+      await tap(tester, find.widgetWithText(SecondaryButton, 'Cancel'));
       expect(git.calls, isEmpty);
       await openPicker(tester);
-      await tester.tap(find.text('main'));
-      await tester.pumpAndSettle();
-      await tester.tap(find.widgetWithText(PrimaryButton, 'Switch branch'));
-      await tester.pumpAndSettle();
+      await tap(tester, find.text('main'));
+      await tap(tester, find.widgetWithText(PrimaryButton, 'Switch branch'));
       expect(git.calls, ['switch main']);
     },
   );
@@ -158,13 +155,8 @@ void main() {
     (tester) async {
       await pump(tester);
       await openPicker(tester);
-      await tester.enterText(
-        find.byKey(const Key('branch-search')),
-        'new feature',
-      );
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('Create new ref "new-feature"'));
-      await tester.pumpAndSettle();
+      await search(tester, 'new feature');
+      await tap(tester, find.text('Create new ref "new-feature"'));
       expect(git.calls, ['create new-feature']);
     },
   );
@@ -172,11 +164,9 @@ void main() {
   testWidgets('Git refusing a new ref says why', (tester) async {
     await pump(tester);
     await openPicker(tester);
-    await tester.enterText(find.byKey(const Key('branch-search')), 'taken');
-    await tester.pumpAndSettle();
+    await search(tester, 'taken');
     git.refError = Exception('ref exists');
-    await tester.tap(find.text('Create new ref "taken"'));
-    await tester.pumpAndSettle();
+    await tap(tester, find.text('Create new ref "taken"'));
     expect(
       state.notice.value?.text,
       contains('Failed to create and switch ref.'),
@@ -192,8 +182,7 @@ void main() {
         find.text('Stop the current turn to switch worktrees.'),
         findsOneWidget,
       );
-      await tester.tap(find.text('main'));
-      await tester.pumpAndSettle();
+      await tap(tester, find.text('main'));
       expect(git.calls, isEmpty);
       expect(find.byKey(const Key('branch-search')), findsOneWidget);
     },
@@ -204,8 +193,7 @@ void main() {
     (tester) async {
       await pump(tester);
       await openPicker(tester);
-      await tester.enterText(find.byKey(const Key('branch-search')), '#42');
-      await tester.pumpAndSettle();
+      await search(tester, '#42');
       await tester.tap(find.text('Checkout pull request'));
       await tester.pump(const Duration(milliseconds: 450));
       await tester.pumpAndSettle();
@@ -263,8 +251,7 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(find.text('Copy branch name'), findsOneWidget);
-    await tester.tap(find.text('Copy branch name'));
-    await tester.pumpAndSettle();
+    await tap(tester, find.text('Copy branch name'));
     expect(copied, ['feature']);
     expect(state.notice.value?.text, 'Branch name copied: feature');
   });

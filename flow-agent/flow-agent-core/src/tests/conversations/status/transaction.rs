@@ -1,4 +1,8 @@
-use super::super::{super::helpers::empty_workspace, REQUEST_HASH, create_review_run, entry};
+use super::super::{
+    super::helpers::{empty_workspace, workspace_session_dir},
+    super::test_support::TempWorkspace,
+    REQUEST_HASH, create_review_run, entry,
+};
 use super::commit_review_event;
 use crate::runtime::{
     conversations::{
@@ -16,6 +20,60 @@ use std::{
     io::Write,
     path::{Path, PathBuf},
 };
+
+const RUN_CREATION_MARKER: &str = ".run-creation-identity-0000000000000001-0000000000000001";
+
+fn conversation_dir(workspace: &Path) -> PathBuf {
+    workspace_session_dir(workspace).join("review")
+}
+
+fn transaction_path(workspace: &Path) -> PathBuf {
+    conversation_dir(workspace).join(".status-transaction.json")
+}
+
+fn history_path(workspace: &Path) -> PathBuf {
+    conversation_dir(workspace).join("history.jsonl")
+}
+
+fn review_with_committed_event(label: &str) -> TempWorkspace {
+    let workspace = empty_workspace(label);
+    create_review_run(&workspace);
+    commit_review_event(&workspace);
+    workspace
+}
+
+fn crash_root_append(workspace: &Path, point: StatusTransactionCrashPoint) {
+    set_status_transaction_crash_point(point);
+    append_conversation_entry(workspace, "review", &entry("root", None, "review-1", 1))
+        .expect_err("the crashed append remains pending");
+}
+
+fn rewrite_transaction(path: &Path, mutate: impl FnOnce(&mut serde_json::Value)) {
+    let mut transaction: serde_json::Value =
+        serde_json::from_slice(&fs::read(path).expect("transaction reads"))
+            .expect("transaction parses");
+    mutate(&mut transaction);
+    fs::write(
+        path,
+        format!(
+            "{}\n",
+            canonical_json(&transaction).expect("mutated transaction canonicalizes")
+        ),
+    )
+    .expect("mutated transaction writes");
+}
+
+fn run_created_mutation(staging_identity: &str, run_identity_marker: &str) -> serde_json::Value {
+    serde_json::json!({
+        "mutation_type": "run-created",
+        "run_session_id": "review-1",
+        "staging_name": format!(".run-review-1-{staging_identity}.staged"),
+        "staging_identity": staging_identity,
+        "run_identity_marker": run_identity_marker,
+        "run_log_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "unpublished_productive_run": false
+    })
+}
 
 #[test]
 fn conversation_status_rejects_invalid_bounded_transactions() {
@@ -36,14 +94,10 @@ fn conversation_status_rejects_invalid_bounded_transactions() {
             "status transaction has an unsupported schema",
         ),
     ] {
-        let workspace = empty_workspace(&format!("conversation-status-transaction-{label}"));
-        create_review_run(&workspace);
-        commit_review_event(&workspace);
-        set_status_transaction_crash_point(StatusTransactionCrashPoint::TransactionRecorded);
-        append_conversation_entry(&workspace, "review", &entry("root", None, "review-1", 1))
-            .expect_err("the recorded transaction remains");
-        let transaction = crate::tests::helpers::workspace_session_dir(&workspace)
-            .join("review/.status-transaction.json");
+        let workspace =
+            review_with_committed_event(&format!("conversation-status-transaction-{label}"));
+        crash_root_append(&workspace, StatusTransactionCrashPoint::TransactionRecorded);
+        let transaction = transaction_path(&workspace);
         let invalid_transaction = if invalid_transaction.is_empty() {
             fs::read_to_string(&transaction)
                 .expect("transaction reads")
@@ -117,48 +171,24 @@ fn conversation_status_rejects_inconsistent_transaction_mutations() {
         (
             "invalid-run-creation-stage",
             |transaction| {
-                let staging_identity = "A".repeat(64);
-                transaction["mutation"] = serde_json::json!({
-                    "mutation_type": "run-created",
-                    "run_session_id": "review-1",
-                    "staging_name": format!(".run-review-1-{staging_identity}.staged"),
-                    "staging_identity": staging_identity,
-                    "run_identity_marker": ".run-creation-identity-0000000000000001-0000000000000001",
-                    "run_log_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-                    "unpublished_productive_run": false
-                });
+                transaction["mutation"] =
+                    run_created_mutation(&"A".repeat(64), RUN_CREATION_MARKER);
             },
             "run-creation staging identity is invalid",
         ),
         (
             "invalid-run-creation-identity",
             |transaction| {
-                let staging_identity = "a".repeat(64);
-                transaction["mutation"] = serde_json::json!({
-                    "mutation_type": "run-created",
-                    "run_session_id": "review-1",
-                    "staging_name": format!(".run-review-1-{staging_identity}.staged"),
-                    "staging_identity": staging_identity,
-                    "run_identity_marker": ".run-creation-identity-invalid",
-                    "run_log_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-                    "unpublished_productive_run": false
-                });
+                transaction["mutation"] =
+                    run_created_mutation(&"a".repeat(64), ".run-creation-identity-invalid");
             },
             "identity marker name is invalid",
         ),
         (
             "inconsistent-run-creation",
             |transaction| {
-                let staging_identity = "a".repeat(64);
-                transaction["mutation"] = serde_json::json!({
-                    "mutation_type": "run-created",
-                    "run_session_id": "review-1",
-                    "staging_name": format!(".run-review-1-{staging_identity}.staged"),
-                    "staging_identity": staging_identity,
-                    "run_identity_marker": ".run-creation-identity-0000000000000001-0000000000000001",
-                    "run_log_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-                    "unpublished_productive_run": false
-                });
+                transaction["mutation"] =
+                    run_created_mutation(&"a".repeat(64), RUN_CREATION_MARKER);
             },
             "run-creation transaction is inconsistent",
         ),
@@ -168,7 +198,7 @@ fn conversation_status_rejects_inconsistent_transaction_mutations() {
                 transaction["mutation"] = serde_json::json!({
                     "mutation_type": "run-reclaimed",
                     "run_session_id": "review-1",
-                    "run_identity_marker": ".run-creation-identity-0000000000000001-0000000000000001"
+                    "run_identity_marker": RUN_CREATION_MARKER
                 });
             },
             "run-reclamation transaction is inconsistent",
@@ -176,26 +206,12 @@ fn conversation_status_rejects_inconsistent_transaction_mutations() {
     ];
 
     for (label, mutate, expected) in cases {
-        let workspace = empty_workspace(&format!("conversation-status-mutation-{label}"));
-        create_review_run(&workspace);
-        commit_review_event(&workspace);
-        set_status_transaction_crash_point(StatusTransactionCrashPoint::TransactionRecorded);
-        append_conversation_entry(&workspace, "review", &entry("root", None, "review-1", 1))
-            .expect_err("the recorded transaction remains");
-        let path = crate::tests::helpers::workspace_session_dir(&workspace)
-            .join("review/.status-transaction.json");
-        let mut transaction: serde_json::Value =
-            serde_json::from_slice(&fs::read(&path).expect("transaction reads"))
-                .expect("transaction parses");
-        mutate(&mut transaction);
-        fs::write(
-            &path,
-            format!(
-                "{}\n",
-                canonical_json(&transaction).expect("mutated transaction canonicalizes")
-            ),
-        )
-        .expect("mutated transaction writes");
+        let workspace =
+            review_with_committed_event(&format!("conversation-status-mutation-{label}"));
+        crash_root_append(&workspace, StatusTransactionCrashPoint::TransactionRecorded);
+        rewrite_transaction(&transaction_path(&workspace), |transaction| {
+            mutate(transaction)
+        });
 
         let error = conversation_status_page(&workspace, None)
             .expect_err("inconsistent transaction must fail closed");
@@ -207,8 +223,7 @@ fn conversation_status_rejects_inconsistent_transaction_mutations() {
 fn conversation_status_discards_an_unpublished_transaction_stage() {
     let workspace = empty_workspace("conversation-status-staged-transaction");
     create_review_run(&workspace);
-    let staged = crate::tests::helpers::workspace_session_dir(&workspace)
-        .join("review/.status-transaction.staged");
+    let staged = conversation_dir(&workspace).join(".status-transaction.staged");
     fs::write(&staged, b"incomplete staged bytes\n").expect("staged transaction writes");
 
     let page = conversation_status_page(&workspace, None).expect("staged transaction is discarded");
@@ -219,14 +234,9 @@ fn conversation_status_discards_an_unpublished_transaction_stage() {
 
 #[test]
 fn conversation_status_rejects_a_summary_that_contradicts_its_transaction() {
-    let workspace = empty_workspace("conversation-status-contradictory-transaction");
-    create_review_run(&workspace);
-    commit_review_event(&workspace);
-    set_status_transaction_crash_point(StatusTransactionCrashPoint::TransactionRecorded);
-    append_conversation_entry(&workspace, "review", &entry("root", None, "review-1", 1))
-        .expect_err("the recorded transaction remains");
-    let summary =
-        crate::tests::helpers::workspace_session_dir(&workspace).join("review/status.json");
+    let workspace = review_with_committed_event("conversation-status-contradictory-transaction");
+    crash_root_append(&workspace, StatusTransactionCrashPoint::TransactionRecorded);
+    let summary = conversation_dir(&workspace).join("status.json");
     let contradictory = fs::read_to_string(&summary)
         .expect("summary reads")
         .replace("\"run_count\":1", "\"run_count\":2");
@@ -250,8 +260,7 @@ fn conversation_status_rejects_unsafe_transaction_stage() {
     create_review_run(&workspace);
     let outside = workspace.join("outside-status-artifact");
     fs::write(&outside, b"outside bytes\n").expect("outside artifact writes");
-    let artifact = crate::tests::helpers::workspace_session_dir(&workspace)
-        .join("review/.status-transaction.staged");
+    let artifact = conversation_dir(&workspace).join(".status-transaction.staged");
     symlink(&outside, &artifact).expect("unsafe transaction stage symlink is created");
 
     conversation_status_page(&workspace, None)
@@ -261,6 +270,7 @@ fn conversation_status_rejects_unsafe_transaction_stage() {
         b"outside bytes\n"
     );
 }
+
 #[test]
 fn conversation_status_recovers_each_bounded_summary_transaction_phase() {
     for point in [
@@ -269,11 +279,9 @@ fn conversation_status_recovers_each_bounded_summary_transaction_phase() {
         StatusTransactionCrashPoint::SummaryStaged,
         StatusTransactionCrashPoint::SummaryPublished,
     ] {
-        let workspace = empty_workspace(&format!("conversation-status-crash-{point:?}"));
-        create_review_run(&workspace);
-        commit_review_event(&workspace);
+        let workspace =
+            review_with_committed_event(&format!("conversation-status-crash-{point:?}"));
         set_status_transaction_crash_point(point);
-
         let error =
             append_conversation_entry(&workspace, "review", &entry("root", None, "review-1", 1))
                 .expect_err("injected transaction crash interrupts the append");
@@ -287,41 +295,32 @@ fn conversation_status_recovers_each_bounded_summary_transaction_phase() {
             page.conversations[0].latest_entry_id, expected_latest,
             "{point:?}"
         );
-        let conversation = crate::tests::helpers::workspace_session_dir(&workspace).join("review");
         for leaf in [
             ".status-transaction.json",
             ".status-transaction.staged",
             ".status-summary.staged",
         ] {
-            assert!(!conversation.join(leaf).exists(), "{point:?}: {leaf}");
+            assert!(
+                !conversation_dir(&workspace).join(leaf).exists(),
+                "{point:?}: {leaf}"
+            );
         }
     }
 }
 
 #[test]
 fn conversation_status_recovery_binds_latest_entry_to_the_durable_append() {
-    let workspace = empty_workspace("conversation-status-latest-entry-binding");
-    create_review_run(&workspace);
-    commit_review_event(&workspace);
-    set_status_transaction_crash_point(StatusTransactionCrashPoint::CanonicalMutationApplied);
-    append_conversation_entry(&workspace, "review", &entry("root", None, "review-1", 1))
-        .expect_err("the durable append remains behind its transaction");
-    let conversation = crate::tests::helpers::workspace_session_dir(&workspace).join("review");
-    let transaction_path = conversation.join(".status-transaction.json");
-    let summary_path = conversation.join("status.json");
+    let workspace = review_with_committed_event("conversation-status-latest-entry-binding");
+    crash_root_append(
+        &workspace,
+        StatusTransactionCrashPoint::CanonicalMutationApplied,
+    );
+    let transaction = transaction_path(&workspace);
+    let summary_path = conversation_dir(&workspace).join("status.json");
     let prior_summary = fs::read(&summary_path).expect("prior summary reads");
-    let mut transaction: serde_json::Value =
-        serde_json::from_slice(&fs::read(&transaction_path).expect("transaction reads"))
-            .expect("transaction parses");
-    transaction["after"]["latest_entry_id"] = "forged-root".into();
-    fs::write(
-        &transaction_path,
-        format!(
-            "{}\n",
-            canonical_json(&transaction).expect("mutated transaction canonicalizes")
-        ),
-    )
-    .expect("mutated transaction writes");
+    rewrite_transaction(&transaction, |value| {
+        value["after"]["latest_entry_id"] = "forged-root".into();
+    });
 
     let error = conversation_status_page(&workspace, None)
         .expect_err("recovery rejects a summary unrelated to the durable history entry");
@@ -337,7 +336,7 @@ fn conversation_status_recovery_binds_latest_entry_to_the_durable_append() {
         prior_summary
     );
     assert!(
-        transaction_path.is_file(),
+        transaction.is_file(),
         "the inconsistent transaction remains for diagnosis"
     );
 }
@@ -361,24 +360,13 @@ fn relabelled_attempt_transaction_fails_closed() {
         &provider_intent("provider-002"),
     )
     .expect_err("the crash point leaves the second intent's transaction recorded");
-    let conversation = crate::tests::helpers::workspace_session_dir(&workspace).join("review");
-    let transaction_path = conversation.join(".status-transaction.json");
-    let summary_path = conversation.join("status.json");
+    let transaction = transaction_path(&workspace);
+    let summary_path = conversation_dir(&workspace).join("status.json");
     let prior_summary = fs::read(&summary_path).expect("prior summary reads");
-    let mut transaction: serde_json::Value =
-        serde_json::from_slice(&fs::read(&transaction_path).expect("transaction reads"))
-            .expect("transaction parses");
-    // Counters consistent with a terminal result, but the appended record is an intent.
-    transaction["mutation"]["kind"] = "attempt-result".into();
-    transaction["after"]["uncertain_attempts"] = 0.into();
-    fs::write(
-        &transaction_path,
-        format!(
-            "{}\n",
-            canonical_json(&transaction).expect("mutated transaction canonicalizes")
-        ),
-    )
-    .expect("mutated transaction writes");
+    rewrite_transaction(&transaction, |value| {
+        value["mutation"]["kind"] = "attempt-result".into();
+        value["after"]["uncertain_attempts"] = 0.into();
+    });
 
     let error = conversation_status_page(&workspace, None)
         .expect_err("recovery rejects a result transaction over an appended intent");
@@ -394,7 +382,7 @@ fn relabelled_attempt_transaction_fails_closed() {
         prior_summary
     );
     assert!(
-        transaction_path.is_file(),
+        transaction.is_file(),
         "the inconsistent transaction remains for diagnosis"
     );
 }
@@ -412,16 +400,15 @@ fn provider_intent(attempt_id: &str) -> RunAttemptIntent {
 
 #[test]
 fn conversation_status_recovery_resyncs_an_applied_append_before_promotion() {
-    let workspace = empty_workspace("conversation-status-applied-append-sync");
-    create_review_run(&workspace);
-    commit_review_event(&workspace);
-    set_status_transaction_crash_point(StatusTransactionCrashPoint::CanonicalMutationApplied);
-    append_conversation_entry(&workspace, "review", &entry("root", None, "review-1", 1))
-        .expect_err("the applied append remains pending");
+    let workspace = review_with_committed_event("conversation-status-applied-append-sync");
+    crash_root_append(
+        &workspace,
+        StatusTransactionCrashPoint::CanonicalMutationApplied,
+    );
 
-    let conversation = crate::tests::helpers::workspace_session_dir(&workspace).join("review");
+    let conversation = conversation_dir(&workspace);
     let target = conversation.join("history.jsonl");
-    let transaction = conversation.join(".status-transaction.json");
+    let transaction = transaction_path(&workspace);
     let summary = conversation.join("status.json");
     let transaction_before = fs::read(&transaction).expect("pending transaction reads");
     let summary_before = fs::read(&summary).expect("pending summary reads");
@@ -449,9 +436,7 @@ fn conversation_status_recovery_resyncs_an_applied_append_before_promotion() {
 
 #[test]
 fn conversation_status_recovery_anchors_an_empty_rotated_segment_before_clearing() {
-    let workspace = empty_workspace("conversation-status-empty-rotated-segment-sync");
-    create_review_run(&workspace);
-    commit_review_event(&workspace);
+    let workspace = review_with_committed_event("conversation-status-empty-rotated-segment-sync");
     append_conversation_entry(&workspace, "review", &entry("prior", None, "review-1", 1))
         .expect("the prior history entry commits");
     set_status_transaction_crash_point(StatusTransactionCrashPoint::TransactionRecorded);
@@ -462,22 +447,13 @@ fn conversation_status_recovery_anchors_an_empty_rotated_segment_before_clearing
     )
     .expect_err("the transaction remains before its append");
 
-    let conversation = crate::tests::helpers::workspace_session_dir(&workspace).join("review");
-    let transaction = conversation.join(".status-transaction.json");
+    let conversation = conversation_dir(&workspace);
+    let transaction = transaction_path(&workspace);
     let summary = conversation.join("status.json");
-    let mut value: serde_json::Value =
-        serde_json::from_slice(&fs::read(&transaction).expect("pending transaction reads"))
-            .expect("pending transaction parses");
-    value["mutation"]["segment_ordinal"] = 2.into();
-    value["mutation"]["prior_bytes"] = 0.into();
-    fs::write(
-        &transaction,
-        format!(
-            "{}\n",
-            canonical_json(&value).expect("mutated transaction canonicalizes")
-        ),
-    )
-    .expect("rotated transaction writes");
+    rewrite_transaction(&transaction, |value| {
+        value["mutation"]["segment_ordinal"] = 2.into();
+        value["mutation"]["prior_bytes"] = 0.into();
+    });
     fs::write(conversation.join("history.000002.jsonl"), b"")
         .expect("empty rotated segment remains after its failed parent sync");
     let transaction_before = fs::read(&transaction).expect("pending transaction rereads");
@@ -504,16 +480,6 @@ fn conversation_status_recovery_anchors_an_empty_rotated_segment_before_clearing
     assert!(!transaction.exists(), "the durable transaction is cleared");
 }
 
-fn history_path(workspace: &Path) -> PathBuf {
-    crate::tests::helpers::workspace_session_dir(workspace).join("review/history.jsonl")
-}
-
-fn status_transaction_path(workspace: &Path) -> PathBuf {
-    crate::tests::helpers::workspace_session_dir(workspace).join("review/.status-transaction.json")
-}
-
-/// Leaves a recorded history append whose transaction survives, as a crash after recording does.
-/// Returns the history length the committed prefix ends at.
 fn record_history_append_then_crash(workspace: &Path, point: StatusTransactionCrashPoint) -> u64 {
     create_review_run(workspace);
     commit_review_event(workspace);
@@ -534,12 +500,8 @@ fn record_history_append_then_crash(workspace: &Path, point: StatusTransactionCr
 
 #[test]
 fn conversation_status_rolls_back_a_torn_named_transaction_append() {
-    let workspace = empty_workspace("conversation-status-torn-append");
-    create_review_run(&workspace);
-    commit_review_event(&workspace);
-    set_status_transaction_crash_point(StatusTransactionCrashPoint::TransactionRecorded);
-    append_conversation_entry(&workspace, "review", &entry("root", None, "review-1", 1))
-        .expect_err("the transaction remains before its append");
+    let workspace = review_with_committed_event("conversation-status-torn-append");
+    crash_root_append(&workspace, StatusTransactionCrashPoint::TransactionRecorded);
     let prior_len = fs::metadata(history_path(&workspace))
         .expect("history reads")
         .len();
@@ -560,19 +522,15 @@ fn conversation_status_rolls_back_a_torn_named_transaction_append() {
         "the torn bytes are truncated to the recorded prior length"
     );
     assert!(
-        !status_transaction_path(&workspace).exists(),
+        !transaction_path(&workspace).exists(),
         "the rolled-back transaction is cleared"
     );
 }
 
 #[test]
 fn torn_append_rollback_retry_syncs_the_truncation_before_clearing() {
-    let workspace = empty_workspace("conversation-status-rollback-retry-sync");
-    create_review_run(&workspace);
-    commit_review_event(&workspace);
-    set_status_transaction_crash_point(StatusTransactionCrashPoint::TransactionRecorded);
-    append_conversation_entry(&workspace, "review", &entry("root", None, "review-1", 1))
-        .expect_err("the transaction remains before its append");
+    let workspace = review_with_committed_event("conversation-status-rollback-retry-sync");
+    crash_root_append(&workspace, StatusTransactionCrashPoint::TransactionRecorded);
     OpenOptions::new()
         .append(true)
         .open(history_path(&workspace))
@@ -586,7 +544,7 @@ fn torn_append_rollback_retry_syncs_the_truncation_before_clearing() {
     );
     conversation_status_page(&workspace, None)
         .expect_err("the truncation's sync failure keeps the transaction");
-    assert!(status_transaction_path(&workspace).exists());
+    assert!(transaction_path(&workspace).exists());
 
     set_conversation_file_sync_error_for_path_for_test(
         &history_path(&workspace),
@@ -594,10 +552,10 @@ fn torn_append_rollback_retry_syncs_the_truncation_before_clearing() {
     );
     conversation_status_page(&workspace, None)
         .expect_err("a retry must sync the truncation before clearing the transaction");
-    assert!(status_transaction_path(&workspace).exists());
+    assert!(transaction_path(&workspace).exists());
 
     conversation_status_page(&workspace, None).expect("the next recovery syncs and clears");
-    assert!(!status_transaction_path(&workspace).exists());
+    assert!(!transaction_path(&workspace).exists());
 }
 
 #[test]
@@ -629,7 +587,7 @@ fn conversation_status_rolls_back_an_append_that_lost_its_final_line_feed() {
         prior_len,
         "the cut record is removed to the recorded prior length"
     );
-    assert!(!status_transaction_path(&workspace).exists());
+    assert!(!transaction_path(&workspace).exists());
 }
 
 #[test]
@@ -661,7 +619,7 @@ fn conversation_status_refuses_a_target_longer_than_its_recorded_append() {
         len,
         "refused bytes are left in place for diagnosis"
     );
-    assert!(status_transaction_path(&workspace).is_file());
+    assert!(transaction_path(&workspace).is_file());
 }
 
 #[test]
@@ -692,5 +650,5 @@ fn conversation_status_refuses_a_target_shorter_than_its_prior_length() {
         len - 1,
         "the damaged prefix is not truncated further"
     );
-    assert!(status_transaction_path(&workspace).is_file());
+    assert!(transaction_path(&workspace).is_file());
 }

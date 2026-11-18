@@ -20,13 +20,9 @@ pub(crate) const GLOBAL_RESERVED_LEAVES: &[&str] = &[
 ];
 pub(crate) const SESSION_STORAGE_DIR: &str = "sessions";
 pub(crate) const LOG_STORAGE_DIR: &str = "logs";
-/// Maximum canonical uncompressed bytes stored in one event or manifest segment.
 pub const MAX_SESSION_SEGMENT_BYTES: u64 = 16 * 1024 * 1024;
-/// Maximum canonical bytes stored for one event, including its trailing LF.
 pub const MAX_CANONICAL_EVENT_BYTES: usize = 320 * 1024;
-/// Maximum canonical event bytes accumulated by one Run across all segments.
 pub const MAX_SESSION_EVENT_BYTES: u64 = 352 * 1024 * 1024;
-/// Maximum canonical context-manifest bytes accumulated across all segments.
 pub const MAX_SESSION_CONTEXT_MANIFEST_BYTES: u64 = 48 * 1024 * 1024;
 #[derive(Clone, Copy)]
 pub struct SessionStreamLimits {
@@ -41,28 +37,20 @@ pub const CONTEXT_MANIFEST_STREAM_LIMITS: SessionStreamLimits = SessionStreamLim
     max_segments: 5,
     max_total_bytes: MAX_SESSION_CONTEXT_MANIFEST_BYTES,
 };
-/// Maximum bytes stored in one immutable Run-owned object chunk.
 pub const MAX_SESSION_OBJECT_BYTES: u64 = 16 * 1024 * 1024;
-/// Maximum canonically named immutable objects owned by one Run.
 pub const MAX_SESSION_OBJECTS: usize = 131_072;
-/// Maximum stored content bytes in one complete self-contained Run bundle.
 pub const MAX_SESSION_BUNDLE_BYTES: u64 = 11 * 512 * 1024 * 1024;
 pub const MAX_SESSION_METADATA_BYTES: u64 = 16 * 1024 * 1024;
-/// Object-data share after reserving the event, manifest and metadata maxima.
 pub const MAX_SESSION_OBJECT_TOTAL_BYTES: u64 = MAX_SESSION_BUNDLE_BYTES
     - MAX_SESSION_EVENT_BYTES
     - MAX_SESSION_CONTEXT_MANIFEST_BYTES
     - MAX_SESSION_METADATA_BYTES;
-/// Maximum canonical events accumulated by one Run, including resume events.
 pub const MAX_FLOW_EVENTS: u64 = 155_750;
-/// Maximum runtime Flow invocations accumulated by one Run, including the root.
 pub const MAX_FLOW_INVOCATIONS: u64 = 512;
-/// Maximum live Flow invocations across all active Runs in one process.
 pub const MAX_LIVE_FLOW_INVOCATIONS: usize = 32;
 pub const MAX_GLOBAL_CONFIG_BYTES: u64 = 1024 * 1024;
 pub const FIXTURE_CLOCK_UNIX_SECONDS: i64 = 1_767_225_600;
 pub const RUNTIME_ERROR_REASON: &str = "runtime_error";
-/// Stable lifecycle reason used for controlled productive cancellation.
 pub const CANCELLED_REASON: &str = "cancelled";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -105,28 +93,18 @@ impl EventClock {
     }
 }
 
-/// Output format for CLI/runtime calls.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum EmitMode {
-    /// Human-readable one-line status output.
     Human,
-    /// Canonical JSONL event stream output.
     Jsonl,
 }
 
-/// Result of a run, replay or resume operation.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RunOutput {
-    /// Number of validated session events observed when the operation returned.
     pub event_count: usize,
-    /// Whether the represented session is known to have failed.
     pub failed: bool,
-    /// Session id.
     pub session_id: String,
-    /// Path to the first persisted session segment; use [`crate::SessionEventReader`] for the
-    /// complete history.
     pub(crate) session_path: PathBuf,
-    /// Rendered status or event output; empty for live-event and streaming replay operations.
     pub stdout: String,
 }
 
@@ -188,7 +166,6 @@ impl HumanFailureStatus {
     }
 }
 
-/// Formats a validated terminal failure for human-facing adapters.
 pub fn render_human_failure_status(reason: &str, message: Option<&str>) -> String {
     let reason = escape_human_failure_text(reason);
     message.map_or_else(

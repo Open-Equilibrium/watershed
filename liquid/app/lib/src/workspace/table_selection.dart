@@ -16,9 +16,6 @@ import 'media_block.dart';
 import 'paste.dart';
 import 'table_cells.dart';
 
-/// A Table's selected cell and its edit, as in a spreadsheet and in Notion:
-/// a click selects a cell, a second click or ⏎ edits a
-/// text or number cell, typing replaces it, and a checkbox ticks on a click or Space.
 class CellSelection extends ChangeNotifier {
   CellSelection({
     required this.rowAt,
@@ -32,58 +29,42 @@ class CellSelection extends ChangeNotifier {
     required this.attach,
     required this.save,
   }) {
-    // Leaving the cell editor keeps what was typed, as a spreadsheet does.
     editFocus.addListener(() {
       if (!editFocus.hasFocus && editing) commit(stay: false);
     });
   }
 
-  /// The row at a position, or none while its window is read.
   final BridgeRow? Function(int index) rowAt;
   final int Function() rowCount;
   final List<BridgeField> Function() fields;
 
-  /// Sets a row's cell of a field; a refused write completes with its error, which the
-  /// Page shows.
   final Future<void> Function(BridgeRow row, BridgeField field, BridgeCell cell)
   write;
 
-  /// Scrolls a cell, as row and field positions, into view.
   final void Function(int row, int field) reveal;
 
-  /// esc on a selected cell leaves the Table.
   final VoidCallback leave;
 
-  /// Shows a problem on the Page.
   final void Function(String problem) report;
 
-  /// Adds an option named so, of that color, to a select field, and answers its identity.
   final Future<String> Function(BridgeField field, String name, int color)
   addOption;
 
-  /// Adds files as attachments and answers those that went in.
   final Future<List<BridgeMedia>> Function(List<MediaSource> sources) attach;
 
-  /// Saves a copy of a file where the person chooses.
   final Future<void> Function(BridgeMedia file) save;
 
-  /// The selected cell, as row and field positions, and whether it is edited.
   (int, int)? selected;
   var editing = false;
 
-  /// Whether a select or date cell's picker is open, and what is typed in it.
   var picking = false;
   final pickText = TextEditingController();
 
-  /// The open picker's keys: ↑↓, ⏎, esc and ⇥.
   KeyEventResult Function(KeyEvent event)? pickKeys;
 
-  /// The selected row's and field's identities, which the selection follows when rows or
-  /// fields change elsewhere.
   String? _rowId;
   String? _fieldId;
 
-  /// The cell an edit started on, which it is written to, and its value then.
   (BridgeRow, BridgeField, BridgeCell?)? _edited;
   final edit = TextEditingController();
   late final editFocus = FocusNode(
@@ -95,23 +76,17 @@ class CellSelection extends ChangeNotifier {
     onKeyEvent: _cellKey,
   );
 
-  /// Keeps the editor, its text input included, when its cell is built elsewhere, as when
-  /// its row moves or the Table scrolls sideways.
   final _editorKey = GlobalKey(debugLabel: 'Cell editor');
 
-  /// Ticks written and not yet read back, by row and field, so quick toggles each flip.
   final _ticks = <(String, String), bool>{};
 
-  /// Why the edited value was refused, shown under the Table until it is fixed.
   String? error;
 
-  /// The person's number format and region, as the Table last built them.
   NumberFormat numbers = NumberFormat.decimalPattern('en_US');
   String days = 'en_US';
 
   var _disposed = false;
 
-  /// The selected cell's row, field and value, or none while its row is read.
   (BridgeRow, BridgeField, BridgeCell?)? get _target {
     final (row, field) = selected ?? (-1, -1);
     final all = fields();
@@ -124,7 +99,6 @@ class CellSelection extends ChangeNotifier {
     return (read, all[field], value);
   }
 
-  /// How a cell shows that it is selected or edited.
   Decoration? mark(BuildContext context, int row, int field) {
     if (selected != (row, field)) return null;
     final accent = context.ws.accent;
@@ -136,12 +110,9 @@ class CellSelection extends ChangeNotifier {
           );
   }
 
-  /// A click selects a cell, a second one edits text and numbers, and a checkbox ticks.
   void tap(int row, int field) {
-    // A click on the picked cell leaves its picker open.
     if (picking && selected == (row, field)) return;
     closePick(stay: false);
-    // A click in the edited cell, beside its text, leaves the edit as it is.
     if (editing && selected == (row, field)) return;
     if (editing && !commit(stay: false)) return;
     final again = selected == (row, field);
@@ -165,16 +136,12 @@ class CellSelection extends ChangeNotifier {
       kind == BridgeFieldKind.date ||
       kind == BridgeFieldKind.file;
 
-  /// The selected file cell's files.
   List<BridgeMedia> get pickedFiles => switch (_target) {
     (_, _, final cell?) when cell.kind == BridgeCellKind.files => cell.files,
     _ => const [],
   };
 
-  /// Adds `sources` to the file cell at `row` and `field`, after its files, once they are
-  /// in; files another write added meanwhile stay.
   Future<void> addFiles(int row, int field, List<MediaSource> sources) {
-    // The row and field as they are now, by identity, as the add may wait its turn.
     final all = fields();
     final rowId = rowAt(row)?.id;
     if (rowId == null || field >= all.length) return Future.value();
@@ -182,7 +149,6 @@ class CellSelection extends ChangeNotifier {
   }
 
   Future<void> _queue(String row, String field, List<MediaSource> sources) {
-    // One add at a time, so each starts from the files the one before wrote.
     final done = _adding.then((_) => _addFiles(row, field, sources));
     _adding = done.then<void>((_) {}, onError: (Object _) {});
     return done;
@@ -190,10 +156,8 @@ class CellSelection extends ChangeNotifier {
 
   Future<void> _adding = Future.value();
 
-  /// The files last written to each cell, by row and field, until a read shows them.
   final _written = <(String, String), List<BridgeMedia>>{};
 
-  /// The row `id` as read now, wherever it is; none once it went.
   BridgeRow? _rowById(String id) {
     for (var at = 0; at < rowCount(); at++) {
       if (rowAt(at) case final found? when found.id == id) return found;
@@ -223,7 +187,6 @@ class CellSelection extends ChangeNotifier {
             ?.value
             .files,
       ];
-      // A write not yet read back is what the cell holds.
       final written = _written[key];
       if (written == null) return shown;
       if (_sameFiles(shown, written)) _written.remove(key);
@@ -237,7 +200,6 @@ class CellSelection extends ChangeNotifier {
     }
     final added = await attach(sources);
     if (added.isEmpty || _disposed) return;
-    // The row as read now, wherever it went meanwhile; gone, it takes nothing.
     final now = _rowById(read.id);
     if (now == null) {
       report(
@@ -263,7 +225,6 @@ class CellSelection extends ChangeNotifier {
         ),
       );
     } on Object {
-      // Refused: the Page shows why, and the cell holds what is stored.
       _written.remove(key);
     }
   }
@@ -275,9 +236,7 @@ class CellSelection extends ChangeNotifier {
           a[at].attachment == b[at].attachment,
       ].every((same) => same);
 
-  /// Opens the file dialog and adds the chosen files to the selected file cell.
   Future<void> addPickedFiles() async {
-    // The cell as it is now, by identity, as the dialog may stay open a while.
     final target = _target;
     closePick();
     if (target == null) return;
@@ -286,11 +245,9 @@ class CellSelection extends ChangeNotifier {
     await _queue(row.id, field.id, sources);
   }
 
-  /// Removes the selected file cell's file at `index`; the last one empties it.
   void removeFile(int index) {
     if (_target case (final row, final field, final cell?)
         when cell.kind == BridgeCellKind.files && index < cell.files.length) {
-      // From the files an add wrote, if a read does not show them yet.
       final held = _written[(row.id, field.id)] ?? cell.files;
       if (index >= held.length) return;
       final files = [...held]..removeAt(index);
@@ -309,7 +266,6 @@ class CellSelection extends ChangeNotifier {
     }
   }
 
-  /// ⌘V on a selected file cell adds copied files, or a copied image.
   Future<void> _pasteFiles(String row, String field) async {
     final Pasted pasted;
     try {
@@ -326,11 +282,8 @@ class CellSelection extends ChangeNotifier {
     await _queue(row, field, sources);
   }
 
-  /// The selected select, date or file cell's field while its picker is open.
   BridgeField? get picked => picking ? _target?.$2 : null;
 
-  /// Opens the selected cell's picker with what is typed; a date cell's starts with its
-  /// day when nothing is.
   void _startPick(String typed) {
     final (row, field) = selected!;
     reveal(row, field);
@@ -346,7 +299,6 @@ class CellSelection extends ChangeNotifier {
     _changed();
   }
 
-  /// Picks `option` for the selected cell, unless it holds it already, and closes the picker.
   void pick(BridgeOption option) {
     if (_target case (final row, final field, final cell)
         when cell?.kind != BridgeCellKind.select || cell?.text != option.id) {
@@ -355,7 +307,6 @@ class CellSelection extends ChangeNotifier {
     closePick();
   }
 
-  /// Creates an option named `name` in the next color and picks it for the selected cell.
   void create(String name) {
     final target = _target;
     closePick();
@@ -369,8 +320,6 @@ class CellSelection extends ChangeNotifier {
         .then<void>((_) {}, onError: (Object _) {});
   }
 
-  /// Writes `day` into the selected date cell, or empties it, and closes the picker;
-  /// with `stay`, the selection takes the keys again.
   void pickDay(DateTime? day, {bool stay = true}) {
     if (_target case (final row, final field, final cell)) {
       final stored = day == null ? null : storedDays.format(day);
@@ -390,16 +339,12 @@ class CellSelection extends ChangeNotifier {
     closePick(stay: stay);
   }
 
-  /// A date cell's day as cells show it.
   String _shownDay(BridgeCell? cell) =>
       switch (DateTime.tryParse(cell?.text ?? '')) {
         final day? => shownDays(days).format(day),
         null => '',
       };
 
-  /// ⏎ in a date picker writes the day typed, or empties the cell when nothing is; the
-  /// cell's own day is kept as it is, and a text that is no day stays, saying so, and
-  /// answers false.
   bool enterDay({bool stay = true}) {
     final typed = pickText.text;
     if (_target case (_, _, final cell)
@@ -417,15 +362,11 @@ class CellSelection extends ChangeNotifier {
     return true;
   }
 
-  /// A click outside a picker closes it; a date picker writes the day typed first, as
-  /// leaving an editor keeps the edit, and drops a text that is no day.
   void leavePick() {
     if (picked?.kind == BridgeFieldKind.date && enterDay(stay: false)) return;
     closePick(stay: false);
   }
 
-  /// Closes the picker and keeps the cell as it is; with `stay`, the selection takes the
-  /// keys again.
   void closePick({bool stay = true}) {
     if (!picking) return;
     picking = false;
@@ -434,8 +375,6 @@ class CellSelection extends ChangeNotifier {
     if (stay) cellsFocus.requestFocus();
   }
 
-  /// ⇥ in the picker keeps the value and selects the next or, going back, previous cell;
-  /// a date picker writes the day typed first, and one that is no day stays, saying so.
   void tabFromPick(bool back) {
     if (picked?.kind == BridgeFieldKind.date && !enterDay()) return;
     closePick();
@@ -449,13 +388,8 @@ class CellSelection extends ChangeNotifier {
     _fieldId = field < all.length ? all[field].id : null;
   }
 
-  /// Moves the selection to where its row and field are now, after rows or fields changed
-  /// elsewhere. A row whose place is not read keeps its place. A row or field no longer
-  /// where the reads have it ends the selection; an open edit is still written to its
-  /// cell, which takes it if the row only moved and refuses it visibly if it went.
   void relocate(int? Function(String row) rowIndex) {
     final (row, _) = selected ?? (-1, -1);
-    // Ending an edit notifies, which asks to relocate again.
     if (row < 0 || _relocating) return;
     _relocating = true;
     try {
@@ -468,7 +402,6 @@ class CellSelection extends ChangeNotifier {
   var _relocating = false;
 
   void _relocate(int row, int? Function(String row) rowIndex) {
-    // A selection made before its row was read takes the row once it is.
     _rowId ??= rowAt(row)?.id;
     final (rowId, fieldId) = (_rowId, _fieldId);
     if (rowId == null || fieldId == null) return;
@@ -477,7 +410,6 @@ class CellSelection extends ChangeNotifier {
     if (at >= 0 && found != null) {
       if ((found, at) == selected) return;
       selected = (found, at);
-      // A cell moved under its picker closes it, as a scroll does.
       if (picking) {
         picking = false;
         error = null;
@@ -488,7 +420,6 @@ class CellSelection extends ChangeNotifier {
     }
     final unread = found == null && rowAt(row) == null && row < rowCount();
     if (at >= 0 && unread) return;
-    // A number that is none cannot be written; the Page says it was not kept.
     if (editing && !commit(stay: false)) {
       report(
         '${error ?? 'The edit'} It was not kept, as its row or field is gone.',
@@ -497,7 +428,6 @@ class CellSelection extends ChangeNotifier {
     clear();
   }
 
-  /// Forgets the selection, as when the Table is left.
   void clear() {
     selected = null;
     editing = false;
@@ -507,7 +437,6 @@ class CellSelection extends ChangeNotifier {
     _changed();
   }
 
-  /// Writes an edit still open as it stands, as when the Table goes or Liquid quits.
   void finish() {
     if (editing && !commit(stay: false)) {
       report('$error It was not kept, as the Table closed.');
@@ -517,7 +446,6 @@ class CellSelection extends ChangeNotifier {
   static bool _edits(BridgeFieldKind kind) =>
       kind == BridgeFieldKind.text || kind == BridgeFieldKind.number;
 
-  /// A cell's value as its editor starts with it.
   String _shown(BridgeFieldKind kind, BridgeCell? cell) => switch (cell?.kind) {
     BridgeCellKind.text => cell!.text ?? '',
     BridgeCellKind.number => numberText(numbers, cell!.number),
@@ -526,7 +454,6 @@ class CellSelection extends ChangeNotifier {
 
   void _startEdit(String text) {
     _edited = _target;
-    // A selected cell scrolled out of view comes back to be edited.
     final (row, field) = selected!;
     reveal(row, field);
     edit.value = TextEditingValue(
@@ -541,8 +468,6 @@ class CellSelection extends ChangeNotifier {
     });
   }
 
-  /// Writes what was typed and ends the edit; a number that is none stays to be fixed.
-  /// With `stay`, the selection takes the keys again.
   bool commit({required bool stay}) {
     final target = _edited;
     if (target == null) {
@@ -607,20 +532,17 @@ class CellSelection extends ChangeNotifier {
     _ticks[at] = checked;
     write(row, field, _cell(BridgeCellKind.checkbox, checked: checked)).then(
       (_) {},
-      // A refused tick is forgotten, so the next click flips what is stored.
       onError: (Object _) {
         if (_ticks[at] == checked) _ticks.remove(at);
       },
     );
   }
 
-  /// Writes a cell; any other write to a file cell supersedes the list an add wrote.
   void _write(BridgeRow row, BridgeField field, BridgeCell cell) {
     _written.remove((row.id, field.id));
     write(row, field, cell).then<void>((_) {}, onError: (Object _) {});
   }
 
-  /// Forgets the ticks and file lists a read now shows, looking only at the rows read.
   void read(int? Function(String row) rowIndex) {
     BridgeCell? shown((String, String) at) {
       final index = rowIndex(at.$1);
@@ -638,8 +560,6 @@ class CellSelection extends ChangeNotifier {
     );
   }
 
-  /// ⏎ keeps the edit and selects the cell, ⇥ keeps it and selects the next one, esc
-  /// undoes it; the rest is typing.
   KeyEventResult _editKey(FocusNode _, KeyEvent event) {
     if (event is KeyUpEvent || !edit.value.composing.isCollapsed) {
       return KeyEventResult.ignored;
@@ -659,11 +579,9 @@ class CellSelection extends ChangeNotifier {
     return KeyEventResult.handled;
   }
 
-  /// The keys on a selected cell.
   KeyEventResult _cellKey(FocusNode _, KeyEvent event) {
     if (event is KeyUpEvent) return KeyEventResult.ignored;
     if (picking) {
-      // Until the picker takes the keys, its own keys act as there, and typing filters it.
       if (pickKeys?.call(event) == KeyEventResult.handled) {
         return KeyEventResult.handled;
       }
@@ -677,8 +595,6 @@ class CellSelection extends ChangeNotifier {
     }
     if (editing) {
       if (editFocus.hasFocus) return KeyEventResult.ignored;
-      // Until the editor takes the keys, ⏎, ⇥ and esc act on the edit as there, and
-      // typing goes into it.
       if (_editKey(editFocus, event) == KeyEventResult.handled) {
         return KeyEventResult.handled;
       }
@@ -715,19 +631,15 @@ class CellSelection extends ChangeNotifier {
         clear();
         leave();
       case LogicalKeyboardKey.space when field.kind == BridgeFieldKind.checkbox:
-        // A held Space ticks once.
         if (event is! KeyRepeatEvent) _toggle(row, field, cell);
       case LogicalKeyboardKey.keyV
           when field.kind == BridgeFieldKind.file && isPaste(event):
-        // A held ⌘V pastes once.
         if (event is! KeyRepeatEvent) unawaited(_pasteFiles(row.id, field.id));
       case LogicalKeyboardKey.backspace || LogicalKeyboardKey.delete:
         if (cell != null && cell.kind != BridgeCellKind.empty) {
           _write(row, field, _cell(BridgeCellKind.empty));
         }
       default:
-        // Typing replaces a text or number cell, and goes into a select or date cell's
-        // picker.
         final typed = event.character;
         if (typed == null ||
             !_printable(typed) ||
@@ -759,7 +671,6 @@ class CellSelection extends ChangeNotifier {
     );
   }
 
-  /// ⇥ selects the next cell, after a row's last field the next row's first; ⇧⇥ goes back.
   void _tab({required bool back}) {
     final (row, field) = selected!;
     final width = fields().length;
@@ -776,7 +687,6 @@ class CellSelection extends ChangeNotifier {
     reveal(row, field);
   }
 
-  /// The edited cell's text field.
   Widget editor(BuildContext context, BridgeField field) => Align(
     key: const Key('cell editor'),
     alignment: Alignment.centerLeft,
@@ -784,7 +694,6 @@ class CellSelection extends ChangeNotifier {
       key: _editorKey,
       controller: edit,
       focusNode: editFocus,
-      // The caret stays where Liquid puts it; desktop Flutter would select all on focus.
       selectAllOnFocus: false,
       textAlign: field.kind == BridgeFieldKind.number
           ? TextAlign.right
@@ -809,9 +718,6 @@ class CellSelection extends ChangeNotifier {
   }
 }
 
-/// The picked select or date cell, which its picker hangs from (see [AnchoredMenu]); a
-/// click outside both leaves the picker. Once first laid out it hands itself to
-/// [onPlaced], which brings it into view.
 class PickedCell extends StatefulWidget {
   const PickedCell({
     super.key,
@@ -887,7 +793,6 @@ class _PickedCellState extends State<PickedCell> {
               onTab: cells.tabFromPick,
               onKeys: (keys) => cells.pickKeys = keys,
             ),
-      // Nor does a click in the cell take the keys from the picker's filter.
       child: TextFieldTapRegion(child: widget.child),
     );
   }

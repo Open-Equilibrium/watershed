@@ -5,7 +5,6 @@ pub(crate) const PROVIDER_ERROR_REASON: &str = "provider_error";
 pub(crate) const PROVIDER_REPLY_INVALID_REASON: &str = "provider_reply_invalid";
 pub(crate) const PROCESS_CLEANUP_UNKNOWN_REASON: &str = "process_cleanup_unknown";
 
-/// Stable bounded failure at the private Executor integration boundary.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ExecutorFailure {
     code: proto::ExecutorErrorCodeV0,
@@ -22,13 +21,11 @@ impl ExecutorFailure {
         Self { code, message }
     }
 
-    /// Returns the stable private Executor failure family.
     pub fn code(&self) -> proto::ExecutorErrorCodeV0 {
         self.code
     }
 }
 
-/// A bounded provider failure reported without rewriting the provider's message.
 #[derive(Debug)]
 pub struct ProviderFailure {
     http_status: Option<u16>,
@@ -36,14 +33,10 @@ pub struct ProviderFailure {
     message: String,
 }
 
-/// How a provider failure settles its attempt.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum ProviderFailureKind {
-    /// The provider rejected the attempt; it is closed and never retried.
     Definitive,
-    /// The attempt may have reached the provider; it stays uncertain.
     Uncertain,
-    /// A reply ended but broke the Responses format; Flow Agent labels its own message.
     ReplyInvalid,
 }
 
@@ -68,168 +61,98 @@ impl ProviderFailure {
         self.kind == ProviderFailureKind::ReplyInvalid
     }
 
-    /// Whether the attempt's terminal outcome is known, so it closes instead of staying uncertain.
     pub(crate) fn is_known_outcome(&self) -> bool {
         self.kind != ProviderFailureKind::Uncertain
     }
 }
 
-/// Error returned by Flow Agent runtime operations.
 #[derive(Debug)]
 pub enum RuntimeError {
-    /// Filesystem I/O failed.
     Io {
-        /// Path being accessed.
         path: PathBuf,
-        /// Underlying I/O error.
         source: io::Error,
     },
-    /// JSON parsing or serialization failed.
     Json(serde_json::Error),
-    /// Policy compilation failed.
     Policy(core_policy::PolicyCompileError),
-    /// Registry loading or validation failed.
     Registry(core_script::RegistryError),
-    /// Runtime enforcement denied a side effect.
     Denied {
-        /// Structured denial reason.
         reason: core_policy::DenyReasonCode,
-        /// Human-readable denial message.
         message: String,
     },
-    /// Runtime protocol invariant was violated.
     Protocol(String),
-    /// Persisted workspace state prevents the requested operation.
     PersistedState(String),
-    /// Global Flow configuration initialization refused an existing owned output.
     GlobalConfigAlreadyInitialized {
-        /// Existing authoring path that prevents initialization.
         path: PathBuf,
     },
-    /// Definition publication refused an existing target.
     DefinitionExists {
-        /// Registry definition kind.
         definition_kind: &'static str,
-        /// Registry definition id.
         definition_id: String,
-        /// Existing definition path.
         path: PathBuf,
     },
-    /// A registry definition was rejected during authoring.
     InvalidDefinition {
-        /// Registry definition kind, when known.
         definition_kind: Option<&'static str>,
-        /// Registry definition id, when known.
         definition_id: Option<String>,
-        /// Safe registry path, when known.
         path: Option<PathBuf>,
-        /// Detailed validation failure.
         source: Box<RuntimeError>,
     },
-    /// An authoring validation reference could not be resolved.
     InvalidReference {
-        /// Registry reference kind.
         reference_kind: &'static str,
-        /// Rejected reference.
         reference: String,
-        /// Registry root searched for the reference.
         path: PathBuf,
-        /// Detailed resolution failure.
         source: Box<RuntimeError>,
     },
-    /// Mandatory provider context exceeded the selected model profile's input budget.
     ContextBudgetExceeded {
-        /// Available input-token budget under the selected model profile.
         input_budget_tokens: usize,
-        /// Canonical mandatory context bytes required by the turn.
         required_bytes: usize,
     },
-    /// In-memory replay output exceeded its fixed byte limit.
     ReplayOutputLimitExceeded {
-        /// Maximum canonical JSONL bytes accepted by the in-memory replay API.
         limit_bytes: usize,
     },
-    /// Fixture resume requires the explicit Fixture execution backend.
     ExecutionBackendUnavailable,
-    /// Productive execution has no supported backend on this platform.
     ProductiveExecutionUnavailable,
-    /// A Tool's processes may outlive its cleanup; the Run stops after recording that.
     ProcessCleanupUnknown,
-    /// A provider rejected or could not conclusively finish an attempted request.
     Provider(ProviderFailure),
-    /// Executor selection, framing or Sandbox preparation failed.
     Executor(ExecutorFailure),
-    /// The active productive CLI operation was cancelled by the user.
     Cancelled,
-    /// The per-session event writer failed after event construction.
     EventWriter(Box<RuntimeError>),
-    /// Multiple independent event-writer failures occurred.
     EventWriterFailures(Vec<Box<RuntimeError>>),
-    /// A temporary replacement operation and its cleanup both failed.
     TemporaryReplacementFailures {
-        /// Failure from writing or publishing the replacement.
         operation: Box<RuntimeError>,
-        /// Failure from removing the temporary replacement path.
         cleanup: Box<RuntimeError>,
     },
-    /// An own-script output was published, but its temporary hard link remains.
     PublishedOutputCleanupFailure {
-        /// Committed output path.
         output: PathBuf,
-        /// Residual temporary hard-link path.
         temporary: PathBuf,
-        /// Final temporary-link cleanup failure.
         source: Box<RuntimeError>,
     },
-    /// An output was published, but its durable finalization failed.
     PublishedOutputFinalizationFailure {
-        /// Committed output path.
         output: PathBuf,
-        /// Finalization failure after publication.
         source: Box<RuntimeError>,
     },
-    /// A complete credential replacement was published, but its finalization failed.
     PublishedCredentialFinalizationFailure {
-        /// Redacted finalization failure after credential publication.
         source: Box<RuntimeError>,
     },
-    /// Multiple controlled operation stages failed.
     ControlledStageFailures {
-        /// Runtime, validation, or output-generation failure.
         operation: Option<Box<RuntimeError>>,
-        /// Event-writer finalization failure.
         finalization: Option<Box<RuntimeError>>,
-        /// Session ownership or lock-cleanup failure.
         cleanup: Option<Box<RuntimeError>>,
     },
-    /// Multiple reservation-cleanup operations failed.
     SessionCleanupFailures(Vec<Box<RuntimeError>>),
-    /// A persisted session failed during runtime execution.
     SessionFailed {
-        /// Identifier of the authoritative failed session.
         session_id: String,
-        /// Typed runtime cause recorded by the session.
         source: Box<RuntimeError>,
     },
-    /// A host-local ownership lease is already held for the requested session.
     ActiveSession {
-        /// Requested session id.
         session_id: String,
-        /// Existing lock path.
         lock_path: PathBuf,
     },
-    /// A requested new session log already exists.
     SessionLogExists(String),
-    /// Resume was requested for a terminal session.
     TerminalSession(String),
-    /// CLI/user input was invalid.
     Usage(String),
-    /// Productive execution requires interactive authentication.
     AuthenticationRequired(String),
 }
 
 impl RuntimeError {
-    /// Returns the process exit code associated with this runtime error.
     pub fn exit_code(&self) -> i32 {
         match self {
             Self::Usage(_) => 64,
@@ -278,7 +201,6 @@ impl RuntimeError {
         })
     }
 
-    /// Builds a broken-reply failure; `message` is Flow Agent's complete, labelled message.
     pub(crate) fn provider_reply_invalid(message: impl Into<String>) -> Self {
         Self::Provider(ProviderFailure {
             http_status: None,
@@ -294,13 +216,11 @@ impl RuntimeError {
         }
     }
 
-    /// Replaces every occurrence of `secret` in a provider failure message, keeping its bound.
     pub(crate) fn without_secret(self, secret: &str) -> Self {
         match self {
             Self::Provider(failure) => {
                 let cut = failure.message.chars().count() >= MAX_PROVIDER_ERROR_MESSAGE_CHARS;
                 let mut message = failure.message.replace(secret, "<redacted>");
-                // The bound may have cut an echoed key; drop the part of it that survived.
                 if let Some(end) = (1..secret.len()).rev().find(|end| {
                     cut && secret.is_char_boundary(*end) && message.ends_with(&secret[..*end])
                 }) {

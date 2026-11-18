@@ -39,7 +39,6 @@ thread_local! {
     static EVENT_LINES_VISITED: Cell<u64> = const { Cell::new(0) };
 }
 
-/// Counts one event line read by a validation pass, for the early-stop regression test.
 fn count_event_line() {
     #[cfg(test)]
     EVENT_LINES_VISITED.with(|count| count.set(count.get().saturating_add(1)));

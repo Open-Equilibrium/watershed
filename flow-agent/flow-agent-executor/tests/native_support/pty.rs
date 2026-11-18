@@ -15,7 +15,6 @@ impl Terminal {
     pub fn new() -> Self {
         let (mut master, mut slave) = (-1, -1);
         let mut name = [0 as c_char; 128];
-        // openpty initializes both owned descriptors and the native device name.
         let result = unsafe {
             openpty(
                 &mut master,

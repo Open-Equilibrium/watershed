@@ -4,25 +4,68 @@ use super::{
     test_support::{empty_workspace, session_home_path},
 };
 use core_script::{RegistryBlock, ToolCommand, parse_registry_block};
-use std::{fs, path::Path, process::Stdio};
+use std::{
+    fs,
+    path::Path,
+    process::{Child, Output, Stdio},
+};
 
-fn initialize_default_workspace(workspace: &Path) {
-    let output = flow_command()
+fn flow_in(workspace: &Path, command: &str) -> Output {
+    flow_command()
         .current_dir(workspace)
-        .arg("init")
+        .args(command.split_whitespace())
         .output()
-        .expect("workspace initialization should run");
+        .expect("flow command should run")
+}
+
+fn succeed_in(workspace: &Path, command: &str) {
+    let output = flow_in(workspace, command);
     assert!(
         output.status.success(),
-        "{}",
+        "{command}: {}",
         String::from_utf8_lossy(&output.stderr)
     );
+}
+
+fn spawn_with_piped_stdin(workspace: &Path, command: &str) -> Child {
+    flow_command()
+        .current_dir(workspace)
+        .args(command.split_whitespace())
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("authoring command should start")
+}
+
+fn succeed_with_stdin(workspace: &Path, command: &str, input: &[u8]) {
+    let output = wait_with_input_and_output_before(
+        spawn_with_piped_stdin(workspace, command),
+        input,
+        cli_child_watchdog(),
+    );
+    assert!(
+        output.status.success(),
+        "{command}: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+fn assert_rejected(workspace: &Path, command: &str, code: i32, diagnostic: &str) {
+    let output = wait_with_output_before(
+        spawn_with_piped_stdin(workspace, command),
+        cli_child_watchdog(),
+    );
+    let stderr = String::from_utf8(output.stderr).expect("stderr should be UTF-8");
+    assert_eq!(output.status.code(), Some(code), "{command}: {stderr}");
+    assert!(stderr.contains(diagnostic), "{command}: {stderr}");
+    assert!(output.stdout.is_empty(), "{command}");
 }
 
 #[test]
 fn init_create_and_validate_custom_recursive_flow() {
     let workspace = empty_workspace();
-    initialize_default_workspace(&workspace);
+    succeed_in(&workspace, "init");
     let global_home = session_home_path();
     assert_eq!(
         fs::read_to_string(global_home.join("config.yaml")).expect("config is readable"),
@@ -31,416 +74,120 @@ fn init_create_and_validate_custom_recursive_flow() {
     for kind in ["tools", "instructions", "phases", "flows"] {
         assert!(global_home.join("registry").join(kind).is_dir());
     }
-    let repeated_init = flow_command()
-        .current_dir(&workspace)
-        .arg("init")
-        .output()
-        .expect("repeated init should run");
-    assert!(!repeated_init.status.success());
 
-    let contract = workspace.join("string-contract.yaml");
-    fs::write(&contract, "type: string\nmax_length: 4096\n").expect("contract written");
-    let predicate = workspace.join("done-predicate.yaml");
     fs::write(
-        &predicate,
+        workspace.join("string-contract.yaml"),
+        "type: string\nmax_length: 4096\n",
+    )
+    .expect("contract written");
+    fs::write(
+        workspace.join("done-predicate.yaml"),
         "path: []\nequals:\n  type: string\n  value: done\n",
     )
     .expect("predicate written");
-    let prompt = workspace.join("SYSTEM.md");
-    fs::write(&prompt, "Review {{project}} and return done.").expect("prompt written");
-    let script = workspace.join("report.sh");
-    fs::write(&script, "printf '%s' \"$1\"").expect("script written");
+    fs::write(
+        workspace.join("SYSTEM.md"),
+        "Review {{project}} and return done.",
+    )
+    .expect("prompt written");
+    fs::write(workspace.join("report.sh"), "printf '%s' \"$1\"").expect("script written");
 
-    let commands = [
-        vec![
-            "create",
-            "tool",
-            "--id",
-            "report",
-            "--name",
-            "Report",
-            "--tool-kind",
-            "predefined-command",
-            "--command-id",
-            "agent-report",
-            "--argv",
-            "--fixed",
-            "--parameter",
-            "--parameter-name",
-            "--project",
-            "--parameter-value-type",
-            "string",
-            "--parameter-required",
-            "true",
-            "--parameter-value-pattern",
-            "^[A-Za-z0-9_-]+$",
-            "--parameter-max-length",
-            "64",
-            "--end-parameter",
-            "--parameter",
-            "--parameter-name",
-            "--mode",
-            "--parameter-value-type",
-            "enum",
-            "--parameter-required",
-            "true",
-            "--parameter-allowed-value",
-            "fast",
-            "--parameter-allowed-value",
-            "thorough",
-            "--end-parameter",
-            "--parameter",
-            "--parameter-name",
-            "--count",
-            "--parameter-value-type",
-            "integer",
-            "--parameter-required",
-            "false",
-            "--parameter-min",
-            "1",
-            "--parameter-max",
-            "3",
-            "--end-parameter",
-            "--parameter",
-            "--parameter-name",
-            "--verbose",
-            "--parameter-value-type",
-            "none",
-            "--parameter-required",
-            "false",
-            "--end-parameter",
-            "--parameter",
-            "--parameter-name",
-            "--output",
-            "--parameter-value-type",
-            "workspace-relative-path",
-            "--parameter-required",
-            "true",
-            "--parameter-value-pattern",
-            "^[A-Za-z0-9_./-]+$",
-            "--parameter-max-length",
-            "128",
-            "--end-parameter",
-        ],
-        vec![
-            "create",
-            "tool",
-            "--id",
-            "script-report",
-            "--name",
-            "ScriptReport",
-            "--tool-kind",
-            "own-script",
-            "--script-body-file",
-            "report.sh",
-        ],
-        vec![
-            "create",
-            "instruction",
-            "--id",
-            "review",
-            "--name",
-            "Review",
-            "--prompt-file",
-            "SYSTEM.md",
-            "--parameter",
-            "--parameter-name",
-            "project",
-            "--parameter-contract-file",
-            "string-contract.yaml",
-            "--end-parameter",
-        ],
-        vec![
-            "create",
-            "phase",
-            "--id",
-            "review-leaf",
-            "--name",
-            "ReviewLeaf",
-            "--instruction-ref",
-            "review",
-            "--tool-ref",
-            "report",
-            "--tool-ref",
-            "script-report",
-            "--output-contract-file",
-            "string-contract.yaml",
-            "--loop",
-            "--loop-max-iterations",
-            "2",
-            "--loop-until-file",
-            "done-predicate.yaml",
-            "--end-loop",
-        ],
-        vec![
-            "create",
-            "phase",
-            "--id",
-            "publish-leaf",
-            "--name",
-            "PublishLeaf",
-            "--instruction-ref",
-            "review",
-            "--tool-ref",
-            "report",
-            "--output-contract-file",
-            "string-contract.yaml",
-        ],
-        vec![
-            "create",
-            "phase",
-            "--id",
-            "review-cycle",
-            "--name",
-            "ReviewCycle",
-            "--phase-ref",
-            "review-leaf",
-            "--phase-ref",
-            "publish-leaf",
-            "--output-contract-file",
-            "string-contract.yaml",
-            "--result-from",
-            "publish-leaf",
-            "--transition",
-            "--transition-from-phase-ref",
-            "review-leaf",
-            "--transition-to-phase-ref",
-            "publish-leaf",
-            "--transition-when-file",
-            "done-predicate.yaml",
-            "--end-transition",
-        ],
-        vec![
-            "create",
-            "flow",
-            "--id",
-            "publish-subflow",
-            "--name",
-            "PublishSubflow",
-            "--phase-ref",
-            "publish-leaf",
-        ],
-        vec![
-            "create",
-            "flow",
-            "--id",
-            "custom-review",
-            "--name",
-            "CustomReview",
-            "--phase-ref",
-            "review-leaf",
-            "--phase-ref",
-            "publish-leaf",
-            "--subflow-ref",
-            "publish-subflow",
-            "--transition",
-            "--transition-from-phase-ref",
-            "review-leaf",
-            "--transition-to-phase-ref",
-            "publish-leaf",
-            "--transition-when-file",
-            "done-predicate.yaml",
-            "--end-transition",
-        ],
-    ];
-    for args in commands {
-        let output = flow_command()
-            .current_dir(&workspace)
-            .args(args)
-            .output()
-            .expect("create should run");
-        assert!(
-            output.status.success(),
-            "{}",
-            String::from_utf8_lossy(&output.stderr)
-        );
+    for command in [
+        "create tool --id report --name Report --tool-kind predefined-command
+            --command-id agent-report --argv --fixed --parameter --parameter-name --project
+            --parameter-value-type string --parameter-required true
+            --parameter-value-pattern ^[A-Za-z0-9_-]+$ --parameter-max-length 64 --end-parameter
+            --parameter --parameter-name --mode --parameter-value-type enum
+            --parameter-required true --parameter-allowed-value fast
+            --parameter-allowed-value thorough --end-parameter
+            --parameter --parameter-name --count --parameter-value-type integer
+            --parameter-required false --parameter-min 1 --parameter-max 3 --end-parameter
+            --parameter --parameter-name --verbose --parameter-value-type none
+            --parameter-required false --end-parameter
+            --parameter --parameter-name --output --parameter-value-type workspace-relative-path
+            --parameter-required true --parameter-value-pattern ^[A-Za-z0-9_./-]+$
+            --parameter-max-length 128 --end-parameter",
+        "create tool --id script-report --name ScriptReport --tool-kind own-script
+            --script-body-file report.sh",
+        "create instruction --id review --name Review --prompt-file SYSTEM.md --parameter
+            --parameter-name project --parameter-contract-file string-contract.yaml --end-parameter",
+        "create phase --id review-leaf --name ReviewLeaf --instruction-ref review
+            --tool-ref report --tool-ref script-report --output-contract-file string-contract.yaml
+            --loop --loop-max-iterations 2 --loop-until-file done-predicate.yaml --end-loop",
+        "create phase --id publish-leaf --name PublishLeaf --instruction-ref review
+            --tool-ref report --output-contract-file string-contract.yaml",
+        "create phase --id review-cycle --name ReviewCycle --phase-ref review-leaf
+            --phase-ref publish-leaf --output-contract-file string-contract.yaml
+            --result-from publish-leaf --transition --transition-from-phase-ref review-leaf
+            --transition-to-phase-ref publish-leaf --transition-when-file done-predicate.yaml
+            --end-transition",
+        "create flow --id publish-subflow --name PublishSubflow --phase-ref publish-leaf",
+        "create flow --id custom-review --name CustomReview --phase-ref review-leaf
+            --phase-ref publish-leaf --subflow-ref publish-subflow --transition
+            --transition-from-phase-ref review-leaf --transition-to-phase-ref publish-leaf
+            --transition-when-file done-predicate.yaml --end-transition",
+    ] {
+        succeed_in(&workspace, command);
     }
 
-    let validate = flow_command()
-        .current_dir(&workspace)
-        .args(["validate", "custom-review"])
-        .output()
-        .expect("validate should run");
-    assert!(
-        validate.status.success(),
-        "{}",
-        String::from_utf8_lossy(&validate.stderr)
-    );
-    let validate_all = flow_command()
-        .current_dir(&workspace)
-        .arg("validate")
-        .output()
-        .expect("full validation should run");
-    assert!(
-        validate_all.status.success(),
-        "{}",
-        String::from_utf8_lossy(&validate_all.stderr)
-    );
+    succeed_in(&workspace, "validate custom-review");
+    succeed_in(&workspace, "validate");
 
-    let duplicate = flow_command()
-        .current_dir(&workspace)
-        .args([
-            "create",
-            "flow",
-            "--id",
-            "custom-review",
-            "--name",
-            "Replacement",
-            "--phase-ref",
-            "review-cycle",
-        ])
-        .output()
-        .expect("duplicate create should run");
-    assert!(!duplicate.status.success());
+    assert!(
+        !flow_in(
+            &workspace,
+            "create flow --id custom-review --name Replacement --phase-ref review-cycle"
+        )
+        .status
+        .success()
+    );
     let original = fs::read_to_string(global_home.join("registry/flows/custom-review.yaml"))
         .expect("original flow remains readable");
     assert!(original.contains("CustomReview"));
     assert!(!original.contains("Replacement"));
 
-    let unresolved = flow_command()
-        .current_dir(&workspace)
-        .args([
-            "create",
-            "phase",
-            "--id",
-            "unresolved",
-            "--name",
-            "Unresolved",
-            "--phase-ref",
-            "missing-phase",
-            "--output-contract-file",
-            "string-contract.yaml",
-            "--result-from",
-            "missing-phase",
-        ])
-        .output()
-        .expect("unresolved create should run");
-    assert!(!unresolved.status.success());
+    assert!(
+        !flow_in(
+            &workspace,
+            "create phase --id unresolved --name Unresolved --phase-ref missing-phase
+                --output-contract-file string-contract.yaml --result-from missing-phase"
+        )
+        .status
+        .success()
+    );
     assert!(!global_home.join("registry/phases/unresolved.yaml").exists());
 }
 
 #[test]
 fn custom_registry_root_accepts_instruction_and_script_stdin_sources() {
     let workspace = empty_workspace();
-    let init = flow_command()
-        .current_dir(&workspace)
-        .args(["init", "--registry-root", "custom-registry"])
-        .output()
-        .expect("custom init should run");
-    assert!(
-        init.status.success(),
-        "{}",
-        String::from_utf8_lossy(&init.stderr)
-    );
-    let global_home = session_home_path();
+    succeed_in(&workspace, "init --registry-root custom-registry");
     assert_eq!(
-        fs::read_to_string(global_home.join("config.yaml")).expect("config is readable"),
+        fs::read_to_string(session_home_path().join("config.yaml")).expect("config is readable"),
         "registry_root: \"custom-registry\"\n"
     );
 
-    let instruction = flow_command()
-        .current_dir(&workspace)
-        .args([
-            "create",
-            "instruction",
-            "--id",
-            "stdin-instruction",
-            "--name",
-            "StdinInstruction",
-            "--prompt-stdin",
-        ])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .expect("instruction create should start");
-    let instruction = wait_with_input_and_output_before(
-        instruction,
+    succeed_with_stdin(
+        &workspace,
+        "create instruction --id stdin-instruction --name StdinInstruction --prompt-stdin",
         b"Review the selected project.",
-        cli_child_watchdog(),
     );
-    assert!(
-        instruction.status.success(),
-        "{}",
-        String::from_utf8_lossy(&instruction.stderr)
+    succeed_with_stdin(
+        &workspace,
+        "create tool --id stdin-script --name StdinScript --tool-kind own-script --script-body-stdin",
+        b"printf '%s' stdin-script",
     );
-
-    let tool = flow_command()
-        .current_dir(&workspace)
-        .args([
-            "create",
-            "tool",
-            "--id",
-            "stdin-script",
-            "--name",
-            "StdinScript",
-            "--tool-kind",
-            "own-script",
-            "--script-body-stdin",
-        ])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .expect("Tool create should start");
-    let tool =
-        wait_with_input_and_output_before(tool, b"printf '%s' stdin-script", cli_child_watchdog());
-    assert!(
-        tool.status.success(),
-        "{}",
-        String::from_utf8_lossy(&tool.stderr)
-    );
-
     fs::write(workspace.join("string-contract.yaml"), "type: string\n").expect("contract writes");
-    for args in [
-        [
-            "create",
-            "phase",
-            "--id",
-            "stdin-phase",
-            "--name",
-            "StdinPhase",
-            "--instruction-ref",
-            "stdin-instruction",
-            "--tool-ref",
-            "stdin-script",
-            "--output-contract-file",
-            "string-contract.yaml",
-        ]
-        .as_slice(),
-        [
-            "create",
-            "flow",
-            "--id",
-            "stdin-flow",
-            "--name",
-            "StdinFlow",
-            "--phase-ref",
-            "stdin-phase",
-        ]
-        .as_slice(),
-    ] {
-        let output = flow_command()
-            .current_dir(&workspace)
-            .args(args)
-            .output()
-            .expect("block create should run");
-        assert!(
-            output.status.success(),
-            "{}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-    }
-    let validate = flow_command()
-        .current_dir(&workspace)
-        .args(["validate", "stdin-flow"])
-        .output()
-        .expect("validate should run");
-    assert!(
-        validate.status.success(),
-        "{}",
-        String::from_utf8_lossy(&validate.stderr)
+    succeed_in(
+        &workspace,
+        "create phase --id stdin-phase --name StdinPhase --instruction-ref stdin-instruction
+            --tool-ref stdin-script --output-contract-file string-contract.yaml",
     );
+    succeed_in(
+        &workspace,
+        "create flow --id stdin-flow --name StdinFlow --phase-ref stdin-phase",
+    );
+    succeed_in(&workspace, "validate stdin-flow");
     assert!(
         session_home_path()
             .join("custom-registry/flows/stdin-flow.yaml")
@@ -449,148 +196,49 @@ fn custom_registry_root_accepts_instruction_and_script_stdin_sources() {
 }
 
 #[test]
-fn duplicate_prompt_source_is_rejected_without_reading_stdin() {
+fn stdin_authoring_rejects_invalid_sources_and_identities_before_reading_stdin() {
     let workspace = empty_workspace();
-    fs::write(workspace.join("prompt.txt"), "Review the project.").expect("prompt writes");
-    let child = flow_command()
-        .current_dir(&workspace)
-        .args([
-            "create",
-            "instruction",
-            "--id",
-            "review",
-            "--name",
-            "Review",
-            "--prompt-file",
-            "prompt.txt",
-            "--prompt-stdin",
-        ])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .expect("instruction create should start");
-
-    let output = wait_with_output_before(child, cli_child_watchdog());
-
-    assert!(!output.status.success());
-    assert!(
-        String::from_utf8_lossy(&output.stderr).contains("duplicate --prompt-stdin"),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-}
-
-#[test]
-fn invalid_stdin_sources_are_rejected_without_reading_stdin() {
-    let workspace = empty_workspace();
+    succeed_in(&workspace, "init");
     fs::write(workspace.join("prompt.txt"), "Review the project.").expect("prompt writes");
 
-    for (arguments, expected) in [
+    for (command, code, diagnostic) in [
         (
-            vec![
-                "create",
-                "instruction",
-                "--id",
-                "review",
-                "--name",
-                "Review",
-                "--prompt-stdin",
-                "--prompt-file",
-                "prompt.txt",
-            ],
+            "create instruction --id review --name Review --prompt-file prompt.txt --prompt-stdin",
+            64,
+            "duplicate --prompt-stdin",
+        ),
+        (
+            "create instruction --id review --name Review --prompt-stdin --prompt-file prompt.txt",
+            64,
             "duplicate --prompt-file",
         ),
         (
-            vec![
-                "create",
-                "tool",
-                "--id",
-                "report",
-                "--name",
-                "Report",
-                "--tool-kind",
-                "predefined-command",
-                "--command-id",
-                "agent-report",
-                "--script-body-stdin",
-            ],
+            "create tool --id report --name Report --tool-kind predefined-command
+                --command-id agent-report --script-body-stdin",
+            64,
             "script body is invalid for predefined-command",
         ),
+        (
+            "create instruction --id INVALID --name Invalid --prompt-stdin",
+            65,
+            "invalid_definition",
+        ),
+        (
+            "create tool --id INVALID --name Invalid --tool-kind own-script --script-body-stdin",
+            65,
+            "invalid_definition",
+        ),
     ] {
-        let child = flow_command()
-            .current_dir(&workspace)
-            .args(arguments)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .expect("invalid authoring command should start");
-
-        let output = wait_with_output_before(child, cli_child_watchdog());
-
-        assert!(!output.status.success());
-        assert!(
-            String::from_utf8_lossy(&output.stderr).contains(expected),
-            "{}",
-            String::from_utf8_lossy(&output.stderr)
-        );
+        assert_rejected(&workspace, command, code, diagnostic);
     }
-}
-
-#[test]
-fn invalid_stdin_backed_identities_are_rejected_before_reading_stdin() {
-    let workspace = empty_workspace();
-    initialize_default_workspace(&workspace);
-
-    for (kind, arguments) in [
-        (
-            "instructions",
-            vec![
-                "create",
-                "instruction",
-                "--id",
-                "INVALID",
-                "--name",
-                "Invalid",
-                "--prompt-stdin",
-            ],
-        ),
-        (
-            "tools",
-            vec![
-                "create",
-                "tool",
-                "--id",
-                "INVALID",
-                "--name",
-                "Invalid",
-                "--tool-kind",
-                "own-script",
-                "--script-body-stdin",
-            ],
-        ),
-    ] {
-        let child = flow_command()
-            .current_dir(&workspace)
-            .args(arguments)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .expect("invalid authoring command should start");
-
-        let output = wait_with_output_before(child, cli_child_watchdog());
-        let stderr = String::from_utf8(output.stderr).expect("stderr should be UTF-8");
-        assert_eq!(output.status.code(), Some(65), "{kind}: {stderr}");
-        assert!(stderr.contains("invalid_definition"), "{kind}: {stderr}");
-        assert!(output.stdout.is_empty(), "{kind}");
+    for kind in ["instructions", "tools"] {
         assert!(
-            !workspace
+            !session_home_path()
                 .join("registry")
                 .join(kind)
                 .join("INVALID.yaml")
-                .exists()
+                .exists(),
+            "{kind}"
         );
     }
 }
@@ -598,7 +246,7 @@ fn invalid_stdin_backed_identities_are_rejected_before_reading_stdin() {
 #[test]
 fn tool_argv_preserves_literal_help_flags_and_environment_tokens() {
     let workspace = empty_workspace();
-    initialize_default_workspace(&workspace);
+    succeed_in(&workspace, "init");
 
     for (id, literal) in [
         ("long-help", "--help"),
@@ -606,28 +254,12 @@ fn tool_argv_preserves_literal_help_flags_and_environment_tokens() {
         ("environment", "$TOOL_INPUT"),
         ("legacy-literal", "--network"),
     ] {
-        let create = flow_command()
-            .current_dir(&workspace)
-            .args([
-                "create",
-                "tool",
-                "--id",
-                id,
-                "--name",
-                id,
-                "--tool-kind",
-                "predefined-command",
-                "--command-id",
-                "agent-echo",
-                "--argv",
-                literal,
-            ])
-            .output()
-            .expect("tool creation should run");
-        assert!(
-            create.status.success(),
-            "{}",
-            String::from_utf8_lossy(&create.stderr)
+        succeed_in(
+            &workspace,
+            &format!(
+                "create tool --id {id} --name {id} --tool-kind predefined-command
+                    --command-id agent-echo --argv {literal}"
+            ),
         );
 
         let path = session_home_path().join(format!("registry/tools/{id}.yaml"));
@@ -711,11 +343,6 @@ fn authoring_help_exposes_each_complete_block_grammar() {
                 "{kind} help lacks {fragment}: {stdout}"
             );
         }
-        if kind == "tool" {
-            for flag in LEGACY_TOOL_FLAGS {
-                assert!(!stdout.contains(flag), "obsolete flag in Tool help: {flag}");
-            }
-        }
         assert!(output.stderr.is_empty(), "{kind}");
     }
 }
@@ -738,170 +365,63 @@ const LEGACY_TOOL_FLAGS: [&str; 12] = [
 #[test]
 fn legacy_tool_flags_reject_before_stdin_and_never_publish() {
     let workspace = empty_workspace();
-    initialize_default_workspace(&workspace);
+    succeed_in(&workspace, "init");
     let definition = session_home_path().join("registry/tools/legacy-tool.yaml");
 
     for flag in LEGACY_TOOL_FLAGS {
-        let child = flow_command()
-            .current_dir(&workspace)
-            .args([
-                "create",
-                "tool",
-                "--id",
-                "legacy-tool",
-                "--name",
-                "LegacyTool",
-                "--tool-kind",
-                "own-script",
-                "--script-body-stdin",
-                flag,
-            ])
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .expect("legacy authoring command should start");
-        let output = wait_with_output_before(child, cli_child_watchdog());
-        let stderr = String::from_utf8(output.stderr).expect("stderr should be UTF-8");
-        assert_eq!(output.status.code(), Some(64), "{flag}: {stderr}");
-        assert!(
-            stderr.contains(&format!(r#"unknown argument \"{flag}\""#)),
-            "{flag}: {stderr}"
+        assert_rejected(
+            &workspace,
+            &format!(
+                "create tool --id legacy-tool --name LegacyTool --tool-kind own-script
+                    --script-body-stdin {flag}"
+            ),
+            64,
+            &format!(r#"unknown argument \"{flag}\""#),
         );
-        assert!(output.stdout.is_empty(), "{flag}");
         assert!(!definition.exists(), "{flag} must not publish a definition");
     }
 }
 
 #[test]
 fn authoring_public_diagnostics_and_exit_classes_are_stable() {
-    fn assert_error(workspace: &Path, args: &[&str], code: i32, diagnostic: &str) {
-        let output = flow_command()
-            .current_dir(workspace)
-            .args(args)
-            .output()
-            .expect("authoring command should run");
-        let stderr = String::from_utf8(output.stderr).expect("stderr should be UTF-8");
-
-        assert_eq!(output.status.code(), Some(code), "{args:?}: {stderr}");
-        assert!(stderr.contains(diagnostic), "{args:?}: {stderr}");
-        assert!(output.stdout.is_empty(), "{args:?}");
-    }
-
     let workspace = empty_workspace();
-    initialize_default_workspace(&workspace);
+    succeed_in(&workspace, "init");
 
-    assert_error(
-        &workspace,
-        &["init"],
-        65,
-        "global_config_already_initialized",
-    );
+    assert_rejected(&workspace, "init", 65, "global_config_already_initialized");
 
-    let tool_args = [
-        "create",
-        "tool",
-        "--id",
-        "inspect",
-        "--name",
-        "Inspect",
-        "--tool-kind",
-        "predefined-command",
-        "--command-id",
-        "agent-echo",
-    ];
-    let created = flow_command()
-        .current_dir(&workspace)
-        .args(tool_args)
-        .output()
-        .expect("valid Tool creation should run");
-    assert!(
-        created.status.success(),
-        "{}",
-        String::from_utf8_lossy(&created.stderr)
-    );
+    let tool = "create tool --id inspect --name Inspect --tool-kind predefined-command
+        --command-id agent-echo";
+    succeed_in(&workspace, tool);
+    assert_rejected(&workspace, tool, 65, "definition_exists");
 
-    assert_error(&workspace, &tool_args, 65, "definition_exists");
-    assert_error(
-        &workspace,
-        &[
-            "create",
-            "tool",
-            "--id",
-            "INVALID",
-            "--name",
-            "Invalid",
-            "--tool-kind",
-            "predefined-command",
-            "--command-id",
-            "agent-echo",
-        ],
-        65,
-        "invalid_definition",
-    );
-    assert_error(
-        &workspace,
-        &["validate", "missing"],
-        65,
-        "invalid_reference",
-    );
-    assert_error(&workspace, &["validate", "--bogus"], 64, "unknown argument");
-    assert_error(&workspace, &["init", "--bogus"], 64, "unknown argument");
+    assert_rejected(&workspace, "validate missing", 65, "invalid_reference");
+    assert_rejected(&workspace, "validate --bogus", 64, "unknown argument");
+    assert_rejected(&workspace, "init --bogus", 64, "unknown argument");
 }
 
 #[test]
 fn malformed_typed_yaml_is_invalid_definition_and_never_published() {
     let workspace = empty_workspace();
-    initialize_default_workspace(&workspace);
+    succeed_in(&workspace, "init");
     fs::write(workspace.join("valid-contract.yaml"), "type: string\n")
         .expect("valid contract should be written");
     fs::write(workspace.join("malformed.yaml"), "type: [\n")
         .expect("malformed YAML should be written");
 
-    for (id, arguments) in [
+    for (id, command) in [
         (
             "malformed-contract",
-            vec![
-                "create",
-                "phase",
-                "--id",
-                "malformed-contract",
-                "--name",
-                "MalformedContract",
-                "--output-contract-file",
-                "malformed.yaml",
-            ],
+            "create phase --id malformed-contract --name MalformedContract
+                --output-contract-file malformed.yaml",
         ),
         (
             "malformed-predicate",
-            vec![
-                "create",
-                "phase",
-                "--id",
-                "malformed-predicate",
-                "--name",
-                "MalformedPredicate",
-                "--output-contract-file",
-                "valid-contract.yaml",
-                "--loop",
-                "--loop-max-iterations",
-                "1",
-                "--loop-until-file",
-                "malformed.yaml",
-                "--end-loop",
-            ],
+            "create phase --id malformed-predicate --name MalformedPredicate
+                --output-contract-file valid-contract.yaml --loop --loop-max-iterations 1
+                --loop-until-file malformed.yaml --end-loop",
         ),
     ] {
-        let output = flow_command()
-            .current_dir(&workspace)
-            .args(arguments)
-            .output()
-            .expect("invalid authoring command should run");
-        let stderr = String::from_utf8(output.stderr).expect("stderr should be UTF-8");
-
-        assert_eq!(output.status.code(), Some(65), "{id}: {stderr}");
-        assert!(stderr.contains("invalid_definition"), "{id}: {stderr}");
-        assert!(output.stdout.is_empty(), "{id}");
+        assert_rejected(&workspace, command, 65, "invalid_definition");
         assert!(
             !session_home_path()
                 .join("registry/phases")

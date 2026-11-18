@@ -49,7 +49,6 @@ pub(super) fn validate_registry_block_shape(block: &RegistryBlock) -> Result<(),
     }
 }
 
-/// Validates the canonical identifier and name shape shared by registry blocks.
 pub fn validate_block_identity(
     kind: RegistryBlockKind,
     identity: &BlockIdentity,

@@ -135,7 +135,6 @@ impl AnchoredDir {
         })
     }
 
-    /// Share the retained root's namespace lease with every descendant publisher.
     pub(crate) fn with_publication(mut self) -> Self {
         self.publication_root = Some(self.dir.clone());
         self
@@ -382,8 +381,6 @@ impl AnchoredWorkspace {
 }
 
 fn directory_lease(dir: &Dir, shared: bool) -> io::Result<ProtectedStateLock> {
-    // Reopen, never duplicate: separate acquisitions need separate lock ownership.
-    // Linux capability directories may use O_PATH, which cannot carry a file lock.
     let file = fs::File::from(rustix::fs::openat(
         dir,
         ".",
@@ -441,7 +438,6 @@ fn create_private_anchored_directory(parent: &Dir, leaf: &OsStr) -> io::Result<D
     let mut builder = cap_std::fs::DirBuilder::new();
     builder.mode(0o700);
     let leaf = Path::new(leaf);
-    // Do not chmod by name after creation: the leaf can be replaced before it is opened.
     parent.create_dir_with(leaf, &builder)?;
     #[cfg(test)]
     observe_private_directory_create();

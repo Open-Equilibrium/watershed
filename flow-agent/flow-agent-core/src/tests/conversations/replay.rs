@@ -13,9 +13,14 @@ use crate::runtime::{
 use std::{
     fs::{self, OpenOptions},
     io::Write,
+    path::{Path, PathBuf},
 };
 
 const IN_MEMORY_REPLAY_TEST_LIMIT_BYTES: usize = 67_108_864;
+
+fn review_run_dir(workspace: &Path) -> PathBuf {
+    workspace_session_dir(workspace).join("review/runs/review-1")
+}
 
 #[test]
 fn human_conversation_replay_uses_run_terminology() {
@@ -133,38 +138,35 @@ fn conversation_replay_rejects_inactive_and_malformed_event_boundaries() {
         (
             "empty",
             Vec::new(),
-            "is empty without active session ownership",
+            Some("is empty without active session ownership"),
         ),
-        ("invalid-utf8", vec![0xff, b'\n'], "is not valid UTF-8"),
+        (
+            "invalid-utf8",
+            vec![0xff, b'\n'],
+            Some("is not valid UTF-8"),
+        ),
+        ("incomplete-final-line", b"{}".to_vec(), None),
     ] {
         let workspace = empty_workspace(&format!("conversation-replay-{label}"));
         create_review_run(&workspace);
-        fs::write(
-            crate::tests::helpers::workspace_session_dir(&workspace)
-                .join("review/runs/review-1/events.jsonl"),
-            bytes,
-        )
-        .expect("event boundary fixture writes");
+        fs::write(review_run_dir(&workspace).join("events.jsonl"), bytes)
+            .expect("event boundary fixture writes");
 
-        let error = replay_conversation_run(&workspace, "review", "review-1", EmitMode::Jsonl)
-            .expect_err("malformed conversation replay must fail closed");
-        assert!(error.to_string().contains(expected), "{label}: {error}");
+        let result = replay_conversation_run(&workspace, "review", "review-1", EmitMode::Jsonl);
+        match expected {
+            Some(message) => {
+                let error = result.expect_err("malformed conversation replay must fail closed");
+                assert!(error.to_string().contains(message), "{label}: {error}");
+            }
+            None => {
+                result.expect("replay ignores an uncommitted incomplete final line");
+            }
+        }
     }
-
-    let workspace = empty_workspace("conversation-replay-incomplete-final-line");
-    create_review_run(&workspace);
-    fs::write(
-        crate::tests::helpers::workspace_session_dir(&workspace)
-            .join("review/runs/review-1/events.jsonl"),
-        b"{}",
-    )
-    .expect("uncommitted incomplete final line writes");
-    replay_conversation_run(&workspace, "review", "review-1", EmitMode::Jsonl)
-        .expect("replay ignores an uncommitted incomplete final line");
 
     let workspace = empty_workspace("conversation-replay-non-final-partial");
     create_review_run(&workspace);
-    let run = crate::tests::helpers::workspace_session_dir(&workspace).join("review/runs/review-1");
+    let run = review_run_dir(&workspace);
     fs::write(run.join("events.jsonl"), b"{}").expect("partial non-final segment writes");
     fs::write(run.join("events.000002.jsonl"), b"{}\n").expect("complete final segment writes");
     let error = replay_conversation_run(&workspace, "review", "review-1", EmitMode::Jsonl)
@@ -177,7 +179,7 @@ fn conversation_replay_rejects_inactive_and_malformed_event_boundaries() {
 
     let workspace = empty_workspace("conversation-replay-terminal-partial");
     create_terminal_review_run(&workspace);
-    let run = crate::tests::helpers::workspace_session_dir(&workspace).join("review/runs/review-1");
+    let run = review_run_dir(&workspace);
     OpenOptions::new()
         .append(true)
         .open(run.join("events.jsonl"))

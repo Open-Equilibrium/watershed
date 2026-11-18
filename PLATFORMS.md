@@ -2,9 +2,8 @@
 
 Support is a product-and-capability contract, not a workspace-wide compilation claim. Release 1 requires native execution and verification on the targets below; a target in this table is not evidence that its implementation is available today.
 
-Flow Agent's accepted replacement boundary is [trusted Tools with mandatory Flow-owned write protection](SECURITY.md#flow-agent-security-contract) (ADR-0166), not general hostile-Tool containment. ADR-0174 limits first-release protection to this installation's required objects, not additional independent Flow homes. The replacement is integrated; [TESTING.md](TESTING.md#native-verification-status) owns native results and remaining acceptance gaps. Implementation alone is not support proof.
-
-Linux and macOS share the same [public installation guarantee and maintenance limits](SECURITY.md#flow-owned-write-protection-and-its-limits) (ADR-0176). Their different [launch mechanics](PROTOCOL.md#process-and-framing-contract) do not establish stronger Linux protection against unconfined host-authority writers.
+Flow Agent's accepted replacement boundary is [trusted Tools with mandatory Flow-owned write protection](SECURITY.md#flow-agent-security-contract) (ADR-0166), not general hostile-Tool containment. ADR-0174 limits first-release protection to this installation's required objects, not additional independent Flow homes. The replacement is integrated; [TESTING.md](TESTING.md#native-verification-status) owns native results and remaining acceptance gaps.
+Linux and macOS share the same [public installation guarantee and maintenance limits](SECURITY.md#flow-owned-write-protection-and-its-limits) (ADR-0176).
 
 | Product / capability | Release 1 native targets | Current implementation |
 |---|---|---|
@@ -44,4 +43,4 @@ Host administrators must supply missing prerequisites explicitly. Installation d
 
 ## Evidence before a support claim
 
-Each native Executor must prove the exact [accepted security contract](SECURITY.md#flow-agent-security-contract), including direct-write protection inherited by Tool children and truthful cancellation/failure reporting. Configuration administration stays manual for the first Flow Agent release. General network containment, exact mount equivalence, preventive process/thread ceilings and hostile crash cleanup are no longer required release guarantees. Ordinary networking is available on both; neither requires runtime-read profiles. Integration supplies no native support proof. [TESTING.md](TESTING.md#m12-transition-and-executor-evidence) owns native results and outstanding evidence. Both native replacement implementations must be verified before the first Flow Agent release. An external sandbox needs separate nested-compatibility evidence; it cannot substitute for Flow's own readiness or establish platform support.
+Each native Executor must prove the exact [accepted security contract](SECURITY.md#flow-agent-security-contract), including direct-write protection inherited by Tool children and truthful cancellation/failure reporting. Excluded guarantees are listed in [SECURITY.md](SECURITY.md#flow-owned-write-protection-and-its-limits). Integration supplies no native support proof. [TESTING.md](TESTING.md#m12-transition-and-executor-evidence) owns native results and outstanding evidence. Both native replacement implementations must be verified before the first Flow Agent release. An external sandbox needs separate nested-compatibility evidence; it cannot substitute for Flow's own readiness or establish platform support.

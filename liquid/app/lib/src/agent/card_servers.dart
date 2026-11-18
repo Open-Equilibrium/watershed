@@ -10,8 +10,6 @@ import '../theme/tokens.g.dart';
 import 'session_card_rows.dart';
 import 'session_menus.dart';
 
-/// The Servers section: the local servers the session's agent or terminals run. A click opens one
-/// in the default browser; Stop ends the process that runs it, as T3 Code's row does.
 class ServersSection extends StatelessWidget {
   const ServersSection({
     super.key,

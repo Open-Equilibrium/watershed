@@ -816,7 +816,6 @@ dependencies = [
  "proto",
  "rustix",
  "serde_json",
- "sha2",
  "signal-hook",
 ]
 

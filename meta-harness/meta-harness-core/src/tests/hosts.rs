@@ -1,6 +1,3 @@
-//! Pairing codes and the tokens they issue (ADR-0299): a code is single use and expires, at most
-//! five are live, and a token admits only the kind of client that paired with it.
-
 use rusqlite::Connection;
 
 use crate::hosts::{self, Access, ClientKind, printable};
@@ -13,7 +10,6 @@ fn store() -> Connection {
     db
 }
 
-/// The kind of client that `token` belongs to, if one holds it.
 fn kind_of(db: &Connection, token: &str) -> Option<ClientKind> {
     hosts::client(db, token).unwrap().map(|(kind, _, _)| kind)
 }
@@ -75,7 +71,6 @@ fn a_name_is_trimmed_and_limited_as_t3_limits_it() {
         "an empty name is the default one"
     );
     assert_eq!(printable(&"a".repeat(70)).chars().count(), 64);
-    // Sixty emoji are 120 UTF-16 units, more than T3's 100.
     let emoji = printable(&"\u{1F600}".repeat(60));
     assert!(emoji.encode_utf16().count() <= 100, "{emoji}");
     assert!(!emoji.ends_with(char::is_whitespace));

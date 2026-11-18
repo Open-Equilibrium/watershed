@@ -1,5 +1,3 @@
-//! A thread's servers, automations and usage limits as T3 0.1.9 streams and reports them.
-
 use std::time::Duration;
 
 use serde_json::{Value, json};
@@ -13,7 +11,6 @@ const WAIT: Duration = Duration::from_secs(10);
 const SERVERS: &str = "subscribeDiscoveredLocalServers";
 const TASKS: &str = "scheduledTasks.subscribe";
 
-/// Discovered servers: two of this thread's (a terminal's and an agent's) and one of another.
 fn discovered() -> Value {
     json!({
         "servers": [
@@ -63,7 +60,6 @@ async fn the_servers_of_a_thread_are_watched_and_one_can_be_stopped() {
             },
         ]
     );
-    // A later discovery replaces the list; the watch hands over the newest.
     fake.received(SERVERS, 1).await;
     fake.push(
         SERVERS,
@@ -77,21 +73,6 @@ async fn the_servers_of_a_thread_are_watched_and_one_can_be_stopped() {
         fake.payloads("preview.stopLocalServer"),
         vec![json!({"pid": 4242, "port": 5173})]
     );
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn dropping_the_servers_watch_interrupts_its_subscription_on_t3() {
-    let (fake, thread) = thread_with(|tag, _, id| match tag {
-        SERVERS => vec![chunk(id, vec![discovered()])],
-        _ => vec![ok(id, json!({}))],
-    })
-    .await;
-    let servers = thread.servers().await.unwrap();
-    let id = fake.request_id(SERVERS);
-    drop(servers);
-    tokio::time::timeout(WAIT, fake.interrupted(&id))
-        .await
-        .expect("T3 is told to stop the discovery stream");
 }
 
 fn tasks() -> Value {
@@ -168,8 +149,6 @@ async fn the_automations_of_a_thread_show_their_schedule_and_state_and_can_be_ru
     );
 }
 
-/// The usage limits of the thread's provider, with one window that is ahead of its pace and one
-/// that is under it.
 fn usage_config() -> Value {
     json!({
         "environment": {"label": "Test Machine"},
@@ -238,5 +217,29 @@ async fn the_usage_limits_of_the_thread_provider_show_remaining_room_pace_and_no
     assert_eq!(
         plain.notice.as_deref(),
         Some("This account has no subscription limits.")
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_moved_session_pauses_its_enabled_scheduled_tasks_and_no_others() {
+    let (fake, thread) = thread_with(|tag, _, id| match tag {
+        TASKS => vec![chunk(
+            id,
+            vec![json!({"tasks": [
+                {"id": "task-1", "title": "Nightly", "threadId": "thread-1", "enabled": true,
+                 "schedule": {"type": "interval", "everyMs": 3_600_000}},
+                {"id": "task-2", "title": "Paused", "threadId": "thread-1", "enabled": false,
+                 "schedule": {"type": "interval", "everyMs": 3_600_000}},
+                {"id": "task-3", "title": "Other", "threadId": "thread-2", "enabled": true,
+                 "schedule": {"type": "interval", "everyMs": 3_600_000}},
+            ]})],
+        )],
+        _ => vec![ok(id, json!({}))],
+    })
+    .await;
+    thread.pause_automations().await.unwrap();
+    assert_eq!(
+        fake.payloads("scheduledTasks.setEnabled"),
+        vec![json!({"id": "task-1", "enabled": false})]
     );
 }

@@ -6,8 +6,6 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'page_kit.dart';
 
-/// What a person typed, as plain lines with a caret: the editor must store exactly this,
-/// however late the core answers (ADR-0240).
 class _Typed {
   final lines = <String>[''];
   int line = 0;
@@ -27,7 +25,6 @@ class _Typed {
 
   void backspace() {
     if (column > 0) {
-      // A whole character as a person sees it.
       final last = lines[line].substring(0, column).characters.last;
       lines[line] = lines[line].replaceRange(column - last.length, column, '');
       column -= last.length;
@@ -57,7 +54,6 @@ void main() {
       EditableTextState focused() => tester.state<EditableTextState>(
         find.byWidgetPredicate(
           (widget) => widget is EditableText && widget.focusNode.hasFocus,
-          // The first line keeps the keys out of sight until its Text Block took over.
           skipOffstage: false,
         ),
       );
@@ -88,7 +84,6 @@ void main() {
             await tester.sendKeyEvent(LogicalKeyboardKey.backspace);
             typed.backspace();
           case 5:
-            // A composition that may span a change of structure, then its result.
             final before = focused().textEditingValue;
             final at = before.selection.baseOffset;
             input(
@@ -106,7 +101,6 @@ void main() {
             );
             typed.insert('你');
           case 6:
-            // A character built from two code points.
             input(inserted('e\u0301'));
             typed.insert('e\u0301');
           default:
@@ -130,7 +124,6 @@ void main() {
           expect(fake.textsOf(page), typed.lines);
           return;
       }
-      // Time passes frame by frame, as on screen.
       for (var frame = 0; frame < 300; frame++) {
         await tester.pump(const Duration(milliseconds: 16));
       }

@@ -1,38 +1,25 @@
-//! Pairing codes and the clients they pair (ADR-0299): a code is single use and expires, and a
-//! client's token admits only the kind of client that paired with it.
-
 use rusqlite::{Connection, params};
 use serde::{Deserialize, Serialize};
 
 use super::{Access, ClientKind, digest, new_token, same};
 use crate::config::{count, failed, sql};
 
-/// How long a pairing code stays valid.
 const CODE_TTL_MS: u64 = 5 * 60_000;
 
-/// How many pairing codes may be live at once.
 const MAX_CODES: usize = 5;
 
-/// The letters of a pairing code: without I, L, O, 0 and 1, which look like others.
 const CODE_LETTERS: &[u8] = b"ABCDEFGHJKMNPQRSTUVWXYZ23456789";
 
-/// The refusal of a pairing code that is wrong, used or expired.
 const REFUSED_CODE: &str = "That pairing code is wrong, already used or expired.";
 
-/// A client paired with this host, as `meta host list` shows it.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct ClientInfo {
-    /// The name the client paired with.
     pub name: String,
-    /// What it paired as.
     pub kind: ClientKind,
-    /// The access level it paired at (ADR-0300).
     pub access: Access,
-    /// When it paired, in milliseconds since the Unix epoch.
     pub since_ms: u64,
 }
 
-/// A new pairing code, shown as `XXXX-XXXX`, from the operating system's randomness.
 fn new_code() -> String {
     let mut bytes = [0u8; 8];
     getrandom::fill(&mut bytes).expect("the operating system provides random bytes");
@@ -43,9 +30,6 @@ fn new_code() -> String {
     format!("{}-{}", &letters[..4], &letters[4..])
 }
 
-/// A client's name as the store keeps it and `meta host list` prints it: without control characters,
-/// trimmed, and within the limits T3 gives a client name (64 characters, 100 UTF-16 units), so T3
-/// keeps the name unchanged in its label. A name with nothing left is `unnamed`.
 pub(crate) fn printable(name: &str) -> String {
     let cleaned: String = name.chars().filter(|c| !c.is_control()).collect();
     match fitted(&cleaned, 64, 100) {
@@ -54,8 +38,6 @@ pub(crate) fn printable(name: &str) -> String {
     }
 }
 
-/// The longest start of `text`, without the whitespace around it, that has at most `chars`
-/// characters and `units` UTF-16 units.
 pub(crate) fn fitted(text: &str, chars: usize, units: usize) -> String {
     let mut used = 0;
     let fitting: String = text
@@ -70,12 +52,10 @@ pub(crate) fn fitted(text: &str, chars: usize, units: usize) -> String {
     fitting.trim_matches(is_space).to_owned()
 }
 
-/// Whitespace as JavaScript trims it, which T3 trims client names with.
 fn is_space(c: char) -> bool {
     c.is_whitespace() || c == '\u{feff}'
 }
 
-/// A code as it is compared: without its dash or spaces, in capitals, so a typed one matches.
 fn normal(code: &str) -> String {
     code.chars()
         .filter(|c| *c != '-' && !c.is_whitespace())
@@ -83,9 +63,6 @@ fn normal(code: &str) -> String {
         .collect()
 }
 
-/// Issues a pairing code for `kind` that is valid for five minutes from `now`, and gives the client
-/// that redeems it `access` (ADR-0300). Expired codes are dropped first; no code is issued while
-/// [`MAX_CODES`] are live.
 pub(crate) fn invite(
     db: &Connection,
     kind: ClientKind,
@@ -116,9 +93,6 @@ pub(crate) fn invite(
     Ok(code)
 }
 
-/// Redeems `code` at `now` for a client named `name`: the code is spent, and the client gets a
-/// new token, which this returns with the access the code gave. The code's kind decides what the
-/// token admits.
 pub(crate) fn pair(
     db: &Connection,
     code: &str,
@@ -141,7 +115,6 @@ pub(crate) fn pair(
                 ))
             })
             .map_err(failed)?;
-        // Every row is compared, so the time taken does not show where a match is.
         for row in rows {
             let (hash, kind, access) = row.map_err(failed)?;
             if same(hash.as_bytes(), wanted.as_bytes()) {
@@ -159,7 +132,6 @@ pub(crate) fn pair(
         )
         .map_err(failed)?;
     if taken > 0 {
-        // Refused before the code is spent: the transaction is dropped unchanged.
         return Err(format!(
             "A client named {name} is paired already; pair under another name."
         ));
@@ -183,8 +155,6 @@ pub(crate) fn pair(
     Ok((token, access))
 }
 
-/// The kind of client that `token` belongs to, its access and the name it paired with, if a
-/// client holds it.
 pub(crate) fn client(
     db: &Connection,
     token: &str,
@@ -215,8 +185,6 @@ pub(crate) fn client(
     Ok(found)
 }
 
-/// Revokes the client named `name`: its token is refused from its next connection on. Answers
-/// whether there was such a client.
 pub(crate) fn revoke(db: &Connection, name: &str) -> Result<bool, String> {
     let removed = db
         .execute("DELETE FROM client WHERE name = ?1", [name])
@@ -224,7 +192,6 @@ pub(crate) fn revoke(db: &Connection, name: &str) -> Result<bool, String> {
     Ok(removed > 0)
 }
 
-/// The clients paired with this host, by name.
 pub(crate) fn clients(db: &Connection) -> Result<Vec<ClientInfo>, String> {
     let mut statement = db
         .prepare("SELECT name, kind, access, created_ms FROM client ORDER BY name")

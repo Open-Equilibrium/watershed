@@ -85,18 +85,22 @@ fn bounded_readers_preserve_lines_and_reject_invalid_input() {
     );
 
     assert_eq!(
-        read_opened_file_with_limit(io::Cursor::new(b"data"), 4, Path::new("config.yaml"), 4,)
+        read_opened_file_with_limit(io::Cursor::new(b"data"), 4, Path::new("config.yaml"), 4)
             .expect("exact bounded file"),
         b"data"
     );
-    assert!(
-        read_opened_file_with_limit(io::Cursor::new(b"data"), 5, Path::new("config.yaml"), 4,)
-            .is_err()
-    );
-    assert!(
-        read_opened_file_with_limit(io::Cursor::new(b"growing"), 4, Path::new("config.yaml"), 4,)
-            .is_err()
-    );
+    for (source, declared_len) in [(&b"data"[..], 5), (&b"growing"[..], 4)] {
+        assert!(
+            read_opened_file_with_limit(
+                io::Cursor::new(source),
+                declared_len,
+                Path::new("config.yaml"),
+                4
+            )
+            .is_err(),
+            "{source:?} with declared length {declared_len} must be rejected"
+        );
+    }
 }
 
 #[test]

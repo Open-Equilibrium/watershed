@@ -16,8 +16,6 @@ const _menuWidth = 280.0;
 const _menuHeight = 360.0;
 const _itemHeight = 30.0;
 
-/// A button or chip with the menu it opens. A
-/// click outside closes the menu.
 class QueryAnchor extends StatefulWidget {
   const QueryAnchor({super.key, required this.anchor, required this.menu});
 
@@ -45,7 +43,6 @@ class _QueryAnchorState extends State<QueryAnchor> {
   );
 }
 
-/// The header's Sort or Filter button, marked while its menu is open or it applies.
 class QueryButton extends StatelessWidget {
   const QueryButton({
     super.key,
@@ -82,7 +79,6 @@ class QueryButton extends StatelessWidget {
   }
 }
 
-/// What applies, under the Table's name; a click opens it again.
 class QueryChip extends StatelessWidget {
   const QueryChip({
     super.key,
@@ -131,8 +127,6 @@ class QueryChip extends StatelessWidget {
   }
 }
 
-/// Whether two filters ask the same; a read's cell holds a list of its own, which `==` tells
-/// apart.
 bool sameFilter(BridgeFilter? a, BridgeFilter? b) {
   if (a == null || b == null) return a == b;
   final (x, y) = (a.value, b.value);
@@ -144,7 +138,6 @@ bool sameFilter(BridgeFilter? a, BridgeFilter? b) {
       x?.checked == y?.checked;
 }
 
-/// How a filter reads on its chip; none once its field is gone.
 String? filterLabel(
   BridgeFilter filter,
   List<BridgeField> fields,
@@ -174,7 +167,6 @@ String? filterLabel(
   };
 }
 
-/// A menu's box, which takes the keys, so esc closes it, unless its content takes them.
 class _Panel extends StatefulWidget {
   const _Panel({
     required this.onEscape,
@@ -329,7 +321,6 @@ Widget _list(int count, IndexedWidgetBuilder item) => Flexible(
   ),
 );
 
-/// Choosing a View's sort: its field, its direction, or none.
 class SortMenu extends StatelessWidget {
   const SortMenu({
     super.key,
@@ -407,9 +398,6 @@ class SortMenu extends StatelessWidget {
 
 enum _Choosing { value, field, match }
 
-/// Choosing a View's filter: a field, how it must match and what, as one condition. A
-/// filter is written once it is whole: at once for a choice, on ⏎ or on leaving the menu
-/// for what is typed; esc drops what is typed.
 class FilterMenu extends StatefulWidget {
   const FilterMenu({
     super.key,
@@ -425,7 +413,6 @@ class FilterMenu extends StatefulWidget {
   final BridgeFilter? filter;
   final NumberFormat numbers;
 
-  /// The person's region, as intl names it.
   final String locale;
   final ValueChanged<BridgeFilter?> onSet;
   final VoidCallback onClose;
@@ -440,7 +427,6 @@ class _FilterMenuState extends State<FilterMenu> {
   BridgeCell? _value;
   var _typed = TextEditingController();
 
-  /// Whether Liquid replaced what is typed, so ⌘Z must not bring it back.
   var _replaced = false;
   final _typing = FocusNode(debugLabel: 'Filter value');
   var _choosing = _Choosing.value;
@@ -482,7 +468,6 @@ class _FilterMenuState extends State<FilterMenu> {
     _focusValue();
   }
 
-  /// What is typed takes the keys once it shows.
   void _focusValue() => WidgetsBinding.instance.addPostFrameCallback((_) {
     if (mounted && _types && _choosing == _Choosing.value) {
       _typing.requestFocus();
@@ -557,7 +542,6 @@ class _FilterMenuState extends State<FilterMenu> {
     files: const [],
   );
 
-  /// What is typed as the field's value; none if it cannot be one.
   BridgeCell? _parsed() {
     final typed = _typed.text.trim();
     if (typed.isEmpty) return null;
@@ -584,7 +568,6 @@ class _FilterMenuState extends State<FilterMenu> {
     }
   }
 
-  /// The filter as chosen so far; none until it is whole.
   BridgeFilter? _built() {
     final needsValue =
         _match == BridgeMatch.is_ || _match == BridgeMatch.contains;
@@ -604,8 +587,6 @@ class _FilterMenuState extends State<FilterMenu> {
     }
   }
 
-  /// Writes what is typed; emptying the value the filter held removes it, and an
-  /// unfinished choice leaves it alone.
   void _writeTyped() {
     if (_typed.text.trim().isNotEmpty) return _commit();
     final saved = widget.filter;

@@ -1,6 +1,3 @@
-//! The Workspace and its mutation pipeline: permission check, validation, atomic apply,
-//! recorded Action, changed resources. No write reaches a document any other way.
-
 use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -23,31 +20,22 @@ use crate::{
 };
 use crate::{database, drawing};
 
-/// A document is stored again as one snapshot once it has this many chunks, so loading it
-/// never replays more changes than that.
 const COMPACT_AFTER: usize = 1_000;
 
-/// One person's Workspace on this device. Documents load from the store when first used,
-/// and every write is durable in the store before it is acknowledged.
 pub struct Workspace<S: Store> {
     pub(crate) store: S,
     pub(crate) device: ActorId,
-    /// The Workspace document's owner, which never changes after its first change.
     owner: PersonId,
     pub(crate) docs: HashMap<Document, Loaded>,
 }
 
 pub(crate) struct Loaded {
     pub doc: AutoCommit,
-    /// How many chunks the store holds for the document.
     chunks: usize,
-    /// A Page document's View order, read once it is first needed.
     order: Option<Order>,
-    /// Its Database Blocks' rows, each read once it is first needed.
     databases: HashMap<BlockId, database::Index>,
 }
 
-/// What a mutation wrote before its changes are committed.
 struct Written {
     created: Option<Created>,
     changed: Vec<Changed>,
@@ -67,8 +55,6 @@ impl Written {
 }
 
 impl<S: Store> Workspace<S> {
-    /// Creates an empty Workspace owned by `owner` in an empty `store`, recorded as its
-    /// first Action.
     pub fn create(owner: PersonId, mut store: S) -> Result<Self, Error> {
         if !store.chunks(&Document::Workspace)?.is_empty() {
             return Err(Error::Storage("the store already holds a Workspace".into()));
@@ -99,8 +85,6 @@ impl<S: Store> Workspace<S> {
         Ok(this)
     }
 
-    /// Opens the Workspace that `store` holds. This device writes under a new Automerge
-    /// actor each time.
     pub fn open(store: S) -> Result<Self, Error> {
         let mut this = Self {
             store,
@@ -114,11 +98,7 @@ impl<S: Store> Workspace<S> {
         Ok(this)
     }
 
-    /// Applies one write through the pipeline and acknowledges it once it is durably
-    /// recorded as one Action, or refuses it and changes nothing.
     pub fn apply(&mut self, request: Request) -> Result<Applied, Error> {
-        // Until Roles exist the permission depends only on the actor, so it is checked
-        // before anything is read and a refused actor learns nothing about the Workspace.
         let permission = self.permit(&request.actor)?;
         let id = ActionId::new()?;
         let written = match self.write(&request.mutation) {
@@ -128,8 +108,6 @@ impl<S: Store> Workspace<S> {
                 return Err(error);
             }
         };
-        // Automerge drops a write of the value already stored, so a mutation can leave
-        // nothing to commit; it records no Action.
         let unchanged = written.new.is_empty()
             && written.touched.iter().all(|document| {
                 self.docs
@@ -155,40 +133,32 @@ impl<S: Store> Workspace<S> {
         })
     }
 
-    /// The person who created the Workspace and holds Can manage.
     pub fn owner(&self) -> &PersonId {
         &self.owner
     }
 
-    /// The areas, in Explorer order.
     pub fn areas(&mut self) -> Result<Vec<Area>, Error> {
         Ok(model::areas(self.doc(&Document::Workspace)?))
     }
 
-    /// An area's Pages, each followed by its descendants, siblings in Explorer order.
     pub fn pages(&mut self, area: &AreaId) -> Result<Vec<PageEntry>, Error> {
         Ok(model::pages(self.doc(&Document::Area(area.clone()))?))
     }
 
-    /// Up to `limit` of a Page's Views in order, from position `start`, so a reader takes
-    /// only the window it shows (client architecture rule 3).
     pub fn views(&mut self, page: &PageId, start: usize, limit: usize) -> Result<Vec<View>, Error> {
         Ok(self.page(page)?.1.window(start, limit))
     }
 
-    /// How many Views a Page shows.
     pub fn view_count(&mut self, page: &PageId) -> Result<usize, Error> {
         Ok(self.page(page)?.1.len())
     }
 
-    /// How a live Text Block reads, from the document of its home `page`.
     pub fn style(&mut self, page: &PageId, block: &BlockId) -> Result<Option<TextStyle>, Error> {
         let doc = self.doc(&Document::Page(page.clone()))?;
         Ok(text_block(doc, block)
             .map(|entry| model::style(model::string(doc, &entry, STYLE).as_deref())))
     }
 
-    /// A live Text Block's text, from the document of its home `page`.
     pub fn text(&mut self, page: &PageId, block: &BlockId) -> Result<Option<String>, Error> {
         Ok(model::text(
             self.doc(&Document::Page(page.clone()))?,
@@ -196,7 +166,6 @@ impl<S: Store> Workspace<S> {
         ))
     }
 
-    /// A live Code Block's code and language, from the document of its home `page`.
     pub fn code(&mut self, page: &PageId, block: &BlockId) -> Result<Option<Code>, Error> {
         Ok(model::code(
             self.doc(&Document::Page(page.clone()))?,
@@ -204,7 +173,6 @@ impl<S: Store> Workspace<S> {
         ))
     }
 
-    /// A live Media Block's file and attachment, from the document of its home `page`.
     pub fn media(&mut self, page: &PageId, block: &BlockId) -> Result<Option<Media>, Error> {
         Ok(model::media(
             self.doc(&Document::Page(page.clone()))?,
@@ -212,9 +180,6 @@ impl<S: Store> Workspace<S> {
         ))
     }
 
-    /// A Whiteboard's or Media Block's drawing: its style and its elements on the document
-    /// pages `pages`, bottom to top, from the document of its home `page` (a Whiteboard's
-    /// are on page 0); none if `block` holds no drawing.
     pub fn drawing(
         &mut self,
         page: &PageId,
@@ -224,8 +189,6 @@ impl<S: Store> Workspace<S> {
         drawing::read(self.doc(&Document::Page(page.clone()))?, block, pages)
     }
 
-    /// A live Database Block's name and fields, from the document of its home `page`; none
-    /// if `block` is no live Database Block.
     pub fn database(
         &mut self,
         page: &PageId,
@@ -234,7 +197,6 @@ impl<S: Store> Workspace<S> {
         database::read(self.doc(&Document::Page(page.clone()))?, block)
     }
 
-    /// A window of a Database Block's rows, filtered and sorted as `query` asks.
     pub fn rows(
         &mut self,
         page: &PageId,
@@ -245,18 +207,14 @@ impl<S: Store> Workspace<S> {
         database::rows(doc, index, block, query)
     }
 
-    /// Whether a Page's document is in memory.
     pub fn is_loaded(&self, page: &PageId) -> bool {
         self.docs.contains_key(&Document::Page(page.clone()))
     }
 
-    /// Releases a Page's document, View order and Database row indexes from memory; the next read loads them
-    /// again from the store. A Page holds no uncommitted writes between requests.
     pub fn close_page(&mut self, page: &PageId) {
         self.docs.remove(&Document::Page(page.clone()));
     }
 
-    /// Up to `limit` recorded Actions, newest first, starting before `before`.
     pub fn history(
         &mut self,
         before: Option<&ActionId>,
@@ -265,7 +223,6 @@ impl<S: Store> Workspace<S> {
         self.store.history(before, limit)
     }
 
-    /// A Page document with its View order.
     fn page(&mut self, page: &PageId) -> Result<(&mut AutoCommit, &mut Order), Error> {
         let document = Document::Page(page.clone());
         self.doc(&document)?;
@@ -274,7 +231,6 @@ impl<S: Store> Workspace<S> {
         Ok((&mut loaded.doc, order))
     }
 
-    /// A Page document with the row index of one of its Database Blocks.
     fn database_index(
         &mut self,
         page: &PageId,
@@ -291,7 +247,6 @@ impl<S: Store> Workspace<S> {
         Ok((&mut loaded.doc, index))
     }
 
-    /// A document, loaded from the store on first use.
     fn doc(&mut self, document: &Document) -> Result<&mut AutoCommit, Error> {
         if !self.docs.contains_key(document) {
             let chunks = self.store.chunks(document)?;
@@ -319,8 +274,6 @@ impl<S: Store> Workspace<S> {
         }
     }
 
-    /// Applies a mutation to the documents it touches, in memory; `apply` commits or discards
-    /// them.
     fn write(&mut self, mutation: &Mutation) -> Result<Written, Error> {
         match mutation {
             Mutation::CreateArea { name } => self.write_create_area(name),
@@ -542,13 +495,11 @@ impl<S: Store> Workspace<S> {
             let starts_section = order.view(view).is_some_and(|shown| shown.boundary);
             let sort = order.key_before(view)?;
             let added = add_text_block(doc, order, sort, "", style)?;
-            // A Section that started here now starts at the new Text Block above.
             if starts_section {
                 move_boundary(doc, order, view, &added.1)?;
             }
             added
         } else {
-            // Only a split inside the text moves a tail, so only it reads the text.
             let text = doc.text(&content)?;
             let tail = text[utf8_offset(&text, at)..].to_string();
             let length =
@@ -654,8 +605,6 @@ impl<S: Store> Workspace<S> {
         ))
     }
 
-    /// Turns a Block of kind `from` into one of kind `to`, stored as its name, with the same
-    /// text and Views; a Text Block reads as a paragraph and a Code Block as plain text.
     fn write_turn_into(
         &mut self,
         page: &PageId,
@@ -844,7 +793,6 @@ impl<S: Store> Workspace<S> {
         field: &FieldId,
         value: &Cell,
     ) -> Result<Written, Error> {
-        // A file names a finished attachment, whose size the store, not the request, tells.
         let sized;
         let value = match value {
             Cell::Files(files) => {
@@ -923,16 +871,12 @@ impl<S: Store> Workspace<S> {
         ))
     }
 
-    /// Discards every uncommitted write, so a refused mutation leaves no trace.
     fn rollback(&mut self) {
         for loaded in self.docs.values_mut() {
             loaded.doc.rollback();
         }
     }
 
-    /// Commits each touched document as one change that carries the Action's header and
-    /// writes them with the Action to the store. If the store fails, the touched documents
-    /// are dropped from memory, so they load again as the store holds them.
     fn record(
         &mut self,
         mut action: Action,
@@ -989,7 +933,6 @@ impl<S: Store> Workspace<S> {
     }
 }
 
-/// Adds a Text Block of `style` holding `text`, with its View after `after` or first.
 fn add_text_block(
     doc: &mut AutoCommit,
     order: &mut Order,
@@ -1011,7 +954,6 @@ fn add_text_block(
     Ok((block, view))
 }
 
-/// What a write inside one Block, such as a Database or a Whiteboard, changed: only that Block.
 fn block_changed(page: &PageId, block: &BlockId, created: Option<Created>) -> Written {
     let mut written = Written::new(
         Document::Page(page.clone()),
@@ -1021,7 +963,6 @@ fn block_changed(page: &PageId, block: &BlockId, created: Option<Created>) -> Wr
     written
 }
 
-/// The Database Block `view` shows.
 fn table_of(order: &Order, view: &ViewId) -> Result<BlockId, Error> {
     let shown = order.view(view).ok_or(Error::NotFound)?;
     if shown.kind != BlockKind::Database {
@@ -1030,7 +971,6 @@ fn table_of(order: &Order, view: &ViewId) -> Result<BlockId, Error> {
     Ok(shown.block.clone())
 }
 
-/// Stores a View's setting whole, so a merge keeps one device's and never mixes two.
 fn put_setting<T: serde::Serialize>(
     doc: &mut AutoCommit,
     view: &ViewId,
@@ -1049,7 +989,6 @@ fn put_setting<T: serde::Serialize>(
     Ok(())
 }
 
-/// Adds a View of `block` at the sort key `sort`.
 fn add_view(
     doc: &mut AutoCommit,
     order: &mut Order,
@@ -1083,18 +1022,15 @@ fn add_view(
     Ok(view)
 }
 
-/// A live Text Block's entry; none for a Block of another type.
 fn text_block(doc: &AutoCommit, block: &BlockId) -> Option<automerge::ObjId> {
     model::of_kind(doc, block.as_str(), BlockKind::Text)
 }
 
-/// A live Text Block's text object; none for a Block of another kind.
 fn text_of(doc: &AutoCommit, block: &BlockId) -> Result<automerge::ObjId, Error> {
     let entry = text_block(doc, block).ok_or(Error::NotFound)?;
     model::child(doc, &entry, TEXT).ok_or(Error::NotFound)
 }
 
-/// The UTF-8 byte offset of the UTF-16 offset `at`, which lies between characters.
 fn utf8_offset(text: &str, at: usize) -> usize {
     let mut units = 0;
     for (offset, c) in text.char_indices() {
@@ -1106,7 +1042,6 @@ fn utf8_offset(text: &str, at: usize) -> usize {
     text.len()
 }
 
-/// Moves a Section boundary from the View `from` to the View `to`.
 fn move_boundary(
     doc: &mut AutoCommit,
     order: &mut Order,

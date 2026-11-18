@@ -203,7 +203,6 @@ impl SessionReservation {
 
     #[cfg(test)]
     pub(crate) fn release_lock(&self) -> Result<(), RuntimeError> {
-        // TempWorkspace owns fixture deletion; teardown only releases the real lease.
         if self.state.get() == ReservationState::Released {
             return Ok(());
         }
@@ -255,7 +254,6 @@ impl SessionReservation {
 impl Drop for SessionReservation {
     fn drop(&mut self) {
         if self.state.get() != ReservationState::Released {
-            // Panic and uncontrolled unwinding cannot report cleanup errors.
             let _ = self.cleanup();
         }
     }
@@ -304,7 +302,6 @@ impl SessionLockGuard {
 impl Drop for SessionLockGuard {
     fn drop(&mut self) {
         if self.state.replace(LockState::Released) == LockState::Active {
-            // Panic and uncontrolled unwinding cannot report cleanup errors.
             let _ = verify_owned_anchored_marker(&self.path, &self.file);
             let _ = self.ownership.release();
         }

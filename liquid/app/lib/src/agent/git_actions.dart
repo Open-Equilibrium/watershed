@@ -12,9 +12,6 @@ import 'commit_dialog.dart';
 import 'publish_dialog.dart';
 import 'session_card_rows.dart';
 
-/// T3 Code's GitActionsControl: a split button whose main part runs the quick action and whose
-/// chevron opens the Git action options. While an action runs it shows the progress, and after it
-/// the result for ten seconds.
 class GitActionsControl extends StatelessWidget {
   const GitActionsControl({super.key, required this.state});
 
@@ -42,7 +39,6 @@ class GitActionsControl extends StatelessWidget {
   );
 }
 
-/// The folder has no repository: T3's "Initialize Git" row.
 class _InitializeRow extends StatelessWidget {
   const _InitializeRow({required this.git});
 
@@ -58,7 +54,6 @@ class _InitializeRow extends StatelessWidget {
   );
 }
 
-/// The running action: its phase, the latest hook line and the time since it started.
 class _Progress extends StatelessWidget {
   const _Progress({required this.running});
 
@@ -106,7 +101,6 @@ class _Progress extends StatelessWidget {
               ],
             ),
           ),
-          // Ticks every second, so the elapsed time moves while the action runs.
           StreamBuilder<int>(
             stream: Stream.periodic(const Duration(seconds: 1), (tick) => tick),
             builder: (context, _) => Text(
@@ -124,7 +118,6 @@ class _Progress extends StatelessWidget {
   }
 }
 
-/// A finished action's title and description; the pull request row carries the link.
 class _Result extends StatelessWidget {
   const _Result({required this.result});
 
@@ -172,7 +165,6 @@ class _Result extends StatelessWidget {
   }
 }
 
-/// The idle split button: the quick action, and the Git action options behind the chevron.
 class _SplitRow extends StatelessWidget {
   const _SplitRow({required this.state, required this.git});
 
@@ -262,7 +254,6 @@ class _SplitRow extends StatelessWidget {
   }
 }
 
-/// One item of the Git action options: its label and icon, why it is disabled, and what it runs.
 class _Entry {
   const _Entry(this.label, this.icon, this.run, {this.reason});
 
@@ -287,8 +278,6 @@ class _EntryLabel extends StatelessWidget {
   );
 }
 
-/// T3's menu items with their disabled reasons, then Publish repository when the checkout has no
-/// remote.
 List<_Entry> _menu(
   BuildContext context,
   SessionState state,
@@ -328,8 +317,6 @@ List<_Entry> _menu(
   ];
 }
 
-/// T3 Code's notices under the Git action options: a detached HEAD, and a clean checkout behind
-/// its upstream.
 List<String> _notices(BridgeGitStatus status) => [
   if (status.branch == null)
     'Detached HEAD: create and check out a branch to enable push and '
@@ -353,8 +340,6 @@ IconData _quickIcon(QuickAction quick) => switch (quick.kind) {
   QuickKind.showHint => LucideIcons.info,
 };
 
-/// Runs `action`. On the default branch T3 asks first and offers a feature branch as the other
-/// way on; the checkout's commit makes the feature branch's name.
 Future<void> _run(
   BuildContext context,
   SessionState state,
@@ -385,7 +370,6 @@ Future<void> _run(
     branch,
     changes: status.changes.isNotEmpty,
   );
-  // true checks out a feature branch first; false continues on the default branch.
   final featureBranch = await showDialog<bool>(
     context: context,
     builder: (context) => ActionDialog(

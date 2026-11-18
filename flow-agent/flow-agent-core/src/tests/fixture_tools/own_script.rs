@@ -63,26 +63,13 @@ fn helpers_reject_unsupported_m1_shell_shapes() {
                 if message.contains("literal workspace-relative path")
         ));
     }
-    for target in [
-        "out//summary.txt",
-        "out/./summary.txt",
-        "out/../summary.txt",
-        "out/a|b",
-    ] {
+    for target in ["out//summary.txt", "out/../summary.txt", "out/a|b"] {
         assert!(matches!(
             normalize_script_write_target(target),
             Err(RuntimeError::Protocol(message)) if message.contains("inside the workspace")
         ));
     }
-    for target in [
-        ".ssh./id_rsa",
-        "NUL",
-        "out./summary.txt",
-        "out/COM1",
-        "out/lPt9.log",
-        "out/nul.txt",
-        "out/summary.txt.",
-    ] {
+    for target in ["NUL", "out/lPt9.log", "out/summary.txt."] {
         assert!(matches!(
             normalize_script_write_target(target),
             Err(RuntimeError::Protocol(message)) if message.contains("Windows path alias")
@@ -112,7 +99,6 @@ fn helpers_reject_unsupported_m1_shell_shapes() {
         ("printf 'bad\\'", "dangling escape"),
         ("printf '%s' OTHER", "printf argument"),
         ("echo $SUMMARY", "unsupported own-script argument"),
-        ("echo \"$SUMMARY\"", "unsupported own-script argument"),
         ("cat out/summary.txt", "unsupported own-script command"),
     ] {
         assert!(

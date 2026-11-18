@@ -7,11 +7,7 @@ import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
 import 'file_cells.dart';
 
-/// `number` with every digit Dart's shortest form keeps, written out in `format`'s digits,
-/// separators and grouping; rounding comes with field formats (ADR-0242). intl itself
-/// keeps at most 18 decimals and 18 grouped digits exactly.
 String numberText(NumberFormat format, double number) {
-  // The core refuses these, but a document it did not write may hold them.
   if (!number.isFinite) return format.format(number);
   final [mantissa, ...exponent] = number.abs().toString().split('e');
   final [whole, ...fraction] = mantissa.split('.');
@@ -40,9 +36,6 @@ String numberText(NumberFormat format, double number) {
       : text;
 }
 
-/// The most specific form of `locale` intl has formats for, keeping its script as in
-/// Serbian written in Latin, or US English where intl has none for a language Material
-/// knows.
 String intlLocale(Locale locale, bool Function(String) exists) {
   final Locale(:languageCode, :scriptCode, :countryCode) = locale;
   return [
@@ -54,12 +47,9 @@ String intlLocale(Locale locale, bool Function(String) exists) {
       'en_US';
 }
 
-/// A cell's text on one line, cut off with an ellipsis.
 Widget cellText(String text, {TextStyle? style}) =>
     Text(text, maxLines: 1, overflow: TextOverflow.ellipsis, style: style);
 
-/// A cell's value as the Table shows it: text, a number or a day in the person's formats,
-/// an option as a tag, or a checkbox, unticked also before anything is written to it.
 class CellView extends StatelessWidget {
   const CellView({
     super.key,
@@ -72,10 +62,8 @@ class CellView extends StatelessWidget {
 
   final BridgeCell? cell;
 
-  /// The cell's field's kind.
   final BridgeFieldKind kind;
 
-  /// The select fields' options, by identity.
   final Map<String, BridgeOption> options;
   final NumberFormat numbers;
   final DateFormat days;
@@ -108,7 +96,6 @@ class CellView extends StatelessWidget {
   }
 }
 
-/// An option as a colored tag; its color number picks one of the ten tag colors, wrapping.
 class OptionTag extends StatelessWidget {
   const OptionTag(this.option, {super.key});
 

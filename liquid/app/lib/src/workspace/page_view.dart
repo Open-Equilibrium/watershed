@@ -18,9 +18,6 @@ import 'text_block.dart';
 import 'whiteboard_block.dart';
 import 'workspace_state.dart';
 
-/// An open Page: its breadcrumb, then its title and its Blocks in the reading column, as the
-/// approved Pages mockups show it. A just-created Page takes the keys in its title; a
-/// Page without Blocks offers a line to type in.
 class WorkspacePage extends StatefulWidget {
   const WorkspacePage({super.key, required this.state, required this.open});
 
@@ -32,8 +29,6 @@ class WorkspacePage extends StatefulWidget {
 }
 
 class _WorkspacePageState extends State<WorkspacePage> implements EditorSource {
-  /// The title, each change of which is one rename; a refused one puts the stored title back,
-  /// read again first, as the tree may not show an earlier rename yet.
   late final _title = StoredName(
     _page?.title ?? '',
     rename: (title) => widget.state.rename(widget.open.page, title),
@@ -41,9 +36,7 @@ class _WorkspacePageState extends State<WorkspacePage> implements EditorSource {
       if (!mounted) return null;
       try {
         await widget.state.readPages(widget.open.area);
-      } on Object {
-        // The tree keeps its last read, and the problem shows.
-      }
+      } on Object catch (_) {}
       return mounted ? _page?.title ?? '' : null;
     },
     quitting: () => widget.state.quitting,
@@ -57,11 +50,9 @@ class _WorkspacePageState extends State<WorkspacePage> implements EditorSource {
   );
   late final _views = PageViews(widget.state, widget.open.page)..start();
 
-  /// The line a Page without Blocks offers; typing there creates the first Text Block.
   final _first = TextEditingController();
   late final _firstFocus = FocusNode(
     debugLabel: 'First line',
-    // A composition takes its own ⏎, and Flutter's field the keys with modifiers.
     onKeyEvent: (_, event) =>
         event is KeyUpEvent ||
             !_first.value.composing.isCollapsed ||
@@ -79,10 +70,8 @@ class _WorkspacePageState extends State<WorkspacePage> implements EditorSource {
         !keys.isAltPressed;
   }
 
-  /// Keeps the first line, its focus and composition included, while it moves out of sight.
   final _firstLineKey = GlobalKey(debugLabel: 'first-line');
 
-  /// While the first Text Block is made from the line, which stays until it took over.
   bool _handing = false;
 
   ValueListenable<List<BridgePage>> get _tree =>
@@ -99,7 +88,6 @@ class _WorkspacePageState extends State<WorkspacePage> implements EditorSource {
     _views.ready.addListener(_readied);
     widget.state.finishing.add(_typedFirst);
     widget.state.finishing.add(_title.typed);
-    // After the frame, so it wins over the window's own first focus.
     if (widget.open.fresh) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) _titleFocus.requestFocus();
@@ -109,7 +97,6 @@ class _WorkspacePageState extends State<WorkspacePage> implements EditorSource {
 
   @override
   void dispose() {
-    // A composition still open in the first line is written as it stands.
     final editor = _views.editor;
     if (!editor.isSource(this) && !editor.busy && _first.text.isNotEmpty) {
       editor.first(this);
@@ -118,7 +105,6 @@ class _WorkspacePageState extends State<WorkspacePage> implements EditorSource {
     widget.state.finishing.remove(_typedFirst);
     widget.state.finishing.remove(_title.typed);
     _tree.removeListener(_titleChanged);
-    // A composition still open in the title is written as it stands, as in the first line.
     _title.dispose();
     _titleFocus.dispose();
     _views.dispose();
@@ -127,7 +113,6 @@ class _WorkspacePageState extends State<WorkspacePage> implements EditorSource {
     super.dispose();
   }
 
-  /// A title changed elsewhere shows unless the person is typing one (architecture rule 7).
   void _titleChanged() {
     if (_titleFocus.hasFocus) return;
     final title = _page?.title ?? '';
@@ -138,9 +123,7 @@ class _WorkspacePageState extends State<WorkspacePage> implements EditorSource {
     if (mounted) setState(() {});
   }
 
-  /// ⏎ or ↓ in the title goes to the first Text Block, as in Notion.
   KeyEventResult _titleKey(KeyEvent event) {
-    // A composition takes its own ⏎ and arrows, and the field the keys with modifiers.
     if (event is KeyUpEvent ||
         !_title.controller.value.composing.isCollapsed ||
         !_plain) {
@@ -158,16 +141,12 @@ class _WorkspacePageState extends State<WorkspacePage> implements EditorSource {
     return KeyEventResult.handled;
   }
 
-  /// What is typed on an empty Page, once any composition ends, makes its first Text Block
-  /// through the Page's input queue (ADR-0240), which also hands over what is typed
-  /// meanwhile and applies a Markdown shortcut typed there.
   void _typedFirst() {
     final editor = _views.editor;
     if (editor.isSource(this)) {
       editor.typed(this);
       return;
     }
-    // On quitting, a composition still open is written as it stands.
     if (_first.text.isEmpty ||
         !_first.value.composing.isCollapsed && !widget.state.quitting) {
       return;
@@ -201,13 +180,10 @@ class _WorkspacePageState extends State<WorkspacePage> implements EditorSource {
     _first.clear();
   }
 
-  /// The Page, with a Whiteboard full screen over it while one is (approved Whiteboard
-  /// Block mockups, section 6).
   Widget _withFullBoard(Widget page) => ValueListenableBuilder(
     valueListenable: _views.fullBoard,
     builder: (context, board, _) => Stack(
       children: [
-        // Hidden but kept, so the Page keeps its place and state.
         Offstage(offstage: board != null, child: page),
         if (board != null)
           Positioned.fill(
@@ -221,7 +197,6 @@ class _WorkspacePageState extends State<WorkspacePage> implements EditorSource {
     ),
   );
 
-  /// The reading column's width, centred.
   Widget _column(Widget child) => Center(
     child: ConstrainedBox(
       constraints: const BoxConstraints(maxWidth: readingWidth),
@@ -229,9 +204,6 @@ class _WorkspacePageState extends State<WorkspacePage> implements EditorSource {
     ),
   );
 
-  /// `block` in the column, with the files going in after its View below it, and those
-  /// going in at the Page's start above the first. Keys keep the Block's state as they
-  /// come and go.
   Widget _withUploads(BridgeView view, int index, Widget block) => _column(
     ValueListenableBuilder(
       valueListenable: _views.uploads,
@@ -268,9 +240,7 @@ class _WorkspacePageState extends State<WorkspacePage> implements EditorSource {
         key: const Key('first-line'),
         controller: _first,
         focusNode: _firstFocus,
-        // The caret stays where Liquid puts it; desktop Flutter would select all on focus.
         selectAllOnFocus: false,
-        // Until the Page's earlier queue is done, nothing can be typed.
         readOnly: !_views.ready.value,
         style: TextStyle(
           fontSize: WsMetrics.fsProse,
@@ -321,7 +291,6 @@ class _WorkspacePageState extends State<WorkspacePage> implements EditorSource {
                           key: const Key('page-title'),
                           controller: _title.take(),
                           focusNode: _titleFocus,
-                          // The title wraps but stays one line, as in Notion.
                           maxLines: null,
                           keyboardType: TextInputType.text,
                           inputFormatters: [
@@ -351,8 +320,6 @@ class _WorkspacePageState extends State<WorkspacePage> implements EditorSource {
                       WsMetrics.space7,
                       WsMetrics.space8,
                     ),
-                    // The first line stays, out of sight, until its Text Block took the
-                    // caret, so typing meanwhile still reaches it.
                     sliver: SliverMainAxisGroup(
                       slivers: [
                         if (_views.count == 0 || _handing)
@@ -363,8 +330,6 @@ class _WorkspacePageState extends State<WorkspacePage> implements EditorSource {
                               child: _column(firstLine),
                             ),
                           ),
-                        // The Text Block a change started from stays, out of sight, after
-                        // its View is gone, until the change is done.
                         if (_views.editor.lingering.value
                             case (final view, final index)
                             when _views.indexOf(view.id) == null)
@@ -384,8 +349,6 @@ class _WorkspacePageState extends State<WorkspacePage> implements EditorSource {
                         SliverList.builder(
                           key: const ValueKey('Blocks'),
                           itemCount: _views.count ?? 0,
-                          // A Block keeps its state, focus included, when Views above
-                          // it come or go.
                           findChildIndexCallback: (key) =>
                               _views.indexOf((key as ValueKey<String>).value),
                           itemBuilder: (context, index) {
@@ -459,7 +422,6 @@ class _WorkspacePageState extends State<WorkspacePage> implements EditorSource {
   }
 }
 
-/// A Block of a kind a later version of Liquid adds, which keeps its place (ADR-0245).
 class _Placeholder extends StatelessWidget {
   const _Placeholder();
 
@@ -493,7 +455,6 @@ class _Placeholder extends StatelessWidget {
   }
 }
 
-/// The open Page's area and title, as the header shows them.
 class _Breadcrumb extends StatelessWidget {
   const _Breadcrumb({required this.state, required this.open});
 

@@ -7,7 +7,6 @@ import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
 import 'diff_model.dart';
 
-/// The colors, sign and number of one side of a line.
 ({Color? background, Widget number, Widget sign}) _lineParts(
   BuildContext context,
   DiffLine line,
@@ -27,7 +26,6 @@ import 'diff_model.dart';
       color: gutter,
       padding: const EdgeInsets.only(right: WsMetrics.space4),
       alignment: Alignment.centerRight,
-      // Muted, as faint lacks contrast on the strong diff colors.
       child: Text(
         value?.toString() ?? '',
         style: TextStyle(
@@ -50,11 +48,8 @@ import 'diff_model.dart';
   );
 }
 
-/// A line's code, colored lightly, with a faint ␍ for a Windows line end and a faint … where
-/// a long line is cut; a hunk header in the faint small style.
 Widget _code(BuildContext context, DiffLine line) {
   final faint = context.ws.textFaint;
-  // Git caps a hunk header's function name at 80 bytes, so a hunk header is never cut.
   if (line.kind == DiffKind.hunk) {
     return Text(
       line.text,
@@ -94,23 +89,18 @@ Widget _code(BuildContext context, DiffLine line) {
   );
 }
 
-/// One line of the unified view: its old and new numbers, sign and code.
 class UnifiedLineRow extends StatelessWidget {
   const UnifiedLineRow({super.key, required this.line});
 
   static const height = 22.0;
 
-  /// The height of a row at the text scale `scaler`: its mono line grows with the scale, and a
-  /// row never gets shorter than [height].
   static double heightIn(TextScaler scaler) => math.max(
     height,
     scaler.scale(WsMetrics.fsMono) * WsMetrics.lhMono / WsMetrics.fsMono,
   );
 
-  /// Width of the two line numbers and the sign before the code.
   static const gutter = 44.0 + 44.0 + 20.0;
 
-  /// Width of one side's line number and sign in the split view.
   static const side = 44.0 + 20.0;
 
   final DiffLine line;
@@ -133,7 +123,6 @@ class UnifiedLineRow extends StatelessWidget {
   }
 }
 
-/// One row of the split view: the line before the run on the left, after it on the right.
 class SplitLineRow extends StatelessWidget {
   const SplitLineRow({super.key, required this.row});
 
@@ -151,7 +140,6 @@ class SplitLineRow extends StatelessWidget {
       );
     }
     Widget side(DiffLine? line, {required bool before}) {
-      // A side without a line, beside one only the other side has.
       if (line == null) return Expanded(child: ColoredBox(color: ws.subtle));
       final parts = _lineParts(
         context,

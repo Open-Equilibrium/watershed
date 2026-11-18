@@ -44,6 +44,32 @@ fn intent_record(index: usize) -> RunLogRecord {
     }
 }
 
+fn provider_intent(attempt_id: &str) -> RunLogRecord {
+    RunLogRecord::Intent {
+        schema: "flow-run-log-record-v1".to_owned(),
+        attempt_id: attempt_id.to_owned(),
+        attempt_kind: RunAttemptKind::Provider,
+        expected_enforcement: None,
+        request_hash: REQUEST_HASH.to_owned(),
+        tool_id: None,
+        timestamp: "2026-07-30T12:00:00Z".to_owned(),
+    }
+}
+
+fn provider_result(attempt_id: &str) -> RunLogRecord {
+    RunLogRecord::TerminalResult {
+        schema: "flow-run-log-record-v1".to_owned(),
+        attempt_id: attempt_id.to_owned(),
+        attempt_kind: RunAttemptKind::Provider,
+        tool_id: None,
+        outcome: RunAttemptOutcome::Completed,
+        classification: None,
+        exit_code: None,
+        timestamp: "2026-07-30T12:00:01Z".to_owned(),
+        durable_output: None,
+    }
+}
+
 fn tool_enforcement_expectation() -> ToolEnforcementExpectation {
     ToolEnforcementExpectation {
         applied_policy_digest: "0".repeat(64),
@@ -54,6 +80,11 @@ fn projection_workspace(name: &str) -> TempWorkspace {
     let workspace = empty_workspace(name);
     create_review_run(&workspace);
     workspace
+}
+
+fn review_run_log(workspace: &TempWorkspace) -> std::path::PathBuf {
+    crate::tests::helpers::workspace_session_dir(workspace)
+        .join("review/runs/review-1/run-log.jsonl")
 }
 
 #[test]
@@ -170,8 +201,7 @@ fn attempt_log_stays_bound_to_its_open_conversation() {
 #[test]
 fn conversation_page_byte_budget() {
     let workspace = projection_workspace("conversation-page-byte-budget");
-    let path = crate::tests::helpers::workspace_session_dir(&workspace)
-        .join("review/runs/review-1/run-log.jsonl");
+    let path = review_run_log(&workspace);
     let mut records = (0..3)
         .map(|index| {
             let empty = terminal_record(index, 0);
@@ -207,34 +237,10 @@ fn conversation_page_byte_budget() {
         append_jsonl(&path, &intent_record(index)).expect("page intent appends");
         append_jsonl(&path, record).expect("page result appends");
     }
-    append_jsonl(
-        &path,
-        &RunLogRecord::Intent {
-            schema: "flow-run-log-record-v1".to_owned(),
-            attempt_id: "provider-sparse".to_owned(),
-            attempt_kind: RunAttemptKind::Provider,
-            expected_enforcement: None,
-            request_hash: REQUEST_HASH.to_owned(),
-            tool_id: None,
-            timestamp: "2026-07-30T12:00:00Z".to_owned(),
-        },
-    )
-    .expect("filtered provider intent appends");
-    append_jsonl(
-        &path,
-        &RunLogRecord::TerminalResult {
-            schema: "flow-run-log-record-v1".to_owned(),
-            attempt_id: "provider-sparse".to_owned(),
-            attempt_kind: RunAttemptKind::Provider,
-            tool_id: None,
-            outcome: RunAttemptOutcome::Completed,
-            classification: None,
-            exit_code: None,
-            timestamp: "2026-07-30T12:00:01Z".to_owned(),
-            durable_output: None,
-        },
-    )
-    .expect("filtered provider result appends");
+    append_jsonl(&path, &provider_intent("provider-sparse"))
+        .expect("filtered provider intent appends");
+    append_jsonl(&path, &provider_result("provider-sparse"))
+        .expect("filtered provider result appends");
     append_jsonl(&path, &intent_record(4)).expect("intent behind cursor appends");
     append_jsonl(&path, &terminal_record(4, 0)).expect("record behind cursor appends");
 
@@ -280,54 +286,15 @@ fn conversation_page_byte_budget() {
 }
 
 #[test]
-fn tool_run_log_projection_filters_every_record_kind_and_rejects_foreign_schema() {
+fn tool_run_log_projection_filters_every_record_kind() {
     let workspace = projection_workspace("run-log-projection-record-kinds");
-    let path = crate::tests::helpers::workspace_session_dir(&workspace)
-        .join("review/runs/review-1/run-log.jsonl");
-    let records = [
-        RunLogRecord::Intent {
-            schema: "flow-run-log-record-v1".to_owned(),
-            attempt_id: "tool-001".to_owned(),
-            attempt_kind: RunAttemptKind::Tool,
-            expected_enforcement: Some(tool_enforcement_expectation()),
-            request_hash: REQUEST_HASH.to_owned(),
-            tool_id: Some("inspect".to_owned()),
-            timestamp: "2026-07-30T12:00:00Z".to_owned(),
-        },
-        RunLogRecord::Intent {
-            schema: "flow-run-log-record-v1".to_owned(),
-            attempt_id: "provider-001".to_owned(),
-            attempt_kind: RunAttemptKind::Provider,
-            expected_enforcement: None,
-            request_hash: "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
-                .to_owned(),
-            tool_id: None,
-            timestamp: "2026-07-30T12:00:00Z".to_owned(),
-        },
-        RunLogRecord::TerminalResult {
-            schema: "flow-run-log-record-v1".to_owned(),
-            attempt_id: "tool-001".to_owned(),
-            attempt_kind: RunAttemptKind::Tool,
-            tool_id: Some("inspect".to_owned()),
-            outcome: RunAttemptOutcome::Completed,
-            classification: None,
-            exit_code: Some(0),
-            timestamp: "2026-07-30T12:00:01Z".to_owned(),
-            durable_output: None,
-        },
-        RunLogRecord::TerminalResult {
-            schema: "flow-run-log-record-v1".to_owned(),
-            attempt_id: "provider-001".to_owned(),
-            attempt_kind: RunAttemptKind::Provider,
-            tool_id: None,
-            outcome: RunAttemptOutcome::Completed,
-            classification: None,
-            exit_code: None,
-            timestamp: "2026-07-30T12:00:01Z".to_owned(),
-            durable_output: None,
-        },
-    ];
-    for record in records {
+    let path = review_run_log(&workspace);
+    for record in [
+        intent_record(1),
+        provider_intent("provider-001"),
+        terminal_record(1, 0),
+        provider_result("provider-001"),
+    ] {
         append_jsonl(&path, &record).expect("projection fixture record appends");
     }
 
@@ -344,12 +311,9 @@ fn tool_run_log_projection_filters_every_record_kind_and_rejects_foreign_schema(
 #[test]
 fn run_attempt_inspection_rejects_every_ambiguous_record_sequence() {
     let base = projection_workspace("run-log-inspection-base");
-    let definition = read_jsonl::<RunLogRecord>(
-        &crate::tests::helpers::workspace_session_dir(&base)
-            .join("review/runs/review-1/run-log.jsonl"),
-    )
-    .expect("definition reads")
-    .remove(0);
+    let definition = read_jsonl::<RunLogRecord>(&review_run_log(&base))
+        .expect("definition reads")
+        .remove(0);
     let request_hash = REQUEST_HASH;
     let intent = |schema: &str, hash: &str, attempt_id: &str| RunLogRecord::Intent {
         schema: schema.to_owned(),
@@ -463,6 +427,15 @@ fn run_attempt_inspection_rejects_every_ambiguous_record_sequence() {
             "has no durable intent",
         ),
         (
+            "result-for-another-attempt",
+            vec![
+                definition.clone(),
+                valid_intent.clone(),
+                result("provider-002", RunAttemptKind::Provider, "completed"),
+            ],
+            "has no durable intent",
+        ),
+        (
             "result-kind-mismatch",
             vec![
                 definition.clone(),
@@ -536,8 +509,7 @@ fn run_attempt_inspection_rejects_every_ambiguous_record_sequence() {
 
     for (name, records, expected) in cases {
         let workspace = projection_workspace(&format!("run-log-inspection-{name}"));
-        let path = crate::tests::helpers::workspace_session_dir(&workspace)
-            .join("review/runs/review-1/run-log.jsonl");
+        let path = review_run_log(&workspace);
         let body = records
             .iter()
             .map(|record| canonical_json(record).expect("record canonicalizes"))
@@ -566,8 +538,7 @@ fn run_attempt_inspection_rejects_every_ambiguous_record_sequence() {
     }
 
     let workspace = projection_workspace("run-log-inspection-invalid-result-outcome");
-    let path = crate::tests::helpers::workspace_session_dir(&workspace)
-        .join("review/runs/review-1/run-log.jsonl");
+    let path = review_run_log(&workspace);
     let body = [
         definition,
         intent("flow-run-log-record-v1", request_hash, "provider-001"),
@@ -586,9 +557,7 @@ fn run_attempt_inspection_rejects_every_ambiguous_record_sequence() {
 #[test]
 fn tool_projection_rejects_an_empty_run_log() {
     let workspace = projection_workspace("run-log-projection-empty");
-    let path = crate::tests::helpers::workspace_session_dir(&workspace)
-        .join("review/runs/review-1/run-log.jsonl");
-    fs::write(&path, b"").expect("empty run log writes");
+    fs::write(review_run_log(&workspace), b"").expect("empty run log writes");
 
     let inspection = inspect_run_attempts(&workspace, "review", "review-1")
         .expect_err("inspection rejects an empty run log");
@@ -634,44 +603,4 @@ fn run_log_append_durability() {
         read_jsonl::<serde_json::Value>(&path).expect("synchronized records replay"),
         records
     );
-}
-
-#[test]
-fn run_attempt_inspection_rejects_a_result_for_a_different_attempt() {
-    let workspace = empty_workspace("conversation-status-attempt-identity");
-    create_review_run(&workspace);
-    let path = crate::tests::helpers::workspace_session_dir(&workspace)
-        .join("review/runs/review-1/run-log.jsonl");
-    append_jsonl(
-        &path,
-        &RunLogRecord::Intent {
-            schema: "flow-run-log-record-v1".to_owned(),
-            attempt_id: "provider-001".to_owned(),
-            attempt_kind: RunAttemptKind::Provider,
-            expected_enforcement: None,
-            request_hash: REQUEST_HASH.to_owned(),
-            tool_id: None,
-            timestamp: "2026-07-30T12:00:00Z".to_owned(),
-        },
-    )
-    .expect("intent appends");
-    append_jsonl(
-        &path,
-        &RunLogRecord::TerminalResult {
-            schema: "flow-run-log-record-v1".to_owned(),
-            attempt_id: "provider-002".to_owned(),
-            attempt_kind: RunAttemptKind::Provider,
-            tool_id: None,
-            outcome: RunAttemptOutcome::Completed,
-            classification: None,
-            exit_code: None,
-            timestamp: "2026-07-30T12:00:01Z".to_owned(),
-            durable_output: Some(serde_json::json!({})),
-        },
-    )
-    .expect("mismatched result appends");
-
-    let error = inspect_run_attempts(&workspace, "review", "review-1")
-        .expect_err("Run Log use must validate attempt identity");
-    assert!(error.to_string().contains("no durable intent"), "{error}");
 }

@@ -12,7 +12,6 @@ const ACL_MAX_ENTRIES: usize = 128;
 const ACL_ALLOW: c_int = 1;
 const ACL_DENY: c_int = 2;
 const ACL_ONLY_INHERIT: c_int = 1 << 8;
-// Darwin sys/acl.h and sys/kauth.h: data, namespace and security mutation.
 const MUTATION: u64 =
     (1 << 2) | (1 << 4) | (1 << 5) | (1 << 6) | (1 << 8) | (1 << 10) | (1 << 12) | (1 << 13);
 const GENERIC_WRITE: u64 = 1 << 23;
@@ -41,9 +40,6 @@ unsafe extern "C" {
     fn acl_set_fd_np(fd: c_int, acl: Acl, acl_type: c_int) -> c_int;
 }
 
-/// Prove that each mutating grant applies only to root/current installation owner,
-/// or is blocked by an earlier deny for that principal or everyone. Membership
-/// in any other group cannot establish that all of its users are trusted.
 pub(crate) fn ensure_no_other_user_mutation(
     opened: &impl AsRawFd,
     effective_uid: u32,
@@ -98,7 +94,6 @@ pub(crate) fn ensure_no_other_user_mutation(
             0 => {}
             _ => return Err(io::Error::last_os_error()),
         }
-        // kauth_acl_evaluate expands generic write/all before ordered evaluation.
         if permissions & (GENERIC_WRITE | GENERIC_ALL) != 0 {
             permissions |= MUTATION & !(1 << 13);
         }
@@ -111,7 +106,6 @@ pub(crate) fn ensure_no_other_user_mutation(
             return Err(io::Error::last_os_error());
         }
         let qualifier = OwnedAcl(qualifier);
-        // acl_get_qualifier returns an owned Darwin uuid_t (16 bytes).
         let principal = unsafe { *qualifier.0.cast::<[u8; 16]>() };
         let well_known = if principal[..12] == WELL_KNOWN_PREFIX {
             u32::from_be_bytes(principal[12..].try_into().expect("UUID tail"))
@@ -120,7 +114,7 @@ pub(crate) fn ensure_no_other_user_mutation(
         };
         if well_known == 0xffff_fffe {
             continue;
-        } // Nobody never applies.
+        }
         if tag == ACL_DENY {
             if well_known == 12 {
                 everybody_denied |= mutation;
@@ -137,7 +131,7 @@ pub(crate) fn ensure_no_other_user_mutation(
             });
         if mutation & !blocked == 0 || well_known == 10 {
             continue;
-        } // Owner is already trusted.
+        }
         let mut id = 0;
         let mut id_type = -1;
         if well_known == 0

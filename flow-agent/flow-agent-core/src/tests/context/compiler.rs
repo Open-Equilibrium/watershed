@@ -1,4 +1,4 @@
-use super::support::{test_profile, tier_zero};
+use super::support::{test_profile, tier_zero, total_source_bytes};
 use crate::runtime::{
     context::{
         ContextModelProfile, ContextOmissionCounts, bounded_context_array_source, compile_context,
@@ -9,49 +9,27 @@ use crate::runtime::{
 
 #[test]
 fn context_profile_requires_a_usable_input_budget() {
-    let invalid_profile = ContextModelProfile {
-        context_limit: 10,
-        id: "invalid-profile",
+    let profile = |context_limit| ContextModelProfile {
+        context_limit,
+        id: "profile-v0",
         output_reserve: 8,
         safety_margin: 3,
     };
     assert!(matches!(
-        invalid_profile.input_budget_tokens(),
+        profile(10).input_budget_tokens(),
         Err(RuntimeError::Protocol(message)) if message.contains("reserves more tokens")
     ));
-    let empty_profile = ContextModelProfile {
-        context_limit: 11,
-        id: "empty-profile",
-        output_reserve: 8,
-        safety_margin: 3,
-    };
     assert!(matches!(
-        empty_profile.input_budget_tokens(),
+        profile(11).input_budget_tokens(),
         Err(RuntimeError::Protocol(message)) if message.contains("leaves no input budget")
     ));
-    let smallest_valid_profile = ContextModelProfile {
-        context_limit: 12,
-        id: "smallest-valid-profile",
-        output_reserve: 8,
-        safety_margin: 3,
-    };
-    assert!(matches!(
-        smallest_valid_profile.input_budget_tokens(),
-        Ok(1)
-    ));
+    assert!(matches!(profile(12).input_budget_tokens(), Ok(1)));
 }
 
 #[test]
 fn context_compiler_rejects_mandatory_content_over_budget() {
     let mandatory = tier_zero("large");
-    let required = mandatory
-        .iter()
-        .map(|source| {
-            context_source_bytes(source)
-                .expect("mandatory source serializes")
-                .len()
-        })
-        .sum::<usize>();
+    let required = total_source_bytes(&mandatory);
     let err = compile_context(
         &test_profile(required - 1),
         &mandatory,

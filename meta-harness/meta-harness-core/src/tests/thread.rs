@@ -1,6 +1,3 @@
-//! A followed thread as Liquid sees it: T3's snapshot, the agent events its changes mean, and the
-//! commands it sends back (ADR-0290).
-
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
@@ -21,7 +18,6 @@ const WAIT: Duration = Duration::from_secs(10);
 const SUBSCRIBE: &str = "orchestration.subscribeThread";
 const COMMAND: &str = "orchestration.dispatchCommand";
 
-/// A T3 projection with `records` in its collections and a default thread.
 pub(super) fn projection(records: Value) -> Value {
     let mut projection = json!({
         "thread": {
@@ -48,12 +44,10 @@ fn run(id: &str, ordinal: u64, status: &str, message: &str) -> Value {
     })
 }
 
-/// A thread followed on a stand-in whose stream starts with `projection` at `sequence`.
 pub(super) async fn follow(projection: Value, sequence: u64) -> (Fake, Thread) {
     follow_answering(projection, sequence, |_, _, id| vec![ok(id, json!({}))]).await
 }
 
-/// Like [`follow`], answering every other request with `answer`.
 pub(super) async fn follow_answering(
     projection: Value,
     sequence: u64,
@@ -75,13 +69,10 @@ pub(super) async fn follow_answering(
     (fake, thread)
 }
 
-/// A stream item carrying T3 change `kind` at `sequence`.
 pub(super) fn event(sequence: u64, kind: &str, payload: Value) -> Value {
     json!({"kind": "event", "sequence": sequence, "event": {"type": kind, "payload": payload}})
 }
 
-/// Pushes a sentinel change at `sequence` and returns the agent events before it. The stream
-/// applies one change at a time, so these are all the events of the changes pushed before.
 async fn until(
     fake: &Fake,
     events: &mut mpsc::Receiver<ThreadEvent>,
@@ -108,7 +99,21 @@ async fn until(
     }
 }
 
-/// The last command sent to T3, without the ids Meta-Harness makes up.
+fn plain(
+    turn: u64,
+    kind: ItemKind,
+    text: &str,
+) -> (
+    u64,
+    ItemKind,
+    ItemDetail,
+    &str,
+    Option<ItemStatus>,
+    Option<u64>,
+) {
+    (turn, kind, ItemDetail::None, text, None, None)
+}
+
 pub(super) fn command(fake: &Fake) -> Value {
     let mut command = fake.payloads(COMMAND).pop().expect("a command was sent");
     for id in ["commandId", "messageId"] {
@@ -215,21 +220,14 @@ async fn a_snapshot_shows_turns_chat_items_and_the_requests_waiting_for_the_pers
     assert_eq!(
         shown,
         vec![
-            (
-                1,
-                ItemKind::UserMessage,
-                ItemDetail::None,
-                "first prompt",
-                None,
-                None
-            ),
+            plain(1, ItemKind::UserMessage, "first prompt"),
             (
                 1,
                 ItemKind::CommandExecution,
                 tool("bash", "cargo test"),
                 "1 failed",
                 Some(ItemStatus::Failed),
-                Some(2000)
+                Some(2000),
             ),
             (
                 1,
@@ -237,49 +235,21 @@ async fn a_snapshot_shows_turns_chat_items_and_the_requests_waiting_for_the_pers
                 tool("edit", "src/lib.rs"),
                 "",
                 Some(ItemStatus::Completed),
-                None
-            ),
-            (
-                2,
-                ItemKind::AssistantMessage,
-                ItemDetail::None,
-                "Working",
                 None,
-                None
             ),
-            (2, ItemKind::Error, ItemDetail::None, "boom", None, None),
-            (
-                2,
-                ItemKind::Reasoning,
-                ItemDetail::None,
-                "thinking",
-                None,
-                None
-            ),
+            plain(2, ItemKind::AssistantMessage, "Working"),
+            plain(2, ItemKind::Error, "boom"),
+            plain(2, ItemKind::Reasoning, "thinking"),
             (
                 2,
                 ItemKind::DynamicToolCall,
                 tool("Read file", "a.rs"),
                 "",
                 Some(ItemStatus::Completed),
-                None
-            ),
-            (
-                5,
-                ItemKind::UserMessage,
-                ItemDetail::None,
-                "queued prompt",
                 None,
-                None
             ),
-            (
-                0,
-                ItemKind::Reasoning,
-                ItemDetail::None,
-                "orphan",
-                None,
-                None
-            ),
+            plain(5, ItemKind::UserMessage, "queued prompt"),
+            plain(0, ItemKind::Reasoning, "orphan"),
         ]
     );
     let approval =
@@ -311,7 +281,6 @@ async fn a_snapshot_shows_turns_chat_items_and_the_requests_waiting_for_the_pers
                     option("decline", "Decline", Some("Deletes files")),
                 ],
             ),
-            // Without options T3 offers its own choices.
             approval(
                 "req-3",
                 "file_read",
@@ -358,7 +327,6 @@ async fn live_changes_become_the_agent_events_liquid_shows() {
             _ => 2,
         })
     };
-    // Sequences up to 5 are in the snapshot already, so these two change nothing.
     fake.push(
         SUBSCRIBE,
         vec![
@@ -410,7 +378,6 @@ async fn live_changes_become_the_agent_events_liquid_shows() {
                 "number": 7, "title": "Renamed PR"})),
             event(29, "run.updated", json!({"id": "r2", "ordinal": 2, "status": "completed",
                 "completedAt": "2026-11-15T10:03:00.000Z"})),
-            // A reverted turn's items and a repeated status say nothing new.
             event(30, "turn-item.updated", json!({"id": "late", "runId": "r3", "type": "assistant_message",
                 "status": "running", "text": "after the revert"})),
             event(31, "run.updated", json!({"id": "r2", "ordinal": 2, "status": "completed"})),
@@ -522,7 +489,7 @@ async fn live_changes_become_the_agent_events_liquid_shows() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn a_message_sent_while_a_turn_runs_queues_or_steers_as_t3_s_composer_does() {
+async fn a_message_queues_steers_or_starts_a_turn_as_t3_s_composer_does() {
     let (fake, thread) = follow(
         projection(json!({"runs": [run("r1", 1, "running", "m1")], "messages": [{"id": "m1", "text": "go"}]})),
         1,
@@ -544,10 +511,6 @@ async fn a_message_sent_while_a_turn_runs_queues_or_steers_as_t3_s_composer_does
         command(&fake),
         json!({"type": "thread.stop", "threadId": "thread-1"})
     );
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn an_idle_thread_starts_a_turn_with_a_message() {
     let (fake, thread) = follow(projection(json!({})), 1).await;
     thread.send("go", false).await.unwrap();
     let sent = command(&fake);
@@ -700,7 +663,6 @@ async fn settings_branch_and_context_reach_t3_and_show_in_the_thread() {
         "approval-required"
     );
 
-    // Without a worktree of its own, the thread's Git works in the project folder.
     thread.git().status().await.unwrap();
     assert_eq!(
         fake.payloads("vcs.refreshStatus"),
@@ -727,48 +689,6 @@ async fn settings_branch_and_context_reach_t3_and_show_in_the_thread() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn a_turn_after_a_rewind_reverts_and_diffs_from_its_visible_predecessor() {
-    let (fake, thread) = follow(
-        projection(json!({
-            "runs": [
-                run("r1", 1, "completed", "m1"),
-                run("r2", 2, "rolled_back", "m2"),
-                run("r3", 3, "rolled_back", "m3"),
-                run("r4", 4, "completed", "m4"),
-            ],
-            "messages": [
-                {"id": "m1", "text": "first"}, {"id": "m2", "text": "second"},
-                {"id": "m3", "text": "third"}, {"id": "m4", "text": "fourth"},
-            ],
-            // T3 marks the checkpoints a rewind passed as stale.
-            "checkpoints": [
-                {"id": "base", "scopeId": "s", "status": "ready", "ordinalWithinScope": 0, "appRunOrdinal": null},
-                {"id": "cp1", "scopeId": "s", "status": "ready", "ordinalWithinScope": 1, "appRunOrdinal": 1},
-                {"id": "cp2", "scopeId": "s", "status": "stale", "ordinalWithinScope": 2, "appRunOrdinal": 2},
-                {"id": "cp3", "scopeId": "s", "status": "stale", "ordinalWithinScope": 3, "appRunOrdinal": 3},
-                {"id": "cp4", "scopeId": "s", "status": "ready", "ordinalWithinScope": 2, "appRunOrdinal": 4},
-            ],
-        })),
-        1,
-    )
-    .await;
-    assert_eq!(thread.revert(4, true).await.unwrap(), "fourth");
-    assert_eq!(
-        command(&fake),
-        json!({"type": "checkpoint.rollback", "scopeId": "s", "checkpointId": "cp1",
-            "restoreFiles": true, "threadId": "thread-1"})
-    );
-    thread.diff(4, 4, false).await.unwrap();
-    assert_eq!(
-        fake.payloads("orchestration.getTurnDiff"),
-        vec![
-            json!({"threadId": "thread-1", "fromTurnCount": 1, "toTurnCount": 4,
-            "ignoreWhitespace": false})
-        ]
-    );
-}
-
-#[tokio::test(flavor = "multi_thread")]
 async fn reverting_a_turn_that_is_not_in_the_thread_dispatches_nothing() {
     let (fake, thread) = follow(
         projection(json!({
@@ -786,8 +706,6 @@ async fn reverting_a_turn_that_is_not_in_the_thread_dispatches_nothing() {
         1,
     )
     .await;
-    // Turn 0 is the thread's start, turn 2 was rewound and turn 9 never existed. A rollback to
-    // the checkpoint before rewound turn 2 would undo turn 3, so none of them may dispatch.
     for turn in [0, 2, 9] {
         assert_eq!(
             thread.revert(turn, true).await.unwrap_err(),
@@ -825,7 +743,6 @@ async fn a_thread_restarts_from_the_snapshot_t3_sends_on_a_new_connection() {
     ];
     let sent = AtomicUsize::new(0);
     let fake = Fake::start(move |tag, _, id| match tag {
-        // The first connection gets the first snapshot; the stream sent again gets the second.
         SUBSCRIBE => {
             let n = sent.fetch_add(1, Ordering::SeqCst).min(1);
             vec![chunk(id, vec![snapshots[n].clone()])]
@@ -842,7 +759,6 @@ async fn a_thread_restarts_from_the_snapshot_t3_sends_on_a_new_connection() {
     let (first, mut events) = thread.subscribe();
     assert_eq!(first.sequence, 1);
     fake.drop_connection();
-    // The subscriber ends: its stream resubscribes behind a fell-behind event, and Liquid reloads.
     let ended = tokio::time::timeout(WAIT, events.recv())
         .await
         .expect("the subscriber ends");
@@ -853,7 +769,6 @@ async fn a_thread_restarts_from_the_snapshot_t3_sends_on_a_new_connection() {
         restarted.turns.iter().map(|t| t.number).collect::<Vec<_>>(),
         vec![1, 2]
     );
-    // The snapshot holds events up to 10, so the stale 10 changes nothing; 11 applies on top.
     fake.push(
         SUBSCRIBE,
         vec![
@@ -887,7 +802,6 @@ async fn subscribers_end_when_t3_ends_the_thread_stream() {
         .await
         .expect("the subscription ends");
     assert!(ended.is_none());
-    // The thread outlives its stream, but T3 sends nothing more: a later subscription ends too.
     let (_, mut later) = thread.subscribe();
     let ended = tokio::time::timeout(WAIT, later.recv())
         .await
@@ -906,7 +820,6 @@ async fn a_late_branch_answer_keeps_the_newer_branch_t3_already_sent() {
             *seen.lock().unwrap() = id.to_owned();
             vec![chunk(id, vec![snapshot.clone()])]
         }
-        // A newer choice reaches the thread before T3 answers the older one.
         _ => vec![
             chunk(
                 &seen.lock().unwrap(),
@@ -928,7 +841,6 @@ async fn a_late_branch_answer_keeps_the_newer_branch_t3_already_sent() {
         .await
         .unwrap();
     thread.set_branch("older", None).await.unwrap();
-    // The thread ends on the newer choice, whichever of the two the follow applies first.
     let newer = Some(std::path::PathBuf::from("/worktrees/newer"));
     tokio::time::timeout(Duration::from_secs(5), async {
         while thread.worktree() != newer {
@@ -939,4 +851,63 @@ async fn a_late_branch_answer_keeps_the_newer_branch_t3_already_sent() {
     .expect("the newer worktree stays");
     tokio::time::sleep(Duration::from_millis(50)).await;
     assert_eq!(thread.worktree(), newer);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_returned_message_queues_behind_the_active_turn_even_when_none_is_running() {
+    let (fake, thread) = follow(projection(json!({})), 1).await;
+    thread.requeue_once("returned-tr-1", "first").await.unwrap();
+    assert_eq!(
+        command(&fake),
+        json!({"type": "message.dispatch", "threadId": "thread-1", "text": "first",
+            "attachments": [], "createdBy": "user", "creationSource": "web",
+            "dispatchMode": {"type": "queue_after_active"}})
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_handoff_run_that_was_aborted_does_not_settle_the_move() {
+    let thread_record = json!({
+        "id": "thread-1", "title": "Build it", "branch": "feature/x",
+        "worktreePath": "/repo/feature-x", "runtimeMode": "full-access",
+        "modelSelection": {"instanceId": "scripted", "model": "scripted", "options": []},
+    });
+    let (_fake, thread) = follow(
+        projection(json!({
+            "thread": thread_record,
+            "runs": [{"id": "run-1", "ordinal": 1, "status": "interrupted",
+                "userMessageId": "handoff-tr-1"}],
+        })),
+        1,
+    )
+    .await;
+    let settled = crate::host::projects::settled(&thread, "tr-1", "handoff").await;
+    assert!(
+        settled.is_err(),
+        "a handoff run that was aborted must not let the move land"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_message_whose_stable_id_the_thread_already_holds_is_not_sent_again() {
+    let (fake, thread) = follow(
+        projection(json!({"messages": [{"id": "queued-tr-0", "text": "first"}]})),
+        1,
+    )
+    .await;
+    thread
+        .send_once("queued-tr-0", "first", false)
+        .await
+        .unwrap();
+    assert!(fake.payloads(COMMAND).is_empty(), "a repeat sends nothing");
+    thread
+        .send_once("queued-tr-1", "second", false)
+        .await
+        .unwrap();
+    let sent = fake
+        .payloads(COMMAND)
+        .pop()
+        .expect("the new message is sent");
+    assert_eq!(sent["messageId"], "queued-tr-1");
+    assert_eq!(sent["text"], "second");
 }

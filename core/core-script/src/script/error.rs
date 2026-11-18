@@ -1,162 +1,93 @@
 use crate::script::model::ToolKind;
 use std::{fmt, path::PathBuf};
 
-/// Error returned while loading, resolving or serializing a registry.
 #[derive(Debug)]
 pub enum RegistryError {
-    /// Filesystem read failed.
     Io {
-        /// Path being accessed.
         path: PathBuf,
-        /// Underlying I/O error.
         source: std::io::Error,
     },
-    /// Registry path failed safety checks.
     UnsafePath {
-        /// Rejected path.
         path: PathBuf,
-        /// Rejection reason.
         message: String,
     },
-    /// Registry read exceeded an M1 byte cap.
     ReadLimitExceeded {
-        /// Path whose read budget was exceeded.
         path: PathBuf,
-        /// Observed byte count.
         bytes: u64,
-        /// Maximum allowed byte count.
         max: u64,
     },
-    /// Registry traversal exceeded a non-byte work bound.
     TraversalLimitExceeded {
-        /// Path where traversal exceeded the bound.
         path: PathBuf,
-        /// Name of the traversal limit.
         limit: &'static str,
-        /// Observed count or depth.
         observed: usize,
-        /// Maximum allowed count or depth.
         max: usize,
     },
-    /// Block id was not a valid v0 id token.
     InvalidBlockId(String),
-    /// Block name was empty or otherwise invalid.
     InvalidBlockName {
-        /// Block kind.
         kind: &'static str,
-        /// Block id.
         id: String,
     },
-    /// Block text was not Unicode NFC; it is refused rather than converted.
     NonNfcDefinitionText {
-        /// Block kind.
         kind: &'static str,
-        /// Block id.
         id: String,
-        /// Innermost field that holds the text.
         field: String,
     },
-    /// Source text could not be parsed.
     Parse {
-        /// Source name used in diagnostics.
         source_name: String,
-        /// Parse diagnostic.
         message: String,
     },
-    /// A block id was duplicated.
     DuplicateId {
-        /// Block kind.
         kind: &'static str,
-        /// Duplicated id.
         id: String,
     },
-    /// A normalized block name was duplicated.
     DuplicateName {
-        /// Block kind.
         kind: &'static str,
-        /// Duplicated authored name.
         name: String,
     },
-    /// A reference matched both an id and a normalized name.
     AmbiguousReference {
-        /// Referenced block kind.
         kind: &'static str,
-        /// User-supplied reference.
         reference: String,
     },
-    /// A reference could not be resolved.
     MissingReference {
-        /// Referencing block kind.
         from_kind: &'static str,
-        /// Referencing block id.
         from_id: String,
-        /// Referenced block kind.
         reference_kind: &'static str,
-        /// User-supplied reference.
         reference: String,
     },
-    /// A transition does not connect ordered direct child Phases.
     InvalidTransition {
-        /// Transition-owning block kind.
         owner_kind: &'static str,
-        /// Transition-owning block id.
         owner_id: String,
-        /// Source Phase reference.
         from_phase_id: String,
-        /// Destination Phase reference.
         to_phase_id: String,
     },
-    /// Recursive Phase references contain a cycle.
     PhaseCycle {
-        /// Phase id involved in the cycle.
         phase_id: String,
     },
-    /// Recursive Phase references exceed the nesting cap.
     PhaseDepthExceeded {
-        /// Phase id where the cap was exceeded.
         phase_id: String,
-        /// Observed nesting depth.
         depth: usize,
-        /// Maximum allowed nesting depth.
         max: usize,
     },
-    /// One Phase declares more direct child Phases than allowed.
     PhaseFanoutExceeded {
-        /// Phase whose direct child list exceeded the cap.
         phase_id: String,
-        /// Observed direct child count.
         count: usize,
-        /// Maximum allowed direct child count.
         max: usize,
     },
-    /// Recursive flow references contain a cycle.
     FlowCycle {
-        /// Flow id involved in the cycle.
         flow_id: String,
     },
-    /// Recursive flow references exceed the nesting cap.
     FlowDepthExceeded {
-        /// Flow id where the cap was exceeded.
         flow_id: String,
-        /// Observed nesting depth.
         depth: usize,
-        /// Maximum allowed nesting depth.
         max: usize,
     },
-    /// One Flow declares more direct runtime subflow invocations than allowed.
     FlowFanoutExceeded {
-        /// Flow whose direct subflow list exceeded the cap.
         flow_id: String,
-        /// Observed direct subflow invocation count.
         count: usize,
-        /// Maximum allowed direct subflow invocation count.
         max: usize,
     },
-    /// Semantic validation failed.
     Semantic(SemanticValidationError),
-    /// Canonical JSON serialization failed.
     CanonicalJson(proto::CanonicalJsonError),
-    /// Serde serialization failed before canonicalization.
     Serialize(serde_json::Error),
 }
 
@@ -293,49 +224,30 @@ impl From<SemanticValidationError> for RegistryError {
     }
 }
 
-/// Semantic validation failure for a registry block.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum SemanticValidationError {
-    /// The command shape does not match the declared tool kind.
     ToolCommandKindMismatch {
-        /// Tool id.
         tool_id: String,
-        /// Declared tool kind.
         tool_kind: ToolKind,
     },
-    /// A tool definition violates its semantic constraints.
     InvalidToolDefinition {
-        /// Tool id.
         tool_id: String,
-        /// Rejection reason.
         message: String,
     },
-    /// Own-script command was not `script:<tool-id>`.
     OwnScriptCommandIdMismatch {
-        /// Declared command string.
         command: String,
-        /// Tool id.
         tool_id: String,
     },
-    /// An Instruction definition violates its finite placeholder contract.
     InvalidInstructionDefinition {
-        /// Instruction id.
         instruction_id: String,
-        /// Rejection reason.
         message: String,
     },
-    /// A Phase definition violates its recursive execution contract.
     InvalidPhaseDefinition {
-        /// Phase id.
         phase_id: String,
-        /// Rejection reason.
         message: String,
     },
-    /// A flow definition violates its semantic constraints.
     InvalidFlowDefinition {
-        /// Flow id.
         flow_id: String,
-        /// Rejection reason.
         message: String,
     },
 }

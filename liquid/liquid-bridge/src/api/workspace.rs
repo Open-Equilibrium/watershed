@@ -1,16 +1,3 @@
-//! The Liquid Workspace's messages. The Workspace crosses the bridge only through four
-//! message-shaped calls on [`LiquidWorkspace`](super::replica::LiquidWorkspace): apply a
-//! mutation, query, subscribe to a resource's changes and close a subscription (client
-//! architecture rule 2, ADR-0216).
-//!
-//! Attachments' bytes cross through the calls of [`super::media`], which a Media Block then
-//! names (ADR-0305).
-//!
-//! Messages are flat structs whose kind names the parts they fill, so Dart needs no code
-//! generation for enums with data. Identities cross as text. A change carries only its
-//! resource and that resource's sequence number; the reader then queries the bounded window
-//! it shows (rule 3).
-
 use liquid_core::{
     AreaId, AttachmentId, BlockId, Changed, Error, FieldId, Mutation, PageId, Place, RowId,
     TextStyle, ViewId,
@@ -22,100 +9,50 @@ use super::database::{
 use super::drawing::{BridgeDrawing, BridgeDrawingEdit, BridgeDrawingStyle};
 use super::media::BridgeMedia;
 
-/// The most items one query answers, so no answer carries an unbounded list.
 pub const MAX_WINDOW: i64 = 500;
 
-/// What a [`BridgeMutation`] does; each kind names the parts it fills.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BridgeMutationKind {
-    /// Adds an area named `text`.
     CreateArea,
-    /// Adds a Page titled `text` to `area`, under `parent` if given.
     CreatePage,
-    /// Retitles `page` to `text`.
     RenamePage,
-    /// Adds a Text Block holding `text` to `page`, after the View `after` or first.
     AddTextBlock,
-    /// Replaces `delete` units at `at` in the Text or Code `block` on its home `page` with
-    /// `text`; positions count UTF-16 units, as Dart does.
     EditText,
-    /// Removes `view` from `page`.
     RemoveView,
-    /// Sets how `view` sorts its rows, to `sort` or to none.
     SetViewSort,
-    /// Sets which rows `view` keeps, to `filter` or to all.
     SetViewFilter,
-    /// Ends `block`, shown by `view` on its home `page`, at `at`, as ⏎ does: the text from
-    /// there moves to a new Text Block of `style` after `view`.
     SplitTextBlock,
-    /// Appends the Text Block of `view` on `page` to the one above, as ⌫ at its start does.
     JoinTextBlock,
-    /// Sets `block`'s `style` on its home `page`.
     SetTextStyle,
-    /// Starts a Section at `view` on `page`, or stops one, as `boundary` says.
     SetSectionBoundary,
-    /// Turns the Text Block `block` on its home `page` into a Code Block in plain text.
     TurnIntoCode,
-    /// Turns the Code Block `block` on its home `page` into a paragraph.
     TurnIntoText,
-    /// Sets the Code Block `block`'s language on its home `page` to `text`; empty for plain
-    /// text.
     SetCodeLanguage,
-    /// Adds a Media Block for the file `text` of `media_type`, kept as the finished
-    /// `attachment`, to `page`, after the View `after` or first.
     AddMediaBlock,
-    /// Adds an empty, hand-drawn Whiteboard Block to `page`, after the View `after` or first.
     AddWhiteboardBlock,
-    /// Sets the drawing style of the Whiteboard or Media `block` on its home `page` to
-    /// `drawing_style`.
     SetDrawingStyle,
-    /// Removes, changes and adds the elements of the Whiteboard's or Media `block`'s drawing
-    /// on its home `page` as `drawing` says, in one Action.
     EditDrawing,
-    /// Adds a Database Block named `text`, with a text field "Name", to `page`, after the
-    /// View `after` or first.
     AddDatabaseBlock,
-    /// Renames the Database `block` on its home `page` to `text`.
     RenameDatabase,
-    /// Adds a field named `text` of `field_kind` to the Database `block` on its home `page`:
-    /// last, after the field `after`, or first.
     AddField,
-    /// Renames `field` of the Database `block` on its home `page` to `text`.
     RenameField,
-    /// Removes `field` from the Database `block` on its home `page`.
     RemoveField,
-    /// Adds an option named `text` of `color` to the select `field` of the Database `block`
-    /// on its home `page`.
     AddOption,
-    /// Adds an empty row to the Database `block` on its home `page`: last, after the row
-    /// `after`, or first.
     AddRow,
-    /// Removes `row` from the Database `block` on its home `page`.
     RemoveRow,
-    /// Sets `row`'s cell of `field` in the Database `block` on its home `page` to `cell`.
     SetCell,
 }
 
-/// How a Text Block reads.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BridgeTextStyle {
-    /// A paragraph.
     Paragraph,
-    /// A heading of level 1.
     Heading1,
-    /// A heading of level 2.
     Heading2,
-    /// A heading of level 3.
     Heading3,
-    /// A bulleted list item.
     Bullet,
-    /// A numbered list item.
     Numbered,
-    /// A to-do not yet done.
     Todo,
-    /// A done to-do.
     Done,
-    /// A quote.
     Quote,
 }
 
@@ -149,249 +86,139 @@ impl BridgeTextStyle {
     }
 }
 
-/// One write, as Dart sends it.
 #[derive(Debug, Clone, PartialEq)]
 pub struct BridgeMutation {
-    /// What the write does.
     pub kind: BridgeMutationKind,
-    /// An area.
     pub area: Option<String>,
-    /// A Page.
     pub page: Option<String>,
-    /// The Page a new Page nests under.
     pub parent: Option<String>,
-    /// A Block.
     pub block: Option<String>,
-    /// A View.
     pub view: Option<String>,
-    /// The View, field or row a new one follows.
     pub after: Option<String>,
-    /// Whether a new field or row goes after all others as the core applies it, rather
-    /// than first or after `after` (ADR-0247).
     pub last: bool,
-    /// A name, title or text.
     pub text: Option<String>,
-    /// Where an edit starts.
     pub at: i64,
-    /// How many units an edit removes.
     pub delete: i64,
-    /// A Text Block's style.
     pub style: BridgeTextStyle,
-    /// Whether a Section starts at `view`.
     pub boundary: bool,
-    /// A Database field.
     pub field: Option<String>,
-    /// A Database row.
     pub row: Option<String>,
-    /// A new field's kind.
     pub field_kind: Option<BridgeFieldKind>,
-    /// A new option's color, an index into the tag colors.
     pub color: i64,
-    /// A cell's new value.
     pub cell: Option<BridgeCell>,
-    /// A View's new sort.
     pub sort: Option<BridgeSort>,
-    /// A View's new filter.
     pub filter: Option<BridgeFilter>,
-    /// A file's media type, such as `image/png`; empty if unknown.
     pub media_type: Option<String>,
-    /// A finished attachment's name.
     pub attachment: Option<String>,
-    /// A drawing's new style.
     pub drawing_style: Option<BridgeDrawingStyle>,
-    /// A drawing's elements removed, changed and added.
     pub drawing: Option<BridgeDrawingEdit>,
 }
 
-/// What an applied write recorded and created.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BridgeApplied {
-    /// The Action that recorded it.
     pub action: String,
-    /// A new area.
     pub area: Option<String>,
-    /// A new Page.
     pub page: Option<String>,
-    /// A new Block.
     pub block: Option<String>,
-    /// The new Block's View.
     pub view: Option<String>,
-    /// A new Database field.
     pub field: Option<String>,
-    /// A new Database row.
     pub row: Option<String>,
-    /// A new option of a select field.
     pub option: Option<String>,
-    /// A drawing's new elements, in the order they were asked for.
     pub elements: Vec<String>,
 }
 
-/// What a [`BridgeQuery`] reads; each kind names the parts it uses and fills.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BridgeQueryKind {
-    /// A window of the areas into `areas`, and their number into `count`.
     Areas,
-    /// A window of `area`'s Page tree into `pages`, and its length into `count`.
     Pages,
-    /// A window of `page`'s Views into `views`, and their number into `count`.
     Views,
-    /// `block`'s text and style on its home `page` into `text` and `style`; none once the
-    /// Block is removed.
     Text,
-    /// The Code `block`'s code and language on its home `page` into `text` and `language`;
-    /// none once the Block is removed or if it is no Code Block.
     Code,
-    /// The Media `block`'s file and attachment on its home `page` into `media`; none once
-    /// the Block is removed or if it is no Media Block.
     Media,
-    /// The Whiteboard's or Media `block`'s drawing on its home `page` into `drawing`: its
-    /// style and its elements on the document pages from `start`, at most `limit` of them
-    /// (a Whiteboard's are on page 0); none once the Block is removed or if it holds no
-    /// drawing.
     Drawing,
-    /// The Database `block`'s name and fields on its home `page` into `database`; none
-    /// once the Block is removed or if it is no Database.
     Database,
-    /// A window of the Database `block`'s rows on its home `page` into `rows`, kept by
-    /// `filter` and ordered by `sort`, and the number of rows `filter` keeps into `count`.
     Rows,
 }
 
-/// One read, as Dart sends it.
 #[derive(Debug, Clone, PartialEq)]
 pub struct BridgeQuery {
-    /// What it reads.
     pub kind: BridgeQueryKind,
-    /// An area.
     pub area: Option<String>,
-    /// A Page.
     pub page: Option<String>,
-    /// A Block.
     pub block: Option<String>,
-    /// Where a window starts.
     pub start: i64,
-    /// How many items a window takes, at most [`MAX_WINDOW`].
     pub limit: i64,
-    /// How a row window is ordered; the rows' own order without one.
     pub sort: Option<BridgeSort>,
-    /// Which rows a row window keeps; all without one.
     pub filter: Option<BridgeFilter>,
 }
 
-/// An area in the Explorer.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BridgeArea {
-    /// Its identity.
     pub id: String,
-    /// Its name.
     pub name: String,
 }
 
-/// A Page in an area's tree, which lists each Page before its descendants.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BridgePage {
-    /// Its identity.
     pub id: String,
-    /// The Page it nests under.
     pub parent: Option<String>,
-    /// Its title.
     pub title: String,
 }
 
-/// The kind of Block a View shows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BridgeBlockKind {
-    /// A Text Block.
     Text,
-    /// A Database Block.
     Database,
-    /// A Code Block.
     Code,
-    /// A Media Block.
     Media,
-    /// A Whiteboard Block.
     Whiteboard,
-    /// A Block of a kind a later version adds, which shows as a placeholder (ADR-0245).
     Unknown,
 }
 
-/// A View on a Page.
 #[derive(Debug, Clone, PartialEq)]
 pub struct BridgeView {
-    /// Its identity.
     pub id: String,
-    /// The Block it shows.
     pub block: String,
-    /// Whether a Section starts here.
     pub boundary: bool,
-    /// The kind of Block it shows.
     pub kind: BridgeBlockKind,
-    /// How it sorts a Table's rows.
     pub sort: Option<BridgeSort>,
-    /// Which of a Table's rows it keeps.
     pub filter: Option<BridgeFilter>,
 }
 
-/// The answer to a query; the query's kind names the parts it fills.
 #[derive(Debug, Clone, PartialEq)]
 pub struct BridgeAnswer {
-    /// Areas.
     pub areas: Vec<BridgeArea>,
-    /// Pages.
     pub pages: Vec<BridgePage>,
-    /// Views.
     pub views: Vec<BridgeView>,
-    /// How many items the whole list holds.
     pub count: i64,
-    /// A Block's text.
     pub text: Option<String>,
-    /// A Text Block's style, with its text.
     pub style: Option<BridgeTextStyle>,
-    /// A Code Block's language, with its code; empty for plain text.
     pub language: Option<String>,
-    /// A Media Block's file and attachment.
     pub media: Option<BridgeMedia>,
-    /// A drawing's style and elements.
     pub drawing: Option<BridgeDrawing>,
-    /// A Database's name and fields.
     pub database: Option<BridgeDatabase>,
-    /// A Database's rows.
     pub rows: Vec<BridgeRow>,
 }
 
-/// What kind of resource a subscription follows; each kind names the parts it uses.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum BridgeResourceKind {
-    /// The list of areas.
     Areas,
-    /// `area`'s Page tree.
     Pages,
-    /// `page`'s Views and their order.
     Views,
-    /// `block`'s content on its home `page`.
     Block,
 }
 
-/// A resource whose readers refresh when it changes.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BridgeResource {
-    /// Its kind.
     pub kind: BridgeResourceKind,
-    /// An area.
     pub area: Option<String>,
-    /// A Page.
     pub page: Option<String>,
-    /// A Block.
     pub block: Option<String>,
 }
 
-/// A resource changed; `seq` counts its changes since this Workspace opened, so a reader
-/// that sees a gap or an older number knows to query again.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BridgeChange {
-    /// The resource.
     pub resource: BridgeResource,
-    /// Its change count.
     pub seq: i64,
 }
 
@@ -431,7 +258,6 @@ fn optional_id<T>(
 }
 
 impl BridgeMutation {
-    /// Where a new field or row goes: last, after `after`, or first.
     fn place<T>(&self, parse: fn(&str) -> Option<T>) -> Result<Place<T>, String> {
         match (self.last, optional_id(&self.after, parse, "after")?) {
             (true, Some(_)) => Err("after and last cannot both be set".into()),
@@ -618,8 +444,6 @@ impl BridgeMutation {
 }
 
 impl BridgeResource {
-    /// The resource with only the parts its kind uses, which must name identities, so it
-    /// equals the resource a change reports.
     pub(crate) fn normalized(&self) -> Result<Self, String> {
         let area = || id(&self.area, AreaId::parse, "area").map(|area| Some(area.to_string()));
         let page = || id(&self.page, PageId::parse, "page").map(|page| Some(page.to_string()));
@@ -669,7 +493,6 @@ impl BridgeResource {
         }
     }
 
-    /// The Page whose document this resource reads, if any.
     pub(crate) fn page(&self) -> Option<&str> {
         matches!(
             self.kind,
@@ -680,7 +503,6 @@ impl BridgeResource {
     }
 }
 
-/// The window `start..start + limit`, with `limit` capped at [`MAX_WINDOW`].
 pub(crate) fn window(start: i64, limit: i64) -> Result<(usize, usize), String> {
     Ok((
         units(start, "start")?,

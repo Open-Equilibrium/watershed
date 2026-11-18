@@ -8,7 +8,45 @@ use crate::runtime::fs_guards::{
     set_private_directory_create_observer, set_private_directory_open_observer,
 };
 use crate::runtime::types::RuntimeError;
-use std::{fs, io::Write as _, os::unix::fs::MetadataExt as _, path::Path};
+use std::{ffi::OsStr, fs, io::Write as _, os::unix::fs::MetadataExt as _, path::Path};
+
+fn private_dir(path: &Path) {
+    use std::os::unix::fs::PermissionsExt as _;
+
+    fs::create_dir(path).expect("private directory created");
+    fs::set_permissions(path, fs::Permissions::from_mode(0o700)).expect("private permissions set");
+}
+
+fn assert_symlink_open_race_is_denied(label: &str, leaf: &OsStr) {
+    use std::os::unix::fs::symlink;
+
+    let workspace = empty_workspace(label);
+    let outside = empty_workspace(&format!("{label}-outside"));
+    let private = workspace.join(leaf);
+    let moved = workspace.join("private-checked");
+    private_dir(&private);
+    let checked = private.clone();
+    set_private_directory_open_observer(move || {
+        fs::rename(checked, moved).expect("checked directory moved");
+        symlink(outside, private).expect("symlink replacement created");
+    });
+    let parent = AnchoredDir::workspace(&workspace).expect("workspace opens");
+
+    let err = parent
+        .private_child(leaf, false, DirectoryErrorMode::ScriptWrite)
+        .expect_err("symlink replacement must be denied");
+
+    assert!(
+        matches!(
+            &err,
+            RuntimeError::Denied {
+                reason: core_policy::DenyReasonCode::SymlinkEscapeDenied,
+                ..
+            }
+        ),
+        "{err}"
+    );
+}
 
 #[test]
 fn protected_home_publication_waits_for_admission_without_locking_other_homes() {
@@ -96,7 +134,6 @@ fn protected_home_publication_waits_for_admission_without_locking_other_homes() 
         fs::read(nested.path.join("stage-dir/data")).unwrap(),
         b"directory payload"
     );
-    // Appending to an admitted file changes no names and must not serialize a Run.
     open_anchored_session_log_append_file(&nested.file("log"))
         .expect("existing log opens during admission")
         .write_all(b"new\n")
@@ -125,17 +162,15 @@ fn protected_home_publication_waits_for_admission_without_locking_other_homes() 
 
 #[test]
 fn private_child_revalidates_permissions_on_the_opened_directory() {
-    use std::os::unix::fs::PermissionsExt as _;
-
     let workspace = empty_workspace("private-directory-open-race");
     let private = workspace.join("private");
     let moved = workspace.join("private-checked");
-    fs::create_dir(&private).expect("private directory created");
-    fs::set_permissions(&private, fs::Permissions::from_mode(0o700))
-        .expect("private permissions set");
+    private_dir(&private);
     let checked = private.clone();
     let replacement = private.clone();
     set_private_directory_open_observer(move || {
+        use std::os::unix::fs::PermissionsExt as _;
+
         fs::rename(checked, moved).expect("checked directory moved");
         fs::create_dir(&replacement).expect("replacement directory created");
         fs::set_permissions(&replacement, fs::Permissions::from_mode(0o777))
@@ -199,13 +234,9 @@ fn private_directory_validation_rejects_an_owner_other_than_the_effective_user()
 
 #[test]
 fn private_child_reports_a_removed_open_race_as_io() {
-    use std::os::unix::fs::PermissionsExt as _;
-
     let workspace = empty_workspace("private-directory-removed-open-race");
     let private = workspace.join("private");
-    fs::create_dir(&private).expect("private directory created");
-    fs::set_permissions(&private, fs::Permissions::from_mode(0o700))
-        .expect("private permissions set");
+    private_dir(&private);
     set_private_directory_open_observer(move || {
         fs::remove_dir(private).expect("checked directory removed");
     });
@@ -227,74 +258,17 @@ fn private_child_reports_a_removed_open_race_as_io() {
 
 #[test]
 fn private_child_still_denies_a_symlink_open_race() {
-    use std::os::unix::fs::{PermissionsExt as _, symlink};
-
-    let workspace = empty_workspace("private-directory-symlink-open-race");
-    let outside = empty_workspace("private-directory-symlink-open-race-outside");
-    let private = workspace.join("private");
-    let moved = workspace.join("private-checked");
-    fs::create_dir(&private).expect("private directory created");
-    fs::set_permissions(&private, fs::Permissions::from_mode(0o700))
-        .expect("private permissions set");
-    let checked = private.clone();
-    set_private_directory_open_observer(move || {
-        fs::rename(checked, moved).expect("checked directory moved");
-        symlink(outside, private).expect("symlink replacement created");
-    });
-    let parent = AnchoredDir::workspace(&workspace).expect("workspace opens");
-
-    let err = parent
-        .private_child("private", false, DirectoryErrorMode::ScriptWrite)
-        .expect_err("symlink replacement must be denied");
-
-    assert!(
-        matches!(
-            &err,
-            RuntimeError::Denied {
-                reason: core_policy::DenyReasonCode::SymlinkEscapeDenied,
-                ..
-            }
-        ),
-        "{err}"
+    assert_symlink_open_race_is_denied(
+        "private-directory-symlink-open-race",
+        OsStr::new("private"),
     );
 }
 
-// macOS rejects non-UTF-8 directory entries before this race can be constructed.
 #[cfg(not(target_os = "macos"))]
 #[test]
 fn private_child_denies_a_non_unicode_symlink_open_race() {
-    use std::{
-        ffi::OsString,
-        os::unix::{ffi::OsStringExt as _, fs::PermissionsExt as _, fs::symlink},
-    };
+    use std::{ffi::OsString, os::unix::ffi::OsStringExt as _};
 
-    let workspace = empty_workspace("private-directory-non-unicode-symlink-open-race");
-    let outside = empty_workspace("private-directory-non-unicode-symlink-open-race-outside");
     let leaf = OsString::from_vec(b"private-\xff".to_vec());
-    let private = workspace.join(&leaf);
-    let moved = workspace.join("private-checked");
-    fs::create_dir(&private).expect("private directory created");
-    fs::set_permissions(&private, fs::Permissions::from_mode(0o700))
-        .expect("private permissions set");
-    let checked = private.clone();
-    set_private_directory_open_observer(move || {
-        fs::rename(checked, moved).expect("checked directory moved");
-        symlink(outside, private).expect("non-Unicode symlink replacement created");
-    });
-    let parent = AnchoredDir::workspace(&workspace).expect("workspace opens");
-
-    let err = parent
-        .private_child(&leaf, false, DirectoryErrorMode::ScriptWrite)
-        .expect_err("non-Unicode symlink replacement must be denied");
-
-    assert!(
-        matches!(
-            &err,
-            RuntimeError::Denied {
-                reason: core_policy::DenyReasonCode::SymlinkEscapeDenied,
-                ..
-            }
-        ),
-        "{err}"
-    );
+    assert_symlink_open_race_is_denied("private-directory-non-unicode-symlink-open-race", &leaf);
 }

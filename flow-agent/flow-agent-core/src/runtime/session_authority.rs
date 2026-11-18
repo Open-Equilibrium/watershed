@@ -28,7 +28,6 @@ thread_local! {
 pub(crate) use crate::runtime::session_store::stable_native_path_bytes;
 
 pub(crate) fn conversation_ownership_key(conversation_id: &str) -> String {
-    // Fixture and productive roots address the same equal-ID public pair.
     conversation_id.to_owned()
 }
 
@@ -46,7 +45,6 @@ pub struct SessionOwnershipLease {
 #[derive(Debug)]
 pub(crate) struct SessionOwnershipObserver {
     path: OnceCell<AnchoredFile>,
-    // WHY: an authority directory that does not exist yet is looked up again on later polls.
     workspace: PathBuf,
     key: String,
 }

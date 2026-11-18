@@ -1,10 +1,8 @@
 import 'dart:math' show atan2, cos, max, min, pi, sin, sqrt;
 import 'dart:ui' show Offset;
 
-/// Shapes a drawn stroke can snap into.
 enum SnapKind { line, rectangle, ellipse, triangle }
 
-/// A perfect shape a drawn stroke snaps into.
 class SnappedShape {
   const SnappedShape({
     required this.kind,
@@ -17,47 +15,33 @@ class SnappedShape {
 
   final SnapKind kind;
 
-  /// Line: its two ends. Triangle: its three corners. Otherwise empty.
   final List<Offset> points;
 
-  /// Rectangle and ellipse only: centre, size and rotation.
   final Offset center;
   final double width;
   final double height;
 
-  /// Radians, clockwise on screen as Flutter's canvas rotates.
   final double rotation;
 }
 
-/// Strokes shorter than this along their path (logical px) are no shape.
 const _minLength = 12.0;
 
-/// Ends at least this share of the bounding diagonal apart make a stroke open.
 const _openShare = 0.25;
 
-/// An open stroke is a line when its ends span this share of its path.
 const _straightShare = 0.9;
 
-/// Ramer–Douglas–Peucker tolerance, as a share of the bounding diagonal.
 const _simplifyShare = 0.08;
 
-/// A closed outline must cover this share of its convex hull.
 const _solidShare = 0.8;
 
-/// A triangle's corners must cover this share of the hull; a rectangle's hull
-/// must fill this share of its box.
 const _fillShare = 0.9;
 
-/// Largest mean |r - 1| over the stroke, r being the normalised radius.
 const _ellipseError = 0.05;
 
-/// Boxes within this angle of an axis snap to it.
 const _snapAngle = 10 * pi / 180;
 
-/// A box: centre, sides and the angle of its width axis.
 typedef _Box = ({Offset center, double width, double height, double angle});
 
-/// The shape [points] were meant to be; null for anything else.
 SnappedShape? snapShape(List<Offset> points) {
   if (points.length < 3) return null;
   final length = _pathLength(points);
@@ -72,7 +56,6 @@ SnappedShape? snapShape(List<Offset> points) {
 SnappedShape? _closed(List<Offset> points, double diagonal) {
   final hull = _hull(points);
   final hullArea = _area(hull);
-  // A loop, spiral or figure eight lies far from its own hull: no shape.
   if (hull.length < 3 || _area(points) < _solidShare * hullArea) return null;
   final corners = _simplifyRing(hull, _simplifyShare * diagonal);
   if (corners.length == 3 && _area(corners) >= _fillShare * hullArea) {
@@ -85,7 +68,6 @@ SnappedShape? _closed(List<Offset> points, double diagonal) {
   return _ellipse(points);
 }
 
-/// An ellipse along the stroke's principal (PCA) axes, if the stroke hugs it.
 SnappedShape? _ellipse(List<Offset> points) {
   var mean = Offset.zero;
   for (final p in points) {
@@ -113,8 +95,6 @@ SnappedShape? _ellipse(List<Offset> points) {
   return _boxShape(SnapKind.ellipse, box);
 }
 
-/// [box] as a shape whose width runs within 45 degrees of level, then snapped
-/// to level when within [_snapAngle] of it.
 SnappedShape _boxShape(SnapKind kind, _Box box) {
   var angle = box.angle % pi;
   if (angle > pi / 2) angle -= pi;
@@ -133,7 +113,6 @@ SnappedShape _boxShape(SnapKind kind, _Box box) {
   );
 }
 
-/// The smallest box around the convex [hull], with a side along one edge.
 _Box _minAreaBox(List<Offset> hull) {
   _Box? best;
   for (var i = 0; i < hull.length; i++) {
@@ -146,7 +125,6 @@ _Box _minAreaBox(List<Offset> hull) {
   return best!;
 }
 
-/// The box around [points] whose width axis is turned by [angle].
 _Box _boxAt(List<Offset> points, double angle) {
   final c = cos(angle), s = sin(angle);
   var minU = double.infinity, maxU = -double.infinity;
@@ -167,7 +145,6 @@ _Box _boxAt(List<Offset> points, double angle) {
   );
 }
 
-/// Convex hull by Andrew's monotone chain.
 List<Offset> _hull(List<Offset> points) {
   final sorted = [
     ...points,
@@ -187,8 +164,6 @@ List<Offset> _hull(List<Offset> points) {
   return [...chain(sorted), ...chain(sorted.reversed)];
 }
 
-/// Ramer–Douglas–Peucker over a closed [ring]. It anchors at the vertex farthest
-/// from the centroid, a corner of any triangle, so no corner gets cut.
 List<Offset> _simplifyRing(List<Offset> ring, double epsilon) {
   final centroid =
       ring.fold(Offset.zero, (sum, p) => sum + p) / ring.length.toDouble();
@@ -200,7 +175,6 @@ List<Offset> _simplifyRing(List<Offset> ring, double epsilon) {
   return [...first, ...second.sublist(1, second.length - 1)];
 }
 
-/// Index of the vertex of [ring] farthest from [from].
 int _farthest(List<Offset> ring, Offset from) {
   var far = 0;
   for (var i = 1; i < ring.length; i++) {
@@ -209,7 +183,6 @@ int _farthest(List<Offset> ring, Offset from) {
   return far;
 }
 
-/// Ramer–Douglas–Peucker over an open [chain]; keeps both ends.
 List<Offset> _simplifyChain(List<Offset> chain, double epsilon) {
   final keep = List.filled(chain.length, false);
   keep[0] = true;
@@ -237,19 +210,16 @@ List<Offset> _simplifyChain(List<Offset> chain, double epsilon) {
   ];
 }
 
-/// Distance from [p] to the line through [a] and [b].
 double _distanceToLine(Offset p, Offset a, Offset b) {
   final length = (b - a).distance;
   return length == 0 ? (p - a).distance : _cross(a, b, p).abs() / length;
 }
 
-/// Cross product of the vectors [o]→[a] and [o]→[b].
 double _cross(Offset o, Offset a, Offset b) {
   final oa = a - o, ob = b - o;
   return oa.dx * ob.dy - oa.dy * ob.dx;
 }
 
-/// Area of the polygon through [ring], closed back to its first vertex.
 double _area(List<Offset> ring) {
   var twice = 0.0;
   for (var i = 0; i < ring.length; i++) {
@@ -267,7 +237,6 @@ double _pathLength(List<Offset> points) {
   return total;
 }
 
-/// Width and height of the bounding box of [points].
 Offset _extent(List<Offset> points) {
   var lo = points.first, hi = points.first;
   for (final p in points) {

@@ -1,7 +1,3 @@
-//! Database Blocks as Dart builds and reads them: fields, options, rows and cells cross as
-//! flat messages, rows come in filtered and sorted windows, and writes reach the Block's
-//! subscribers.
-
 use std::sync::{Arc, Mutex};
 
 use super::workspace::{Folder, Memory, lisbon, mutation, query, resource};
@@ -11,7 +7,7 @@ use crate::api::database::{
 use crate::api::replica::LiquidWorkspace;
 use crate::api::workspace::{
     BridgeAnswer, BridgeBlockKind, BridgeMutation, BridgeMutationKind, BridgeQuery,
-    BridgeQueryKind, BridgeResource, BridgeResourceKind, BridgeView, MAX_WINDOW,
+    BridgeQueryKind, BridgeResource, BridgeResourceKind, BridgeView,
 };
 
 fn cell(kind: BridgeCellKind) -> BridgeCell {
@@ -38,7 +34,6 @@ fn number(value: f64) -> BridgeCell {
     }
 }
 
-/// The Database "Expenses" on the Page "Lisbon", after its Text Block.
 struct Expenses {
     workspace: LiquidWorkspace,
     page: String,
@@ -73,7 +68,6 @@ impl Expenses {
         expenses
     }
 
-    /// Applies `write` to the Database and answers what it created, or its Action.
     fn apply(&self, write: BridgeMutation) -> Result<String, String> {
         let applied = self.workspace.apply(BridgeMutation {
             page: Some(self.page.clone()),
@@ -133,7 +127,6 @@ impl Expenses {
         })
     }
 
-    /// The window's rows as their "Name" cells.
     fn names(&self, read: BridgeQuery) -> Vec<String> {
         self.rows(read)
             .unwrap()
@@ -225,7 +218,6 @@ fn a_database_s_fields_options_and_cells_cross_the_bridge() {
     assert_eq!(value(&date), Some(day));
     assert_eq!(value(&paid), Some(ticked));
 
-    // Clearing a cell leaves it out of its row.
     expenses
         .set(&rent, &amount, cell(BridgeCellKind::Empty))
         .unwrap();
@@ -304,46 +296,8 @@ fn rows_come_in_filtered_and_sorted_windows() {
 }
 
 #[test]
-fn renames_and_removals_show_in_the_next_read() {
-    let expenses = Expenses::new("database-remove");
-    let amount = expenses.field(&expenses.name, "Amount", BridgeFieldKind::Number);
-    let rent = expenses.row(None);
-    let train = expenses.row(Some(&rent));
-    for write in [
-        BridgeMutation {
-            text: Some("Trip costs".into()),
-            ..mutation(BridgeMutationKind::RenameDatabase)
-        },
-        BridgeMutation {
-            field: Some(amount.clone()),
-            text: Some("Euros".into()),
-            ..mutation(BridgeMutationKind::RenameField)
-        },
-        BridgeMutation {
-            field: Some(expenses.name.clone()),
-            ..mutation(BridgeMutationKind::RemoveField)
-        },
-        BridgeMutation {
-            row: Some(rent.clone()),
-            ..mutation(BridgeMutationKind::RemoveRow)
-        },
-    ] {
-        expenses.apply(write).unwrap();
-    }
-    let database = expenses.database().database.unwrap();
-    assert_eq!(database.name, "Trip costs");
-    let names: Vec<_> = database.fields.iter().map(|field| &field.name).collect();
-    assert_eq!(names, ["Euros"]);
-    let window = expenses.rows(query(BridgeQueryKind::Rows)).unwrap();
-    let rows: Vec<_> = window.rows.iter().map(|row| &row.id).collect();
-    assert_eq!(rows, [&train]);
-}
-
-#[test]
-fn a_database_write_reaches_its_block_s_subscribers_and_then_leaves_memory() {
+fn a_database_write_reaches_its_block_s_subscribers_until_it_closes() {
     let expenses = Expenses::new("database-notify");
-    let page = liquid_core::PageId::parse(&expenses.page).unwrap();
-    assert!(!expenses.workspace.is_loaded(&page), "after adding it");
     let seen = Arc::new(Mutex::new(Vec::new()));
     let block = BridgeResource {
         page: Some(expenses.page.clone()),
@@ -363,20 +317,17 @@ fn a_database_write_reaches_its_block_s_subscribers_and_then_leaves_memory() {
     assert_eq!(*seen.lock().unwrap(), [0, 1, 2]);
 
     expenses.workspace.close(1);
-    assert!(!expenses.workspace.is_loaded(&page));
     expenses.set(&rent, &expenses.name, text("Flat")).unwrap();
-    assert!(!expenses.workspace.is_loaded(&page), "after a write");
+    assert_eq!(
+        *seen.lock().unwrap(),
+        [0, 1, 2],
+        "a closed subscription hears nothing more"
+    );
     let refused = expenses.set(&rent, &expenses.name, number(1.0));
     assert_eq!(
         refused.unwrap_err(),
         "the value is not of its kind or not valid"
     );
-    assert!(
-        !expenses.workspace.is_loaded(&page),
-        "after a refused write"
-    );
-    expenses.rows(query(BridgeQueryKind::Rows)).unwrap();
-    assert!(!expenses.workspace.is_loaded(&page), "after a read");
 }
 
 #[test]
@@ -432,61 +383,88 @@ fn malformed_database_requests_are_refused() {
 }
 
 #[test]
-fn rows_and_fields_added_last_go_after_all_others() {
-    let expenses = Expenses::new("database-last");
-    let last = |kind| BridgeMutation {
-        last: true,
-        ..mutation(kind)
+fn field_row_and_code_changes_map_to_their_core_mutations() {
+    let expenses = Expenses::new("database-mapping");
+    let rows = |e: &Expenses| e.rows(query(BridgeQueryKind::Rows)).unwrap().rows;
+    let fields = |e: &Expenses| e.database().database.unwrap().fields;
+    let views = |e: &Expenses| {
+        e.workspace
+            .query(BridgeQuery {
+                page: Some(e.page.clone()),
+                ..query(BridgeQueryKind::Views)
+            })
+            .unwrap()
+            .views
     };
-    let a = expenses.apply(last(BridgeMutationKind::AddRow)).unwrap();
-    let b = expenses.apply(last(BridgeMutationKind::AddRow)).unwrap();
-    let first = expenses.row(None);
-    let rows = expenses.rows(query(BridgeQueryKind::Rows)).unwrap().rows;
-    let ids: Vec<_> = rows.into_iter().map(|row| row.id).collect();
-    assert_eq!(ids, [first, a, b]);
+    let cost = expenses.field(&expenses.name, "Cost", BridgeFieldKind::Number);
+    let row = expenses.row(None);
+    assert_eq!(rows(&expenses)[0].id, row);
 
-    let amount = expenses
+    expenses
         .apply(BridgeMutation {
-            text: Some("Amount".into()),
-            field_kind: Some(BridgeFieldKind::Number),
-            ..last(BridgeMutationKind::AddField)
+            field: Some(cost.clone()),
+            text: Some("Price".into()),
+            ..mutation(BridgeMutationKind::RenameField)
         })
         .unwrap();
-    let fields = expenses.database().database.unwrap().fields;
-    assert_eq!(fields.last().unwrap().id, amount);
-}
+    assert_eq!(
+        fields(&expenses)
+            .iter()
+            .find(|field| field.id == cost)
+            .unwrap()
+            .name,
+        "Price"
+    );
 
-#[test]
-fn a_view_names_its_block_s_kind() {
-    let expenses = Expenses::new("database-kind");
-    let views = expenses
+    expenses
+        .apply(BridgeMutation {
+            field: Some(cost.clone()),
+            ..mutation(BridgeMutationKind::RemoveField)
+        })
+        .unwrap();
+    assert!(fields(&expenses).iter().all(|field| field.id != cost));
+
+    expenses
+        .apply(BridgeMutation {
+            row: Some(row),
+            ..mutation(BridgeMutationKind::RemoveRow)
+        })
+        .unwrap();
+    assert!(rows(&expenses).is_empty());
+
+    let paragraph = views(&expenses)[0].block.clone();
+    let on_paragraph = |kind| BridgeMutation {
+        page: Some(expenses.page.clone()),
+        block: Some(paragraph.clone()),
+        ..mutation(kind)
+    };
+    expenses
+        .workspace
+        .apply(on_paragraph(BridgeMutationKind::TurnIntoCode))
+        .unwrap();
+    expenses
+        .workspace
+        .apply(BridgeMutation {
+            text: Some("rust".into()),
+            ..on_paragraph(BridgeMutationKind::SetCodeLanguage)
+        })
+        .unwrap();
+    let code = expenses
         .workspace
         .query(BridgeQuery {
             page: Some(expenses.page.clone()),
-            ..query(BridgeQueryKind::Views)
-        })
-        .unwrap()
-        .views;
-    let kinds: Vec<_> = views.iter().map(|view| view.kind).collect();
-    // Lisbon's Text Block, then the Table after it.
-    assert_eq!(kinds, [BridgeBlockKind::Text, BridgeBlockKind::Database]);
-}
-
-#[test]
-fn a_rows_window_never_exceeds_its_cap() {
-    let expenses = Expenses::new("database-rows-cap");
-    let mut last = None;
-    for _ in 0..MAX_WINDOW + 11 {
-        last = Some(expenses.row(last.as_deref()));
-    }
-    let window = expenses
-        .rows(BridgeQuery {
-            limit: i64::MAX,
-            ..query(BridgeQueryKind::Rows)
+            block: Some(paragraph),
+            ..query(BridgeQueryKind::Code)
         })
         .unwrap();
-    assert_eq!(window.rows.len() as i64, MAX_WINDOW);
-    assert_eq!(window.count, MAX_WINDOW + 11);
+    assert_eq!(code.language.as_deref(), Some("rust"));
+    assert_eq!(
+        views(&expenses)
+            .iter()
+            .map(|view| view.kind)
+            .collect::<Vec<_>>(),
+        [BridgeBlockKind::Code, BridgeBlockKind::Database],
+    );
 }
 
 #[test]

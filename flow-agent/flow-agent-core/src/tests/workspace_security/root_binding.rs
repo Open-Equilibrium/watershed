@@ -175,33 +175,44 @@ fn apply_rejects_a_workspace_root_rebound_after_planning() {
 }
 
 #[test]
-fn run_rejects_a_workspace_root_rebound_after_config_load() {
-    let workspace = workspace_copy("hello-flow");
-    let outside = workspace_copy("hello-flow");
-    let moved = workspace.with_extension("configured-original");
-    let workspace_for_observer = workspace.to_path_buf();
-    let outside_for_observer = outside.to_path_buf();
-    let moved_for_observer = moved.clone();
-    set_run_post_config_observer(move || {
-        fs::rename(&workspace_for_observer, &moved_for_observer)
-            .expect("configured workspace root moves");
-        fs::rename(&outside_for_observer, &workspace_for_observer)
-            .expect("workspace root is rebound after config load");
-    });
+fn run_rejects_a_workspace_root_rebound_before_planning() {
+    type SetObserver = fn(Box<dyn FnOnce()>);
+    let observers: [(&str, SetObserver); 2] = [
+        ("after config load", |observer| {
+            set_run_post_config_observer(observer)
+        }),
+        ("after reservation", |observer| {
+            set_run_pre_plan_observer(observer)
+        }),
+    ];
+    for (label, set_observer) in observers {
+        let workspace = workspace_copy("hello-flow");
+        let outside = workspace_copy("hello-flow");
+        let moved = workspace.with_extension(format!("{}-original", label.replace(' ', "-")));
+        let workspace_for_observer = workspace.to_path_buf();
+        let outside_for_observer = outside.to_path_buf();
+        let moved_for_observer = moved.clone();
+        set_observer(Box::new(move || {
+            fs::rename(&workspace_for_observer, &moved_for_observer)
+                .expect("configured workspace root moves");
+            fs::rename(&outside_for_observer, &workspace_for_observer)
+                .expect("workspace root is rebound");
+        }));
 
-    let result = run_flow(&workspace, "hello-flow", EmitMode::Jsonl);
-    fs::rename(&*workspace, &*outside).expect("rebound workspace restores");
-    fs::rename(&moved, &*workspace).expect("configured workspace restores");
+        let result = run_flow(&workspace, "hello-flow", EmitMode::Jsonl);
+        fs::rename(&*workspace, &*outside).expect("rebound workspace restores");
+        fs::rename(&moved, &*workspace).expect("configured workspace restores");
 
-    let err = result.expect_err("configured workspace identity must remain authoritative");
-    assert!(
-        err.to_string().contains("workspace root identity changed"),
-        "{err}"
-    );
-    assert!(
-        !outside.join("out/summary.txt").exists(),
-        "rebound outside workspace must remain untouched"
-    );
+        let err = result.expect_err("the run-bound workspace identity must remain authoritative");
+        assert!(
+            err.to_string().contains("workspace root identity changed"),
+            "{label}: {err}"
+        );
+        assert!(
+            !outside.join("out/summary.txt").exists(),
+            "{label}: rebound outside workspace must remain untouched"
+        );
+    }
 }
 
 #[test]
@@ -242,34 +253,4 @@ fn run_uses_the_retained_workspace_when_the_root_is_transiently_rebound() {
         "hello\n"
     );
     assert!(!rebound.join("out/summary.txt").exists());
-}
-
-#[test]
-fn run_retains_one_workspace_root_across_reservation_planning_and_apply() {
-    let workspace = workspace_copy("hello-flow");
-    let outside = workspace_copy("hello-flow");
-    let moved = workspace.with_extension("run-original");
-    let workspace_for_observer = workspace.to_path_buf();
-    let outside_for_observer = outside.to_path_buf();
-    let moved_for_observer = moved.clone();
-    set_run_pre_plan_observer(move || {
-        fs::rename(&workspace_for_observer, &moved_for_observer)
-            .expect("reserved workspace root moves before planning");
-        fs::rename(&outside_for_observer, &workspace_for_observer)
-            .expect("workspace root is rebound before planning");
-    });
-
-    let result = run_flow(&workspace, "hello-flow", EmitMode::Jsonl);
-    fs::rename(&*workspace, &*outside).expect("rebound workspace restores");
-    fs::rename(&moved, &*workspace).expect("reserved workspace restores");
-
-    let err = result.expect_err("the run-bound workspace identity must remain authoritative");
-    assert!(
-        err.to_string().contains("workspace root identity changed"),
-        "{err}"
-    );
-    assert!(
-        !outside.join("out/summary.txt").exists(),
-        "rebound outside workspace must remain untouched"
-    );
 }

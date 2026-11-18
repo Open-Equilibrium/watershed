@@ -137,7 +137,6 @@ fn conversation_status_summary(
     })
 }
 
-/// Renders one bounded deterministic page of conversation status.
 pub fn conversation_status(
     workspace: impl AsRef<Path>,
     continuation_token: Option<&str>,

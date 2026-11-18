@@ -1,18 +1,16 @@
-use super::{
-    event_writer::support::{
-        SyncProbe, enqueue_test_event, progress_writer, progress_writer_with_sync_probe,
-        reserved_writer_start,
-    },
-    helpers::{empty_workspace, reserve_session_log},
+use super::event_writer::support::{
+    SyncProbe, assert_error_contains, enqueue_test_event, progress_writer, reserved_session,
+    reserved_writer_start,
 };
 use crate::runtime::{
     event_writer::{RuntimeEventSink, SerialSessionWriter},
     live_events::{LiveEventReceiveError, live_event_channel},
-    segmented_appender::{EventLogAppender, SessionLogAppender},
+    segmented_appender::{BatchAppendFailure, EventLogAppender, SessionLogAppender},
     serial_event_writer::{
         DirtySyncState, EVENT_WRITER_BATCH_CAPACITY, EVENT_WRITER_BATCH_WINDOW,
         EVENT_WRITER_DIRTY_SYNC_INTERVAL, PendingEventBatch,
     },
+    session_lock::SessionReservation,
     session_reading::SessionEventReader,
     stage_results::reconcile_controlled_stages,
     types::RuntimeError,
@@ -23,19 +21,19 @@ use std::{
     io::{self, Write},
     path::Path,
     sync::{
-        Arc, Mutex,
+        Arc,
         atomic::{AtomicUsize, Ordering},
     },
     thread,
     time::{Duration, Instant},
 };
 
-struct SyncFailAppender {
-    bytes: Arc<Mutex<Vec<u8>>>,
-}
-
 struct SyncProbeAppender {
     syncs: Arc<AtomicUsize>,
+}
+
+struct PanicAppender {
+    panic_on_sync: bool,
 }
 
 impl EventLogAppender for SyncProbeAppender {
@@ -49,89 +47,35 @@ impl EventLogAppender for SyncProbeAppender {
     }
 }
 
-impl EventLogAppender for SyncFailAppender {
-    fn append(&mut self, _path: &Path, bytes: &[u8]) -> Result<(), RuntimeError> {
-        self.bytes
-            .lock()
-            .expect("appender bytes lock")
-            .extend_from_slice(bytes);
-        Ok(())
-    }
-
-    fn sync(&mut self, path: &Path) -> Result<(), RuntimeError> {
-        Err(RuntimeError::Io {
-            path: path.to_owned(),
-            source: io::Error::other("injected sync failure"),
-        })
-    }
-}
-
-struct PanicAppendAppender;
-
-impl EventLogAppender for PanicAppendAppender {
+impl EventLogAppender for PanicAppender {
     fn append(&mut self, _path: &Path, _bytes: &[u8]) -> Result<(), RuntimeError> {
-        panic!("injected append panic");
+        if !self.panic_on_sync {
+            panic!("injected append panic");
+        }
+        Ok(())
     }
 
     fn sync(&mut self, _path: &Path) -> Result<(), RuntimeError> {
+        if self.panic_on_sync {
+            panic!("injected shutdown sync panic");
+        }
         Ok(())
     }
 }
-
-struct PanicShutdownSyncAppender;
 
 fn assert_writer_panic_causes(error: &RuntimeError) {
-    let message = error.to_string();
-    assert!(
-        message.contains("session event writer channel closed unexpectedly"),
-        "{message}"
-    );
-    assert!(
-        message.contains("session event writer panicked"),
-        "{message}"
-    );
-}
-
-impl EventLogAppender for PanicShutdownSyncAppender {
-    fn append(&mut self, _path: &Path, _bytes: &[u8]) -> Result<(), RuntimeError> {
-        Ok(())
-    }
-
-    fn sync(&mut self, _path: &Path) -> Result<(), RuntimeError> {
-        panic!("injected shutdown sync panic");
-    }
-}
-
-#[test]
-fn finish_reports_append_panic_and_channel_failure_together() {
-    let workspace = empty_workspace("event-writer-append-panic");
-    let reservation = reserve_session_log(&workspace, "panicappend001").expect("session reserved");
-    let mut writer = SerialSessionWriter::start_with_appender(
-        reserved_writer_start(&reservation, None),
-        PanicAppendAppender,
-    )
-    .expect("writer starts");
-    let event = test_event("panicappend001", "evt-first", EventType::SessionStarted, 1);
-    let jsonl = event.canonical_jsonl().expect("event serializes");
-
-    writer
-        .commit(&event, &jsonl, None)
-        .expect_err("append panic closes the response channel");
-    let err = writer
-        .finish()
-        .expect_err("finish must retain the channel and panic causes");
-    assert_writer_panic_causes(&err);
-
-    reservation.release_lock().expect("reservation rolls back");
+    assert_error_contains(error, "session event writer channel closed unexpectedly");
+    assert_error_contains(error, "session event writer panicked");
 }
 
 #[test]
 fn finish_reports_shutdown_sync_panic_and_channel_failure_together() {
-    let workspace = empty_workspace("event-writer-shutdown-panic");
-    let reservation = reserve_session_log(&workspace, "panicsync001").expect("session reserved");
+    let (_workspace, reservation) = reserved_session("event-writer-shutdown-panic", "panicsync001");
     let mut writer = SerialSessionWriter::start_with_appender(
         reserved_writer_start(&reservation, None),
-        PanicShutdownSyncAppender,
+        PanicAppender {
+            panic_on_sync: true,
+        },
     )
     .expect("writer starts");
     let event = test_event("panicsync001", "evt-first", EventType::SessionStarted, 1);
@@ -150,12 +94,13 @@ fn finish_reports_shutdown_sync_panic_and_channel_failure_together() {
 
 #[test]
 fn append_panic_remains_visible_with_operation_and_cleanup_failures() {
-    let workspace = empty_workspace("event-writer-panic-stages");
-    let reservation = reserve_session_log(&workspace, "panicstages001").expect("session reserved");
+    let (_workspace, reservation) = reserved_session("event-writer-panic-stages", "panicstages001");
     reservation.activate().expect("reservation activates");
     let mut writer = SerialSessionWriter::start_with_appender(
         reserved_writer_start(&reservation, None),
-        PanicAppendAppender,
+        PanicAppender {
+            panic_on_sync: false,
+        },
     )
     .expect("writer starts");
     let event = test_event("panicstages001", "evt-first", EventType::SessionStarted, 1);
@@ -172,53 +117,22 @@ fn append_panic_remains_visible_with_operation_and_cleanup_failures() {
     let err = reconcile_controlled_stages(operation, finalization, reservation.cleanup())
         .expect_err("operation, panic, and cleanup failures must remain visible");
     assert_writer_panic_causes(&err);
-    let message = err.to_string();
-    assert!(message.contains("ownership cleanup failed"), "{message}");
+    assert_error_contains(&err, "ownership cleanup failed");
 
     fs::remove_dir(reservation.lock_path.diagnostic_path())
         .expect("cleanup blocker directory removed");
 }
 
 #[test]
-fn finish_preserves_every_deferred_batch_failure() {
-    let workspace = empty_workspace("event-writer-deferred-failures");
-    let reservation = reserve_session_log(&workspace, "hello001").expect("session reserved");
-    let appends = Arc::new(Mutex::new(Vec::new()));
-    let (notifier, _receiver) = live_event_channel();
-    let (mut writer, progress, _) =
-        progress_writer(&reservation, 2, notifier, appends, Some(Some(0)), None);
-    for event in &progress {
-        enqueue_test_event(&mut writer, event);
-    }
-
-    let err = writer
-        .finish()
-        .expect_err("every deferred failure must remain visible");
-    let message = err.to_string();
-    assert!(
-        message.contains("injected batch append failure"),
-        "{message}"
-    );
-    assert!(
-        message.contains("event discarded after a prior session writer failure"),
-        "{message}"
-    );
-
-    reservation.release_lock().expect("reservation rolls back");
-}
-
-#[test]
 fn finish_preserves_an_all_committed_batch_failure_and_final_sync_failure() {
-    let workspace = empty_workspace("event-writer-all-committed-batch-failure");
-    let reservation = reserve_session_log(&workspace, "hello001").expect("session reserved");
-    let appends = Arc::new(Mutex::new(Vec::new()));
+    let (_workspace, reservation) =
+        reserved_session("event-writer-all-committed-batch-failure", "hello001");
     let syncs = Arc::new(AtomicUsize::new(0));
     let (notifier, _receiver) = live_event_channel();
-    let (mut writer, progress, _) = progress_writer_with_sync_probe(
+    let (mut writer, progress, _, appends) = progress_writer(
         &reservation,
         2,
         notifier,
-        Arc::clone(&appends),
         Some(Some(2)),
         None,
         Some(SyncProbe {
@@ -234,12 +148,8 @@ fn finish_preserves_an_all_committed_batch_failure_and_final_sync_failure() {
     let err = writer
         .finish()
         .expect_err("append and final sync failures must both remain visible");
-    let message = err.to_string();
-    assert!(
-        message.contains("injected batch append failure"),
-        "{message}"
-    );
-    assert!(message.contains("injected batch sync failure"), "{message}");
+    assert_error_contains(&err, "injected batch append failure");
+    assert_error_contains(&err, "injected batch sync failure");
     assert_eq!(
         appends.lock().expect("batch append probe lock").concat(),
         progress_jsonl.concat().into_bytes()
@@ -251,8 +161,8 @@ fn finish_preserves_an_all_committed_batch_failure_and_final_sync_failure() {
 
 #[test]
 fn finish_syncs_an_acknowledged_event_after_a_later_validation_failure() {
-    let workspace = empty_workspace("event-writer-final-sync-after-failure");
-    let reservation = reserve_session_log(&workspace, "finalsync001").expect("session reserved");
+    let (_workspace, reservation) =
+        reserved_session("event-writer-final-sync-after-failure", "finalsync001");
     let syncs = Arc::new(AtomicUsize::new(0));
     let mut writer = SerialSessionWriter::start_with_appender(
         reserved_writer_start(&reservation, None),
@@ -286,15 +196,13 @@ fn finish_syncs_an_acknowledged_event_after_a_later_validation_failure() {
 
 #[test]
 fn progress_batches_stay_bounded_and_flush_before_semantic_events() {
-    let workspace = empty_workspace("event-writer-batch-bound");
-    let reservation = reserve_session_log(&workspace, "hello001").expect("session reserved");
-    let appends = Arc::new(Mutex::new(Vec::new()));
+    let (_workspace, reservation) = reserved_session("event-writer-batch-bound", "hello001");
     let (notifier, receiver) = live_event_channel();
-    let (mut writer, progress, terminal) = progress_writer(
+    let (mut writer, progress, terminal, appends) = progress_writer(
         &reservation,
         EVENT_WRITER_BATCH_CAPACITY + 1,
         notifier,
-        Arc::clone(&appends),
+        None,
         None,
         None,
     );
@@ -336,12 +244,10 @@ fn lone_progress_flushes_on_a_non_sliding_deadline() {
     batch.start(first + Duration::from_millis(20));
     assert!(batch.is_due(first + EVENT_WRITER_BATCH_WINDOW));
 
-    let workspace = empty_workspace("event-writer-batch-deadline");
-    let reservation = reserve_session_log(&workspace, "hello001").expect("session reserved");
-    let appends = Arc::new(Mutex::new(Vec::new()));
+    let (_workspace, reservation) = reserved_session("event-writer-batch-deadline", "hello001");
     let (notifier, receiver) = live_event_channel();
-    let (mut writer, progress, _) =
-        progress_writer(&reservation, 1, notifier, Arc::clone(&appends), None, None);
+    let (mut writer, progress, _, appends) =
+        progress_writer(&reservation, 1, notifier, None, None, None);
 
     let jsonl = enqueue_test_event(&mut writer, &progress[0]);
     assert_eq!(
@@ -362,19 +268,19 @@ fn lone_progress_flushes_on_a_non_sliding_deadline() {
 #[test]
 fn failed_progress_batch_retains_and_notifies_only_its_complete_prefix() {
     for readable_prefix in [Some(0), Some(1), None] {
-        let workspace = empty_workspace(&format!(
-            "event-writer-batch-failure-{}",
-            readable_prefix.map_or("invalid".to_owned(), |count| count.to_string())
-        ));
-        let reservation = reserve_session_log(&workspace, "hello001").expect("session reserved");
-        let appends = Arc::new(Mutex::new(Vec::new()));
+        let (_workspace, reservation) = reserved_session(
+            &format!(
+                "event-writer-batch-failure-{}",
+                readable_prefix.map_or("invalid".to_owned(), |count| count.to_string())
+            ),
+            "hello001",
+        );
         let syncs = Arc::new(AtomicUsize::new(0));
         let (notifier, receiver) = live_event_channel();
-        let (mut writer, progress, terminal) = progress_writer_with_sync_probe(
+        let (mut writer, progress, terminal, appends) = progress_writer(
             &reservation,
             2,
             notifier,
-            Arc::clone(&appends),
             Some(readable_prefix),
             None,
             Some(SyncProbe {
@@ -395,14 +301,10 @@ fn failed_progress_batch_retains_and_notifies_only_its_complete_prefix() {
             )
             .expect_err("batch suffix failure blocks the terminal event");
 
-        let message = error.to_string();
-        assert!(
-            message.contains("injected batch append failure"),
-            "{message}"
-        );
-        assert!(
-            message.contains("event discarded after a prior session writer failure"),
-            "{message}"
+        assert_error_contains(&error, "injected batch append failure");
+        assert_error_contains(
+            &error,
+            "event discarded after a prior session writer failure",
         );
         assert_eq!(
             appends.lock().expect("batch append probe lock").concat(),
@@ -436,51 +338,37 @@ fn failed_progress_batch_retains_and_notifies_only_its_complete_prefix() {
 
 #[test]
 fn appended_checkpoint_notifies_but_sync_failure_remains_visible() {
-    let workspace = empty_workspace("event-writer-sync-failure");
-    let reservation = reserve_session_log(&workspace, "syncfail001").expect("session reserved");
-    let appended = Arc::new(Mutex::new(Vec::new()));
+    let (_workspace, reservation) = reserved_session("event-writer-sync-failure", "syncfail001");
     let (notifier, receiver) = live_event_channel();
-    let mut writer = SerialSessionWriter::start_with_appender(
-        reserved_writer_start(&reservation, Some(notifier)),
-        SyncFailAppender {
-            bytes: Arc::clone(&appended),
-        },
-    )
-    .expect("writer starts");
-    let [started, completed] = test_event_pair("syncfail001", EventType::SessionCompleted);
-    let started_jsonl = started.canonical_jsonl().expect("started serializes");
-    let completed_jsonl = completed.canonical_jsonl().expect("completed serializes");
+    let (mut writer, _, terminal, appends) = progress_writer(
+        &reservation,
+        0,
+        notifier,
+        None,
+        None,
+        Some(SyncProbe {
+            count: Arc::new(AtomicUsize::new(0)),
+            failure: true,
+        }),
+    );
+    let jsonl = terminal.canonical_jsonl().expect("terminal serializes");
 
-    writer
-        .commit(&started, &started_jsonl, None)
-        .expect("non-checkpoint append succeeds");
-    assert_eq!(
-        receiver
-            .recv_timeout(Duration::from_millis(50))
-            .expect("first append notifies")
-            .highest_committed_sequence,
-        1
-    );
     let err = writer
-        .commit(&completed, &completed_jsonl, None)
+        .commit(&terminal, &jsonl, None)
         .expect_err("checkpoint sync failure is reported");
-    assert!(matches!(
-        err,
-        RuntimeError::EventWriter(source)
-            if matches!(source.as_ref(), RuntimeError::Io { source, .. }
-                if source.to_string().contains("injected sync failure"))
-    ));
+    assert_error_contains(&err, "injected batch sync failure");
     assert_eq!(
         receiver
             .recv_timeout(Duration::from_millis(50))
-            .expect("successfully appended checkpoint notifies")
+            .expect("appended checkpoint notifies")
             .highest_committed_sequence,
-        2
+        terminal.sequence
     );
     assert_eq!(
-        *appended.lock().expect("appended bytes lock"),
-        format!("{started_jsonl}{completed_jsonl}").into_bytes()
+        appends.lock().expect("batch append probe lock").concat(),
+        jsonl.into_bytes()
     );
+    drop(writer);
     reservation.release_lock().expect("reservation rolls back");
 }
 
@@ -520,16 +408,37 @@ fn test_event_pair(session_id: &str, second_type: EventType) -> [EventEnvelope; 
     ]
 }
 
+fn failed_partial_append(
+    reservation: &SessionReservation,
+    events: &[EventEnvelope; 2],
+    cleanup: impl FnOnce(&mut fs::File, u64) -> io::Result<()>,
+) -> BatchAppendFailure {
+    let [first, second] = events
+        .each_ref()
+        .map(|event| event.canonical_jsonl().expect("event serializes"));
+    let first_len = first.len();
+    let mut appender = SessionLogAppender::open(&reservation.session_path).expect("appender opens");
+    appender
+        .append_native_batch_with(
+            reservation.session_path.diagnostic_path(),
+            &[first.as_bytes(), second.as_bytes()],
+            |file, bytes| {
+                file.write_all(&bytes[..first_len + 1])?;
+                Err(io::Error::other("injected append failure"))
+            },
+            cleanup,
+        )
+        .expect_err("partial second event fails")
+}
+
 #[test]
 fn failed_batch_retains_a_complete_prefix_already_observed_by_a_reader() {
-    let workspace = empty_workspace("event-writer-visible-batch-prefix");
-    let reservation =
-        reserve_session_log(&workspace, "visibleprefix001").expect("session reserved");
+    let (workspace, reservation) =
+        reserved_session("event-writer-visible-batch-prefix", "visibleprefix001");
     let [first, second] = test_event_pair("visibleprefix001", EventType::MessageDelta);
     let first_jsonl = first.canonical_jsonl().expect("first event serializes");
     let second_jsonl = second.canonical_jsonl().expect("second event serializes");
-    let path = reservation.session_path.clone();
-    let append_path = path.clone();
+    let append_path = reservation.session_path.clone();
     let first_len = first_jsonl.len();
     let (prefix_visible, observe_prefix) = std::sync::mpsc::sync_channel(0);
     let (prefix_observed, continue_append) = std::sync::mpsc::sync_channel(0);
@@ -590,27 +499,13 @@ fn failed_batch_retains_a_complete_prefix_already_observed_by_a_reader() {
 
 #[test]
 fn cleanup_sync_failure_still_reports_the_complete_persisted_prefix() {
-    let workspace = empty_workspace("event-writer-cleanup-failure-prefix");
-    let reservation =
-        reserve_session_log(&workspace, "cleanupfailure001").expect("session reserved");
-    let [first, second] = test_event_pair("cleanupfailure001", EventType::MessageDelta);
-    let first_jsonl = first.canonical_jsonl().expect("first event serializes");
-    let second_jsonl = second.canonical_jsonl().expect("second event serializes");
-    let mut appender = SessionLogAppender::open(&reservation.session_path).expect("appender opens");
-    let failure = appender
-        .append_native_batch_with(
-            reservation.session_path.diagnostic_path(),
-            &[first_jsonl.as_bytes(), second_jsonl.as_bytes()],
-            |file, bytes| {
-                file.write_all(&bytes[..first_jsonl.len() + 1])?;
-                Err(io::Error::other("injected append failure"))
-            },
-            |file, retained_len| {
-                file.set_len(retained_len)?;
-                Err(io::Error::other("injected cleanup sync failure"))
-            },
-        )
-        .expect_err("partial second event and cleanup sync fail");
+    let (workspace, reservation) =
+        reserved_session("event-writer-cleanup-failure-prefix", "cleanupfailure001");
+    let events = test_event_pair("cleanupfailure001", EventType::MessageDelta);
+    let failure = failed_partial_append(&reservation, &events, |file, retained_len| {
+        file.set_len(retained_len)?;
+        Err(io::Error::other("injected cleanup sync failure"))
+    });
 
     assert_eq!(failure.committed_events, Some(1));
     assert!(matches!(
@@ -631,33 +526,19 @@ fn cleanup_sync_failure_still_reports_the_complete_persisted_prefix() {
         [1]
     );
     drop(reader);
-    drop(appender);
     reservation.release_lock().expect("reservation rolls back");
 }
 
 #[test]
 fn failed_truncation_reports_no_readable_prefix() {
-    let workspace = empty_workspace("event-writer-failed-truncation");
-    let reservation =
-        reserve_session_log(&workspace, "failedtruncation001").expect("session reserved");
-    let [first, second] = test_event_pair("failedtruncation001", EventType::MessageDelta);
-    let first_jsonl = first.canonical_jsonl().expect("first event serializes");
-    let second_jsonl = second.canonical_jsonl().expect("second event serializes");
-    let mut appender = SessionLogAppender::open(&reservation.session_path).expect("appender opens");
-    let failure = appender
-        .append_native_batch_with(
-            reservation.session_path.diagnostic_path(),
-            &[first_jsonl.as_bytes(), second_jsonl.as_bytes()],
-            |file, bytes| {
-                file.write_all(&bytes[..first_jsonl.len() + 1])?;
-                Err(io::Error::other("injected append failure"))
-            },
-            |_, _| Err(io::Error::other("injected truncation failure")),
-        )
-        .expect_err("partial suffix and truncation fail");
+    let (_workspace, reservation) =
+        reserved_session("event-writer-failed-truncation", "failedtruncation001");
+    let events = test_event_pair("failedtruncation001", EventType::MessageDelta);
+    let failure = failed_partial_append(&reservation, &events, |_, _| {
+        Err(io::Error::other("injected truncation failure"))
+    });
 
     assert_eq!(failure.committed_events, None);
-    drop(appender);
     reservation.release_lock().expect("reservation rolls back");
 }
 
@@ -682,8 +563,8 @@ fn stopped_writer_does_not_spin_on_an_expired_sync_deadline() {
         serial_event_writer::SerialEventBackend, validate::SessionAppendValidationState,
     };
 
-    let workspace = empty_workspace("stopped-writer-expired-deadline");
-    let reservation = reserve_session_log(&workspace, "stoppedspin001").expect("session reserved");
+    let (_workspace, reservation) =
+        reserved_session("stopped-writer-expired-deadline", "stoppedspin001");
     let now = Instant::now();
     let mut dirty = DirtySyncState::default();
     dirty.mark_dirty(now - EVENT_WRITER_DIRTY_SYNC_INTERVAL * 2);

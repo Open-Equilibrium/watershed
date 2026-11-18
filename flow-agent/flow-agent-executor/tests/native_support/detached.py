@@ -1,4 +1,3 @@
-"""The retained detached writer, released only after observed Tool-root exit."""
 import json
 import os
 import socket
@@ -12,7 +11,6 @@ if os.fork():
     os._exit(0)
 os.close(reader)
 os.setsid()
-# This known helper must not retain the Executor's output collection pipes.
 with open(os.devnull, "r+b", buffering=0) as null:
     for descriptor in (0, 1, 2):
         os.dup2(null.fileno(), descriptor)

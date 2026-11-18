@@ -1,5 +1,3 @@
-//! The pipeline's invariant across documents: no write bypasses it.
-
 use std::collections::HashSet;
 
 use automerge::AutoCommit;
@@ -84,7 +82,6 @@ fn every_change_of_every_document_belongs_to_a_recorded_action() {
             })
         })
         .collect();
-    // The store, not the documents in memory, is what another session loads.
     let mut stored = HashSet::new();
     let documents: Vec<Document> = workspace.docs.keys().cloned().collect();
     assert_eq!(documents.len(), 3, "the Workspace, one area and one Page");
@@ -104,7 +101,6 @@ fn every_change_of_every_document_belongs_to_a_recorded_action() {
     assert_eq!(history.len(), 6);
 }
 
-/// A store whose commits fail while `failing` is set.
 #[derive(Default)]
 struct Flaky {
     inner: MemoryStore,
@@ -404,14 +400,12 @@ fn a_block_of_an_unknown_kind_is_neither_read_nor_changed_as_text() {
     else {
         panic!("a Text Block")
     };
-    // A later version made it a Chart that keeps a text, as one of its own might.
     let loaded = workspace
         .docs
         .get_mut(&Document::Page(page.clone()))
         .unwrap();
     let entry = crate::model::live(&loaded.doc, crate::model::BLOCKS, block.as_str()).unwrap();
     loaded.doc.put(&entry, crate::model::KIND, "chart").unwrap();
-    // Committed, so a refused write's rollback keeps it, as it keeps a received change.
     loaded.doc.commit();
 
     assert_eq!(workspace.text(&page, &block), Ok(None));
@@ -429,7 +423,6 @@ fn a_block_of_an_unknown_kind_is_neither_read_nor_changed_as_text() {
         at: 0,
         style: crate::TextStyle::Paragraph,
     };
-    // ⌫ at the start of the Text Block below does not join it into the Chart.
     let join = Mutation::JoinTextBlock { page, view: below };
     for refused in [edit, split, join] {
         assert_eq!(
@@ -477,7 +470,6 @@ fn a_start_split_puts_the_new_text_block_above_a_view_whose_key_another_shares()
     ) else {
         panic!("a Page")
     };
-    // Two devices placed both Text Blocks at one spot, so their Views share a key.
     let loaded = workspace
         .docs
         .get_mut(&Document::Page(page.clone()))

@@ -10,9 +10,6 @@ import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
 import 'field_panel.dart';
 
-/// The menu a click on a field's header opens: its
-/// name to rename in place, its kind, which cannot change yet, and Delete field. ⏎ keeps
-/// the name and closes it, esc drops the name; ↑↓ choose Delete field, which ⏎ then takes.
 class FieldMenu extends StatefulWidget {
   const FieldMenu({
     super.key,
@@ -24,10 +21,8 @@ class FieldMenu extends StatefulWidget {
 
   final BridgeField field;
 
-  /// The name as typed, kept by [FieldMenus] so closing the menu any way keeps it.
   final TextEditingController name;
 
-  /// Closes the menu, keeping the name typed unless `drop`.
   final void Function({bool drop}) onClose;
   final VoidCallback onDelete;
 
@@ -38,8 +33,6 @@ class FieldMenu extends StatefulWidget {
 class _FieldMenuState extends State<FieldMenu> {
   late final _focus = FocusNode(debugLabel: 'Field menu', onKeyEvent: _key);
 
-  /// Whether ↓ chose Delete field, which ⏎ then takes, and whether the pointer is on it,
-  /// which only shows.
   var _deleting = false;
   var _hovered = false;
 
@@ -47,13 +40,11 @@ class _FieldMenuState extends State<FieldMenu> {
   void initState() {
     super.initState();
     widget.name.addListener(_typed);
-    // The name takes the keys, also while a cell had them.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _focus.requestFocus();
     });
   }
 
-  /// Typing goes back to the name, which ⏎ then keeps.
   void _typed() {
     if (_deleting) setState(() => _deleting = false);
   }
@@ -115,13 +106,11 @@ class _FieldMenuState extends State<FieldMenu> {
               child: TextField(
                 controller: widget.name,
                 focusNode: _focus,
-                // The caret stays where Liquid puts it; desktop Flutter would select all on focus.
                 selectAllOnFocus: false,
                 style: TextStyle(fontSize: WsMetrics.fsUi, color: ws.text),
                 decoration: const InputDecoration.collapsed(hintText: null),
               ),
             ),
-            // A field's kind cannot change yet (section 3).
             _item(
               context,
               icon: fieldKindIcon(kind),
@@ -187,7 +176,6 @@ class _FieldMenuState extends State<FieldMenu> {
   }
 }
 
-/// Asks before a field and its values in all rows go, counting the `rows` once read; answers whether to delete it.
 Future<bool> confirmDeleteField(
   BuildContext context,
   BridgeField field,
@@ -210,9 +198,6 @@ Future<bool> confirmDeleteField(
     ) ??
     false;
 
-/// A Table's field menu and what it writes: it
-/// opens under a field's header, keeps a typed name however it closes but for esc, also
-/// when the Table goes or Liquid quits, and asks before Delete field.
 class FieldMenus extends ChangeNotifier {
   FieldMenus({
     required this.fieldOf,
@@ -221,33 +206,23 @@ class FieldMenus extends ChangeNotifier {
     required this.confirm,
   });
 
-  /// The Table's field of an identity, as last read.
   final BridgeField? Function(String? id) fieldOf;
 
-  /// Renames a field; a refused write shows on the Page.
   final void Function(String field, String name) rename;
 
-  /// Deletes a field; a refused write shows on the Page.
   final Future<void> Function(String field) remove;
 
-  /// Asks before a field and its values go.
   final Future<bool> Function(BridgeField field) confirm;
 
-  /// The field whose menu is open.
   String? open;
 
-  /// The name typed in the menu, which closing it keeps unless esc drops it, and the name
-  /// it opened with or last wrote.
   final name = TextEditingController();
   String _opened = '';
 
-  /// A field and the name typed in its menu before Delete field, kept while the question
-  /// is open, so quitting or the Table going meanwhile still writes it.
   (String, String)? _asking;
 
   var _disposed = false;
 
-  /// A click on a field's header opens its menu, or closes it when open.
   void toggle(BridgeField field) {
     final wasOpen = open == field.id;
     close();
@@ -261,7 +236,6 @@ class FieldMenus extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Closes the menu and renames the field as typed, unless `drop`.
   void close({bool drop = false}) {
     if (open == null) return;
     if (!drop) renameTyped();
@@ -269,9 +243,6 @@ class FieldMenus extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Renames the menu's field as typed, unless the name is empty or as the menu opened
-  /// with it, so a rename elsewhere meanwhile stays; also as the Table goes or Liquid
-  /// quits.
   void renameTyped() {
     if (_asking case (final field, final typed)) {
       _asking = null;
@@ -284,8 +255,6 @@ class FieldMenus extends ChangeNotifier {
     rename(field, typed);
   }
 
-  /// Delete field asks first, then deletes the field and its values; a name typed is kept
-  /// when the question is cancelled.
   Future<void> delete() async {
     final field = fieldOf(open);
     final typed = name.text.trim();
@@ -304,12 +273,10 @@ class FieldMenus extends ChangeNotifier {
     if (!_disposed) await remove(field.id);
   }
 
-  /// A field gone elsewhere takes its menu along.
   void read() {
     if (open != null && fieldOf(open) == null) close(drop: true);
   }
 
-  /// The open menu, which hangs under its field's header.
   Widget view(BuildContext context) {
     final field = fieldOf(open);
     if (field == null) return const SizedBox.shrink();

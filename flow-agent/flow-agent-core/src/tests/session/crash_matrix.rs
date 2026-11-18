@@ -1,10 +1,3 @@
-//! Process-death matrix for productive Runs.
-//!
-//! Every durable step of a productive root or continuation Run, including its creation, is a
-//! point where a real child process dies. The store that survives keeps its real inodes and
-//! directory identities. Exact Resume and one-id Resume run on each surviving store and must keep
-//! the PROTOCOL.md recovery invariants.
-
 use crate::{
     runtime::{
         config_io::{GlobalConfig, load_global_config},
@@ -49,7 +42,6 @@ const CRASH_RECORD: &str = "crash-record.json";
 
 const CONVERSATION_ID: &str = "smoke-flow";
 
-/// Counts provider dispatches; the child reports the count it reached in its crash record.
 struct EffectProvider {
     effects: Arc<AtomicUsize>,
 }
@@ -76,7 +68,6 @@ impl ProductiveProvider for EffectProvider {
     }
 }
 
-/// One workspace whose productive Runs share one provider-effect counter.
 struct Store {
     config: GlobalConfig,
     effects: Arc<AtomicUsize>,
@@ -87,14 +78,12 @@ struct Store {
 }
 
 impl Store {
-    /// A fresh workspace; the guard removes it when dropped.
     fn fresh() -> (TempWorkspace, Self) {
         let (workspace, fixture) = disabled_configured_smoke_productive_execution_fixture();
         let store = Self::with_fixture(&workspace, fixture);
         (workspace, store)
     }
 
-    /// The store of an existing workspace, as the process that crashed or recovers it sees it.
     fn at(workspace: &Path) -> Self {
         Self::with_fixture(workspace, load_productive_execution_fixture(workspace))
     }
@@ -135,8 +124,6 @@ impl Store {
             None,
             false,
             || Ok(credential),
-            // WHY: the fixture workspace has no AGENTS.md, which resume reads as empty guidance;
-            // a Run with other guidance replays a different request and cannot resume.
             "",
             None,
             &mut self.provider(),
@@ -169,7 +156,6 @@ impl Store {
         )
     }
 
-    /// Names of the entries under the conversation's `runs` directory, staging names included.
     fn run_entries(&self) -> BTreeSet<String> {
         match fs::read_dir(self.sessions.join(CONVERSATION_ID).join("runs")) {
             Ok(entries) => entries
@@ -209,14 +195,9 @@ fn json_lines(path: &Path) -> Vec<serde_json::Value> {
     }
 }
 
-/// Checks status.json against the Run directories, Run Logs and history file.
-///
-/// The oracle parses the stored records directly, so it does not reuse the runtime readers.
 fn assert_status_agrees_with_logs(store: &Store, step: &str) {
     let summary = store.sessions.join(CONVERSATION_ID).join("status.json");
     if !summary.exists() {
-        // WHY: a Conversation whose creation was interrupted before its summary is either
-        // omitted or fails the listing closed (PROTOCOL.md: a missing summary fails closed).
         if let Ok(page) = conversation_status_page(&store.workspace, None) {
             assert!(
                 page.conversations
@@ -230,9 +211,6 @@ fn assert_status_agrees_with_logs(store: &Store, step: &str) {
     let page = match conversation_status_page(&store.workspace, None) {
         Ok(page) => page,
         Err(error) => {
-            // WHY: a malformed summary fails the listing closed, and so does a pending Run creation
-            // until a reservation of its Conversation recovers it (PROTOCOL.md). The next
-            // reservation check below verifies that recovery.
             let pending = store
                 .sessions
                 .join(CONVERSATION_ID)
@@ -293,9 +271,6 @@ fn assert_status_agrees_with_logs(store: &Store, step: &str) {
     assert_eq!(status.latest_entry_id, latest, "{step}: latest entry");
 }
 
-/// What the dying child leaves for its parent: the provider effects before the scenario and at the
-/// crash, the Runs published before the scenario, and the durable steps reached (the last one is
-/// the fatal step).
 #[derive(Deserialize, Serialize)]
 struct CrashRecord {
     baseline_effects: usize,
@@ -304,13 +279,6 @@ struct CrashRecord {
     steps: Vec<String>,
 }
 
-/// Runs exact Resume and one-id Resume on one surviving store and checks the at-most-once rules.
-///
-/// Every published Run dispatches at most one provider effect in total, so the effects added
-/// since the scenario started never exceed the Runs added since then.
-///
-/// `must_resume` marks a power cut whose torn append exact Resume must roll back and resume from,
-/// not merely fail closed (ADR-0259; see `must_resume_after_cut`).
 fn assert_recovery_invariants(
     store: &Store,
     crashed: &CrashRecord,
@@ -328,7 +296,6 @@ fn assert_recovery_invariants(
     match &exact {
         Some(Ok(output)) => {
             assert!(!output.failed, "{step}: exact Resume completes its Run");
-            // A completed Run has exactly one provider effect, whether the crash preceded it.
             assert_eq!(
                 before_exact - base + exact_dispatches,
                 1,
@@ -388,9 +355,6 @@ fn assert_recovery_invariants(
     assert_status_agrees_with_logs(store, &format!("{step}, after one-id Resume"));
 }
 
-/// Replaces generated identifiers (digests, counters, timestamps) in step labels.
-///
-/// Replays compare by step kind and structure; the identifiers differ between processes.
 fn normalized(steps: &[String]) -> Vec<String> {
     steps
         .iter()
@@ -416,9 +380,6 @@ fn normalized(steps: &[String]) -> Vec<String> {
         .collect()
 }
 
-/// How a child dies at its crash point: a process death keeps every byte it wrote, while a power
-/// loss drops the bytes each file had not synced. `Cut` also keeps all but the last byte of the
-/// last unsynced write, so a JSONL record survives without its line feed (ADR-0259).
 #[derive(Clone, Copy, Debug)]
 enum Death {
     Process,
@@ -444,21 +405,17 @@ impl Death {
     }
 }
 
-/// The deaths a parent checks at durable step `index` of a reference with `steps`.
 fn deaths_at(power: bool, steps: &[String], index: usize) -> Vec<Death> {
     if !power {
         return vec![Death::Process];
     }
     let mut deaths = vec![Death::Power(PowerLoss::Drop)];
-    // WHY: a cut takes bytes only from an unsynced write, so it differs from a drop only when the
-    // step before the crash point is a write that no sync has covered.
     if index > 0 && steps[index - 1].starts_with("write ") {
         deaths.push(Death::Power(PowerLoss::CutLastWrite));
     }
     deaths
 }
 
-/// The child role of a matrix: the workspace, durable step and death its parent assigned, if any.
 fn crash_child_role() -> Option<(PathBuf, usize, Death)> {
     let workspace = std::env::var_os(CRASH_CHILD_WORKSPACE)?;
     let index = std::env::var(CRASH_CHILD_STEP)
@@ -470,7 +427,6 @@ fn crash_child_role() -> Option<(PathBuf, usize, Death)> {
     Some((PathBuf::from(workspace), index, death))
 }
 
-/// Runs the setup and scenario in a child process that dies at durable step `index`.
 fn die_at_step(workspace: &Path, index: usize, death: Death) -> CrashRecord {
     let output = Command::new(std::env::current_exe().expect("test executable resolves"))
         .args(["--exact", &current_test_name(), "--nocapture"])
@@ -491,13 +447,6 @@ fn die_at_step(workspace: &Path, index: usize, death: Death) -> CrashRecord {
     serde_json::from_slice(&bytes).expect("crash record parses")
 }
 
-/// Kills a child process at each selected durable step of `scenario` and checks each survivor.
-///
-/// `setup` runs untraced in every process before the traced scenario. Returns the reference step
-/// list of an unfaulted run.
-///
-/// A power-loss matrix traces file syncs as steps too, and checks each step with a drop and, after
-/// an unsynced write, a cut.
 fn run_crash_matrix(
     setup: impl Fn(&Store),
     scenario: impl Fn(&Store) -> Result<RunOutput, RuntimeError>,
@@ -559,7 +508,6 @@ fn run_crash_matrix(
         steps
     };
 
-    // WHY: every failing crash point is reported together, so one run shows the whole picture.
     let mut failures = Vec::new();
     for (index, step) in reference
         .iter()
@@ -602,11 +550,6 @@ fn run_crash_matrix(
     reference
 }
 
-/// Whether a power cut that tears the traced write `step` must resume exactly (ADR-0259).
-///
-/// A torn event, context or history line, and a torn Provider or Tool intent, are rolled back as
-/// appends that never happened, so exact Resume resumes the Run. A torn terminal result leaves its
-/// attempt uncertain, which exact Resume refuses until external evidence reconciles it.
 fn must_resume_after_cut(store: &Store, step: &str) -> bool {
     let Some(path) = step.strip_prefix("write ") else {
         return false;
@@ -624,7 +567,6 @@ fn must_resume_after_cut(store: &Store, step: &str) -> bool {
     }
 }
 
-/// The `record_type` of the unterminated record that ends a JSONL file, if it has one.
 fn unterminated_record_type(path: &Path) -> Option<String> {
     let bytes = fs::read(path).expect("written JSONL file reads");
     let tail = bytes.rsplit(|byte| *byte == b'\n').next()?;
@@ -632,7 +574,6 @@ fn unterminated_record_type(path: &Path) -> Option<String> {
     record["record_type"].as_str().map(str::to_owned)
 }
 
-/// A Conversation's staged Run left by a crash is gone after the next reservation.
 fn assert_no_staged_run(store: &Store, step: &str) {
     assert!(
         store
@@ -643,7 +584,6 @@ fn assert_no_staged_run(store: &Store, step: &str) {
     );
 }
 
-/// The next reservation after a root Run's crash: a fresh root reclaims the Run the crash staged.
 fn next_root_reservation(store: &Store, step: &str) {
     let output = store
         .start_root()
@@ -677,7 +617,6 @@ fn root_run_survives_a_process_death_at_every_durable_step() {
     }
 }
 
-/// Builds the twelve-Run chain that the depth-twelve matrices start from.
 fn build_twelve_run_chain(store: &Store) {
     store.start_root().expect("root Run completes");
     for depth in 1..=11 {
@@ -695,9 +634,6 @@ fn build_twelve_run_chain(store: &Store) {
 
 #[test]
 fn continuation_run_at_depth_twelve_survives_a_process_death_at_every_durable_step() {
-    // WHY: each child replays the twelve-Run prefix, so the chain's matrix samples its steps to
-    // bound the runtime: every fourth step of the Run creation prefix, then every twentieth step
-    // of the attempt and recovery records that follow.
     let reference = run_crash_matrix(
         build_twelve_run_chain,
         Store::continue_newest,
@@ -728,8 +664,6 @@ fn root_run_survives_a_power_loss_at_every_durable_step() {
 
 #[test]
 fn continuation_run_at_depth_twelve_survives_a_power_loss_at_sampled_durable_steps() {
-    // WHY: a power trace also records file syncs, so it has about twice the steps of the process
-    // trace. This sample covers the first eighty steps every eighth step, then every fortieth.
     let reference = run_crash_matrix(
         build_twelve_run_chain,
         Store::continue_newest,

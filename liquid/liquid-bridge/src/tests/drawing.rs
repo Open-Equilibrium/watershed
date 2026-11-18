@@ -1,8 +1,3 @@
-//! Drawings and file cells as Dart builds and reads them (ADR-0305 to ADR-0307): a
-//! Whiteboard's or an annotated PDF's elements cross as flat messages with a stroke's points
-//! as bytes, a PDF's in windows of pages, and a file cell names finished attachments whose
-//! sizes the core reads.
-
 use super::workspace::{Folder, Memory, lisbon, mutation, query};
 use crate::api::database::{BridgeCell, BridgeCellKind, BridgeFieldKind};
 use crate::api::drawing::{

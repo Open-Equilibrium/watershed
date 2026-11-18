@@ -12,12 +12,8 @@ import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
 import 'read_delay.dart';
 
-/// How long a single choice shows as picked before the answer moves on, as T3 waits.
 const _advanceDelay = Duration(milliseconds: 200);
 
-/// The agent's questions, in place of the composer, as T3's pending questions panel: one
-/// question at a time, its options and a typed answer where the question allows one. A single
-/// choice moves on by itself; the answers go once the last question has one.
 class QuestionCard extends StatefulWidget {
   const QuestionCard({super.key, required this.request, required this.state});
 
@@ -31,10 +27,8 @@ class QuestionCard extends StatefulWidget {
 class _QuestionCardState extends State<QuestionCard> with ReadDelay {
   int _index = 0;
 
-  /// The chosen labels of each question, by question id.
   final _chosen = <String, List<String>>{};
 
-  /// The typed answer of each question, by question id.
   final _typed = <String, String>{};
   var _text = TextEditingController();
   final _card = FocusNode(debugLabel: 'question');
@@ -44,13 +38,11 @@ class _QuestionCardState extends State<QuestionCard> with ReadDelay {
   BridgeQuestion get _question => _questions[_index];
   bool get _last => _index == _questions.length - 1;
 
-  /// What a question's answer is: the typed text when there is some, else the chosen labels.
   List<String> _values(BridgeQuestion question) {
     final typed = (_typed[question.id] ?? '').trim();
     return typed.isNotEmpty ? [typed] : _chosen[question.id] ?? const [];
   }
 
-  /// Whether a question's answer is the typed text, which the agent gets as written.
   bool _isTyped(BridgeQuestion question) =>
       (_typed[question.id] ?? '').trim().isNotEmpty;
 
@@ -75,7 +67,6 @@ class _QuestionCardState extends State<QuestionCard> with ReadDelay {
 
   void _go(int index) => setState(() {
     _index = index;
-    // Another question's answer must not come back with ⌘Z.
     final typed = TextEditingValue(text: _typed[_questions[index].id] ?? '');
     if (writeText(_text, typed)) _text = adoptController(_text);
   });
@@ -98,7 +89,6 @@ class _QuestionCardState extends State<QuestionCard> with ReadDelay {
     });
   }
 
-  /// Moves to the next question, or sends the answers once the last question has one.
   void _primary() {
     if (_last) {
       if (_complete) _send();
@@ -139,7 +129,6 @@ class _QuestionCardState extends State<QuestionCard> with ReadDelay {
       }),
       child: Focus(
         focusNode: _card,
-        // A key held from before, such as the ⏎ that sent the message, types nothing.
         onKeyEvent: skipHeld,
         child: InputCard(
           ring: ws.borderStrong,
@@ -202,7 +191,6 @@ class _QuestionCardState extends State<QuestionCard> with ReadDelay {
                           TextField(
                             key: const Key('answer'),
                             controller: _text,
-                            // An unbound ⏎ must not unfocus the field, or the card loses its keys.
                             onEditingComplete: () {},
                             onChanged: (value) =>
                                 setState(() => _typed[question.id] = value),
@@ -242,7 +230,6 @@ class _QuestionCardState extends State<QuestionCard> with ReadDelay {
   }
 }
 
-/// One option of a question: a radio or a check mark, its label and its description.
 class _Option extends StatelessWidget {
   const _Option({
     required this.label,

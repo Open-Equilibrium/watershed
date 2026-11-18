@@ -15,7 +15,7 @@ use crate::runtime::{
     session_authority::{SessionOwnershipLease, session_ownership_is_active},
     session_candidates::suffixed_session_id,
     session_definition::SessionDefinitionMetadata,
-    session_lock::open_or_create_anchored_session_marker,
+    session_lock::{SessionReservation, open_or_create_anchored_session_marker},
     session_reservation::{
         materialize_session_candidate, reserve_unique_session_candidate_with_anchored_workspace,
         session_log_metadata_text, set_candidate_pre_lease_observer_for_test,
@@ -26,7 +26,17 @@ use crate::runtime::{
 };
 #[cfg(not(target_os = "macos"))]
 use std::ffi::OsString;
-use std::{fs, io};
+use std::{
+    fs, io,
+    path::{Path, PathBuf},
+};
+
+#[derive(Clone, Copy, PartialEq)]
+enum Dir {
+    Sessions,
+    Logs,
+}
+use Dir::{Logs, Sessions};
 
 #[cfg(not(target_os = "macos"))]
 fn non_unicode_object_leaf(session_id: &str) -> OsString {
@@ -49,6 +59,10 @@ fn session_definition_metadata(
     }
 }
 
+fn assert_bytes(path: impl AsRef<Path>, expected: &[u8]) {
+    assert_eq!(fs::read(path).expect("file remains readable"), expected);
+}
+
 fn assert_unsafe_namespace_collision(error: RuntimeError, expected_session_id: &str) {
     match error {
         RuntimeError::ControlledStageFailures {
@@ -67,6 +81,62 @@ fn assert_unsafe_namespace_collision(error: RuntimeError, expected_session_id: &
         }
         other => panic!("unexpected reservation failure: {other}"),
     }
+}
+
+fn replace_with_foreign(path: &Path) -> (PathBuf, Option<PathBuf>) {
+    let moved = path.with_extension("reserved.jsonl");
+    fs::rename(path, &moved).expect("reserved member moves aside");
+    fs::write(path, b"foreign replacement").expect("foreign replacement writes");
+    (path.to_owned(), Some(moved))
+}
+
+fn add_foreign(path: PathBuf) -> (PathBuf, Option<PathBuf>) {
+    fs::write(&path, b"foreign member").expect("foreign member writes");
+    (path, None)
+}
+
+fn replace_owned_file_after_identity_check(moved_to: PathBuf, replacement: &'static [u8]) {
+    set_owned_file_remove_observer(move |path| {
+        fs::rename(path.diagnostic_path(), &moved_to)
+            .expect("owned file moves after identity check");
+        fs::write(path.diagnostic_path(), replacement).expect("foreign replacement writes");
+    });
+}
+
+fn assert_terminal_after_release(
+    workspace: &Path,
+    reservation: &SessionReservation,
+    observed: &Path,
+    session_id: &str,
+) {
+    let before = fs::read(observed).expect("observed file readable");
+    let replacement_ownership = SessionOwnershipLease::acquire(
+        workspace,
+        session_id,
+        reservation.lock_path.diagnostic_path(),
+    )
+    .expect("another owner acquires the released session");
+    let replacement_metadata =
+        session_definition_metadata("sha256:replacement-registry", "sha256:replacement-flow");
+
+    let write_error = write_reserved_session_metadata(reservation, Some(&replacement_metadata))
+        .expect_err("released reservation must not rewrite metadata");
+    let activation_error = reservation
+        .activate()
+        .expect_err("released reservation must not reactivate");
+
+    assert!(
+        write_error.to_string().contains("released"),
+        "{write_error}"
+    );
+    assert!(
+        activation_error.to_string().contains("released"),
+        "{activation_error}"
+    );
+    assert_bytes(observed, &before);
+    replacement_ownership
+        .release()
+        .expect("replacement owner releases");
 }
 
 #[test]
@@ -220,10 +290,7 @@ fn reservation_collision_preserves_existing_session_log() {
         err,
         RuntimeError::SessionLogExists(session_id) if session_id == "existing001"
     ));
-    assert_eq!(
-        fs::read(&session_path).expect("existing session remains"),
-        b"existing session"
-    );
+    assert_bytes(&session_path, b"existing session");
     assert!(!dirs.sessions.path.join("existing001.lock").exists());
 }
 
@@ -235,7 +302,6 @@ fn reservation_skips_a_marker_retained_after_its_availability_snapshot() {
     let marker = dirs.sessions.file("marker001.lock");
     let retained = marker.path.clone();
     set_candidate_pre_lease_observer_for_test(move || {
-        // A released owner leaves its regular marker in place.
         open_or_create_anchored_session_marker(&marker).expect("concurrent marker created");
     });
 
@@ -330,165 +396,66 @@ fn reservation_rejects_an_orphan_segment_namespace() {
         error,
         RuntimeError::SessionLogExists(session_id) if session_id == "orphansegment001"
     ));
-    assert_eq!(
-        fs::read(segment).expect("orphan segment remains readable"),
-        b"foreign segment"
-    );
+    assert_bytes(&segment, b"foreign segment");
     assert!(!sessions.join("orphansegment001.jsonl").exists());
     assert!(!sessions.join("orphansegment001.lock").exists());
 }
 
 #[test]
-fn partial_reservation_rollback_preserves_context_collision() {
-    let workspace = empty_workspace("reservation-context-race");
-    let dirs = ensure_runtime_dirs(&workspace).expect("runtime dirs");
-    let session_path = dirs.sessions.path.join("context001.jsonl");
-    let lock_path = dirs.sessions.path.join("context001.lock");
-    let metadata_path = dirs.logs.path.join("context001.log");
-    let context_path = dirs.logs.path.join("context001.contexts.jsonl");
+fn publish_race_collisions_reject_reservation_and_keep_foreign_members() {
+    let cases: [(&str, &[(Dir, &str)]); 5] = [
+        ("context001", &[(Logs, "context001.contexts.jsonl")]),
+        (
+            "segment001",
+            &[
+                (Sessions, "segment001.000002.jsonl"),
+                (Logs, "segment001.contexts.jsonl"),
+            ],
+        ),
+        ("segment003", &[(Sessions, "segment003.000002.jsonl")]),
+        ("segment004", &[(Logs, "segment004.contexts.000002.jsonl")]),
+        (
+            "objectrace001",
+            &[(Sessions, "objectrace001.object.sha256-invalid")],
+        ),
+    ];
+    for (session_id, foreign) in cases {
+        let workspace = empty_workspace(&format!("reservation-publish-race-{session_id}"));
+        let dirs = ensure_runtime_dirs(&workspace).expect("runtime dirs");
+        let (sessions, logs) = (&dirs.sessions.path, &dirs.logs.path);
+        let dir_path = |dir| match dir {
+            Sessions => sessions,
+            Logs => logs,
+        };
 
-    let err = reserve_session_log_with_publish_observer(&workspace, "context001", || {
-        fs::write(&context_path, b"existing context").expect("racing context written");
-    })
-    .expect_err("context collision must reject reservation");
+        let err = reserve_session_log_with_publish_observer(&workspace, session_id, || {
+            for &(dir, leaf) in foreign {
+                fs::write(dir_path(dir).join(leaf), leaf.as_bytes())
+                    .expect("racing member written");
+            }
+        })
+        .expect_err("publish-race collision must reject reservation");
 
-    assert_unsafe_namespace_collision(err, "context001");
-    assert_eq!(
-        fs::read(&context_path).expect("racing context remains"),
-        b"existing context"
-    );
-    assert_eq!(fs::read(session_path).expect("session orphan remains"), b"");
-    assert!(
-        !metadata_path.exists(),
-        "the final namespace check runs before metadata reservation"
-    );
-    assert!(!lock_path.exists());
-}
-
-#[test]
-fn partial_reservation_rollback_preserves_concurrent_event_segment() {
-    let workspace = empty_workspace("reservation-segment-race");
-    let dirs = ensure_runtime_dirs(&workspace).expect("runtime dirs");
-    let session_path = dirs.sessions.path.join("segment001.jsonl");
-    let segment_path = dirs.sessions.path.join("segment001.000002.jsonl");
-    let lock_path = dirs.sessions.path.join("segment001.lock");
-    let metadata_path = dirs.logs.path.join("segment001.log");
-    let context_path = dirs.logs.path.join("segment001.contexts.jsonl");
-
-    let err = reserve_session_log_with_publish_observer(&workspace, "segment001", || {
-        fs::write(&segment_path, b"foreign event segment").expect("racing event segment written");
-        fs::write(&context_path, b"existing context").expect("racing context written");
-    })
-    .expect_err("context collision must reject reservation");
-
-    assert_unsafe_namespace_collision(err, "segment001");
-    assert_eq!(
-        fs::read(&segment_path).expect("racing event segment remains"),
-        b"foreign event segment"
-    );
-    assert_eq!(
-        fs::read(&context_path).expect("racing context remains"),
-        b"existing context"
-    );
-    assert_eq!(fs::read(session_path).expect("session orphan remains"), b"");
-    assert!(
-        !metadata_path.exists(),
-        "the segment collision occurs before metadata reservation"
-    );
-    assert!(!lock_path.exists());
-}
-
-#[test]
-fn reservation_rejects_event_segment_published_after_base_reservation() {
-    let workspace = empty_workspace("reservation-segment-only-race");
-    let dirs = ensure_runtime_dirs(&workspace).expect("runtime dirs");
-    let session_path = dirs.sessions.path.join("segment003.jsonl");
-    let segment_path = dirs.sessions.path.join("segment003.000002.jsonl");
-    let lock_path = dirs.sessions.path.join("segment003.lock");
-    let metadata_path = dirs.logs.path.join("segment003.log");
-    let context_path = dirs.logs.path.join("segment003.contexts.jsonl");
-
-    let err = reserve_session_log_with_publish_observer(&workspace, "segment003", || {
-        fs::write(&segment_path, b"foreign event segment").expect("racing event segment written");
-    })
-    .expect_err("event segment collision must reject reservation");
-
-    assert_unsafe_namespace_collision(err, "segment003");
-    assert_eq!(
-        fs::read(&segment_path).expect("racing event segment remains"),
-        b"foreign event segment"
-    );
-    assert_eq!(fs::read(session_path).expect("session orphan remains"), b"");
-    assert!(!metadata_path.exists());
-    assert!(!context_path.exists());
-    assert!(!lock_path.exists());
-}
-
-#[test]
-fn reservation_rejects_context_segment_published_after_base_reservation() {
-    let workspace = empty_workspace("reservation-context-segment-only-race");
-    let dirs = ensure_runtime_dirs(&workspace).expect("runtime dirs");
-    let session_path = dirs.sessions.path.join("segment004.jsonl");
-    let lock_path = dirs.sessions.path.join("segment004.lock");
-    let metadata_path = dirs.logs.path.join("segment004.log");
-    let context_path = dirs.logs.path.join("segment004.contexts.jsonl");
-    let context_segment_path = dirs.logs.path.join("segment004.contexts.000002.jsonl");
-
-    let err = reserve_session_log_with_publish_observer(&workspace, "segment004", || {
-        fs::write(&context_segment_path, b"foreign context segment")
-            .expect("racing context segment written");
-    })
-    .expect_err("context segment collision must reject reservation");
-
-    assert_unsafe_namespace_collision(err, "segment004");
-    assert_eq!(
-        fs::read(&context_segment_path).expect("racing context segment remains"),
-        b"foreign context segment"
-    );
-    assert_eq!(fs::read(session_path).expect("session orphan remains"), b"");
-    assert!(!lock_path.exists());
-    assert!(!metadata_path.exists());
-    assert!(!context_path.exists());
-}
-
-#[test]
-fn reservation_rejects_object_published_after_base_reservation() {
-    let workspace = empty_workspace("reservation-object-race");
-    let dirs = ensure_runtime_dirs(&workspace).expect("runtime dirs");
-    let session_path = dirs.sessions.path.join("objectrace001.jsonl");
-    let lock_path = dirs.sessions.path.join("objectrace001.lock");
-    let metadata_path = dirs.logs.path.join("objectrace001.log");
-    let context_path = dirs.logs.path.join("objectrace001.contexts.jsonl");
-    let object_path = dirs
-        .sessions
-        .path
-        .join("objectrace001.object.sha256-invalid");
-
-    let err = reserve_session_log_with_publish_observer(&workspace, "objectrace001", || {
-        fs::write(&object_path, b"foreign object member").expect("racing object member written");
-    })
-    .expect_err("object namespace collision must reject reservation");
-
-    assert_unsafe_namespace_collision(err, "objectrace001");
-    assert_eq!(
-        fs::read(&object_path).expect("racing object member remains"),
-        b"foreign object member"
-    );
-    assert_eq!(fs::read(session_path).expect("session orphan remains"), b"");
-    assert!(!lock_path.exists());
-    assert!(!metadata_path.exists());
-    assert!(!context_path.exists());
+        assert_unsafe_namespace_collision(err, session_id);
+        for &(dir, leaf) in foreign {
+            assert_bytes(dir_path(dir).join(leaf), leaf.as_bytes());
+        }
+        let context_leaf = format!("{session_id}.contexts.jsonl");
+        let context_is_foreign = foreign
+            .iter()
+            .any(|&(dir, leaf)| dir == Logs && leaf == context_leaf);
+        assert_eq!(logs.join(&context_leaf).exists(), context_is_foreign);
+        assert_bytes(sessions.join(format!("{session_id}.jsonl")), b"");
+        assert!(!sessions.join(format!("{session_id}.lock")).exists());
+        assert!(!logs.join(format!("{session_id}.log")).exists());
+    }
 }
 
 #[test]
 fn unactivated_reservation_rollback_preserves_concurrent_segment_siblings() {
     let workspace = empty_workspace("reservation-segment-rollback");
     let dirs = ensure_runtime_dirs(&workspace).expect("runtime dirs");
-    let session_path = dirs.sessions.path.join("segment002.jsonl");
     let event_segment_path = dirs.sessions.path.join("segment002.000002.jsonl");
-    let lock_path = dirs.sessions.path.join("segment002.lock");
-    let metadata_path = dirs.logs.path.join("segment002.log");
-    let context_path = dirs.logs.path.join("segment002.contexts.jsonl");
     let context_segment_path = dirs.logs.path.join("segment002.contexts.000002.jsonl");
     let reservation =
         reserve_session_log(&workspace, "segment002").expect("session reservation succeeds");
@@ -499,23 +466,16 @@ fn unactivated_reservation_rollback_preserves_concurrent_segment_siblings() {
 
     reservation.release_lock().expect("reservation rolls back");
 
-    assert_eq!(
-        fs::read(&event_segment_path).expect("foreign event segment remains"),
-        b"foreign event segment"
-    );
-    assert_eq!(
-        fs::read(&context_segment_path).expect("foreign context segment remains"),
-        b"foreign context segment"
-    );
-    for orphan in [session_path, metadata_path, context_path] {
-        assert_eq!(
-            fs::read(&orphan).expect("owned orphan remains readable"),
-            b"",
-            "{} must remain inventory-visible and empty",
-            orphan.display()
-        );
+    assert_bytes(&event_segment_path, b"foreign event segment");
+    assert_bytes(&context_segment_path, b"foreign context segment");
+    for orphan in [
+        dirs.sessions.path.join("segment002.jsonl"),
+        dirs.logs.path.join("segment002.log"),
+        dirs.logs.path.join("segment002.contexts.jsonl"),
+    ] {
+        assert_bytes(&orphan, b"");
     }
-    assert!(!lock_path.exists());
+    assert!(!dirs.sessions.path.join("segment002.lock").exists());
 }
 
 #[test]
@@ -525,27 +485,15 @@ fn reservation_rollback_never_unlinks_a_replacement_after_identity_check() {
         reserve_session_log(&workspace, "replacement001").expect("session reservation succeeds");
     let session_path = reservation.session_path.diagnostic_path().to_owned();
     let moved_owned_path = session_path.with_extension("owned");
-    let replacement = b"foreign replacement";
-    let moved_for_observer = moved_owned_path.clone();
-    set_owned_file_remove_observer(move |path| {
-        fs::rename(path.diagnostic_path(), &moved_for_observer)
-            .expect("owned file moves after identity check");
-        fs::write(path.diagnostic_path(), replacement).expect("foreign replacement writes");
-    });
+    replace_owned_file_after_identity_check(moved_owned_path.clone(), b"foreign replacement");
 
     let err = reservation
         .cleanup()
         .expect_err("unsafe rollback cleanup must remain visible");
 
     assert!(err.to_string().contains("cannot safely remove"), "{err}");
-    assert_eq!(
-        fs::read(&session_path).expect("foreign replacement remains"),
-        replacement
-    );
-    assert_eq!(
-        fs::read(&moved_owned_path).expect("owned orphan remains"),
-        b""
-    );
+    assert_bytes(&session_path, b"foreign replacement");
+    assert_bytes(&moved_owned_path, b"");
     assert!(
         reservation.log_path.diagnostic_path().exists(),
         "owned log orphan remains inventory-visible"
@@ -609,10 +557,7 @@ fn unique_reservation_skips_a_non_unicode_object_namespace() {
 
     assert_eq!(reservation.session_id, "nonunicode001-2");
     reservation.release_lock().expect("reservation rolls back");
-    assert_eq!(
-        fs::read(object_path).expect("object sentinel remains readable"),
-        b"foreign object member"
-    );
+    assert_bytes(&object_path, b"foreign object member");
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -631,10 +576,7 @@ fn reservation_rejects_a_non_unicode_object_published_after_candidate_selection(
     .expect_err("non-Unicode object namespace collision must reject reservation");
 
     assert!(error.to_string().contains("already exists"), "{error}");
-    assert_eq!(
-        fs::read(object_path).expect("object sentinel remains readable"),
-        b"foreign object member"
-    );
+    assert_bytes(&object_path, b"foreign object member");
 }
 
 #[test]
@@ -684,10 +626,8 @@ fn unique_reservation_never_allocates_an_occupied_id_with_probe_hints() {
     let workspace = empty_workspace("reservation-occupied-probe");
     let sessions = crate::tests::helpers::ensure_workspace_session_dir(&workspace);
     let logs = crate::tests::helpers::ensure_workspace_log_dir(&workspace);
-    // Conclusive metadata plus a probe-only events link must stay occupied.
     fs::write(logs.join("probe001.log"), "").expect("metadata sentinel written");
     symlink("missing", sessions.join("probe001.jsonl")).expect("events symlink");
-    // A symlinked lock is occupied on its own.
     symlink("missing", sessions.join("probe001-2.lock")).expect("lock symlink");
 
     let reservation =
@@ -732,10 +672,7 @@ fn dropped_session_reservation_retains_inventory_visible_orphans() {
     };
 
     for orphan in [session_path, log_path, context_path] {
-        assert_eq!(
-            fs::read(orphan.diagnostic_path()).expect("owned orphan remains readable"),
-            b""
-        );
+        assert_bytes(orphan.diagnostic_path(), b"");
     }
     assert!(!lock_path.diagnostic_path().exists());
 }
@@ -772,38 +709,13 @@ fn released_reservation_cannot_rewrite_metadata_or_reactivate() {
     write_reserved_session_metadata(&reservation, Some(&original_metadata))
         .expect("metadata activates reservation");
     reservation.cleanup().expect("reservation releases");
-    let replacement_ownership = SessionOwnershipLease::acquire(
+
+    assert_terminal_after_release(
         &workspace,
+        &reservation,
+        reservation.log_path.diagnostic_path(),
         "released001",
-        reservation.lock_path.diagnostic_path(),
-    )
-    .expect("another owner acquires the released session");
-    let metadata_path = reservation.log_path.diagnostic_path().to_owned();
-    let before = fs::read(&metadata_path).expect("released metadata remains readable");
-    let replacement_metadata =
-        session_definition_metadata("sha256:replacement-registry", "sha256:replacement-flow");
-
-    let write_error = write_reserved_session_metadata(&reservation, Some(&replacement_metadata))
-        .expect_err("released reservation must not rewrite metadata");
-    let activation_error = reservation
-        .activate()
-        .expect_err("released reservation must not reactivate");
-
-    assert!(
-        write_error.to_string().contains("released"),
-        "{write_error}"
     );
-    assert!(
-        activation_error.to_string().contains("released"),
-        "{activation_error}"
-    );
-    assert_eq!(
-        fs::read(metadata_path).expect("metadata remains readable"),
-        before
-    );
-    replacement_ownership
-        .release()
-        .expect("replacement owner releases");
 }
 
 #[test]
@@ -826,36 +738,8 @@ fn partial_cleanup_release_makes_the_reservation_terminal() {
         !session_ownership_is_active(&workspace, "partialrelease001")
             .expect("released authority reads")
     );
-    let replacement_ownership = SessionOwnershipLease::acquire(
-        &workspace,
-        "partialrelease001",
-        reservation.lock_path.diagnostic_path(),
-    )
-    .expect("another actor acquires the released authority");
-    let metadata =
-        session_definition_metadata("sha256:replacement-registry", "sha256:replacement-flow");
 
-    let write_error = write_reserved_session_metadata(&reservation, Some(&metadata))
-        .expect_err("partially released reservation cannot write metadata");
-    let activation_error = reservation
-        .activate()
-        .expect_err("partially released reservation cannot reactivate");
-
-    assert!(
-        write_error.to_string().contains("released"),
-        "{write_error}"
-    );
-    assert!(
-        activation_error.to_string().contains("released"),
-        "{activation_error}"
-    );
-    assert_eq!(
-        fs::read(marker_path).expect("foreign marker remains readable"),
-        b"foreign marker"
-    );
-    replacement_ownership
-        .release()
-        .expect("replacement owner releases");
+    assert_terminal_after_release(&workspace, &reservation, &marker_path, "partialrelease001");
 }
 
 #[test]
@@ -880,14 +764,11 @@ fn metadata_publication_rejects_a_replacement_of_the_reserved_log() {
         .expect_err("replacement must invalidate the reservation");
 
     assert!(error.to_string().contains("identity changed"), "{error}");
-    assert_eq!(
-        fs::read(reservation.log_path.diagnostic_path()).expect("replacement remains readable"),
-        b"foreign replacement"
+    assert_bytes(
+        reservation.log_path.diagnostic_path(),
+        b"foreign replacement",
     );
-    assert_eq!(
-        fs::read(moved_reserved_log).expect("reserved file remains readable"),
-        b""
-    );
+    assert_bytes(&moved_reserved_log, b"");
     assert!(!reservation.lock_path.diagnostic_path().exists());
 }
 
@@ -913,14 +794,8 @@ fn metadata_activation_rejects_a_replacement_after_parent_sync() {
         .expect_err("replacement before activation must invalidate the reservation");
 
     assert!(error.to_string().contains("identity changed"), "{error}");
-    assert_eq!(
-        fs::read(&metadata_path).expect("foreign replacement remains readable"),
-        b"foreign replacement"
-    );
-    assert_eq!(
-        fs::read_to_string(moved_reserved_log).expect("reserved metadata remains readable"),
-        expected
-    );
+    assert_bytes(&metadata_path, b"foreign replacement");
+    assert_bytes(&moved_reserved_log, expected.as_bytes());
 }
 
 #[test]
@@ -945,10 +820,7 @@ fn metadata_activation_rejects_a_lock_published_after_materialization() {
         ),
         "{error}"
     );
-    assert_eq!(
-        fs::read(lock_path).expect("foreign marker remains readable"),
-        b"foreign marker"
-    );
+    assert_bytes(&lock_path, b"foreign marker");
 }
 
 #[test]
@@ -972,44 +844,19 @@ fn metadata_activation_revalidates_every_reserved_bundle_member() {
         let workspace = empty_workspace(&format!("reservation-activation-{collision:?}"));
         let reservation = reserve_session_log(&workspace, "bundlecommit001")
             .expect("session reservation succeeds");
+        let session = reservation.session_path.diagnostic_path();
+        let context = reservation.context_path.diagnostic_path();
         let (foreign_path, moved_owned_path) = match collision {
-            Collision::SessionReplacement => {
-                let path = reservation.session_path.diagnostic_path().to_owned();
-                let moved = path.with_extension("reserved.jsonl");
-                fs::rename(&path, &moved).expect("reserved session moves aside");
-                fs::write(&path, b"foreign session").expect("foreign session writes");
-                (path, Some(moved))
-            }
-            Collision::ContextReplacement => {
-                let path = reservation.context_path.diagnostic_path().to_owned();
-                let moved = path.with_extension("reserved.jsonl");
-                fs::rename(&path, &moved).expect("reserved context moves aside");
-                fs::write(&path, b"foreign context").expect("foreign context writes");
-                (path, Some(moved))
-            }
+            Collision::SessionReplacement => replace_with_foreign(session),
+            Collision::ContextReplacement => replace_with_foreign(context),
             Collision::EventSegment => {
-                let path = reservation
-                    .session_path
-                    .diagnostic_path()
-                    .with_file_name("bundlecommit001.000002.jsonl");
-                fs::write(&path, b"foreign event segment").expect("event segment writes");
-                (path, None)
+                add_foreign(session.with_file_name("bundlecommit001.000002.jsonl"))
             }
             Collision::ContextSegment => {
-                let path = reservation
-                    .context_path
-                    .diagnostic_path()
-                    .with_file_name("bundlecommit001.contexts.000002.jsonl");
-                fs::write(&path, b"foreign context segment").expect("context segment writes");
-                (path, None)
+                add_foreign(context.with_file_name("bundlecommit001.contexts.000002.jsonl"))
             }
             Collision::ObjectMember => {
-                let path = reservation
-                    .session_path
-                    .diagnostic_path()
-                    .with_file_name("bundlecommit001.object.sha256-invalid");
-                fs::write(&path, b"foreign object member").expect("object member writes");
-                (path, None)
+                add_foreign(session.with_file_name("bundlecommit001.object.sha256-invalid"))
             }
         };
         let metadata = session_definition_metadata("sha256:registry", "sha256:flow");
@@ -1058,11 +905,7 @@ fn metadata_parent_sync_failure_is_retryable_before_reservation_activation() {
         !reservation.lock_path.diagnostic_path().exists(),
         "failed metadata finalization must not activate the reservation"
     );
-    assert_eq!(
-        fs::read_to_string(reservation.log_path.diagnostic_path())
-            .expect("published metadata remains readable"),
-        expected
-    );
+    assert_bytes(reservation.log_path.diagnostic_path(), expected.as_bytes());
 
     start_directory_sync_trace_for_test();
     write_reserved_session_metadata(&reservation, Some(&metadata))
@@ -1071,11 +914,7 @@ fn metadata_parent_sync_failure_is_retryable_before_reservation_activation() {
         take_directory_sync_trace_for_test(),
         [crate::runtime::fs_guards::test_path_key(&logs)]
     );
-    assert_eq!(
-        fs::read_to_string(reservation.log_path.diagnostic_path())
-            .expect("retried metadata remains readable"),
-        expected
-    );
+    assert_bytes(reservation.log_path.diagnostic_path(), expected.as_bytes());
     assert!(reservation.lock_path.diagnostic_path().exists());
 }
 
@@ -1112,16 +951,8 @@ fn empty_reservation_cleanup_retries_without_deleting_owned_artifacts() {
     let reservation =
         reserve_session_log(&workspace, "removalretry001").expect("reservation succeeds");
     let session_path = reservation.session_path.diagnostic_path().to_owned();
-    let log_path = reservation.log_path.diagnostic_path().to_owned();
-    let context_path = reservation.context_path.diagnostic_path().to_owned();
     let moved_path = session_path.with_extension("owned");
-    let moved_for_observer = moved_path.clone();
-    set_owned_file_remove_observer(move |path| {
-        fs::rename(path.diagnostic_path(), &moved_for_observer)
-            .expect("owned file moves after identity check");
-        fs::write(path.diagnostic_path(), b"temporary replacement")
-            .expect("replacement blocks guarded removal");
-    });
+    replace_owned_file_after_identity_check(moved_path.clone(), b"temporary replacement");
 
     reservation
         .cleanup()
@@ -1133,8 +964,8 @@ fn empty_reservation_cleanup_retries_without_deleting_owned_artifacts() {
         .cleanup()
         .expect_err("retry retains identity-bound artifacts");
     assert!(session_path.exists());
-    assert!(log_path.exists());
-    assert!(context_path.exists());
+    assert!(reservation.log_path.diagnostic_path().exists());
+    assert!(reservation.context_path.diagnostic_path().exists());
     reservation
         .release_lock()
         .expect("fixture teardown releases its authority");
@@ -1173,17 +1004,11 @@ fn explicit_reservation_rollback_never_accepts_a_foreign_replacement_lock() {
             || err.to_string().contains("marker identity changed"),
         "{err}"
     );
-    assert_eq!(
-        fs::read(&lock_path).expect("foreign lock remains readable"),
-        b"foreign owner"
-    );
+    assert_bytes(&lock_path, b"foreign owner");
     reservation
         .cleanup()
         .expect_err("ownership mismatch remains retryable");
-    assert_eq!(
-        fs::read(&lock_path).expect("retry preserves foreign lock"),
-        b"foreign owner"
-    );
+    assert_bytes(&lock_path, b"foreign owner");
     fs::remove_file(&lock_path).expect("foreign owner releases its lock");
 }
 
@@ -1204,24 +1029,8 @@ fn simulated_abrupt_termination_releases_authority_without_removing_the_marker()
 }
 
 #[test]
-fn reservation_rejects_a_missing_lock_and_non_file_session_leaf() {
+fn reservation_rejects_a_non_file_session_leaf() {
     let workspace = empty_workspace("reservation-helper-edges");
-    let missing_lock = reserve_session_log(&workspace, "missing001").expect("reservation succeeds");
-    missing_lock.activate().expect("reservation activates");
-    missing_lock.lock_path.remove().expect("lock removed");
-
-    let err = missing_lock
-        .release_lock()
-        .expect_err("missing lock release reports an IO error");
-
-    assert!(matches!(
-        err,
-        RuntimeError::Io { path, .. } if path.ends_with("missing001.lock")
-    ));
-    missing_lock
-        .cleanup()
-        .expect_err("missing lock rollback reports an IO error");
-
     let session_dir = ensure_runtime_dirs(&workspace)
         .expect("runtime dirs created")
         .sessions
@@ -1244,51 +1053,38 @@ fn reservation_rejects_a_missing_lock_and_non_file_session_leaf() {
 
 #[test]
 fn reserve_session_log_cleans_partial_files_on_late_reservation_errors() {
-    let log_conflict = empty_workspace("reserve-log-conflict");
-    let anchored = AnchoredWorkspace::open(&log_conflict).expect("workspace opens");
-    let candidate = reserve_unique_session_candidate_with_anchored_workspace(&anchored, "clean001")
-        .expect("candidate reserves before collision");
-    crate::tests::helpers::ensure_workspace_session_dir(&log_conflict);
-    crate::tests::helpers::ensure_workspace_log_dir(&log_conflict);
-    fs::write(
-        crate::tests::helpers::workspace_log_dir(&log_conflict).join("clean001.log"),
-        "",
-    )
-    .expect("conflicting log file");
+    for (session_id, log_conflict) in [("clean001", true), ("clean002", false)] {
+        let workspace = empty_workspace(&format!("reserve-{session_id}-conflict"));
+        let anchored = AnchoredWorkspace::open(&workspace).expect("workspace opens");
+        let candidate =
+            reserve_unique_session_candidate_with_anchored_workspace(&anchored, session_id)
+                .expect("candidate reserves before collision");
+        crate::tests::helpers::ensure_workspace_session_dir(&workspace);
+        let conflict = if log_conflict {
+            crate::tests::helpers::ensure_workspace_log_dir(&workspace);
+            crate::tests::helpers::workspace_log_dir(&workspace).join(format!("{session_id}.log"))
+        } else {
+            crate::tests::helpers::workspace_session_dir(&workspace)
+                .join(format!("{session_id}.lock"))
+        };
+        fs::write(conflict, "").expect("conflicting file written");
 
-    materialize_session_candidate(&anchored, candidate)
-        .expect_err("log conflict must fail reservation");
+        materialize_session_candidate(&anchored, candidate)
+            .expect_err("a late namespace conflict must fail reservation");
 
-    assert!(
-        !crate::tests::helpers::workspace_session_dir(&log_conflict)
-            .join("clean001.jsonl")
-            .exists()
-    );
-
-    let lock_conflict = empty_workspace("reserve-lock-conflict");
-    let anchored = AnchoredWorkspace::open(&lock_conflict).expect("workspace opens");
-    let candidate = reserve_unique_session_candidate_with_anchored_workspace(&anchored, "clean002")
-        .expect("candidate reserves before collision");
-    crate::tests::helpers::ensure_workspace_session_dir(&lock_conflict);
-    fs::write(
-        crate::tests::helpers::workspace_session_dir(&lock_conflict).join("clean002.lock"),
-        "",
-    )
-    .expect("conflicting lock file");
-
-    materialize_session_candidate(&anchored, candidate)
-        .expect_err("lock conflict must fail reservation");
-
-    assert!(
-        !crate::tests::helpers::workspace_session_dir(&lock_conflict)
-            .join("clean002.jsonl")
-            .exists()
-    );
-    assert!(
-        !crate::tests::helpers::workspace_log_dir(&lock_conflict)
-            .join("clean002.log")
-            .exists()
-    );
+        assert!(
+            !crate::tests::helpers::workspace_session_dir(&workspace)
+                .join(format!("{session_id}.jsonl"))
+                .exists()
+        );
+        if !log_conflict {
+            assert!(
+                !crate::tests::helpers::workspace_log_dir(&workspace)
+                    .join(format!("{session_id}.log"))
+                    .exists()
+            );
+        }
+    }
 }
 
 #[test]
@@ -1341,10 +1137,6 @@ fn session_reservation_cleanup_stays_bound_to_the_opened_runtime_directory() {
         fs::read_to_string(outside_session).expect("outside session remains readable"),
         "outside"
     );
-    assert_eq!(
-        fs::read(moved_session_dir.join("swap001.jsonl"))
-            .expect("owned session orphan remains readable"),
-        b""
-    );
+    assert_bytes(moved_session_dir.join("swap001.jsonl"), b"");
     assert!(!moved_session_dir.join("swap001.lock").exists());
 }

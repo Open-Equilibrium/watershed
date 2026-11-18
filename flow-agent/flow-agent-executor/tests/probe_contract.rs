@@ -57,41 +57,34 @@ fn sibling_self_test_succeeds_without_output() {
 }
 
 #[test]
-fn sibling_inner_mode_rejects_invalid_status_descriptors() {
-    for descriptor in ["not-an-integer", "-1", "0", "1", "2"] {
+fn sibling_rejects_invalid_invocations_without_output() {
+    const USAGE: &str = "usage: flow-executor [--probe]\n";
+    const DESCRIPTOR: &[&str] = &[
+        "invalid inner status descriptor\n",
+        "invalid inherited descriptor\n",
+    ];
+    let cases: [(&[&str], &[&str]); 8] = [
+        (&["--invalid"], &[USAGE]),
+        (&["--inner"], &[USAGE]),
+        (&["--inner", "3", "4", "5"], &[USAGE]),
+        (&["--inner", "not-an-integer"], DESCRIPTOR),
+        (&["--inner", "-1"], DESCRIPTOR),
+        (&["--inner", "0"], DESCRIPTOR),
+        (&["--inner", "1"], DESCRIPTOR),
+        (&["--inner", "2"], DESCRIPTOR),
+    ];
+    for (arguments, diagnostics) in cases {
         let output = Command::new(env!("CARGO_BIN_EXE_flow-executor"))
-            .args(["--inner", descriptor])
-            .output()
-            .expect("sibling Executor inner mode launches");
-
-        assert_eq!(output.status.code(), Some(65), "{descriptor}: {output:?}");
-        assert!(output.stdout.is_empty());
-        let diagnostic = String::from_utf8(output.stderr).expect("stderr is UTF-8");
-        assert!(
-            diagnostic == "invalid inner status descriptor\n"
-                || diagnostic == "invalid inherited descriptor\n",
-            "{descriptor}: {diagnostic}"
-        );
-    }
-}
-
-#[test]
-fn sibling_rejects_invalid_arguments_without_output() {
-    for arguments in [
-        vec!["--invalid"],
-        vec!["--inner"],
-        vec!["--inner", "3", "4", "5"],
-    ] {
-        let output = Command::new(env!("CARGO_BIN_EXE_flow-executor"))
-            .args(&arguments)
+            .args(arguments)
             .output()
             .expect("sibling Executor launches");
 
         assert_eq!(output.status.code(), Some(65), "{arguments:?}: {output:?}");
         assert!(output.stdout.is_empty());
-        assert_eq!(
-            String::from_utf8(output.stderr).expect("stderr is UTF-8"),
-            "usage: flow-executor [--probe]\n"
+        let diagnostic = String::from_utf8(output.stderr).expect("stderr is UTF-8");
+        assert!(
+            diagnostics.contains(&diagnostic.as_str()),
+            "{arguments:?}: {diagnostic}"
         );
     }
 }

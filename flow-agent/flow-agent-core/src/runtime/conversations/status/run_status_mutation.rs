@@ -151,8 +151,6 @@ fn validate_run_creation_shape(
     if actual.contains(RUN_LOG_LEAF) {
         let file = run.file(RUN_LOG_LEAF);
         let (opened, metadata) = open_anchored_file_for_read(&file)?;
-        // WHY: an empty run-log is a definition cut off before its write, known partial inventory
-        // that only a removal reclaims (PROTOCOL.md).
         if metadata.len() == 0 && allow_empty_run_log {
             return Ok((actual, construction));
         }

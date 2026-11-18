@@ -11,8 +11,6 @@ import '../theme/tokens.g.dart';
 final _command = RegExp(r'^gh\s+pr\s+checkout\s+(\S+)$');
 final _number = RegExp(r'^#?(\d+)$');
 
-/// The number or https URL a typed pull request names, or null when it names none: `123`, `#123`,
-/// either after `gh pr checkout`, or a URL. The bridge resolves it.
 String? pullRequestReference(String input) {
   final text = input.trim();
   final argument = _command.firstMatch(text)?.group(1) ?? text;
@@ -21,8 +19,6 @@ String? pullRequestReference(String input) {
   return argument.startsWith('https://') ? argument : null;
 }
 
-/// T3 Code's "Checkout pull request" dialog: resolves the reference typed, then checks the pull
-/// request out in the project folder (Local) or in a worktree of its own (Worktree).
 Future<void> showCheckoutPullRequestDialog(
   BuildContext context,
   SessionState state,
@@ -55,7 +51,6 @@ class _CheckoutPullRequestState extends State<_CheckoutPullRequest> {
   late final _input = TextEditingController(text: widget.reference);
   Timer? _timer;
 
-  /// Counts the resolutions, so an answer for an earlier reference never lands.
   int _attempt = 0;
   bool _dirty = false;
   String? _reference;
@@ -63,7 +58,6 @@ class _CheckoutPullRequestState extends State<_CheckoutPullRequest> {
   bool _resolving = false;
   String? _resolveError;
 
-  /// `local` or `worktree` while that checkout runs.
   String? _preparing;
   String? _prepareError;
 
@@ -98,7 +92,6 @@ class _CheckoutPullRequestState extends State<_CheckoutPullRequest> {
     if (_reference case final ref?) _schedule(ref);
   }
 
-  /// Resolves `reference` once the typing pauses, as T3 does.
   void _schedule(String reference) {
     _timer?.cancel();
     _timer = Timer(_wait, () => unawaited(_resolve(reference)));
@@ -142,7 +135,6 @@ class _CheckoutPullRequestState extends State<_CheckoutPullRequest> {
         reference,
         worktree: worktree,
       );
-      // T3 drafts a new thread on the checked-out branch.
       await state.draftFor(checked);
       if (mounted) Navigator.of(context).pop();
     } on Object catch (error) {
@@ -236,7 +228,6 @@ class _CheckoutPullRequestState extends State<_CheckoutPullRequest> {
   }
 }
 
-/// The pull request the reference resolved to: its title, its branches and its state.
 class _Resolved extends StatelessWidget {
   const _Resolved({required this.pr});
 

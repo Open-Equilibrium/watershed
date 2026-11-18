@@ -21,10 +21,6 @@ import 'workspace_state.dart';
 
 const _end = caretEnd;
 
-/// One Text Block on its Page, with the divider above it when it starts a Section. It
-/// follows only its own Block (client architecture rule 6); typing shows at once and
-/// reaches the core afterwards (rule 7). ⏎ and ⌫ at its start go through the Page's input
-/// queue (ADR-0240).
 class TextBlock extends StatefulWidget {
   const TextBlock({
     super.key,
@@ -36,7 +32,6 @@ class TextBlock extends StatefulWidget {
   final PageViews views;
   final BridgeView view;
 
-  /// Its position on the Page.
   final int index;
 
   @override
@@ -44,55 +39,39 @@ class TextBlock extends StatefulWidget {
 }
 
 class _TextBlockState extends State<TextBlock> implements EditorSource {
-  /// The field's controller, which a text Liquid replaced swaps for a fresh one (see [_adopt]).
   var _text = TextEditingController();
 
-  /// Keeps the field, its text input included, when a new style wraps it differently.
   final _field = GlobalKey(debugLabel: 'Text Block field');
   late final _focus = FocusNode(
     debugLabel: 'Text Block',
     onKeyEvent: (_, event) => _key(event),
   );
 
-  /// The text the core holds as far as this Block knows, its own edits included.
   String? _stored;
   BridgeTextStyle _style = BridgeTextStyle.paragraph;
 
-  /// While the text changes from the core or a key, not from typing.
   bool _quiet = false;
 
-  /// Whether Liquid replaced the text since the field last took its controller.
   bool _replaced = false;
 
-  /// Reads asked for, so only the latest shows.
   int _reads = 0;
 
-  /// The edits sent since the stored text was last read.
   var _edits = EditChain();
 
-  /// Whether the field was last built editable, which it is once its text is known.
   bool _editable = false;
 
-  /// A caret place past the text shown, which a write on its way makes room for.
   int? _wanted;
   StreamSubscription<BridgeChange>? _followed;
   StreamSubscription<String>? _settled;
 
-  /// The slash command menu `/` opens, its commands for what follows `/` and the one ⏎
-  /// takes.
   final _menu = OverlayPortalController();
   var _choices = const <SlashCommand>[];
   var _chosen = 0;
 
-  /// While a Table chosen with a slash command takes this line's place: what is typed stays in
-  /// the field, unsent, and becomes the Table's name once the Table takes the caret, the
-  /// person moves to another field or the line goes.
   var _adding = false;
 
-  /// The Table taking this line's place, once added.
   BridgeApplied? _added;
 
-  /// What the line held when it went before its Table was added.
   String? _gone;
 
   WorkspaceState get _state => widget.views.state;
@@ -117,11 +96,9 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
       _state.workspace,
       BridgeResource(kind: BridgeResourceKind.block, page: _page, block: block),
     ).listen((_) => unawaited(_read()), onError: _report);
-    // Built after the caret was handed to it.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _takeCaret();
     });
-    // Once every write to this Block arrived, its text is read again.
     _settled = widget.views.settled
         .where((settled) => settled == block)
         .listen((_) => unawaited(_read()));
@@ -129,8 +106,6 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
 
   @override
   void dispose() {
-    // What the line held while its Table was added is the Table's name, also if the
-    // Table never takes the caret.
     if (_adding) {
       final typed = _gone = _text.text;
       if (_added case final added?) {
@@ -138,7 +113,6 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
         widget.views.naming[added.view!] = () => (typed, true);
       }
     }
-    // A composition still open, or anything else not yet sent, is written as it stands.
     if (!_editor.owns(this) &&
         !_adding &&
         _stored != null &&
@@ -156,7 +130,6 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
     super.dispose();
   }
 
-  /// The Page's earlier queue finished: the field takes keys once what it wrote shows.
   void _readied() {
     if (!mounted) return;
     setState(() => _stored = null);
@@ -169,7 +142,6 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
   void _focusChanged() {
     if (_focus.hasFocus) return;
     _closeMenu();
-    // A person who moved to another field keeps the caret there.
     if (_adding && _added != null) _finish(_text.text);
   }
 
@@ -177,9 +149,6 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
     if (_menu.isShowing) _menu.hide();
   }
 
-  /// Opens the slash command menu once `/` is typed in an empty Text Block, or `handed` text
-  /// starting with it, filters it by what follows, and closes it when nothing matches or the
-  /// `/` is gone.
   void _offer(String text, String stored, {bool handed = false}) {
     final opening =
         stored.isEmpty && (text == '/' || handed && text.startsWith('/'));
@@ -195,12 +164,8 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
     _menu.show();
   }
 
-  /// Takes `choice`, whose writes quitting waits for.
   void _take(SlashCommand choice) => _state.track(_choose(choice));
 
-  /// Applies `choice` in place of what was typed for it: a style, this line turned into
-  /// code, or a Table in this line's place, starting the Section the line started. A line
-  /// that ends the Page stays, empty, below the Table, so the Page goes on.
   Future<void> _choose(SlashCommand choice) async {
     _closeMenu();
     _set('', 0);
@@ -218,8 +183,6 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
     _adding = true;
     final BridgeApplied added;
     try {
-      // The last line keeps its place below the Table, which goes after the View above,
-      // read first if its window was not; only the Page's first line has none.
       String? after = view.id;
       if (last) {
         final above = widget.index > 0
@@ -243,12 +206,10 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
         const [],
       );
     } on Object {
-      // The problem shows on the Page; what was typed stays in the line.
       if (mounted) {
         _adding = false;
         _typed();
       } else if (_gone case final gone? when gone.isNotEmpty) {
-        // The line went meanwhile; what it held is its text.
         unawaited(
           views
               .write(textEdit(_page, block, '', gone), [block])
@@ -263,11 +224,9 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
     } else if (!_focus.hasFocus || _state.quitting) {
       _finish(_text.text);
     } else {
-      // The Table reads the name from the line once it takes the caret.
       views.naming[added.view!] = _handOver;
       views.moveCaret(Caret(added.view!, 0));
     }
-    // A refused write's problem shows on the Page; the Table stays.
     try {
       Future<void> boundary(String view, bool starts) => views.write(
         mutation(
@@ -288,19 +247,15 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
           [block],
         );
       }
-    } on Object {
-      // Shown on the Page.
-    }
+    } on Object catch (_) {}
   }
 
-  /// What the line holds, for the Table that took its place and now the caret.
   (String, bool) _handOver() {
     final typed = _text.text;
     _release();
     return (typed, false);
   }
 
-  /// Gives what the line holds to its Table without the caret.
   void _finish(String typed) {
     final added = _added!;
     final views = widget.views;
@@ -309,7 +264,6 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
     _release();
   }
 
-  /// Renames the Table `added` to `typed`, if anything was typed.
   void _name(PageViews views, BridgeApplied added, String typed) {
     views.naming.remove(added.view);
     if (typed.isEmpty) return;
@@ -328,7 +282,6 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
     );
   }
 
-  /// The line is itself again, empty if it stays.
   void _release() {
     widget.views.naming.remove(_added?.view);
     _adding = false;
@@ -336,9 +289,6 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
     if (mounted) _set('', 0);
   }
 
-  /// The slash command menu, under the line `/` was typed in or above it (see
-  /// [AnchoredMenu]); its commands scroll in the room it has. Clicking it keeps the
-  /// field's focus.
   Widget _menuView(BuildContext context) => SlashCommands(
     choices: _choices,
     chosen: _chosen,
@@ -346,7 +296,6 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
     onHover: (index) => setState(() => _chosen = index),
   );
 
-  /// ↑↓ choose in the open slash command menu, ⏎ takes the choice and esc closes it.
   KeyEventResult _menuKey(LogicalKeyboardKey key) {
     switch (key) {
       case LogicalKeyboardKey.arrowDown || LogicalKeyboardKey.arrowUp:
@@ -366,12 +315,9 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
     if (mounted) _state.readFailed(error);
   }
 
-  /// Shows the stored text and style, unless a write to this Block or a change of the
-  /// Page's structure from it is on its way.
   Future<void> _read() async {
     final read = ++_reads;
     final views = widget.views;
-    // A read asked while a write is on its way may miss it, whenever it answers.
     final clean = views.pending(block) == 0;
     final sent = views.sent(block);
     final BridgeAnswer answer;
@@ -383,7 +329,6 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
       _report(error);
       return;
     }
-    // While a Table takes this line's place, what is typed there is its name.
     if (!mounted || read != _reads || _editor.isSource(this) || _adding) {
       return;
     }
@@ -400,7 +345,6 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
       unawaited(views.readRun(widget.index).catchError(_report));
     }
     if (style != _style) setState(() => _style = style);
-    // Editable once the text is known, so nothing typed before is lost.
     if (_stored == null) setState(() {});
     _stored = text;
     _edits = EditChain();
@@ -430,9 +374,6 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
     if (changed && mounted) setState(() => _replaced = true);
   }
 
-  /// Flutter keeps a field's undo history with its controller, so ⌘Z after a text Liquid
-  /// replaced would bring back the text before it (rule 7). The field takes a fresh controller
-  /// when it builds, which keeps what is typed before that frame.
   void _adopt() {
     _replaced = false;
     _text = adoptController(_text, listener: _typed);
@@ -463,7 +404,6 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
         caret.kind != BridgeBlockKind.text) {
       return;
     }
-    // What the input queue wrote last is what the core holds, so it needs no read first.
     if (caret.text case final text?) {
       _stored = text;
       if (_text.text != text) _set(text, text.length);
@@ -472,7 +412,6 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
       setState(() => _style = style);
     }
     if (_stored == null) return;
-    // Takes the caret once the field is built editable, so it opens its text input.
     if (!_editable) {
       setState(() {});
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -482,8 +421,6 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
     }
     widget.views.caret.value = null;
     _focus.requestFocus();
-    // `/` typed on a blank Page opens the slash command menu in the Text Block it made, also
-    // with the keys typed after it while the Block was made.
     if (caret.text case final text? when caret.slash) {
       _offer(text, '', handed: true);
     }
@@ -494,13 +431,9 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
     );
   }
 
-  /// Sends what typing changed, or applies a shortcut typed at the start. While the Page's
-  /// structure changes from here, the input queue takes it instead.
   void _typed() {
     final stored = _stored;
     if (_adding) {
-      // Quitting names the Table with what the line holds, as the Table cannot take the
-      // caret any more; while it is added, that happens once it answers.
       if (_state.quitting && _added != null) _finish(_text.text);
       return;
     }
@@ -509,7 +442,6 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
       _editor.typed(this);
       return;
     }
-    // On quitting, a composition still open is written as it stands.
     if (_composing && !_state.quitting) return;
     final text = _text.text;
     if (text == stored) return;
@@ -552,8 +484,6 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
     _offer(text, stored);
   }
 
-  /// Sends the change from the stored text to `text` as one edit; after a refused one, none
-  /// until the stored text is read again, which each change asks for.
   void _send(String text) {
     final stored = _stored!;
     if (_edits.refused != null) {
@@ -565,7 +495,6 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
     _write(textEdit(_page, block, stored, text), chain: _edits);
   }
 
-  /// Writes `change` after earlier ones; a refusal shows the stored text again (rule 7).
   void _write(BridgeMutation change, {EditChain? chain}) => unawaited(
     widget.views
         .write(change, [block], chain: chain)
@@ -581,9 +510,6 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
     }
   }
 
-  /// Adds the files `sources` gives as Media Blocks below this line, or in its place if it
-  /// is empty; an empty line that ends the Page stays below them, so the Page goes on
-  /// (ADR-0305).
   Future<void> _addMedia(Future<List<MediaSource>> Function() sources) async {
     final views = widget.views;
     final view = widget.view;
@@ -612,8 +538,6 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
     if (empty && first != null) await _handOverSection(first, last: last);
   }
 
-  /// A Block that took this empty line's place starts the Section the line started; a
-  /// line that ends the Page stays below it and starts none (as a Table does).
   Future<void> _handOverSection(String added, {required bool last}) async {
     final view = widget.view;
     if (!view.boundary) return;
@@ -634,8 +558,6 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
     }
   }
 
-  /// Adds a focused Whiteboard in place of this empty line, or below the line; a line that
-  /// ends the Page stays below it, so the Page goes on.
   Future<void> _addWhiteboard() async {
     final views = widget.views;
     final view = widget.view;
@@ -675,9 +597,6 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
     }
   }
 
-  /// Pastes what the clipboard holds: copied files and images as Media Blocks, code an
-  /// editor marked as a Code Block in its language, below this line or in its place if it is
-  /// empty, and anything else as text (ADR-0305).
   Future<void> _paste() async {
     final Pasted pasted;
     try {
@@ -697,7 +616,6 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
     }
     if (pasted.code case final code?) return _pasteCode(code, pasted.language);
     final text = pasted.text;
-    // Where the caret is now: the text may have changed while the clipboard was read.
     final selection = _text.selection;
     if (text == null ||
         text.isEmpty ||
@@ -711,8 +629,6 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
     );
   }
 
-  /// Puts `code` into a Code Block in `language`: this line, if it is empty, or a new one
-  /// below it; the Code Block takes the caret at its end.
   Future<void> _pasteCode(String code, String language) async {
     final views = widget.views;
     final view = widget.view;
@@ -754,14 +670,11 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
         await views.write(write, [target.block]);
       }
     } on Object {
-      // Shown on the Page.
       return;
     }
     views.moveCaret(Caret(target.view, caretEnd, kind: BridgeBlockKind.code));
   }
 
-  /// Turns this Text Block into a Code Block, which takes the caret at its start once built
-  /// (ADR-0302).
   void _turnIntoCode() {
     _write(
       mutation(BridgeMutationKind.turnIntoCode, page: _page, block: block),
@@ -771,7 +684,6 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
     );
   }
 
-  /// Ticks or unticks a to-do, which ⌘⏎ and its box do; other styles stay.
   void _toggleToDo() {
     final done = _style == BridgeTextStyle.done;
     if (done || _style == BridgeTextStyle.todo) {
@@ -796,10 +708,8 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
     if (event is KeyUpEvent || _composing || _stored == null) {
       return KeyEventResult.ignored;
     }
-    // Until the Page's earlier queue is done, the field takes no keys at all.
     if (!widget.views.ready.value) return KeyEventResult.handled;
     final keys = HardwareKeyboard.instance;
-    // A key with the Liquid key held is a Liquid shortcut's, never the plain key's (⇪⏎ is not ⏎).
     final plain =
         !keys.isShiftPressed &&
         !keys.isMetaPressed &&
@@ -816,7 +726,6 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
     if (!plain) return KeyEventResult.ignored;
     if (_editor.isSource(this)) return _editor.queue(this, event);
     if (_menu.isShowing) return _menuKey(event.logicalKey);
-    // While a Table takes this line's place, only typing reaches the field.
     if (_adding) {
       return switch (event.logicalKey) {
         LogicalKeyboardKey.enter ||
@@ -832,8 +741,6 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
         _ => KeyEventResult.ignored,
       };
     }
-    // While another Text Block's change of structure runs, this field types and deletes as
-    // usual, and its own ⏎ or ⌫ at the start joins the queue behind that change.
     final selection = _text.selection;
     if (!selection.isValid) return KeyEventResult.ignored;
     final at = selection.baseOffset;
@@ -866,7 +773,6 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
     }
   }
 
-  /// Hands ⏎ or ⌫ at the start to the Page's input queue, which changes the structure.
   void _structure(LogicalKeyboardKey key) => _editor.start(
     this,
     EditorTarget(
@@ -881,7 +787,6 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
     key,
   );
 
-  /// Whether the caret is on the text's first or last visual line.
   bool _onLine({required bool first}) {
     RenderEditable? editable;
     void find(RenderObject object) {
@@ -910,10 +815,7 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
     return (caret - edge).abs() < 1;
   }
 
-  /// Puts the caret into the neighbouring Text or Code Block, past Blocks of other kinds: at
-  /// the end above, at the start below.
   bool _move(int by) {
-    // The caret is the input queue's to place while the structure changes.
     if (_editor.busy) return false;
     final neighbour = widget.views.caretFrom(widget.index + by, by);
     if (neighbour == null) return false;
@@ -1030,12 +932,10 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
       ),
       _ => text,
     };
-    // The field passes ⌘⏎ and ⇪⏎ on, so they reach this Block while it has the caret.
     text = CallbackShortcuts(
       bindings: Keymap.of(context).bind({Command.toggleToDo: _toggleToDo}),
       child: text,
     );
-    // The slash command menu sits above the style's frame, which a restyle rebuilds.
     return AnchoredMenu(
       controller: _menu,
       height: SlashCommands.heightFor(_choices),
@@ -1055,29 +955,23 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
     );
   }
 
-  /// Its number in the run of numbered items it ends.
   int _number(Map<String, BridgeTextStyle> styles) {
     if (widget.view.boundary) return 1;
     var number = 1;
     for (var index = widget.index - 1; index >= 0; index--) {
-      // Read as far as readRun reached, without pushing the shown windows out.
       final above = widget.views.peek(index);
-      // A Block of another kind ends the run, also one that was a numbered item before.
       if (above == null ||
           above.kind != BridgeBlockKind.text ||
           styles[above.block] != BridgeTextStyle.numbered) {
         break;
       }
       number++;
-      // A run ends at its Section's start.
       if (above.boundary) break;
     }
     return number;
   }
 }
 
-/// The divider `---` leaves above a View that starts a Section; tile edges show it in
-/// Arrange mode instead.
 class SectionDivider extends StatelessWidget {
   const SectionDivider({super.key = const Key('section-divider')});
 

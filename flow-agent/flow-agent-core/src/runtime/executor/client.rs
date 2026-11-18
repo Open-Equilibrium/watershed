@@ -13,29 +13,24 @@ mod preparation;
 mod response;
 mod transport;
 
-/// Definitive result of one bounded Executor dispatch.
 pub(crate) enum ExecutorDispatchOutcome {
     Completed(Box<ExecutorToolExecution>),
     Error(proto::ExecutorErrorCodeV0),
 }
 
-/// Result of validating one exact Tool request in its retained one-shot Executor.
 pub(crate) enum ExecutorPreflightOutcome {
     Ready(Box<PreparedExecutorWaiting>),
     Rejected(proto::ExecutorErrorCodeV0),
 }
 
-/// Validated result and Flow-owned write protection evidence from one Tool execution.
 pub(crate) struct ExecutorToolExecution {
     pub(crate) enforcement: proto::EnforcementReceiptV0,
     pub(crate) outcome: ToolExecutionOutcome,
-    /// Whether a process of the Tool's group survived cleanup after the Executor's answer.
     pub(crate) cleanup_unknown: bool,
     #[cfg(any(test, feature = "m12-startup-evidence"))]
     pub(crate) request_hash: String,
 }
 
-/// Fully validated request with protected objects retained before recovery or dispatch.
 pub(crate) struct PreparedExecutorTool {
     request_hash: String,
     protected_descriptors: Vec<std::os::fd::OwnedFd>,
@@ -43,7 +38,6 @@ pub(crate) struct PreparedExecutorTool {
     request_bytes: Vec<u8>,
 }
 
-/// One validated Tool request waiting for explicit start in its retained Executor process.
 pub(crate) struct PreparedExecutorWaiting {
     prepared: PreparedExecutorTool,
     process: transport::WaitingExecutor,
@@ -59,7 +53,6 @@ impl PreparedExecutorTool {
     }
 }
 
-/// Ready one-shot Executor and this installation's admitted protected objects.
 pub(crate) struct PreparedExecutor {
     selection: ExecutorSelection,
     protected_objects: Vec<ProtectedObject>,
@@ -67,7 +60,6 @@ pub(crate) struct PreparedExecutor {
 }
 
 impl PreparedExecutor {
-    /// Resolves the selected Executor and retains the admitted protected installation.
     pub(crate) fn prepare_selected() -> Result<Self, RuntimeError> {
         let protected_directories = protected_directories(true)?;
         let selection = resolve_executor_with_roots(&protected_directories)?;
@@ -79,7 +71,6 @@ impl PreparedExecutor {
         })
     }
 
-    /// Launches exactly one Executor and validates the prepared request without starting its Tool.
     pub(crate) fn preflight_prepared(
         &self,
         prepared: PreparedExecutorTool,
@@ -101,7 +92,6 @@ impl PreparedExecutor {
         })
     }
 
-    /// Explicitly starts a Tool in its already validated one-shot Executor.
     pub(crate) fn start_prepared(
         &self,
         waiting: PreparedExecutorWaiting,
@@ -139,7 +129,6 @@ impl PreparedExecutor {
         }
     }
 
-    /// Runs both stages immediately for non-productive conformance and startup evidence.
     #[cfg(any(test, feature = "m12-startup-evidence"))]
     pub(crate) fn execute_prepared(
         &self,
@@ -168,8 +157,6 @@ impl PreparedExecutor {
     }
 }
 
-/// Validates a terminal Completed answer. A surviving process group keeps only a valid answer, so
-/// an invalid one fails stop instead of dropping the unknown cleanup.
 fn validate_completed(
     enforcement: &proto::EnforcementReceiptV0,
     tool_result: proto::ExecutorToolResultV0,
@@ -320,7 +307,6 @@ mod tests {
         }
         const ALLOWED: &str = "WATERSHED_EXECUTOR_ALLOWED_FIXTURE";
         const OMITTED: &str = "WATERSHED_EXECUTOR_OMITTED_FIXTURE";
-        // This test owns its process; these values contain only synthetic fixture data.
         unsafe {
             std::env::set_var(ALLOWED, "literal environment value");
             std::env::set_var(OMITTED, "must not be forwarded");
@@ -447,7 +433,6 @@ mod tests {
         }
         use std::os::unix::ffi::OsStringExt as _;
         const NAME: &str = "WATERSHED_EXECUTOR_NON_UTF8_FIXTURE";
-        // This test owns its process; the value is one synthetic non-UTF-8 byte.
         unsafe { std::env::set_var(NAME, std::ffi::OsString::from_vec(vec![0xff])) };
         let root = crate::tests::empty_workspace();
         let workspace = AnchoredWorkspace::open(&root).expect("workspace opens");
@@ -532,8 +517,6 @@ mod tests {
         }
         if std::env::var_os("NEXTEST").is_some() {
             for descriptor in 0..=2 {
-                // SAFETY: nextest gives this test its own process, and the test deliberately
-                // invalidates only that process's inherited standard descriptors.
                 unsafe {
                     let _ = c_close(descriptor);
                 }
@@ -612,7 +595,6 @@ mod tests {
             .expect("preflight is canonical"),
         )
         .expect("preflight is UTF-8");
-        // Keep shell parsing separate from the Start record on the same pipe.
         let script = format!(
             "{{\n\
              printf '%s' '{preflight}'\n\
@@ -747,7 +729,6 @@ mod tests {
             return;
         }
         const NAME: &str = "WATERSHED_EXECUTOR_DECOMPOSED_FIXTURE";
-        // This test owns its process; the value is synthetic fixture data.
         unsafe {
             std::env::set_var(NAME, "Cafe\u{301}");
         }
@@ -879,7 +860,6 @@ mod tests {
             "without a surviving group the invalid answer is an ordinary error"
         );
         if std::env::var_os(CHILD_ENV).is_none() {
-            // The child re-runs only this test, so its abort cannot end the caller.
             let test_name = std::thread::current()
                 .name()
                 .expect("test thread has a name")
@@ -1082,8 +1062,6 @@ mod tests {
             &request,
             script.as_bytes(),
             || {
-                // Deterministically replace a destination after its snapshot, as
-                // another parent thread or spawn's channel allocation can do.
                 rustix::io::dup2(&replacement, &mut destination)
                     .expect("destination is replaced before spawn");
                 Ok(Instant::now() + Duration::from_secs(5))
@@ -1132,7 +1110,6 @@ mod tests {
                 .expect("private shell executor is executable");
             path
         };
-        // macOS can kill a relocated system shell before it runs the fixture.
         #[cfg(target_os = "macos")]
         let path = Path::new("/bin/sh").to_owned();
         let executor = File::open(&path).expect("shell executor opens");
@@ -1141,8 +1118,6 @@ mod tests {
         assert!(parent_flags.contains(rustix::io::FdFlags::CLOEXEC));
         #[cfg(target_os = "linux")]
         {
-            // Linux can retain an image across rename; this implementation detail
-            // does not extend the shared administrator-owned installation contract.
             fs::rename(&path, root.join("retained-executor"))
                 .expect("opened shell executor is renamed");
             fs::write(&path, b"invalid replacement executable\n").expect("old path is replaced");
@@ -1227,7 +1202,6 @@ mod tests {
                 |_| Ok(()),
                 &|| now,
                 |child| {
-                    // The fixture cannot emit its frame until stdout has been polled empty.
                     std::fs::write(&release, b"release").expect("response producer is released");
                     let started = Instant::now();
                     while !child_exited_without_reaping(child).expect("Executor is observable") {
@@ -1358,7 +1332,6 @@ mod tests {
     }
 
     fn preparation_fixture(protected_objects: Vec<ProtectedObject>) -> PreparedExecutor {
-        // Request preparation needs retained objects, but never probes or launches this selection.
         PreparedExecutor {
             selection: ExecutorSelection::new(
                 "/unused-executor".into(),

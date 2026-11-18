@@ -8,8 +8,6 @@ import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
 import 'session_card_settings.dart';
 
-/// A row of the session card: 32 px high with 13 px medium text and a hover fill, as the rows of
-/// T3 Code's thread details card.
 class CardRow extends StatelessWidget {
   const CardRow({super.key, required this.children, this.onTap});
 
@@ -44,8 +42,6 @@ class CardRow extends StatelessWidget {
   }
 }
 
-/// A section of the card: its blocks in a padded column, below a hairline when `divided`, which
-/// T3 Code draws when an earlier section has content.
 class CardSection extends StatelessWidget {
   const CardSection({super.key, this.divided = false, required this.children});
 
@@ -69,7 +65,6 @@ class CardSection extends StatelessWidget {
   );
 }
 
-/// A section's heading, small and muted, with what sits at its end, such as a menu button.
 class CardHeading extends StatelessWidget {
   const CardHeading({super.key, required this.title, this.trailing});
 
@@ -99,8 +94,6 @@ class CardHeading extends StatelessWidget {
   );
 }
 
-/// A row's small icon button, shown with its `tooltip` and announced as `label`, as T3 Code names
-/// it; it is off when `onPressed` is null.
 class CardIconButton extends StatelessWidget {
   const CardIconButton({
     super.key,
@@ -133,10 +126,6 @@ class CardIconButton extends StatelessWidget {
   );
 }
 
-/// The thread details items: the heading, a checkbox per row, which a click shows or hides and
-/// leaves the menu open, then Reset to default, which is off while every row has its default. The
-/// session card's rows menu and Settings → Appearance both show them, so both set the same
-/// settings; `first` takes the focus when the menu opens.
 List<Widget> threadDetailsMenuItems(
   BuildContext context,
   SessionCardSettingsController settings, {
@@ -171,8 +160,6 @@ List<Widget> threadDetailsMenuItems(
   ),
 ];
 
-/// Rows that show `initial` at first. "Show N more" reveals `page` more at a time, or all the rest
-/// when `page` is null; a `collapsible` list also offers "Show less" once it shows more.
 class PagedRows extends StatefulWidget {
   const PagedRows({
     super.key,

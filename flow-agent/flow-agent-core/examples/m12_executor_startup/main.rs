@@ -218,7 +218,6 @@ mod tests {
     #[test]
     fn measurement_child_output_over_its_bound_fails_the_workload() {
         let session = TempRoot::create("flow-m12-output-bound").unwrap();
-        // One byte beyond the 64 KiB per-stream bound, then the child exits on its own.
         let error = launch_measurement_child(
             &session,
             Path::new("/bin/sh"),
@@ -229,7 +228,6 @@ mod tests {
         assert!(error.to_string().contains("wrote more than"), "{error}");
     }
 
-    // A real absolute image, because the report hashes the selected Executor's bytes.
     fn executor_path() -> PathBuf {
         PathBuf::from("/bin/sh")
     }

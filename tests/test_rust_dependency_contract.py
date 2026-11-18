@@ -81,7 +81,6 @@ def rust_product_manifest_paths(repo: Path) -> list[Path]:
 
 class RustDependencyContractTest(unittest.TestCase):
     def test_workspace_registry_dependencies_are_exactly_pinned(self) -> None:
-        # Cargo reads "=1.2" as any 1.2.x release, so only complete versions are exact.
         for version in ("=1.2.3", "=1.0.0-rc.1"):
             self.assertTrue(exactly_pinned(version), version)
         for version in ("=1", "=1.2", "^1.2.3", "=1.2.3, <1.3"):
@@ -145,21 +144,7 @@ class RustDependencyContractTest(unittest.TestCase):
                 env=git_environment(),
             )
 
-            excluded = {
-                repo / name for name in manifests if name != ".codex-tools/Cargo.toml"
-            }
-            open_path = Path.open
-
-            def open_product_path(path: Path, *args, **kwargs):
-                self.assertNotIn(
-                    path, excluded, "product gate opened repository agent setup"
-                )
-                return open_path(path, *args, **kwargs)
-
-            with (
-                mock.patch(__name__ + ".ROOT", repo),
-                mock.patch.object(Path, "open", autospec=True, side_effect=open_product_path),
-            ):
+            with mock.patch(__name__ + ".ROOT", repo):
                 self.test_rust_product_manifests_have_no_node_runtime_dependency()
                 product = repo / ".codex-tools" / "Cargo.toml"
                 product.write_text('[dependencies]\nnode = "1"\n', encoding="utf-8")

@@ -106,8 +106,6 @@ pub(crate) fn responses_request_input_bytes(
         })
 }
 
-/// Decodes a reply's events. Every shape error is a reply that ended but broke the Responses
-/// format, so it is reply-invalid rather than a definitive provider error (PROTOCOL.md).
 pub(crate) fn decode_responses_turn(
     events: &[serde_json::Value],
 ) -> Result<ProviderTurn, RuntimeError> {
@@ -498,7 +496,6 @@ fn provider_protocol(message: impl Into<String>) -> RuntimeError {
     RuntimeError::Protocol(format!("OpenAI Codex provider: {}", message.into()))
 }
 
-/// A reply that ended but broke the Responses format; the message is Flow Agent's own.
 pub(super) fn provider_reply_invalid(detail: impl AsRef<str>) -> RuntimeError {
     RuntimeError::provider_reply_invalid(format!(
         "Flow Agent rejected the provider reply: {}",

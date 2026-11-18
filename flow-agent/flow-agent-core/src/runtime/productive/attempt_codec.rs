@@ -51,7 +51,6 @@ struct CancelledToolOutput {
     stage: ExecutorAttemptStage,
 }
 
-/// Whether a recovered Tool attempt carries a full output envelope; a cancelled one may too.
 pub(super) fn has_tool_output_envelope(result: &RunAttemptResult) -> bool {
     result
         .durable_output
@@ -66,10 +65,6 @@ pub(super) fn has_tool_output_envelope(result: &RunAttemptResult) -> bool {
         })
 }
 
-/// Returns the stage of a recovered cancelled Tool attempt. v0 records carry no stage and
-/// were always written after `tool.started`, so they read as `started`; so does a record
-/// without durable output, as recovery read it before stages existed. A full Tool output
-/// envelope is written only once the Tool started.
 pub(super) fn recovered_cancelled_tool_stage(
     result: &RunAttemptResult,
 ) -> Result<ExecutorAttemptStage, RuntimeError> {
@@ -95,7 +90,6 @@ pub(super) fn recovered_cancelled_tool_stage(
     }
 }
 
-/// Builds a Tool attempt's durable output; v2 adds the mark that its process cleanup is unknown.
 pub(super) fn tool_attempt_output(
     enforcement: &proto::EnforcementReceiptV0,
     request_hash: &str,
@@ -119,7 +113,6 @@ pub(super) fn tool_attempt_output(
     })
 }
 
-/// Whether a Tool attempt's durable output records that its process cleanup is unknown.
 pub(crate) fn cleanup_unknown_recorded(result: &RunAttemptResult) -> bool {
     result
         .durable_output
@@ -152,7 +145,6 @@ pub(super) struct ToolAttemptOutput {
     pub(super) tool_result: serde_json::Value,
 }
 
-/// v1 carries no cleanup mark and v2 always carries one, so the mark never contradicts its schema.
 fn cleanup_mark_matches_schema(schema: &str, mark: bool) -> bool {
     match schema {
         TOOL_ATTEMPT_OUTPUT_SCHEMA_V1 => !mark,

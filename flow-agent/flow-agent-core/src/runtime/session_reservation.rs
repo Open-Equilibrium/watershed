@@ -99,8 +99,6 @@ pub(crate) fn reserve_unique_session_candidate_with_anchored_workspace(
         }
         match SessionOwnershipLease::acquire_anchored(workspace, &session_id, &marker_path) {
             Ok(ownership) => {
-                // Another owner may have published or retained its marker after
-                // the snapshot, so recheck with the same occupancy rules.
                 if !candidate_still_available(workspace, base_session_id, ordinal, &session_id)? {
                     ownership.release()?;
                     continue;

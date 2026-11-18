@@ -18,14 +18,11 @@ References: Notion, AppFlowy, Microsoft Loop and T3 Code.
 
 ## Tokens
 
-- **Color:** Notion's warm neutrals (`canvas`, `subtle`, `surface`, `hover`, `selected`), very light borders, three text levels, Liquid azure as the accent (the logo's blue, AA contrast), status colors (`success`, `warning`, `danger`), GitHub-style diff and syntax colors, data-series colors and ten tag colors for a select field's options, as Notion's (`tag-0` default to `tag-9` red, an option's stored color picking one and wrapping after ten; a new option takes the next); dark yellow is darker than Notion's so its text meets AA, which a token test checks for every tag (decided 2026-11-11). Surfaces are separated by background rather than borders. Light and dark values share names; a GUI selects `.theme-light` or `.theme-dark`, and system mode follows the operating system.
-- **Type:** Notion's platform UI font stack and a monospace font for code, at Notion's sizes (ADR-0241): display 40/48 bold for Page titles, h1 30/38, h2 24/32 and h3 20/28 semibold, prose 16/24, UI 14/20, sidebar 14/20, compact 13/20 for dense rows, chips and buttons, small 12/18, caption 11/14 for chart axes, badges and tags, mono 13/20; the reading column is 708 px wide.
-- **Spacing:** 4, 6, 8, 12, 16, 20, 24 and 32 px.
-- **Radii:** 4 for tags, 6 for buttons, inputs and list items, 8 for cards and panels, 12 for windows, dialogs and the input area.
-- **Rows:** 28 px for navigation items, 34 px for table rows, 45 px for headers.
-- **Sidebar:** as dense as Notion's, AppFlowy's and Loop's: 240 px wide, one line per Page in 28 px rows; the chat list shows two lines per Chat, as WhatsApp does (ADR-0241).
-- **Text size:** Settings → Appearance scales text and rows together: Compact, Default (the sizes above) or Large.
-- **Motion:** 120 ms for hover and press, 200 ms for panels, ease-out; none when the user prefers reduced motion.
+- **Color:** Notion's warm neutrals (`canvas`, `subtle`, `surface`, `hover`, `selected`), very light borders, three text levels, Liquid azure as the accent (the logo's blue, AA contrast), status colors (`success`, `warning`, `danger`), GitHub-style diff and syntax colors, data-series colors and ten tag colors for a select field's options, as Notion's (`tag-0` default to `tag-9` red, an option's stored color picking one and wrapping after ten; a new option takes the next); dark yellow is darker than Notion's so its text meets AA, which a token test checks for every tag. Surfaces are separated by background rather than borders. Light and dark values share names; a GUI selects `.theme-light` or `.theme-dark`, and system mode follows the operating system.
+- **Type:** Notion's platform UI font stack and a monospace font for code, at Notion's sizes (ADR-0241).
+- **Layout:** spacing, radii, row heights, sidebar and reading widths are tokens. The sidebar is as dense as Notion's, AppFlowy's and Loop's: one line per Page, and two lines per Chat, as WhatsApp does (ADR-0241).
+- **Text size:** Settings → Appearance scales text and rows together: Compact, Default (the token sizes) or Large.
+- **Motion:** short transitions for hover and press, longer ones for panels, ease-out; none when the user prefers reduced motion.
 - **Icons:** Lucide (ISC), 16 px in rows and buttons, in the text color of their context; status icons always come with text (principle 5).
 - **Logo:** [liquid-logo.svg](liquid-logo.svg) is the source of Liquid's app icon, on Apple's icon grid, and of its sidebar mark.
 
@@ -35,9 +32,10 @@ References: Notion, AppFlowy, Microsoft Loop and T3 Code.
 - A choice of one among a few options uses the shared segments (`Segments` in `liquid/app/lib/src/controls.dart`): one framed control on the subtle background, the chosen segment raised on the surface, the same in every view; mockups that draw it otherwise are superseded.
 - An action that cannot run stays visible, dimmed, and says why on hover.
 - A row's menu button (···) sits inside the row at its right end, seen on hover or keyboard focus; the sidebar's session row shows it in place of its status word. Right-click opens the same menu.
-- A session's menu lists “Export record” above “Delete session…”. It writes the session's record folder to Downloads and shows it in Finder, without a save dialog, since Finder lets the person move the folder; the status bar says where it went (decided 2026-11-11).
+- A dialog row that does not fit offers its fixes as segments in a row of their own below its text, and the chosen fixes run with the dialog's main action, which stays available; Liquid's “Move to host” dialog is the model (ADR-0308).
+- A session's menu lists “Export record” above “Delete session…”. It writes the session's record folder to Downloads and shows it in Finder, without a save dialog, since Finder lets the person move the folder; the status bar says where it went.
 - Results and errors appear as notices in the status bar, Liquid's place for messages, not as toasts: errors stay until esc or a click, info and warnings fade after 6 s, and a click lists the latest ones with their whole text. While Settings are open, which cover the status bar, a failed save shows at their top instead, until ✕, esc or the next save of the same settings.
 - An error starts with a plain sentence that says what failed and whether anything changed, then quotes the tool's own message, with credentials removed.
-- Liquid's shared question dialog puts Cancel on the left and its main action on the right, its other actions between them, as macOS and Material place them; older mockups list the main action first in their markup and show it this way.
-- Automations, History, Page history and Settings open as a dialog over the current Page or Source, and closing it shows that Page again; the Settings page that replaced the main area in older mockups is superseded.
-- A pick from a remote's list, such as a pull request's base branch, shows the list's first page and also searches the remote as the person types, after a short pause, saying while it searches. A typed name the remote does not know is refused; when the search fails the first page stays and Enter takes a typed name as before, checked when the plan is read again (decided 2026-11-11).
+- Liquid's shared question dialog puts Cancel on the left and its main action on the right, its other actions between them, as macOS and Material place them.
+- Automations, History, Page history and Settings open as a dialog over the current Page or Source, and closing it shows that Page again.
+- A pick from a remote's list, such as a pull request's base branch, shows the list's first page and also searches the remote as the person types, after a short pause, saying while it searches. A typed name the remote does not know is refused; when the search fails the first page stays and Enter takes a typed name as before, checked when the plan is read again.

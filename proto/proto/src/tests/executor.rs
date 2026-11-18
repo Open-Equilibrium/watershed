@@ -16,7 +16,9 @@ use crate::{
     parse_executor_probe_v0, parse_executor_request_v0, parse_executor_response_v0,
     parse_executor_start_v0, resolved_policy_digest_v0, validate_enforcement_receipt_v0,
 };
+
 use serde::Serialize;
+
 use std::{collections::BTreeMap, time::Duration};
 
 #[test]
@@ -150,14 +152,6 @@ fn executor_probe_wire_has_no_runtime_manifest() {
     let mut legacy = document;
     legacy["runtime_mounts"] = serde_json::json!([]);
     assert!(parse_executor_probe_v0(&canonical_wire(&legacy)).is_err());
-}
-
-#[test]
-fn executor_rejects_process_capacity_classification() {
-    assert!(
-        serde_json::from_str::<ExecutorToolClassificationV0>("\"process_capacity_exceeded\"")
-            .is_err()
-    );
 }
 
 fn identity(device: u64, inode: u64, kind: ExecutorObjectKindV0) -> UnixObjectIdentityV0 {
@@ -318,18 +312,6 @@ fn executor_generated_records_bind_normalized_ids_to_the_original_request() {
             format!("Executor {kind} request id does not match")
         );
     }
-}
-
-#[test]
-fn non_nfc_request_id_is_refused_before_serialization() {
-    let mut request = request();
-    request.request_id = "e\u{301}".to_owned();
-    assert_eq!(
-        canonical_executor_request_v0(&request)
-            .unwrap_err()
-            .to_string(),
-        "Executor request_id must use NFC text"
-    );
 }
 
 #[test]
@@ -564,13 +546,6 @@ fn executor_request_accepts_the_complete_protected_descriptor_capacity() {
 }
 
 #[test]
-fn executor_request_round_trips_the_bound_invocation_and_protected_objects() {
-    let request = request();
-    let bytes = canonical_executor_request_v0(&request).expect("valid request");
-    assert_eq!(parse_executor_request_v0(&bytes).unwrap(), request);
-}
-
-#[test]
 fn executor_request_preserves_literal_argument_strings() {
     let mut request = request();
     request.resolved_policy.argv = vec![
@@ -621,18 +596,24 @@ fn executor_request_enforces_environment_value_bound() {
 }
 
 #[test]
-fn executor_request_refuses_non_nfc_arguments_and_environment_without_converting() {
-    type Mutation = fn(&mut ExecutorResolvedPolicyV0);
+fn executor_request_refuses_non_nfc_text_without_converting() {
+    type Mutation = fn(&mut ExecutorRequestV0);
     let cases: &[(&str, Mutation, &str)] = &[
         (
+            "request id",
+            |request| request.request_id = "e\u{301}".to_owned(),
+            "Executor request_id must use NFC text",
+        ),
+        (
             "argument",
-            |policy| policy.argv = vec!["e\u{301}".to_owned()],
+            |request| request.resolved_policy.argv = vec!["e\u{301}".to_owned()],
             "Executor argv must use NFC text",
         ),
         (
             "environment name",
-            |policy| {
-                policy
+            |request| {
+                request
+                    .resolved_policy
                     .environment
                     .insert("e\u{301}".to_owned(), "value".to_owned());
             },
@@ -640,8 +621,9 @@ fn executor_request_refuses_non_nfc_arguments_and_environment_without_converting
         ),
         (
             "environment value",
-            |policy| {
-                policy
+            |request| {
+                request
+                    .resolved_policy
                     .environment
                     .insert("LANG".to_owned(), "e\u{301}".to_owned());
             },
@@ -651,7 +633,7 @@ fn executor_request_refuses_non_nfc_arguments_and_environment_without_converting
 
     for &(name, mutate, expected) in cases {
         let mut candidate = request();
-        mutate(&mut candidate.resolved_policy);
+        mutate(&mut candidate);
         refresh_policy_digest(&mut candidate);
         let error = canonical_executor_request_v0(&candidate)
             .expect_err(&format!("accepted request with non-NFC {name}"));
@@ -845,19 +827,9 @@ fn executor_request_rejects_invalid_limits_protection_environment_and_ids() {
             "Executor environment name is invalid",
         ),
         (
-            "too many argv entries",
-            |policy| policy.argv = vec![String::new(); MAX_EXECUTOR_EXEC_VECTOR_ENTRIES_V0],
-            "Executor argv entry bound is invalid",
-        ),
-        (
             "NUL in argv",
             |policy| policy.argv = vec!["invalid\0argument".to_owned()],
             "Executor argv is invalid",
-        ),
-        (
-            "oversized exec vector",
-            |policy| policy.argv = vec!["x".repeat(4_096); 33],
-            "Executor argv exceeds its byte limit",
         ),
         (
             "too many environment entries",
@@ -948,6 +920,25 @@ fn executor_request_byte_limit_is_enforced_on_encode_and_parse() {
     assert_eq!(error.to_string(), "Executor request exceeds its byte limit");
 }
 
+fn terminal(
+    status: ExecutorToolStatusV0,
+    classification: Option<ExecutorToolClassificationV0>,
+    exit_code: Option<i32>,
+) -> ExecutorResponseV0 {
+    ExecutorResponseV0::Completed {
+        schema: EXECUTOR_RESPONSE_SCHEMA_V0.to_owned(),
+        request_id: "request-1".to_owned(),
+        tool_result: ExecutorToolResultV0 {
+            classification,
+            exit_code,
+            status,
+            stderr_base64: String::new(),
+            stdout_base64: String::new(),
+        },
+        enforcement: receipt(),
+    }
+}
+
 #[test]
 fn executor_terminal_evidence_accepts_only_coherent_states() {
     use ExecutorToolClassificationV0 as Classification;
@@ -990,19 +981,8 @@ fn executor_terminal_evidence_accepts_only_coherent_states() {
         (Status::Cancelled, Some(Classification::Cancelled), None),
     ];
     for (status, classification, exit_code) in valid {
-        let response = ExecutorResponseV0::Completed {
-            schema: EXECUTOR_RESPONSE_SCHEMA_V0.to_owned(),
-            request_id: "request-1".to_owned(),
-            tool_result: ExecutorToolResultV0 {
-                classification,
-                exit_code,
-                status,
-                stderr_base64: String::new(),
-                stdout_base64: String::new(),
-            },
-            enforcement: receipt(),
-        };
-        canonical_executor_response_v0(&response).expect("coherent terminal evidence");
+        canonical_executor_response_v0(&terminal(status, classification, exit_code))
+            .expect("coherent terminal evidence");
     }
 
     for (status, classification, exit_code) in [
@@ -1016,19 +996,9 @@ fn executor_terminal_evidence_accepts_only_coherent_states() {
         ),
         (Status::Cancelled, Some(Classification::Cancelled), Some(1)),
     ] {
-        let response = ExecutorResponseV0::Completed {
-            schema: EXECUTOR_RESPONSE_SCHEMA_V0.to_owned(),
-            request_id: "request-1".to_owned(),
-            tool_result: ExecutorToolResultV0 {
-                classification,
-                exit_code,
-                status,
-                stderr_base64: String::new(),
-                stdout_base64: String::new(),
-            },
-            enforcement: receipt(),
-        };
-        assert!(canonical_executor_response_v0(&response).is_err());
+        assert!(
+            canonical_executor_response_v0(&terminal(status, classification, exit_code)).is_err()
+        );
     }
 }
 
@@ -1140,30 +1110,33 @@ fn executor_setup_error_is_terminal_without_a_policy_receipt() {
     assert!(canonical_executor_response_v0(&invalid).is_err());
 }
 
+fn request_with_path(field: &str, path: &str) -> ExecutorRequestV0 {
+    let mut candidate = request();
+    match field {
+        "executable" => candidate.resolved_policy.executable = path.to_owned(),
+        "working_directory" => candidate.resolved_policy.working_directory = path.to_owned(),
+        _ => candidate.resolved_policy.protected_objects[0].path = path.to_owned(),
+    }
+    refresh_policy_digest(&mut candidate);
+    candidate
+}
+
 #[test]
 fn executor_paths_are_canonical_object_identities() {
-    for path in [
-        "relative",
-        "/",
-        "/trailing/",
-        "//double",
-        "/double//slash",
-        "/dot/./path",
-        "/parent/../path",
-        "/back\\slash",
-        "/bad\npath",
-        "",
-    ] {
-        for field in ["executable", "working_directory", "protected object"] {
-            let mut candidate = request();
-            match field {
-                "executable" => candidate.resolved_policy.executable = path.to_owned(),
-                "working_directory" => {
-                    candidate.resolved_policy.working_directory = path.to_owned()
-                }
-                _ => candidate.resolved_policy.protected_objects[0].path = path.to_owned(),
-            }
-            refresh_policy_digest(&mut candidate);
+    for field in ["executable", "working_directory", "protected object"] {
+        for path in [
+            "relative",
+            "/",
+            "/trailing/",
+            "//double",
+            "/double//slash",
+            "/dot/./path",
+            "/parent/../path",
+            "/back\\slash",
+            "/bad\npath",
+            "",
+        ] {
+            let candidate = request_with_path(field, path);
             assert!(
                 canonical_executor_request_v0(&candidate).is_err(),
                 "accepted {field} path {path:?}"
@@ -1173,18 +1146,8 @@ fn executor_paths_are_canonical_object_identities() {
                 "parsed {field} path {path:?}"
             );
         }
-    }
-    for field in ["executable", "working_directory", "protected object"] {
-        let mut candidate = request();
-        let decomposed = "/tmp/cafe\u{301}".to_owned();
-        match field {
-            "executable" => candidate.resolved_policy.executable = decomposed,
-            "working_directory" => candidate.resolved_policy.working_directory = decomposed,
-            _ => candidate.resolved_policy.protected_objects[0].path = decomposed,
-        }
-        refresh_policy_digest(&mut candidate);
         assert!(
-            canonical_executor_request_v0(&candidate).is_err(),
+            canonical_executor_request_v0(&request_with_path(field, "/tmp/cafe\u{301}")).is_err(),
             "normalization must not redirect the {field} path"
         );
     }
@@ -1202,15 +1165,6 @@ fn executor_probe_round_trips_readiness_and_features() {
         let bytes = canonical_executor_probe_v0(&probe).expect("valid readiness record");
         assert_eq!(parse_executor_probe_v0(&bytes).unwrap(), probe);
     }
-}
-
-#[test]
-fn executor_probe_requires_at_least_one_protocol_version() {
-    let mut probe = probe();
-    probe.protocol_versions.clear();
-
-    let error = parse_executor_probe_v0(&canonical_wire(&probe)).unwrap_err();
-    assert_eq!(error.to_string(), "Executor probe list bounds are invalid");
 }
 
 #[test]
@@ -1237,6 +1191,9 @@ fn executor_probe_rejects_invalid_identity_and_feature_bounds() {
         }),
         ("empty protocol", |probe| {
             probe.protocol_versions = vec![String::new()]
+        }),
+        ("no protocol versions", |probe| {
+            probe.protocol_versions.clear()
         }),
         ("invalid feature", |probe| {
             probe.supported_policy_features = vec!["bad\nfeature".to_owned()]

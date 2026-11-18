@@ -5,15 +5,21 @@ use crate::runtime::{
         set_script_output_cleanup_error_once, set_script_output_cleanup_errors,
         set_script_output_publish_observer,
     },
-    fs_guards::replacement_temp_path,
+    fs_guards::{AnchoredFile, replacement_temp_path},
     types::RuntimeError,
 };
-use std::{fs, io, thread};
+use std::{fs, io, path::Path, thread};
 
 mod target;
 
+fn result_target(workspace: &Path) -> AnchoredFile {
+    anchored_workspace_write_path(workspace, "out/result.txt", true)
+        .expect("target resolves")
+        .expect("target parent exists")
+}
+
 #[test]
-fn rejects_existing_unix_target_without_changing_mode() {
+fn rejects_existing_target_without_changing_it_or_allocating_a_temp() {
     use std::os::unix::fs::PermissionsExt as _;
 
     let workspace = empty_workspace("script-replacement-mode");
@@ -22,9 +28,8 @@ fn rejects_existing_unix_target_without_changing_mode() {
     fs::write(&output, "old").expect("original output written");
     fs::set_permissions(&output, fs::Permissions::from_mode(0o600))
         .expect("restrictive output mode configured");
-    let target = anchored_workspace_write_path(&workspace, "out/result.txt", true)
-        .expect("target resolves")
-        .expect("target parent exists");
+    let target = result_target(&workspace);
+    let temp = replacement_temp_path(&output, 0).expect("temp path derives");
 
     let err =
         replace_script_output_atomically(&target, b"new").expect_err("existing output must reject");
@@ -40,29 +45,7 @@ fn rejects_existing_unix_target_without_changing_mode() {
         .mode()
         & 0o777;
     assert_eq!(mode, 0o600);
-    assert_eq!(fs::read(output).expect("original output reads"), b"old");
-}
-
-#[test]
-fn rejects_stale_target_before_temp_creation() {
-    let workspace = empty_workspace("script-output-stale-target");
-    fs::create_dir(workspace.join("out")).expect("output directory created");
-    let output = workspace.join("out/result.txt");
-    fs::write(&output, "stale").expect("stale output written");
-    let target = anchored_workspace_write_path(&workspace, "out/result.txt", true)
-        .expect("target resolves")
-        .expect("target parent exists");
-    let temp = replacement_temp_path(&output, 0).expect("temp path derives");
-
-    let err = replace_script_output_atomically(&target, b"new")
-        .expect_err("stale target must reject before replacement allocation");
-
-    assert_denied(
-        err,
-        core_policy::DenyReasonCode::WriteDenied,
-        "already exists",
-    );
-    assert_eq!(fs::read(output).expect("stale output reads"), b"stale");
+    assert_eq!(fs::read(&output).expect("original output reads"), b"old");
     assert!(!temp.exists(), "replacement temp must not be created");
 }
 
@@ -72,9 +55,7 @@ fn concurrent_publication_is_create_only() {
 
     let workspace = empty_workspace("script-output-create-only-race");
     fs::create_dir(workspace.join("out")).expect("output directory created");
-    let target = anchored_workspace_write_path(&workspace, "out/result.txt", true)
-        .expect("target resolves")
-        .expect("target parent exists");
+    let target = result_target(&workspace);
     let barrier = Arc::new(Barrier::new(2));
     let handles = [b"first".as_slice(), b"second".as_slice()].map(|contents| {
         let target = target.clone();
@@ -113,9 +94,7 @@ fn transient_post_publication_cleanup_failure_still_reports_success() {
     let workspace = empty_workspace("script-output-published-cleanup-retry");
     fs::create_dir(workspace.join("out")).expect("output directory created");
     let output = workspace.join("out/result.txt");
-    let target = anchored_workspace_write_path(&workspace, "out/result.txt", true)
-        .expect("target resolves")
-        .expect("target parent exists");
+    let target = result_target(&workspace);
     let temp = replacement_temp_path(&output, 0).expect("temp path derives");
     set_script_output_cleanup_error_once(io::ErrorKind::PermissionDenied);
 
@@ -134,9 +113,7 @@ fn persistent_post_publication_cleanup_failure_reports_committed_paths() {
     let workspace = empty_workspace("script-output-published-cleanup-failure");
     fs::create_dir(workspace.join("out")).expect("output directory created");
     let output = workspace.join("out/result.txt");
-    let target = anchored_workspace_write_path(&workspace, "out/result.txt", true)
-        .expect("target resolves")
-        .expect("target parent exists");
+    let target = result_target(&workspace);
     let temp = replacement_temp_path(&output, 0).expect("temp path derives");
     set_script_output_cleanup_errors([
         io::ErrorKind::PermissionDenied,

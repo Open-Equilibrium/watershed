@@ -1,6 +1,4 @@
 #!/bin/sh
-# Builds the Liquid key helper into Liquid.app as a login item. Runs as an Xcode
-# build phase of the Runner target, before Xcode signs the app around it.
 set -eu
 here="$PROJECT_DIR/LiquidKey"
 app="$TARGET_BUILD_DIR/$CONTENTS_FOLDER_PATH/Library/LoginItems/LiquidKey.app"
@@ -43,7 +41,6 @@ if [ "${CODE_SIGNING_ALLOWED:-YES}" = YES ]; then
     set -- --force --sign "$identity"
     if [ "${ENABLE_HARDENED_RUNTIME:-NO}" = YES ]; then set -- "$@" --options runtime; fi
     if [ "$identity" != - ]; then set -- "$@" --timestamp; fi
-    # Xcode's extra flags, such as a keychain, apply here too, split as the shell splits them.
     eval "set -- \"\$@\" ${OTHER_CODE_SIGN_FLAGS:-}"
     codesign "$@" "$app"
 fi

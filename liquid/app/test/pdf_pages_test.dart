@@ -4,7 +4,6 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:liquid/src/workspace/pdf_pages.dart';
 
-/// The macOS PDF renderer's channel (ADR-0307), with its calls answered here.
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   const channel = MethodChannel('liquid/pdf');
@@ -13,7 +12,6 @@ void main() {
   final calls = <MethodCall>[];
   final pdf = Uint8List.fromList([37, 80, 68, 70]);
 
-  /// The renderer's answers for one document of two pages, opened as id 7.
   Object? reply(MethodCall call) => switch (call.method) {
     'open' => {
       'id': 7,
@@ -75,7 +73,6 @@ void main() {
   });
 
   test('a platform without the renderer throws PdfUnreadable', () async {
-    // No handler: the channel has no plugin behind it.
     await expectLater(PdfPages.open(pdf), throwsA(isA<PdfUnreadable>()));
   });
 }

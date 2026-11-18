@@ -9,7 +9,6 @@ import 'package:liquid/src/workspace/text_block.dart';
 
 import 'page_kit.dart';
 
-/// Code Blocks (ADR-0302).
 void main() {
   final kit = PageKit();
 
@@ -25,7 +24,6 @@ void main() {
   String codeOf(int index) =>
       kit.fake.texts[kit.fake.views[kit.page]![index].block]!;
 
-  /// Puts `value` into the focused field, as the text input does.
   Future<void> input(WidgetTester tester, TextEditingValue value) async {
     tester.testTextInput.updateEditingValue(value);
     await tester.pumpAndSettle();
@@ -113,7 +111,6 @@ void main() {
       );
       expect(codeOf(0), 'if (total) {\n  return 0;\n  }');
 
-      // The last two lines, selected from inside the second.
       codeField(tester).controller!.selection = const TextSelection(
         baseOffset: 16,
         extentOffset: 28,

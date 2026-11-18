@@ -46,7 +46,6 @@ def workflow_text() -> str:
 
 
 def field_block(lines: list[str], indent: str) -> list[str]:
-    """A field's value lines; the first nonblank line outside `indent` ends it."""
     return list(itertools.takewhile(lambda line: not line.strip() or line.startswith(indent), lines))
 
 
@@ -77,7 +76,6 @@ def ci_push_branches(workflow: str) -> tuple[str, ...]:
 
 
 def jobs(workflow: str) -> dict[str, list[str]]:
-    """Each job's lines, keyed by job id."""
     lines = workflow.splitlines()
     result: dict[str, list[str]] = {}
     current = None
@@ -93,7 +91,6 @@ def jobs(workflow: str) -> dict[str, list[str]]:
 
 
 def job_steps(workflow: str, job: str) -> dict[str, list[str]]:
-    """A job's steps in order, with YAML aliases replaced by their anchored step."""
     anchors: dict[str, list[str]] = {}
     parsed: dict[str, list[list[str]]] = {}
     for name, lines in jobs(workflow).items():
@@ -127,7 +124,6 @@ def job_steps(workflow: str, job: str) -> dict[str, list[str]]:
 
 
 def step_lines(workflow: str, name: str, job: str | None = None) -> list[str]:
-    """A step's lines; without a job, every copy of the step must be identical."""
     if job is not None:
         steps = job_steps(workflow, job)
         if name not in steps:
@@ -162,8 +158,6 @@ def step_run(workflow: str, name: str) -> str:
         return declaration
     block = field_block(lines[run_index + 1 :], "          ")
     if declaration == ">-":
-        # YAML folds plain lines into single spaces but keeps the break beside a blank or
-        # more-indented line, so any other folded block is refused rather than reconstructed.
         while block and not block[-1].strip():
             block.pop()
         if not all(re.match(r"          \S", line) for line in block):
@@ -187,7 +181,6 @@ def assert_step_state(
     condition: str | None = None,
     continue_on_error: bool = False,
 ) -> list[str]:
-    """The step runs only in `job`, under exactly `condition`."""
     case.assertEqual(job_of(workflow, name), [job], name)
     lines = step_lines(workflow, name, job)
     case.assertEqual(
@@ -220,7 +213,6 @@ class CiWorkflowContractTest(unittest.TestCase):
         self.assertIn('sudo -n -- /usr/bin/env PATH="$PATH" SUDO_USER="$(id -un)"', privileged)
         self.assertIn("install.tests.test_readiness.ReadinessContractTest.privileged_installer_acceptance",
                       privileged)
-        # Every job with a macOS leg proves its own native host before its first gate.
         self.assertEqual(set(job_of(workflow, "Check native Mac host")), set(MATRIX_JOBS))
         self.assertEqual(
             [line.removeprefix("        if: ") for line in step_lines(workflow, "Check native Mac host")
@@ -235,7 +227,6 @@ class CiWorkflowContractTest(unittest.TestCase):
                 position = names.index("Check native Mac host")
                 self.assertLessEqual(set(names[:position]),
                                      {"Checkout", "Install pinned Node", "Check Node version"})
-        # Linux native tests need the protection prerequisites in every job that runs them.
         self.assertEqual(set(job_of(workflow, "Provision native Linux protection prerequisites")),
                          {"test", "flow-agent"})
         for job, first in (("test", "Run tests"), ("flow-agent", "Build native installation artifacts")):
@@ -286,7 +277,6 @@ class CiWorkflowContractTest(unittest.TestCase):
         with (ROOT / "liquid" / "liquid-bridge" / "rust-toolchain.toml").open("rb") as bridge_file:
             bridge = tomllib.load(bridge_file)["toolchain"]
 
-        # The build hook only reads the crate's own file, which adds the targets it builds.
         self.assertEqual({key: value for key, value in bridge.items() if key != "targets"}, pinned)
 
     def test_minimum_node_exercises_tooling_after_the_pinned_gates(self) -> None:
@@ -346,7 +336,6 @@ class CiWorkflowContractTest(unittest.TestCase):
         ])
 
     def test_topic_branches_run_ci_through_their_pull_request_or_on_request(self) -> None:
-        # A push run besides the pull request run would ask for macOS runners twice per commit.
         workflow = workflow_text()
         self.assertEqual(ci_push_branches(workflow), ("main",))
         self.assertIn("\n  pull_request:\n    branches: [main]\n", workflow)
@@ -375,18 +364,13 @@ class CiWorkflowContractTest(unittest.TestCase):
                 self.assertEqual(step_run(workflow, "Example"), "first\n\nsecond")
                 self.assertEqual(job_of(workflow, "Example"), ["first", "second"])
 
-    def test_folded_run_blocks_join_their_lines_with_spaces(self) -> None:
-        workflow = "jobs:\n  first:\n    steps:\n      - name: Example\n        run: >-\n          first\n          second\n"
-        self.assertEqual(step_run(workflow, "Example"), "first second")
-
-    def test_folded_run_blocks_with_other_line_breaks_are_refused(self) -> None:
-        # YAML keeps the line break beside a blank or more-indented line, so such a command is refused.
+    def test_folded_run_blocks_join_plain_lines_and_refuse_other_line_breaks(self) -> None:
+        head = "jobs:\n  first:\n    steps:\n      - name: Example\n        run: >-\n"
+        self.assertEqual(step_run(head + "          first\n          second\n", "Example"), "first second")
         for body in ("          import sys;\n            # comment\n          sys.exit(7)\n",
                      "          first\n\n          second\n"):
-            with self.subTest(body=body):
-                workflow = "jobs:\n  first:\n    steps:\n      - name: Example\n        run: >-\n" + body
-                with self.assertRaisesRegex(AssertionError, "folded"):
-                    step_run(workflow, "Example")
+            with self.subTest(body=body), self.assertRaisesRegex(AssertionError, "folded"):
+                step_run(head + body, "Example")
 
     def test_feature_gated_evidence_reporters_are_registered(self) -> None:
         manifest = tomllib.loads(
@@ -434,7 +418,6 @@ class CiWorkflowContractTest(unittest.TestCase):
             workflow.replace("install.tests.test_install install.tests.test_readiness",
                              "install.tests.test_install", 1),
             workflow.replace(installer, installer + f"\n        if: {UBUNTU}", 1),
-            # Selections narrower than the scope's packages or Liquid's coverage scope.
             workflow.replace("          $RUST_PACKAGES\n", "          -p liquid_bridge\n", 1),
             workflow.replace(LIQUID_COVERAGE_PACKAGES, "-p liquid_bridge", 1),
             workflow.replace('--ignore-filename-regex "$COVERAGE_EXCLUSIONS"',
@@ -473,11 +456,9 @@ class CiWorkflowContractTest(unittest.TestCase):
         )
         self.assertEqual(
             step_run(workflow, "Install pinned T3 Code"),
-            # A plain assignment stops the step when the installer fails; inside echo it would not.
             't3="$(node scripts/install-t3.mjs "$RUNNER_TEMP/t3")"\n'
             'echo "META_HARNESS_T3=$t3" >> "$GITHUB_ENV"',
         )
-        # Flow Agent's coverage tests the whole workspace, Meta-Harness's T3 contract tests included.
         assert_step_state(
             self, workflow, "Install pinned T3 Code for the workspace coverage", job="flow-agent",
         )
@@ -493,10 +474,7 @@ class CiWorkflowContractTest(unittest.TestCase):
              "install.tests.test_install", "install.tests.test_readiness"],
         )
 
-        # The scope selects the whole workspace whenever Flow Agent changed.
         self.assertIn("      RUST_PACKAGES: ${{ needs.scope.outputs.rust_packages }}", jobs(workflow)["test"])
-        # Without Flow Agent the scope's packages are Liquid's coverage packages, whose coverage run
-        # already runs every one of their tests once.
         assert_step_state(self, workflow, "Run tests", job="test",
                           condition="needs.scope.outputs.flow_agent == 'true' || "
                           "needs.scope.outputs.liquid != 'true'")
@@ -554,7 +532,6 @@ class CiWorkflowContractTest(unittest.TestCase):
             report,
         )
 
-        # Liquid and Meta-Harness changes measure their own crates with the same gate.
         liquid_lines = assert_step_state(self, workflow, "Check Liquid coverage", job="test",
                                          condition=LIQUID)
         self.assertIn("        shell: bash", liquid_lines)
@@ -666,7 +643,6 @@ class CiWorkflowContractTest(unittest.TestCase):
         self.assertIn('--executor "$M12_INSTALLED_EXECUTOR"', conformance)
         assert_step_state(self, workflow, "Check Flow build targets", job=job)
 
-        # CI provisioning is explicit; the product installer never performs it.
         prerequisites_lines = step_lines(workflow, "Provision native Linux protection prerequisites")
         self.assertIn(f"        if: {UBUNTU} && needs.scope.outputs.flow_agent == 'true'",
                       prerequisites_lines)
@@ -697,14 +673,12 @@ class CiWorkflowContractTest(unittest.TestCase):
                                 ("Check the Liquid key helper", MAC)):
             assert_step_state(self, workflow, name, job="liquid", condition=condition)
         assert_step_state(self, workflow, "Build the Liquid macOS app", job="liquid", condition=MAC)
-        # The scheme's test action runs RunnerTests, and it needs the build's Flutter configuration.
         assert_step_state(self, workflow, "Run the Liquid macOS app tests", job="liquid", condition=MAC)
         self.assertEqual(
             shlex.split(step_run(workflow, "Run the Liquid macOS app tests")),
             ["xcodebuild", "test", "-workspace", "macos/Runner.xcworkspace", "-scheme", "Runner",
              "-destination", "platform=macOS"],
         )
-        # The codegen comes as the release's prebuilt archive, checked against its pinned SHA-256.
         codegen = step_lines(workflow, "Check the generated Liquid bridge", "liquid")
         version = next(line.split(": ")[1] for line in codegen if "FRB_VERSION:" in line)
         self.assertIn(f"  flutter_rust_bridge: {version}\n",
@@ -739,7 +713,6 @@ class CiWorkflowContractTest(unittest.TestCase):
         )
         self.assertEqual(step_run(workflow, "Check the Liquid key helper"),
                          "sh liquid/app/macos/LiquidKey/test.sh")
-        # Flutter's tool directory must never reach the PATH of a privileged step.
         self.assertFalse(any("sudo " in "\n".join(lines)
                              for lines in job_steps(workflow, "liquid").values()))
 
@@ -757,7 +730,6 @@ class CiWorkflowContractTest(unittest.TestCase):
     def test_installer_receipt_check_requires_active_native_protection(self) -> None:
         installer = M12_INSTALLER_ACCEPTANCE.read_text(encoding="utf-8")
         command = installer.split("<<'PY'\n", 1)[1].split("\nPY", 1)[0]
-        # Run the actual acceptance checker; native CI owns real Tool execution.
         with tempfile.TemporaryDirectory(prefix="m12 receipt ") as temporary:
             home = Path(temporary)
             log = home / "workspaces/workspace-v1-test/sessions/session/runs/run/run-log.jsonl"
@@ -833,8 +805,6 @@ class CiWorkflowContractTest(unittest.TestCase):
         shell = "/bin/sh" if os.name == "posix" else shutil.which("sh")
         if shell is None:
             self.skipTest("requires a POSIX shell; native CI always runs this boundary")
-        # Native acceptance owns real fixture initialization; NativeProcessTest
-        # owns helper deadlines and cleanup. Here only the shell handoff is doubled.
         with tempfile.TemporaryDirectory(prefix="m12 entrypoints ") as temporary:
             root = Path(temporary)
             node = root / "node"

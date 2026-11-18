@@ -6,8 +6,6 @@ import '../theme/icons.dart';
 import '../theme/theme.dart';
 import 'session_card_rows.dart';
 
-/// The Environment row: the host's name, and the checkout's folder icon, whose tooltip gives the
-/// worktree path. A right-click copies the full path, as T3 Code's row does.
 class EnvironmentRow extends StatelessWidget {
   const EnvironmentRow({super.key, required this.state, required this.host});
 
@@ -20,9 +18,10 @@ class EnvironmentRow extends StatelessWidget {
     builder: (context, threads, _) {
       final ws = context.ws;
       final path = threads
-          .where((thread) => thread.id == state.session?.id)
+          .where((listed) => listed.thread.id == state.session?.id)
           .firstOrNull
-          ?.worktree;
+          ?.thread
+          .worktree;
       final row = CardRow(
         key: const Key('workspace-row'),
         children: [
@@ -49,7 +48,6 @@ class EnvironmentRow extends StatelessWidget {
     },
   );
 
-  /// Offers Copy full path at `at`, and copies `path` when it is chosen.
   Future<void> _copyMenu(BuildContext context, Offset at, String path) async {
     final overlay =
         Overlay.of(context).context.findRenderObject()! as RenderBox;

@@ -73,30 +73,6 @@ impl Resolve for PendingResolver {
     }
 }
 
-fn assert_configured_connect_deadline(selected: HttpDeadlines, expected: Duration) {
-    assert_eq!(selected.connect, expected);
-    block_on_paused_network(async move {
-        let client = build_http_client_from_builder(
-            reqwest::Client::builder().dns_resolver(PendingResolver),
-            HttpDeadlines {
-                connect: selected.connect,
-                header: selected.connect + Duration::from_secs(1),
-                read: selected.connect + Duration::from_secs(1),
-                overall: selected.connect + Duration::from_secs(1),
-            },
-        )
-        .expect("client builds");
-        let request =
-            tokio::spawn(async move { client.get("http://pending.invalid").send().await });
-        assert_pending(&request).await;
-        tokio::time::advance(selected.connect - Duration::from_nanos(1)).await;
-        assert_pending(&request).await;
-        tokio::time::advance(Duration::from_nanos(1)).await;
-        let result = expect_ready(request).await;
-        assert!(result.is_err());
-    });
-}
-
 pub(super) fn block_on_paused_network<F>(future: F) -> F::Output
 where
     F: Future,
@@ -133,13 +109,30 @@ pub(super) async fn expect_ready<T>(future: tokio::task::JoinHandle<T>) -> T {
 }
 
 #[test]
-fn auth_connect_deadline() {
-    assert_configured_connect_deadline(AUTH_HTTP_DEADLINES, Duration::from_secs(10));
-}
-
-#[test]
-fn responses_connect_deadline() {
-    assert_configured_connect_deadline(RESPONSES_HTTP_DEADLINES, Duration::from_secs(10));
+fn configured_connect_deadlines_fire_exactly_at_their_limit() {
+    for selected in [AUTH_HTTP_DEADLINES, RESPONSES_HTTP_DEADLINES] {
+        assert_eq!(selected.connect, Duration::from_secs(10));
+        block_on_paused_network(async move {
+            let client = build_http_client_from_builder(
+                reqwest::Client::builder().dns_resolver(PendingResolver),
+                HttpDeadlines {
+                    connect: selected.connect,
+                    header: selected.connect + Duration::from_secs(1),
+                    read: selected.connect + Duration::from_secs(1),
+                    overall: selected.connect + Duration::from_secs(1),
+                },
+            )
+            .expect("client builds");
+            let request =
+                tokio::spawn(async move { client.get("http://pending.invalid").send().await });
+            assert_pending(&request).await;
+            tokio::time::advance(selected.connect - Duration::from_nanos(1)).await;
+            assert_pending(&request).await;
+            tokio::time::advance(Duration::from_nanos(1)).await;
+            let result = expect_ready(request).await;
+            assert!(result.is_err());
+        });
+    }
 }
 
 #[test]
@@ -161,7 +154,6 @@ fn elapsed_deadline_cancels_the_in_flight_future_once() {
             std::future::pending::<()>().await
         })
         .await;
-        // The timed-out future must be dropped by the time the deadline returns.
         assert!(probe.load(Ordering::SeqCst));
         result
     });
@@ -340,10 +332,7 @@ fn system_dns_timeout_and_cancellation_return_before_lookup_completion() {
             cancelled.store(true, Ordering::Release);
         }
         assert_lookup_command_error(result, authentication, cancellation);
-        assert!(matches!(
-            held.completed.try_recv(),
-            Err(mpsc::TryRecvError::Empty)
-        ));
+        assert_eq!(held.completed.try_recv(), Err(mpsc::TryRecvError::Empty));
         held.release(name);
     }
 }
@@ -389,10 +378,7 @@ fn system_dns_capacity_is_shared_and_reclaimed_only_after_lookup_completion() {
     for (result, authentication) in results {
         assert_lookup_command_error(result, authentication, !authentication);
     }
-    assert!(matches!(
-        held.completed.try_recv(),
-        Err(mpsc::TryRecvError::Empty)
-    ));
+    assert_eq!(held.completed.try_recv(), Err(mpsc::TryRecvError::Empty));
 
     let cancelled = Arc::new(AtomicBool::new(false));
     let waiting = held.command(
@@ -404,7 +390,6 @@ fn system_dns_capacity_is_shared_and_reclaimed_only_after_lookup_completion() {
             ..lookup_deadlines()
         },
     );
-    // Uncancelled, the request waits for a lookup slot that the held lookups keep.
     assert!(
         matches!(
             waiting.recv_timeout(Duration::from_millis(250)),
@@ -412,16 +397,10 @@ fn system_dns_capacity_is_shared_and_reclaimed_only_after_lookup_completion() {
         ),
         "the request returned before it was cancelled"
     );
-    assert!(matches!(
-        held.started.try_recv(),
-        Err(mpsc::TryRecvError::Empty)
-    ));
+    assert_eq!(held.started.try_recv(), Err(mpsc::TryRecvError::Empty));
     cancelled.store(true, Ordering::Release);
     assert_lookup_command_error(waiting, false, true);
-    assert!(matches!(
-        held.started.try_recv(),
-        Err(mpsc::TryRecvError::Empty)
-    ));
+    assert_eq!(held.started.try_recv(), Err(mpsc::TryRecvError::Empty));
 
     held.release("mixed-0.invalid");
     let replacement = held.command(
@@ -435,8 +414,5 @@ fn system_dns_capacity_is_shared_and_reclaimed_only_after_lookup_completion() {
         "replacement.invalid"
     );
     assert_lookup_command_error(replacement, true, false);
-    assert!(matches!(
-        held.completed.try_recv(),
-        Err(mpsc::TryRecvError::Empty)
-    ));
+    assert_eq!(held.completed.try_recv(), Err(mpsc::TryRecvError::Empty));
 }

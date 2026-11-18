@@ -4,11 +4,6 @@ use crate::script::model::{
     ValuePathSegment, ValuePredicate,
 };
 
-/// Matches a Tool parameter pattern against one complete value.
-///
-/// Patterns use the finite Rust `regex` syntax. Flow Agent implicitly anchors both ends,
-/// so an authored pattern cannot match only a substring. A pattern that turns on the verbose
-/// flag is refused, since a trailing comment would swallow the anchors.
 pub fn parameter_pattern_matches(pattern: &str, value: &str) -> Result<bool, String> {
     if uses_verbose_flag(pattern) {
         return Err("the verbose flag is not supported".to_owned());
@@ -25,8 +20,6 @@ pub fn parameter_pattern_matches(pattern: &str, value: &str) -> Result<bool, Str
         .map_err(|error| error.to_string())
 }
 
-/// Whether a `(?` flag group names the verbose flag `x`, as `(?x)`, `(?ix:` or `(?i-x)` do. An
-/// escaped or bracketed look-alike counts too: over-refusing fails closed.
 fn uses_verbose_flag(pattern: &str) -> bool {
     pattern.match_indices("(?").any(|(start, _)| {
         pattern[start + 2..]
@@ -37,7 +30,6 @@ fn uses_verbose_flag(pattern: &str) -> bool {
 }
 use std::{collections::BTreeMap, fmt};
 
-/// Failure to validate, compare, or render an M1.1 runtime value.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct FlowValueError {
     message: String,
@@ -59,7 +51,6 @@ impl fmt::Display for FlowValueError {
 
 impl std::error::Error for FlowValueError {}
 
-/// Parses one validated closed `flow-value-v0` JSON wrapper.
 pub fn parse_flow_value_v0(value: serde_json::Value) -> Result<FlowValue, FlowValueError> {
     proto::validate_flow_value_v0(&value)
         .map_err(|error| FlowValueError::new(error.to_string()))?;
@@ -67,7 +58,6 @@ pub fn parse_flow_value_v0(value: serde_json::Value) -> Result<FlowValue, FlowVa
         .map_err(|error| FlowValueError::new(format!("invalid flow-value-v0: {error}")))
 }
 
-/// Parses one canonical session-object URI and returns its lowercase SHA-256 digest.
 pub fn parse_session_object_uri(uri: &str) -> Result<&str, FlowValueError> {
     proto::parse_session_object_uri(uri).map_err(|error| match error {
         proto::SessionObjectUriError::NonCanonicalUri => {
@@ -79,13 +69,11 @@ pub fn parse_session_object_uri(uri: &str) -> Result<&str, FlowValueError> {
     })
 }
 
-/// Builds one canonical session-object URI from a lowercase SHA-256 digest.
 pub fn build_session_object_uri(digest: &str) -> Result<String, FlowValueError> {
     proto::build_session_object_uri(digest)
         .map_err(|_| FlowValueError::new("session-object digest must be lowercase SHA-256 hex"))
 }
 
-/// Validates the finite shape, canonical forms, and global bounds of one runtime value.
 pub fn validate_flow_value(value: &FlowValue) -> Result<(), FlowValueError> {
     guard_flow_value_budget(value, 1, &mut FlowValueBudget::default())?;
     let json_value = serde_json::to_value(value)
@@ -100,8 +88,6 @@ struct FlowValueBudget {
     text_bytes: usize,
 }
 
-// Bounds the value before serde copies it. Text bytes are a lower bound of the canonical JSON size,
-// so every rejection here is also one the canonical proto validator would make.
 fn guard_flow_value_budget(
     value: &FlowValue,
     depth: usize,
@@ -160,7 +146,6 @@ impl FlowValueBudget {
     }
 }
 
-/// Validates one runtime value against a closed recursive value contract.
 pub fn validate_flow_value_against_contract(
     value: &FlowValue,
     contract: &ValueContract,
@@ -170,7 +155,6 @@ pub fn validate_flow_value_against_contract(
     validate_against_contract_at(value, contract, "$")
 }
 
-/// Evaluates one exact typed path-equality predicate.
 pub fn predicate_matches(
     value: &FlowValue,
     predicate: &ValuePredicate,
@@ -198,7 +182,6 @@ pub fn predicate_matches(
     Ok(selected == &predicate.equals)
 }
 
-/// Renders an Instruction within `max_bytes` by replacing every declared placeholder.
 pub fn render_instruction(
     instruction: &InstructionBlock,
     parameters: &BTreeMap<String, FlowValue>,

@@ -11,19 +11,14 @@ import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
 import 'session_card_rows.dart';
 
-/// Whether the Lineage section shows: an agent runs, the session can be disconnected, or a thread
-/// is related to it, as T3 Code's section does.
 bool showsLineage(BridgeLineage lineage) =>
     lineage.running > 0 ||
     lineage.canDisconnect ||
     lineage.rows.any((row) => row.group != BridgeLineageGroup.sideChats);
 
-/// Whether the Side chats section shows: a side chat belongs to the session.
 bool showsSideChats(BridgeLineage lineage) =>
     lineage.rows.any((row) => row.group == BridgeLineageGroup.sideChats);
 
-/// The Lineage section: the threads related to the session, in the groups T3 Code gives them. Its
-/// heading counts the running agents, and its More menu disconnects the agent session.
 class LineageSection extends StatelessWidget {
   const LineageSection({
     super.key,
@@ -45,7 +40,6 @@ class LineageSection extends StatelessWidget {
     final related = rowsIn(BridgeLineageGroup.related);
     final active = rowsIn(BridgeLineageGroup.active);
     final previous = rowsIn(BridgeLineageGroup.previous);
-    // A lone "Previous agents" group names itself; the heading returns for a status or an action.
     final headed =
         lineage.running > 0 ||
         lineage.canDisconnect ||
@@ -70,7 +64,6 @@ class LineageSection extends StatelessWidget {
   }
 }
 
-/// The Side chats section: the forks of the session that a side chat opened.
 class SideChatsSection extends StatelessWidget {
   const SideChatsSection({
     super.key,
@@ -102,7 +95,6 @@ class SideChatsSection extends StatelessWidget {
   }
 }
 
-/// A list of related rows, six at first, then twelve more at a time.
 PagedRows _rows(
   SessionState state,
   BridgeLineage lineage,
@@ -116,8 +108,6 @@ PagedRows _rows(
   ],
 );
 
-/// The previous agents, folded under their header until opened, which names the failed ones and
-/// how many there are.
 class _PreviousAgents extends StatefulWidget {
   const _PreviousAgents({
     required this.state,
@@ -181,8 +171,6 @@ class _PreviousAgentsState extends State<_PreviousAgents> {
   }
 }
 
-/// One related thread: its relation's icon, its title and what it did, with the merge and stop
-/// buttons where they apply. A click opens the thread in Liquid.
 class _LineageRow extends StatelessWidget {
   const _LineageRow({
     required this.state,
@@ -243,7 +231,6 @@ class _LineageRow extends StatelessWidget {
     );
   }
 
-  /// What a row ends with: its status, or for a subagent that ran, its elapsed time.
   static String _outcome(BridgeLineageRow row) {
     final started = row.startedMs;
     if (row.failed ||
@@ -255,7 +242,6 @@ class _LineageRow extends StatelessWidget {
     return formatDuration(ended - started);
   }
 
-  /// The merge button's name, which T3 Code gives the merge target's title.
   static String _mergeLabel(BridgeLineage lineage) {
     final target = lineage.mergeTargetTitle;
     return target == null
@@ -263,7 +249,6 @@ class _LineageRow extends StatelessWidget {
         : 'Merge back to $target';
   }
 
-  /// The merge button's tooltip, which says what merging needs or does.
   static String _mergeTip(BridgeLineage lineage) {
     if (!lineage.mergeReady) {
       return 'Complete a run in this fork before merging it back';
@@ -295,7 +280,6 @@ class _LineageRow extends StatelessWidget {
       };
 }
 
-/// The Lineage heading's More menu, which disconnects the agent session.
 class _MoreMenu extends StatelessWidget {
   const _MoreMenu({required this.state});
 

@@ -48,11 +48,9 @@ pub(crate) fn epoch_milliseconds() -> Result<u64, RuntimeError> {
         .ok_or_else(auth_protocol)
 }
 
-/// A callback that carries the generated state.
 #[derive(Debug, Eq, PartialEq)]
 pub(crate) enum OAuthCallback {
     Code(String),
-    /// The authorization server returned an OAuth error instead of a code.
     Denied,
 }
 

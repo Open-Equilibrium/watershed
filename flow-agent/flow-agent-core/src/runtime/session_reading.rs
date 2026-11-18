@@ -6,7 +6,6 @@ use crate::runtime::{
 use proto::{EventEnvelope, EventType};
 use std::path::Path;
 
-/// Replays one run owned by the addressed conversation.
 pub fn replay_conversation_run(
     workspace: impl AsRef<Path>,
     conversation_id: &str,
@@ -62,11 +61,6 @@ impl InMemoryReplayOutput {
     }
 }
 
-/// Streams one conversation Run as validated canonical JSONL records.
-///
-/// The callback is invoked once per complete record. The returned [`RunOutput`] contains the
-/// validated summary with an empty `stdout`; callers that need in-memory output may use
-/// [`replay_conversation_run`], which is bounded in memory.
 pub fn replay_conversation_run_streaming(
     workspace: impl AsRef<Path>,
     conversation_id: &str,

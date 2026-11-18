@@ -7,7 +7,6 @@ import 'package:liquid/src/session/git_state.dart';
 
 import 'fake_backend.dart';
 
-/// A checkout on a feature branch with a remote and an upstream, unless a case changes that.
 BridgeGitStatus checkout({
   String? branch = 'feature/x',
   bool defaultBranch = false,
@@ -32,7 +31,6 @@ BridgeGitStatus checkout({
   pullRequest: pullRequest,
 );
 
-/// Git whose [run] streams the progress a test adds to [progress].
 class SteppedGit extends FakeGit {
   final progress = StreamController<BridgeGitProgress>();
 
@@ -68,10 +66,14 @@ void main() {
 
   setUp(() => errors = []);
 
-  GitState gitState(GitBackend git) => GitState(
-    git,
-    onError: (title, message) => errors.add('$title: $message'),
-  );
+  GitState gitState(GitBackend git) {
+    final state = GitState(
+      git,
+      onError: (title, message) => errors.add('$title: $message'),
+    );
+    addTearDown(state.dispose);
+    return state;
+  }
 
   test('the split button does what T3 does in each state of the checkout', () {
     void expectQuick(
@@ -343,39 +345,19 @@ void main() {
   });
 
   test('a feature branch is offered only to actions that commit changes', () {
-    expect(
-      featureBranchUnavailable(BridgeGitAction.commit, 'main', changes: false),
-      isNotNull,
-      reason: 'there are no changes to name it after',
-    );
-    expect(
-      featureBranchUnavailable(BridgeGitAction.push, 'main', changes: true),
-      isNotNull,
-    );
-    expect(
-      featureBranchUnavailable(
-        BridgeGitAction.createPullRequest,
-        'main',
-        changes: true,
-      ),
-      isNotNull,
-    );
-    expect(
-      featureBranchUnavailable(
-        BridgeGitAction.commitPush,
-        'main',
-        changes: true,
-      ),
-      isNull,
-    );
-    expect(
-      featureBranchUnavailable(
-        BridgeGitAction.commitPushPullRequest,
-        'main',
-        changes: true,
-      ),
-      isNull,
-    );
+    for (final (action, changes, offered) in [
+      (BridgeGitAction.commit, false, false),
+      (BridgeGitAction.push, true, false),
+      (BridgeGitAction.createPullRequest, true, false),
+      (BridgeGitAction.commitPush, true, true),
+      (BridgeGitAction.commitPushPullRequest, true, true),
+    ]) {
+      expect(
+        featureBranchUnavailable(action, 'main', changes: changes),
+        offered ? isNull : isNotNull,
+        reason: '$action',
+      );
+    }
   });
 
   test('elapsed time reads as seconds, then minutes and seconds', () {
@@ -390,7 +372,6 @@ void main() {
   test('the state follows the checkout status as it changes', () async {
     final git = FakeGit(status: checkout());
     final state = gitState(git);
-    addTearDown(state.dispose);
     await pumpEventQueue();
     expect(state.quickAction().label, 'Commit');
 
@@ -406,7 +387,6 @@ void main() {
       final git = SteppedGit();
       addTearDown(git.progress.close);
       final state = gitState(git);
-      addTearDown(state.dispose);
 
       final run = state.run(BridgeGitAction.commitPush, message: 'Fix');
       expect(state.running.value?.label, 'Starting source control action...');
@@ -447,7 +427,6 @@ void main() {
       final git = SteppedGit();
       addTearDown(git.progress.close);
       final state = gitState(git);
-      addTearDown(state.dispose);
 
       final run = state.run(BridgeGitAction.push);
       git.progress.add(
@@ -471,7 +450,6 @@ void main() {
       final git = SteppedGit();
       addTearDown(git.progress.close);
       final state = gitState(git);
-      addTearDown(state.dispose);
 
       final first = state.run(BridgeGitAction.commit);
       await state.run(BridgeGitAction.push);
@@ -486,14 +464,12 @@ void main() {
   test('pull shows its result, and a failure is a pull error', () async {
     final git = FakeGit();
     final state = gitState(git);
-    addTearDown(state.dispose);
     await state.pull();
     expect(git.calls, ['pull']);
     expect(state.result.value, (title: 'Pulled', description: 'Up to date'));
     expect(state.running.value, isNull);
 
     final offline = gitState(PullFailingGit());
-    addTearDown(offline.dispose);
     await offline.pull();
     expect(errors, ['Pull failed: offline']);
   });
@@ -503,13 +479,11 @@ void main() {
     () async {
       final git = FakeGit();
       final state = gitState(git);
-      addTearDown(state.dispose);
       await state.initialize();
       expect(git.calls, ['init']);
       expect(state.running.value, isNull);
 
       final denied = gitState(InitFailingGit());
-      addTearDown(denied.dispose);
       await denied.initialize();
       expect(errors, ['Git initialization failed: no permission']);
     },
@@ -517,7 +491,6 @@ void main() {
 
   testWidgets('a result shows for ten seconds, then clears', (tester) async {
     final state = gitState(FakeGit());
-    addTearDown(state.dispose);
     await state.pull();
 
     expect(state.result.value, isNotNull);
@@ -529,7 +502,6 @@ void main() {
 
   test('a checkout whose status cannot be watched reports that Git status is unavailable', () async {
     final state = gitState(WatchFailingGit());
-    addTearDown(state.dispose);
     await pumpEventQueue();
 
     expect(state.problem.value, 'Git status is unavailable.');

@@ -1,21 +1,15 @@
-//! A T3 stream held as its latest value. Dropping the watch ends the stream, which tells T3 to
-//! stop sending it.
-
 use serde_json::Value;
 use tokio::sync::watch;
 use tokio::task::JoinHandle;
 
 use super::client::Subscription;
 
-/// The latest value of a T3 stream, kept current until the watch is dropped.
 pub struct Watch<T> {
     latest: watch::Receiver<T>,
     task: JoinHandle<()>,
 }
 
 impl<T: Send + Sync + 'static> Watch<T> {
-    /// Follows `stream`, keeping the latest value `map` makes of its items. Returns once the
-    /// first item maps to a value.
     pub(crate) async fn follow(
         mut stream: Subscription,
         map: impl Fn(&Value) -> Option<T> + Send + 'static,
@@ -41,7 +35,6 @@ impl<T: Send + Sync + 'static> Watch<T> {
 }
 
 impl<T: serde::de::DeserializeOwned + Send + Sync + 'static> Watch<T> {
-    /// Follows a stream of the Meta-Harness service, starting at `first`.
     pub(crate) fn from_stream(first: T, mut stream: crate::remote::Stream<T>) -> Self {
         let (sender, latest) = watch::channel(first);
         let task = tokio::spawn(async move {
@@ -56,13 +49,10 @@ impl<T: serde::de::DeserializeOwned + Send + Sync + 'static> Watch<T> {
 }
 
 impl<T: Clone> Watch<T> {
-    /// The latest value.
     pub fn current(&self) -> T {
         self.latest.borrow().clone()
     }
 
-    /// Waits for a value newer than the last one `changed` returned; `None` once T3 ended the
-    /// stream.
     pub async fn changed(&mut self) -> Option<T> {
         self.latest.changed().await.ok()?;
         Some(self.latest.borrow_and_update().clone())

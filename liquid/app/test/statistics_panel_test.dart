@@ -14,23 +14,27 @@ import 'fake_backend.dart';
 
 const info = SessionInfo(project: 'acme-api');
 
-/// Two turns of one model: 17m 53s of working time, 261 s of it in tools, 86 tool calls.
 BridgeStatistics statistics() {
   const model = 'anthropic/claude-sonnet-4-5';
+  BridgeModelUsage modelUsage(
+    int responses,
+    int input,
+    int output,
+    int cacheRead,
+    int cacheWrite,
+  ) => BridgeModelUsage(
+    model: model,
+    usage: BridgeUsage(
+      input: input,
+      output: output,
+      cacheRead: cacheRead,
+      cacheWrite: cacheWrite,
+      reasoning: 0,
+    ),
+    responses: responses,
+  );
   return BridgeStatistics(
-    models: [
-      BridgeModelUsage(
-        model: model,
-        usage: BridgeUsage(
-          input: 212000,
-          output: 18300,
-          cacheRead: 1580000,
-          cacheWrite: 41000,
-          reasoning: 0,
-        ),
-        responses: 41,
-      ),
-    ],
+    models: [modelUsage(41, 212000, 18300, 1580000, 41000)],
     tools: const [
       BridgeToolCalls(
         name: 'bash',
@@ -54,19 +58,7 @@ BridgeStatistics statistics() {
         prompt: 'Add a rate limit to /login',
         startedMs: 0,
         endedMs: 201000,
-        models: [
-          BridgeModelUsage(
-            model: model,
-            usage: BridgeUsage(
-              input: 200000,
-              output: 10000,
-              cacheRead: 900000,
-              cacheWrite: 20000,
-              reasoning: 0,
-            ),
-            responses: 20,
-          ),
-        ],
+        models: [modelUsage(20, 200000, 10000, 900000, 20000)],
         toolMs: 72000,
         failed: 4,
       ),
@@ -75,19 +67,7 @@ BridgeStatistics statistics() {
         prompt: 'Cover the limiter with tests',
         startedMs: 300000,
         endedMs: 1172000,
-        models: [
-          BridgeModelUsage(
-            model: model,
-            usage: BridgeUsage(
-              input: 12000,
-              output: 8300,
-              cacheRead: 680000,
-              cacheWrite: 21000,
-              reasoning: 0,
-            ),
-            responses: 21,
-          ),
-        ],
+        models: [modelUsage(21, 12000, 8300, 680000, 21000)],
         toolMs: 189000,
         failed: 2,
       ),
@@ -97,11 +77,15 @@ BridgeStatistics statistics() {
   );
 }
 
+Future<void> tap(WidgetTester tester, Finder finder) async {
+  await tester.tap(finder);
+  await tester.pumpAndSettle();
+}
+
 void main() {
   late SessionState state;
   late FakeSession session;
 
-  /// Every value `scrollChatTo` takes, recorded before the Chat clears each request.
   final scrolls = <int?>[];
 
   Future<void> show(WidgetTester tester, {FakeSession? using}) async {
@@ -173,8 +157,7 @@ void main() {
       await show(tester);
       await openPanel(tester);
 
-      await tester.tap(inPanel(find.text('Tokens')));
-      await tester.pumpAndSettle();
+      await tap(tester, inPanel(find.text('Tokens')));
 
       expect(inPanel(find.text('1.85 M')), findsWidgets);
       expect(inPanel(find.text('claude-sonnet-4-5')), findsWidgets);
@@ -192,8 +175,7 @@ void main() {
       await show(tester);
       await openPanel(tester);
 
-      await tester.tap(inPanel(find.widgetWithText(InkWell, 'Time')));
-      await tester.pumpAndSettle();
+      await tap(tester, inPanel(find.widgetWithText(InkWell, 'Time')));
 
       expect(inPanel(find.text('17m 53s')), findsOneWidget);
       expect(inPanel(find.text('4m 21s')), findsOneWidget, reason: 'tool time');
@@ -229,13 +211,11 @@ void main() {
       await show(tester);
       await openPanel(tester);
 
-      await tester.tap(inPanel(find.widgetWithText(InkWell, 'Turn')));
-      await tester.pumpAndSettle();
+      await tap(tester, inPanel(find.widgetWithText(InkWell, 'Turn')));
       expect(inPanel(find.text('Add a rate limit to /login')), findsOneWidget);
       expect(inPanel(find.text('2 failed')), findsOneWidget);
 
-      await tester.tap(inPanel(find.text('Cover the limiter with tests')));
-      await tester.pumpAndSettle();
+      await tap(tester, inPanel(find.text('Cover the limiter with tests')));
 
       expect(find.byKey(const Key('statistics-panel')), findsNothing);
       expect(scrolls, contains(2));
@@ -245,8 +225,7 @@ void main() {
   testWidgets('a focused turn row opens with Enter', (tester) async {
     await show(tester);
     await openPanel(tester);
-    await tester.tap(inPanel(find.widgetWithText(InkWell, 'Turn')));
-    await tester.pumpAndSettle();
+    await tap(tester, inPanel(find.widgetWithText(InkWell, 'Turn')));
 
     Focus.of(tester.element(inPanel(find.text('Cover the limiter with tests'))))
         .requestFocus();
@@ -261,8 +240,7 @@ void main() {
   testWidgets('hovering a turn column shows its tooltip', (tester) async {
     await show(tester);
     await openPanel(tester);
-    await tester.tap(inPanel(find.widgetWithText(InkWell, 'Tokens')));
-    await tester.pumpAndSettle();
+    await tap(tester, inPanel(find.widgetWithText(InkWell, 'Tokens')));
 
     final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
     await mouse.addPointer(location: Offset.zero);
@@ -284,8 +262,7 @@ void main() {
     await tester.ensureVisible(
       inPanel(find.text('Ask the agent about this session…')),
     );
-    await tester.tap(inPanel(find.text('Ask the agent about this session…')));
-    await tester.pumpAndSettle();
+    await tap(tester, inPanel(find.text('Ask the agent about this session…')));
 
     expect(find.byKey(const Key('statistics-panel')), findsNothing);
     expect(

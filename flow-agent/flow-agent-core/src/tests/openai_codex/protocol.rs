@@ -1,7 +1,24 @@
 use crate::runtime::openai_codex::{
-    ProviderTokenUsage, ProviderToolCall, build_responses_request_body, decode_responses_turn,
-    derive_prompt_cache_key, output_contract_instruction, provider_arguments_to_flow_value,
+    ProviderToolCall, build_responses_request_body, decode_responses_turn, derive_prompt_cache_key,
+    output_contract_instruction, provider_arguments_to_flow_value,
 };
+use std::collections::BTreeMap;
+
+fn parameter(
+    name: &str,
+    value_type: core_script::ParameterValueType,
+) -> core_script::AllowedParameter {
+    core_script::AllowedParameter {
+        name: name.to_owned(),
+        value_type,
+        required: false,
+        allowed_values: Vec::new(),
+        value_pattern: None,
+        max_length: None,
+        min: None,
+        max: None,
+    }
+}
 
 fn test_tool() -> core_script::ToolBlock {
     core_script::ToolBlock {
@@ -18,24 +35,18 @@ fn test_tool() -> core_script::ToolBlock {
         script_body: None,
         allowed_parameters: vec![
             core_script::AllowedParameter {
-                name: "--path".to_owned(),
-                value_type: core_script::ParameterValueType::WorkspaceRelativePath,
                 required: true,
-                allowed_values: Vec::new(),
                 value_pattern: Some("^[a-z]+(?:/[a-z]+)*$".to_owned()),
                 max_length: Some(128),
-                min: None,
-                max: None,
+                ..parameter(
+                    "--path",
+                    core_script::ParameterValueType::WorkspaceRelativePath,
+                )
             },
             core_script::AllowedParameter {
-                name: "--limit".to_owned(),
-                value_type: core_script::ParameterValueType::Integer,
-                required: false,
-                allowed_values: Vec::new(),
-                value_pattern: None,
-                max_length: None,
                 min: Some(1),
                 max: Some(10),
+                ..parameter("--limit", core_script::ParameterValueType::Integer)
             },
         ],
     }
@@ -73,25 +84,12 @@ fn productive_request_is_stateless_and_exposes_only_declared_tools() {
         body["tools"][0]["parameters"]["properties"]["--limit"]["type"],
         serde_json::json!(["integer", "null"])
     );
-    assert!(body.get("previous_response_id").is_none());
-}
-
-#[test]
-fn provider_tool_schema_does_not_advertise_local_rust_regexes() {
-    let body = build_responses_request_body(
-        "gpt-fixture",
-        "cache-key",
-        "Follow the Phase instructions.",
-        &[],
-        &[&test_tool()],
-    )
-    .expect("request body");
-
     assert!(
         body["tools"][0]["parameters"]["properties"]["--path"]
             .get("pattern")
             .is_none()
     );
+    assert!(body.get("previous_response_id").is_none());
 }
 
 #[test]
@@ -109,18 +107,12 @@ fn every_optional_provider_parameter_kind_is_strict_and_nullable() {
     ]
     .into_iter()
     .map(|(name, value_type)| core_script::AllowedParameter {
-        name: name.to_owned(),
-        value_type,
-        required: false,
         allowed_values: if name == "--mode" {
             vec!["safe".to_owned()]
         } else {
             Vec::new()
         },
-        value_pattern: None,
-        max_length: None,
-        min: None,
-        max: None,
+        ..parameter(name, value_type)
     })
     .collect();
     let body = build_responses_request_body(
@@ -209,58 +201,32 @@ fn productive_response_retains_order_and_decodes_text_and_tool_calls() {
 }
 
 #[test]
-fn productive_response_rejects_empty_or_duplicate_tool_call_identities() {
-    let function_call = |call_id: &str, name: &str, arguments: &str| {
-        serde_json::json!({
-            "type":"response.output_item.done",
-            "item":{
-                "type":"function_call",
-                "call_id":call_id,
-                "name":name,
-                "arguments":arguments
-            }
-        })
-    };
-    for tool_calls in [
-        vec![function_call("", "inspect", "{}")],
-        vec![function_call("call_1", "", "{}")],
-        vec![
-            function_call("call_1", "inspect", "{}"),
-            function_call("call_1", "inspect", "{}"),
-        ],
-        vec![
-            function_call("call_1", "inspect", "{}"),
-            function_call("call_1", "inspect", "{\"--path\":\"src\"}"),
-        ],
-    ] {
-        let events = tool_calls
-            .into_iter()
-            .chain([serde_json::json!({
-                "type":"response.completed",
-                "response":{"id":"resp_1"}
-            })])
-            .collect::<Vec<_>>();
-        assert!(decode_responses_turn(&events).is_err_and(|error| {
-            error
-                .provider_failure()
-                .is_some_and(|failure| failure.is_reply_invalid())
-        }));
-    }
-}
-
-#[test]
 fn provider_reply_that_breaks_the_responses_format_is_reply_invalid() {
-    let call = |call_id: &str| {
+    let call = |call_id: &str, name: &str| {
         serde_json::json!({
             "type":"response.output_item.done",
-            "item":{"type":"function_call","call_id":call_id,"name":"inspect","arguments":"{}"}
+            "item":{"type":"function_call","call_id":call_id,"name":name,"arguments":"{}"}
         })
     };
     let completed = serde_json::json!({"type":"response.completed","response":{"id":"resp_1"}});
     let cases = [
         (
+            "empty call id",
+            vec![call("", "inspect"), completed.clone()],
+            "OpenAI Codex provider: function call id must not be empty",
+        ),
+        (
+            "empty function name",
+            vec![call("call_1", ""), completed.clone()],
+            "OpenAI Codex provider: function name must not be empty",
+        ),
+        (
             "repeated call id",
-            vec![call("call_1"), call("call_1"), completed.clone()],
+            vec![
+                call("call_1", "inspect"),
+                call("call_1", "inspect"),
+                completed.clone(),
+            ],
             "response repeated function call id call_1",
         ),
         (
@@ -299,82 +265,44 @@ fn provider_reply_that_breaks_the_responses_format_is_reply_invalid() {
 
 #[test]
 fn productive_response_decodes_optional_bounded_cache_usage() {
-    let turn = decode_responses_turn(&[serde_json::json!({
-        "type":"response.completed",
-        "response":{
-            "id":"resp_1",
-            "usage":{
+    for (payload, expected) in [
+        (
+            serde_json::json!({
                 "input_tokens":12,
-                "input_tokens_details":{
-                    "cached_tokens":4,
-                    "cache_write_tokens":3
-                },
+                "input_tokens_details":{"cached_tokens":4,"cache_write_tokens":3},
                 "output_tokens":6
-            }
-        }
-    })])
-    .expect("completed turn with usage");
-
-    assert_eq!(
-        turn.token_usage,
-        Some(ProviderTokenUsage {
-            input_tokens: Some(5),
-            output_tokens: Some(6),
-            cache_read_tokens: Some(4),
-            cache_write_tokens: Some(3),
-        })
-    );
-
-    let zero = decode_responses_turn(&[serde_json::json!({
-        "type":"response.completed",
-        "response":{
-            "id":"resp_2",
-            "usage":{
+            }),
+            (Some(5), Some(6), Some(4), Some(3)),
+        ),
+        (
+            serde_json::json!({
                 "input_tokens":0,
-                "input_tokens_details":{
-                    "cached_tokens":0,
-                    "cache_write_tokens":0
-                },
+                "input_tokens_details":{"cached_tokens":0,"cache_write_tokens":0},
                 "output_tokens":0
-            }
-        }
-    })])
-    .expect("zero usage");
-    assert_eq!(
-        zero.token_usage,
-        Some(ProviderTokenUsage {
-            input_tokens: Some(0),
-            output_tokens: Some(0),
-            cache_read_tokens: Some(0),
-            cache_write_tokens: Some(0),
-        })
-    );
-
-    let bounded = decode_responses_turn(&[serde_json::json!({
-        "type":"response.completed",
-        "response":{
-            "id":"resp_3",
-            "usage":{
-                "input_tokens":u64::MAX,
-                "output_tokens":u64::MAX
-            }
-        }
-    })])
-    .expect("bounded u64 usage");
-    assert_eq!(
-        bounded
-            .token_usage
-            .as_ref()
-            .and_then(|usage| usage.input_tokens),
-        Some(u64::MAX)
-    );
-    assert_eq!(
-        bounded
-            .token_usage
-            .as_ref()
-            .and_then(|usage| usage.output_tokens),
-        Some(u64::MAX)
-    );
+            }),
+            (Some(0), Some(0), Some(0), Some(0)),
+        ),
+        (
+            serde_json::json!({"input_tokens":u64::MAX,"output_tokens":u64::MAX}),
+            (Some(u64::MAX), Some(u64::MAX), None, None),
+        ),
+    ] {
+        let turn = decode_responses_turn(&[serde_json::json!({
+            "type":"response.completed",
+            "response":{"id":"resp_1","usage":payload}
+        })])
+        .expect("completed turn with usage");
+        let usage = turn.token_usage.expect("usage is decoded");
+        assert_eq!(
+            (
+                usage.input_tokens,
+                usage.output_tokens,
+                usage.cache_read_tokens,
+                usage.cache_write_tokens,
+            ),
+            expected
+        );
+    }
 }
 
 #[test]
@@ -423,7 +351,7 @@ fn provider_arguments_become_a_complete_typed_tool_map() {
     assert_eq!(
         provider_arguments_to_flow_value(&tool, "{\"--path\":\"src\",\"--limit\":3}")
             .expect("typed arguments"),
-        core_script::FlowValue::Map(std::collections::BTreeMap::from([
+        core_script::FlowValue::Map(BTreeMap::from([
             (
                 "--limit".to_owned(),
                 core_script::FlowValue::Integer("3".to_owned()),
@@ -443,7 +371,7 @@ fn provider_arguments_become_a_complete_typed_tool_map() {
     assert_eq!(
         provider_arguments_to_flow_value(&tool, "{\"--path\":\"src\",\"--limit\":null}")
             .expect("strict nullable optional parameter is treated as absent"),
-        core_script::FlowValue::Map(std::collections::BTreeMap::from([(
+        core_script::FlowValue::Map(BTreeMap::from([(
             "--path".to_owned(),
             core_script::FlowValue::String("src".to_owned()),
         )]))
@@ -456,24 +384,12 @@ fn provider_arguments_enforce_declared_tool_parameter_contracts() {
     tool.allowed_parameters[0].max_length = Some(3);
     tool.allowed_parameters.extend([
         core_script::AllowedParameter {
-            name: "--mode".to_owned(),
-            value_type: core_script::ParameterValueType::Enum,
-            required: false,
             allowed_values: vec!["safe".to_owned()],
-            value_pattern: None,
-            max_length: None,
-            min: None,
-            max: None,
+            ..parameter("--mode", core_script::ParameterValueType::Enum)
         },
         core_script::AllowedParameter {
-            name: "--label".to_owned(),
-            value_type: core_script::ParameterValueType::String,
-            required: false,
-            allowed_values: Vec::new(),
-            value_pattern: None,
             max_length: Some(3),
-            min: None,
-            max: None,
+            ..parameter("--label", core_script::ParameterValueType::String)
         },
     ]);
 

@@ -33,6 +33,22 @@ fn execute_tool_invocation(
     execute_anchored_tool_invocation(invocation, workspace.root(), control)
 }
 
+fn run_tool(
+    invocation: &ToolInvocation,
+    workspace: &Path,
+    timeout: Duration,
+) -> ToolExecutionOutcome {
+    let cancelled = AtomicBool::new(false);
+    execute_tool_invocation(
+        invocation,
+        workspace,
+        ToolRunControl {
+            cancelled: &cancelled,
+            deadline: Instant::now() + timeout,
+        },
+    )
+}
+
 fn escaped_output_invocation(fixture: &str) -> ToolInvocation {
     let mut invocation = shell_invocation(
         "\"$1\" --exact \"$2\" --nocapture & printf leader-done; while [ ! -f escaped.filled ]; do /bin/sleep 0.01; done",
@@ -78,9 +94,6 @@ thread_local! {
     static TERM_READY_WORKSPACE: RefCell<Option<PathBuf>> = const { RefCell::new(None) };
 }
 
-// A short deadline can expire before the shell has set its TERM trap. Hold the
-// group TERM until the tool creates `TERM_READY` after setting it; on timeout
-// the TERM proceeds and the test's own assertions report the failure.
 fn await_term_ready(signal: rustix::process::Signal) {
     let Some(workspace) = TERM_READY_WORKSPACE.with_borrow(Clone::clone) else {
         return;
@@ -102,14 +115,10 @@ fn execute_timed_out_after_term_ready(label: &str, body: &str) -> ToolExecutionO
     let workspace = empty_workspace(label);
     TERM_READY_WORKSPACE.set(Some(workspace.to_path_buf()));
     observe_group_signals_for_test(Some(hold_term_until_ready));
-    let cancelled = AtomicBool::new(false);
-    let outcome = execute_tool_invocation(
+    let outcome = run_tool(
         &shell_invocation(body),
         &workspace,
-        ToolRunControl {
-            cancelled: &cancelled,
-            deadline: Instant::now() + Duration::from_millis(100),
-        },
+        Duration::from_millis(100),
     );
     observe_group_signals_for_test(None);
     TERM_READY_WORKSPACE.set(None);
@@ -118,28 +127,21 @@ fn execute_timed_out_after_term_ready(label: &str, body: &str) -> ToolExecutionO
 
 #[test]
 fn unix_runner_captures_both_streams_with_an_empty_environment() {
-    let cancelled = AtomicBool::new(false);
-    let empty_environment = execute_tool_invocation(
+    let environment = run_tool(
         &ToolInvocation {
             executable: "/usr/bin/env".to_owned(),
             argv: Vec::new(),
         },
         Path::new("."),
-        ToolRunControl {
-            cancelled: &cancelled,
-            deadline: Instant::now() + Duration::from_secs(5),
-        },
+        Duration::from_secs(5),
     );
-    assert_eq!(empty_environment.status, RunAttemptOutcome::Completed);
-    assert!(empty_environment.stdout.is_empty());
+    assert_eq!(environment.status, RunAttemptOutcome::Completed);
+    assert!(environment.stdout.is_empty());
 
-    let outcome = execute_tool_invocation(
+    let outcome = run_tool(
         &shell_invocation("printf stdout-value && printf stderr-value >&2"),
         Path::new("."),
-        ToolRunControl {
-            cancelled: &cancelled,
-            deadline: Instant::now() + Duration::from_secs(5),
-        },
+        Duration::from_secs(5),
     );
 
     assert_eq!(outcome.status, RunAttemptOutcome::Completed);
@@ -237,58 +239,57 @@ fn runner_omits_an_observed_exit_code_for_timeout_or_cancellation() {
     );
 }
 
-fn stream_budget_fixture(body: &str) -> ToolExecutionOutcome {
-    let cancelled = AtomicBool::new(false);
-    execute_tool_invocation(
-        &shell_invocation(body),
-        Path::new("."),
-        ToolRunControl {
-            cancelled: &cancelled,
-            deadline: Instant::now() + Duration::from_secs(10),
-        },
-    )
-}
-
 #[test]
-fn runner_stdout_budget() {
-    let exact = stream_budget_fixture("/usr/bin/head -c 4194304 /dev/zero");
-    assert_eq!(exact.status, RunAttemptOutcome::Completed);
-    assert_eq!(exact.stdout.len(), MAX_TOOL_STREAM_BYTES);
-    assert!(exact.stderr.is_empty());
+fn runner_stream_budgets_accept_the_cap_and_fail_one_byte_beyond() {
+    for (label, redirect, retained, classification) in [
+        (
+            "stdout",
+            "",
+            (MAX_TOOL_STREAM_BYTES, 0),
+            ToolTerminalClassification::StdoutCapExceeded,
+        ),
+        (
+            "stderr",
+            " >&2",
+            (0, MAX_TOOL_STREAM_BYTES),
+            ToolTerminalClassification::StderrCapExceeded,
+        ),
+    ] {
+        let exact = run_tool(
+            &shell_invocation(&format!("/usr/bin/head -c 4194304 /dev/zero{redirect}")),
+            Path::new("."),
+            Duration::from_secs(10),
+        );
+        assert_eq!(exact.status, RunAttemptOutcome::Completed, "{label}");
+        assert_eq!(
+            (exact.stdout.len(), exact.stderr.len()),
+            retained,
+            "{label}"
+        );
 
-    let excess = stream_budget_fixture("/usr/bin/head -c 4194305 /dev/zero");
-    assert_eq!(excess.status, RunAttemptOutcome::Failed);
-    assert_eq!(
-        excess.classification,
-        Some(ToolTerminalClassification::StdoutCapExceeded)
-    );
-    assert!(matches!(excess.exit_code, None | Some(0)));
-    assert_eq!(excess.stdout.len(), MAX_TOOL_STREAM_BYTES);
-    assert!(excess.stderr.is_empty());
-}
-
-#[test]
-fn runner_stderr_budget() {
-    let exact = stream_budget_fixture("/usr/bin/head -c 4194304 /dev/zero >&2");
-    assert_eq!(exact.status, RunAttemptOutcome::Completed);
-    assert_eq!(exact.stderr.len(), MAX_TOOL_STREAM_BYTES);
-    assert!(exact.stdout.is_empty());
-
-    let excess = stream_budget_fixture("/usr/bin/head -c 4194305 /dev/zero >&2");
-    assert_eq!(excess.status, RunAttemptOutcome::Failed);
-    assert_eq!(
-        excess.classification,
-        Some(ToolTerminalClassification::StderrCapExceeded)
-    );
-    assert!(matches!(excess.exit_code, None | Some(0)));
-    assert_eq!(excess.stderr.len(), MAX_TOOL_STREAM_BYTES);
-    assert!(excess.stdout.is_empty());
+        let excess = run_tool(
+            &shell_invocation(&format!("/usr/bin/head -c 4194305 /dev/zero{redirect}")),
+            Path::new("."),
+            Duration::from_secs(10),
+        );
+        assert_eq!(excess.status, RunAttemptOutcome::Failed, "{label}");
+        assert_eq!(excess.classification, Some(classification), "{label}");
+        assert!(matches!(excess.exit_code, None | Some(0)), "{label}");
+        assert_eq!(
+            (excess.stdout.len(), excess.stderr.len()),
+            retained,
+            "{label}"
+        );
+    }
 }
 
 #[test]
 fn runner_cap_does_not_expose_an_exit_observed_during_cleanup() {
-    let outcome =
-        stream_budget_fixture("/usr/bin/head -c 4194305 /dev/zero; /bin/sleep 0.05; exit 17");
+    let outcome = run_tool(
+        &shell_invocation("/usr/bin/head -c 4194305 /dev/zero; /bin/sleep 0.05; exit 17"),
+        Path::new("."),
+        Duration::from_secs(10),
+    );
 
     assert_eq!(outcome.status, RunAttemptOutcome::Failed);
     assert_eq!(
@@ -299,54 +300,36 @@ fn runner_cap_does_not_expose_an_exit_observed_during_cleanup() {
 }
 
 #[test]
-fn runner_noop_lifecycle() {
-    let cancelled = AtomicBool::new(false);
-    for _ in 0..4 {
-        let outcome = execute_tool_invocation(
-            &ToolInvocation {
-                executable: "/usr/bin/true".to_owned(),
-                argv: Vec::new(),
-            },
-            Path::new("."),
-            ToolRunControl {
-                cancelled: &cancelled,
-                deadline: Instant::now() + Duration::from_secs(5),
-            },
-        );
-        assert_eq!(outcome.status, RunAttemptOutcome::Completed);
-        assert_eq!(outcome.exit_code, Some(0));
-    }
-}
-
-#[test]
 fn runner_owns_completed_leader_until_final_group_signal() {
-    use std::cell::Cell;
+    #[derive(Clone, Copy)]
+    struct Observation {
+        lost_ownership: bool,
+        completed: bool,
+        exit: Option<i32>,
+        signal: rustix::process::Signal,
+    }
 
     thread_local! {
-        static LOST_OWNERSHIP: Cell<bool> = const { Cell::new(false) };
-        static LAST_SIGNAL_COMPLETED: Cell<bool> = const { Cell::new(false) };
-        static LAST_SIGNAL_EXIT: Cell<Option<i32>> = const { Cell::new(None) };
-        static LAST_SIGNAL: Cell<Option<rustix::process::Signal>> = const { Cell::new(None) };
+        static OBSERVATIONS: RefCell<Vec<Observation>> = const { RefCell::new(Vec::new()) };
     }
     fn observe_owned_leader(pid: rustix::process::Pid, signal: rustix::process::Signal) {
         await_term_ready(signal);
-        // Only the controller can verify that this exact child remains waitable.
-        // NOWAIT leaves ownership intact through the signal that follows.
         let status = rustix::process::waitid(
             rustix::process::WaitId::Pid(pid),
             rustix::process::WaitIdOptions::EXITED
                 | rustix::process::WaitIdOptions::NOHANG
                 | rustix::process::WaitIdOptions::NOWAIT,
         );
-        LOST_OWNERSHIP.set(LOST_OWNERSHIP.get() || status.is_err());
-        LAST_SIGNAL_COMPLETED.set(status.as_ref().is_ok_and(Option::is_some));
-        LAST_SIGNAL_EXIT.set(
-            status
+        let observation = Observation {
+            lost_ownership: status.is_err(),
+            completed: status.as_ref().is_ok_and(Option::is_some),
+            exit: status
                 .ok()
                 .flatten()
                 .and_then(|status| status.exit_status()),
-        );
-        LAST_SIGNAL.set(Some(signal));
+            signal,
+        };
+        OBSERVATIONS.with_borrow_mut(|observations| observations.push(observation));
     }
 
     for (body, deadline, classification, expected_exit, last_signal_exit, needs_kill) in [
@@ -388,40 +371,34 @@ fn runner_owns_completed_leader_until_final_group_signal() {
             (classification == ToolTerminalClassification::ToolTimedOut)
                 .then(|| workspace.to_path_buf()),
         );
-        LOST_OWNERSHIP.set(false);
-        LAST_SIGNAL_COMPLETED.set(false);
-        LAST_SIGNAL_EXIT.set(None);
-        LAST_SIGNAL.set(None);
+        OBSERVATIONS.with_borrow_mut(Vec::clear);
         observe_group_signals_for_test(Some(observe_owned_leader));
-        let cancelled = AtomicBool::new(false);
-        let outcome = execute_tool_invocation(
-            &shell_invocation(body),
-            &workspace,
-            ToolRunControl {
-                cancelled: &cancelled,
-                deadline: Instant::now() + deadline,
-            },
-        );
+        let outcome = run_tool(&shell_invocation(body), &workspace, deadline);
         observe_group_signals_for_test(None);
         TERM_READY_WORKSPACE.set(None);
 
+        let observations = OBSERVATIONS.with_borrow(Clone::clone);
         assert!(
-            !LOST_OWNERSHIP.get(),
+            observations
+                .iter()
+                .all(|observation| !observation.lost_ownership),
             "a group signal must retain ownership of its original leader"
         );
+        let last = observations
+            .last()
+            .expect("a group signal observed the leader");
         assert!(
-            LAST_SIGNAL_COMPLETED.get(),
+            last.completed,
             "the completed leader must remain waitable at the final signal"
         );
         assert_eq!(
-            LAST_SIGNAL_EXIT.get(),
-            last_signal_exit,
+            last.exit, last_signal_exit,
             "the retained leader must preserve its actual terminal status"
         );
         assert_eq!(outcome.classification, Some(classification));
         assert_eq!(outcome.exit_code, expected_exit);
         if needs_kill {
-            assert_eq!(LAST_SIGNAL.get(), Some(rustix::process::Signal::KILL));
+            assert_eq!(last.signal, rustix::process::Signal::KILL);
         }
     }
 }
@@ -445,12 +422,12 @@ fn runner_term_grace() {
 }
 
 #[test]
-fn runner_forced_reap() {
+fn forced_reap_fails_the_run_and_hands_the_leader_to_a_reaper() {
     force_reap_timeout_for_test(true);
     let started = Instant::now();
     let outcome = execute_timed_out_after_term_ready(
         "runner-forced-reap",
-        "trap '' TERM; : > term-ready; while :; do /bin/sleep 1; done",
+        "trap '' TERM; printf %s $$; : > term-ready; while :; do /bin/sleep 1; done",
     );
     force_reap_timeout_for_test(false);
 
@@ -461,28 +438,13 @@ fn runner_forced_reap() {
     );
     assert!(started.elapsed() >= Duration::from_secs(2));
     assert!(started.elapsed() < Duration::from_secs(4));
-}
 
-#[test]
-fn reap_timeout_hands_the_child_to_a_reaper() {
-    force_reap_timeout_for_test(true);
-    let outcome = execute_timed_out_after_term_ready(
-        "reap-timeout-reaper",
-        "trap '' TERM; printf %s $$; : > term-ready; while :; do /bin/sleep 1; done",
-    );
-    force_reap_timeout_for_test(false);
-
-    assert_eq!(
-        outcome.classification,
-        Some(ToolTerminalClassification::ProcessReapFailed)
-    );
     let leader = std::str::from_utf8(&outcome.stdout)
         .expect("leader pid is UTF-8")
         .parse::<i32>()
         .expect("the Tool reports its leader pid");
     let leader = rustix::process::Pid::from_raw(leader).expect("leader pid is positive");
-    // NOWAIT observes an exited leader without consuming its status, so ECHILD means a reaper took it.
-    let started = Instant::now();
+    let reaping = Instant::now();
     loop {
         match rustix::process::waitid(
             rustix::process::WaitId::Pid(leader),
@@ -495,7 +457,7 @@ fn reap_timeout_hands_the_child_to_a_reaper() {
             Err(error) => panic!("leader observation failed: {error}"),
         }
         assert!(
-            started.elapsed() < Duration::from_secs(5),
+            reaping.elapsed() < Duration::from_secs(5),
             "the leader outlived its forced reap without being reaped"
         );
         std::thread::sleep(Duration::from_millis(10));
@@ -511,15 +473,11 @@ fn runner_output_drain() {
     }
     let workspace = empty_workspace("runner-output-drain");
     std::fs::write(workspace.join(MARKER), b"fixture").expect("fixture mode is selected");
-    let cancelled = AtomicBool::new(false);
     let started = Instant::now();
-    let outcome = execute_tool_invocation(
+    let outcome = run_tool(
         &escaped_output_invocation(FILTER),
         &workspace,
-        ToolRunControl {
-            cancelled: &cancelled,
-            deadline: Instant::now() + Duration::from_secs(5),
-        },
+        Duration::from_secs(5),
     );
 
     assert_eq!(outcome.status, RunAttemptOutcome::Failed);
@@ -540,15 +498,11 @@ fn runner_output_drain_rejects_an_escaped_child_that_exceeds_the_stream_cap() {
     }
     let workspace = empty_workspace("runner-output-drain-cap");
     std::fs::write(workspace.join(MARKER), b"fixture").expect("fixture mode is selected");
-    let cancelled = AtomicBool::new(false);
     let started = Instant::now();
-    let outcome = execute_tool_invocation(
+    let outcome = run_tool(
         &escaped_output_invocation(FILTER),
         &workspace,
-        ToolRunControl {
-            cancelled: &cancelled,
-            deadline: Instant::now() + Duration::from_secs(15),
-        },
+        Duration::from_secs(15),
     );
 
     assert_eq!(outcome.status, RunAttemptOutcome::Failed);
@@ -560,4 +514,24 @@ fn runner_output_drain_rejects_an_escaped_child_that_exceeds_the_stream_cap() {
     assert_eq!(outcome.stdout.len(), MAX_TOOL_STREAM_BYTES);
     assert!(started.elapsed() >= Duration::from_secs(1));
     assert!(started.elapsed() < Duration::from_secs(10));
+}
+
+#[test]
+fn runner_noop_lifecycle() {
+    let cancelled = AtomicBool::new(false);
+    for _ in 0..4 {
+        let outcome = execute_tool_invocation(
+            &ToolInvocation {
+                executable: "/usr/bin/true".to_owned(),
+                argv: Vec::new(),
+            },
+            Path::new("."),
+            ToolRunControl {
+                cancelled: &cancelled,
+                deadline: Instant::now() + Duration::from_secs(5),
+            },
+        );
+        assert_eq!(outcome.status, RunAttemptOutcome::Completed);
+        assert_eq!(outcome.exit_code, Some(0));
+    }
 }

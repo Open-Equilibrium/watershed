@@ -8,12 +8,10 @@ import '../theme/tokens.g.dart';
 import 'keymap.dart';
 import 'shortcut_store.dart';
 
-/// One line of the list: a command whose keys can change, or keys that stay as they are.
 class _Entry {
   const _Entry(Command this.command) : fixed = null, system = null;
   const _Entry.fixed(Fixed this.fixed) : command = null, system = null;
 
-  /// Keys macOS handles for the Liquid key, which Liquid cannot change.
   const _Entry.system(String label, String keys)
     : system = (label, keys),
       command = null,
@@ -97,7 +95,6 @@ const List<_Group> _right = [
   ),
 ];
 
-/// Settings → Shortcuts: the profile, every action's keys and recording new ones.
 class ShortcutsPane extends StatefulWidget {
   const ShortcutsPane({super.key, required this.shortcuts});
 
@@ -111,19 +108,14 @@ class _ShortcutsPaneState extends State<ShortcutsPane> {
   final _keys = FocusNode(debugLabel: 'shortcuts');
   final _search = TextEditingController();
 
-  /// The command taking new keys, the keys pressed for it and who runs each of them already.
   Command? _recording;
   Keys? _pressed;
   List<({Keys keys, List<Command> owners})> _conflicts = const [];
 
-  /// Whether the keys shown are the defaults a Reset restores, which "Use anyway" takes.
   bool _restoring = false;
 
-  /// Why the keys pressed cannot be taken.
   String? _refused;
 
-  /// A change waiting until the user agrees that it replaces the kept Custom profile, and the
-  /// profile it was asked under.
   ({Command command, Keys keys, List<Command> clear, Profile profile})?
   _replacing;
   final _keep = FocusNode(debugLabel: 'keep Custom');
@@ -169,11 +161,8 @@ class _ShortcutsPaneState extends State<ShortcutsPane> {
     _restoring = false;
   });
 
-  /// Restores `command`'s defaults. Keys another command runs now are taken only after the
-  /// same question recording asks, which names every command it takes keys from.
   void _reset(Command command) {
     final restored = _shortcuts.value.reset(command);
-    // Liquid key combinations count while their key is off too: they come back with it.
     final all = restored.withLiquidKey(true);
     final conflicts = [
       for (final keys in all.bindings(command))
@@ -195,14 +184,11 @@ class _ShortcutsPaneState extends State<ShortcutsPane> {
     _keys.requestFocus();
   }
 
-  /// Restores `command`'s defaults, taking them from the commands that run them.
   void _restore(Command command) {
     _shortcuts.change(_shortcuts.value.resetTaking(command));
     _done();
   }
 
-  /// Leaving the recording row stops recording, unless the focus went on to "Use anyway" or
-  /// to the question whether to replace Custom.
   void _focusChanged() {
     if (_recording != null &&
         !_keys.hasPrimaryFocus &&
@@ -212,9 +198,6 @@ class _ShortcutsPaneState extends State<ShortcutsPane> {
     }
   }
 
-  /// A profile chosen meanwhile settles the question whether to replace Custom, and ends a
-  /// recording whose conflict names the owner under the profile before. Another profile than
-  /// the one asked under ends the question too, as its keys would not run there.
   void _settingsChanged() {
     final replacing = _replacing;
     if (replacing != null &&
@@ -225,7 +208,6 @@ class _ShortcutsPaneState extends State<ShortcutsPane> {
     if (_conflicts.isNotEmpty) _stop();
   }
 
-  /// Changes `command`'s keys, after asking when that replaces the kept Custom profile.
   void _change(Command command, Keys keys, {List<Command> clear = const []}) {
     if (_shortcuts.value.replaced == null) return _apply(command, keys, clear);
     setState(() {
@@ -249,7 +231,6 @@ class _ShortcutsPaneState extends State<ShortcutsPane> {
     _done();
   }
 
-  /// Ends recording and gives the keys back to the page.
   void _done() {
     _stop();
     _keys.requestFocus();
@@ -269,11 +250,8 @@ class _ShortcutsPaneState extends State<ShortcutsPane> {
     liquidKey,
   };
 
-  /// Tab still moves the focus, so "Use anyway" can be reached from the keyboard.
   static final _navigation = {LogicalKeyboardKey.tab};
 
-  /// While the recording row has the focus, its keys go to the recorder, so no shortcut runs
-  /// meanwhile; keys for the search field or a link pass.
   KeyEventResult _onKey(FocusNode node, KeyEvent event) {
     final command = _recording;
     if (command == null ||
@@ -289,13 +267,11 @@ class _ShortcutsPaneState extends State<ShortcutsPane> {
       _stop();
       return KeyEventResult.handled;
     }
-    // The keys it already starts with change nothing, so no Custom profile starts.
     if (_shortcuts.value.bindings(command).firstOrNull == keys) {
       _done();
       return KeyEventResult.handled;
     }
     final use = reserved(command, keys);
-    // Liquid key combinations count while their key is off too: they come back with it.
     final owners = _shortcuts.value
         .withLiquidKey(true)
         .conflicts(command, keys);
@@ -583,7 +559,6 @@ class _ShortcutsPaneState extends State<ShortcutsPane> {
   }
 }
 
-/// The profile choice, and in Custom whether Caps Lock is the Liquid key.
 class _ProfileRow extends StatelessWidget {
   const _ProfileRow({required this.shortcuts, required this.settings});
 
@@ -640,7 +615,6 @@ class _ProfileRow extends StatelessWidget {
           _Row(
             label: 'Use Caps Lock as the Liquid key',
             keys: [
-              // A small switch, within the row.
               SizedBox(
                 height: 20,
                 child: FittedBox(
@@ -711,7 +685,6 @@ class _Row extends StatelessWidget {
 
 enum _Tone { plain, faint, changed, recording }
 
-/// The commands that run some keys, bold and in a sentence: `A.`, `A and B.` or `A, B and C.`.
 List<InlineSpan> _ownerSpans(List<Command> owners) => [
   for (final (index, owner) in owners.indexed) ...[
     if (index > 0) TextSpan(text: index == owners.length - 1 ? ' and ' : ', '),
@@ -723,7 +696,6 @@ List<InlineSpan> _ownerSpans(List<Command> owners) => [
   const TextSpan(text: '.'),
 ];
 
-/// The names of commands in a link: `A`, `A and B` or `A, B and C`.
 String _ownerNames(List<Command> owners) {
   final labels = [for (final owner in owners) owner.label];
   return labels.length < 2
@@ -731,7 +703,6 @@ String _ownerNames(List<Command> owners) {
       : '${labels.sublist(0, labels.length - 1).join(', ')} and ${labels.last}';
 }
 
-/// Keys as a key cap.
 class _Kbd extends StatelessWidget {
   const _Kbd(this.text, {this.tone = _Tone.plain});
 
@@ -775,7 +746,6 @@ class _Kbd extends StatelessWidget {
   }
 }
 
-/// A warning below the recording row.
 class _Notice extends StatelessWidget {
   const _Notice({required this.children});
 
@@ -795,7 +765,6 @@ class _Notice extends StatelessWidget {
       color: context.ws.warningSubtle,
       borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
     ),
-    // Focus on a link shows above the notice's background.
     child: Material(
       type: MaterialType.transparency,
       child: Wrap(spacing: WsMetrics.space3, children: children),
@@ -820,8 +789,6 @@ class _Link extends StatelessWidget {
   );
 }
 
-/// Asks whether a change may replace the kept Custom profile; keeping it is
-/// the default, and leaving the question keeps it too.
 class _ReplaceCustom extends StatelessWidget {
   const _ReplaceCustom({
     required this.settings,

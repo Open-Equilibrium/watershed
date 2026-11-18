@@ -13,39 +13,17 @@ import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 // These functions are ignored because they are not marked as `pub`: `id`, `message`, `normalized`, `of`, `of`, `optional_id`, `page`, `place`, `to_core`, `to_core`, `units`, `window`
 // These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `hash`, `hash`
 
-/// The answer to a query; the query's kind names the parts it fills.
 class BridgeAnswer {
-  /// Areas.
   final List<BridgeArea> areas;
-
-  /// Pages.
   final List<BridgePage> pages;
-
-  /// Views.
   final List<BridgeView> views;
-
-  /// How many items the whole list holds.
   final PlatformInt64 count;
-
-  /// A Block's text.
   final String? text;
-
-  /// A Text Block's style, with its text.
   final BridgeTextStyle? style;
-
-  /// A Code Block's language, with its code; empty for plain text.
   final String? language;
-
-  /// A Media Block's file and attachment.
   final BridgeMedia? media;
-
-  /// A drawing's style and elements.
   final BridgeDrawing? drawing;
-
-  /// A Database's name and fields.
   final BridgeDatabase? database;
-
-  /// A Database's rows.
   final List<BridgeRow> rows;
 
   const BridgeAnswer({
@@ -94,33 +72,15 @@ class BridgeAnswer {
           rows == other.rows;
 }
 
-/// What an applied write recorded and created.
 class BridgeApplied {
-  /// The Action that recorded it.
   final String action;
-
-  /// A new area.
   final String? area;
-
-  /// A new Page.
   final String? page;
-
-  /// A new Block.
   final String? block;
-
-  /// The new Block's View.
   final String? view;
-
-  /// A new Database field.
   final String? field;
-
-  /// A new Database row.
   final String? row;
-
-  /// A new option of a select field.
   final String? option;
-
-  /// A drawing's new elements, in the order they were asked for.
   final List<String> elements;
 
   const BridgeApplied({
@@ -163,12 +123,8 @@ class BridgeApplied {
           elements == other.elements;
 }
 
-/// An area in the Explorer.
 class BridgeArea {
-  /// Its identity.
   final String id;
-
-  /// Its name.
   final String name;
 
   const BridgeArea({required this.id, required this.name});
@@ -185,34 +141,10 @@ class BridgeArea {
           name == other.name;
 }
 
-/// The kind of Block a View shows.
-enum BridgeBlockKind {
-  /// A Text Block.
-  text,
+enum BridgeBlockKind { text, database, code, media, whiteboard, unknown }
 
-  /// A Database Block.
-  database,
-
-  /// A Code Block.
-  code,
-
-  /// A Media Block.
-  media,
-
-  /// A Whiteboard Block.
-  whiteboard,
-
-  /// A Block of a kind a later version adds, which shows as a placeholder (ADR-0245).
-  unknown,
-}
-
-/// A resource changed; `seq` counts its changes since this Workspace opened, so a reader
-/// that sees a gap or an older number knows to query again.
 class BridgeChange {
-  /// The resource.
   final BridgeResource resource;
-
-  /// Its change count.
   final PlatformInt64 seq;
 
   const BridgeChange({required this.resource, required this.seq});
@@ -229,79 +161,30 @@ class BridgeChange {
           seq == other.seq;
 }
 
-/// One write, as Dart sends it.
 class BridgeMutation {
-  /// What the write does.
   final BridgeMutationKind kind;
-
-  /// An area.
   final String? area;
-
-  /// A Page.
   final String? page;
-
-  /// The Page a new Page nests under.
   final String? parent;
-
-  /// A Block.
   final String? block;
-
-  /// A View.
   final String? view;
-
-  /// The View, field or row a new one follows.
   final String? after;
-
-  /// Whether a new field or row goes after all others as the core applies it, rather
-  /// than first or after `after` (ADR-0247).
   final bool last;
-
-  /// A name, title or text.
   final String? text;
-
-  /// Where an edit starts.
   final PlatformInt64 at;
-
-  /// How many units an edit removes.
   final PlatformInt64 delete;
-
-  /// A Text Block's style.
   final BridgeTextStyle style;
-
-  /// Whether a Section starts at `view`.
   final bool boundary;
-
-  /// A Database field.
   final String? field;
-
-  /// A Database row.
   final String? row;
-
-  /// A new field's kind.
   final BridgeFieldKind? fieldKind;
-
-  /// A new option's color, an index into the tag colors.
   final PlatformInt64 color;
-
-  /// A cell's new value.
   final BridgeCell? cell;
-
-  /// A View's new sort.
   final BridgeSort? sort;
-
-  /// A View's new filter.
   final BridgeFilter? filter;
-
-  /// A file's media type, such as `image/png`; empty if unknown.
   final String? mediaType;
-
-  /// A finished attachment's name.
   final String? attachment;
-
-  /// A drawing's new style.
   final BridgeDrawingStyle? drawingStyle;
-
-  /// A drawing's elements removed, changed and added.
   final BridgeDrawingEdit? drawing;
 
   const BridgeMutation({
@@ -389,112 +272,40 @@ class BridgeMutation {
           drawing == other.drawing;
 }
 
-/// What a [`BridgeMutation`] does; each kind names the parts it fills.
 enum BridgeMutationKind {
-  /// Adds an area named `text`.
   createArea,
-
-  /// Adds a Page titled `text` to `area`, under `parent` if given.
   createPage,
-
-  /// Retitles `page` to `text`.
   renamePage,
-
-  /// Adds a Text Block holding `text` to `page`, after the View `after` or first.
   addTextBlock,
-
-  /// Replaces `delete` units at `at` in the Text or Code `block` on its home `page` with
-  /// `text`; positions count UTF-16 units, as Dart does.
   editText,
-
-  /// Removes `view` from `page`.
   removeView,
-
-  /// Sets how `view` sorts its rows, to `sort` or to none.
   setViewSort,
-
-  /// Sets which rows `view` keeps, to `filter` or to all.
   setViewFilter,
-
-  /// Ends `block`, shown by `view` on its home `page`, at `at`, as ⏎ does: the text from
-  /// there moves to a new Text Block of `style` after `view`.
   splitTextBlock,
-
-  /// Appends the Text Block of `view` on `page` to the one above, as ⌫ at its start does.
   joinTextBlock,
-
-  /// Sets `block`'s `style` on its home `page`.
   setTextStyle,
-
-  /// Starts a Section at `view` on `page`, or stops one, as `boundary` says.
   setSectionBoundary,
-
-  /// Turns the Text Block `block` on its home `page` into a Code Block in plain text.
   turnIntoCode,
-
-  /// Turns the Code Block `block` on its home `page` into a paragraph.
   turnIntoText,
-
-  /// Sets the Code Block `block`'s language on its home `page` to `text`; empty for plain
-  /// text.
   setCodeLanguage,
-
-  /// Adds a Media Block for the file `text` of `media_type`, kept as the finished
-  /// `attachment`, to `page`, after the View `after` or first.
   addMediaBlock,
-
-  /// Adds an empty, hand-drawn Whiteboard Block to `page`, after the View `after` or first.
   addWhiteboardBlock,
-
-  /// Sets the drawing style of the Whiteboard or Media `block` on its home `page` to
-  /// `drawing_style`.
   setDrawingStyle,
-
-  /// Removes, changes and adds the elements of the Whiteboard's or Media `block`'s drawing
-  /// on its home `page` as `drawing` says, in one Action.
   editDrawing,
-
-  /// Adds a Database Block named `text`, with a text field "Name", to `page`, after the
-  /// View `after` or first.
   addDatabaseBlock,
-
-  /// Renames the Database `block` on its home `page` to `text`.
   renameDatabase,
-
-  /// Adds a field named `text` of `field_kind` to the Database `block` on its home `page`:
-  /// last, after the field `after`, or first.
   addField,
-
-  /// Renames `field` of the Database `block` on its home `page` to `text`.
   renameField,
-
-  /// Removes `field` from the Database `block` on its home `page`.
   removeField,
-
-  /// Adds an option named `text` of `color` to the select `field` of the Database `block`
-  /// on its home `page`.
   addOption,
-
-  /// Adds an empty row to the Database `block` on its home `page`: last, after the row
-  /// `after`, or first.
   addRow,
-
-  /// Removes `row` from the Database `block` on its home `page`.
   removeRow,
-
-  /// Sets `row`'s cell of `field` in the Database `block` on its home `page` to `cell`.
   setCell,
 }
 
-/// A Page in an area's tree, which lists each Page before its descendants.
 class BridgePage {
-  /// Its identity.
   final String id;
-
-  /// The Page it nests under.
   final String? parent;
-
-  /// Its title.
   final String title;
 
   const BridgePage({required this.id, this.parent, required this.title});
@@ -512,30 +323,14 @@ class BridgePage {
           title == other.title;
 }
 
-/// One read, as Dart sends it.
 class BridgeQuery {
-  /// What it reads.
   final BridgeQueryKind kind;
-
-  /// An area.
   final String? area;
-
-  /// A Page.
   final String? page;
-
-  /// A Block.
   final String? block;
-
-  /// Where a window starts.
   final PlatformInt64 start;
-
-  /// How many items a window takes, at most [`MAX_WINDOW`].
   final PlatformInt64 limit;
-
-  /// How a row window is ordered; the rows' own order without one.
   final BridgeSort? sort;
-
-  /// Which rows a row window keeps; all without one.
   final BridgeFilter? filter;
 
   const BridgeQuery({
@@ -575,56 +370,22 @@ class BridgeQuery {
           filter == other.filter;
 }
 
-/// What a [`BridgeQuery`] reads; each kind names the parts it uses and fills.
 enum BridgeQueryKind {
-  /// A window of the areas into `areas`, and their number into `count`.
   areas,
-
-  /// A window of `area`'s Page tree into `pages`, and its length into `count`.
   pages,
-
-  /// A window of `page`'s Views into `views`, and their number into `count`.
   views,
-
-  /// `block`'s text and style on its home `page` into `text` and `style`; none once the
-  /// Block is removed.
   text,
-
-  /// The Code `block`'s code and language on its home `page` into `text` and `language`;
-  /// none once the Block is removed or if it is no Code Block.
   code,
-
-  /// The Media `block`'s file and attachment on its home `page` into `media`; none once
-  /// the Block is removed or if it is no Media Block.
   media,
-
-  /// The Whiteboard's or Media `block`'s drawing on its home `page` into `drawing`: its
-  /// style and its elements on the document pages from `start`, at most `limit` of them
-  /// (a Whiteboard's are on page 0); none once the Block is removed or if it holds no
-  /// drawing.
   drawing,
-
-  /// The Database `block`'s name and fields on its home `page` into `database`; none
-  /// once the Block is removed or if it is no Database.
   database,
-
-  /// A window of the Database `block`'s rows on its home `page` into `rows`, kept by
-  /// `filter` and ordered by `sort`, and the number of rows `filter` keeps into `count`.
   rows,
 }
 
-/// A resource whose readers refresh when it changes.
 class BridgeResource {
-  /// Its kind.
   final BridgeResourceKind kind;
-
-  /// An area.
   final String? area;
-
-  /// A Page.
   final String? page;
-
-  /// A Block.
   final String? block;
 
   const BridgeResource({required this.kind, this.area, this.page, this.block});
@@ -644,69 +405,26 @@ class BridgeResource {
           block == other.block;
 }
 
-/// What kind of resource a subscription follows; each kind names the parts it uses.
-enum BridgeResourceKind {
-  /// The list of areas.
-  areas,
+enum BridgeResourceKind { areas, pages, views, block }
 
-  /// `area`'s Page tree.
-  pages,
-
-  /// `page`'s Views and their order.
-  views,
-
-  /// `block`'s content on its home `page`.
-  block,
-}
-
-/// How a Text Block reads.
 enum BridgeTextStyle {
-  /// A paragraph.
   paragraph,
-
-  /// A heading of level 1.
   heading1,
-
-  /// A heading of level 2.
   heading2,
-
-  /// A heading of level 3.
   heading3,
-
-  /// A bulleted list item.
   bullet,
-
-  /// A numbered list item.
   numbered,
-
-  /// A to-do not yet done.
   todo,
-
-  /// A done to-do.
   done,
-
-  /// A quote.
   quote,
 }
 
-/// A View on a Page.
 class BridgeView {
-  /// Its identity.
   final String id;
-
-  /// The Block it shows.
   final String block;
-
-  /// Whether a Section starts here.
   final bool boundary;
-
-  /// The kind of Block it shows.
   final BridgeBlockKind kind;
-
-  /// How it sorts a Table's rows.
   final BridgeSort? sort;
-
-  /// Which of a Table's rows it keeps.
   final BridgeFilter? filter;
 
   const BridgeView({

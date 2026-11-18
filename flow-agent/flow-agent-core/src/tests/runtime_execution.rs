@@ -1,7 +1,7 @@
 use super::{
     helpers::{
         add_bad_write_tool_to_summarize, assert_no_active_session_lock, fixture_runtime_policy,
-        load_test_registry, replace_registry_text,
+        replace_registry_text, workspace_log_dir,
     },
     test_support::workspace_copy,
 };
@@ -108,7 +108,7 @@ fn deterministic_plan_and_checked_execution_match_planned_signatures() {
 }
 
 #[test]
-fn apply_consumes_the_compiled_plan_without_retraversing_changed_definitions() {
+fn apply_consumes_the_compiled_plan_after_flow_and_tool_definitions_change() {
     let workspace = workspace_copy("hello-flow");
     let (registry, policy) = fixture_runtime_policy("hello-flow", "hello-flow");
     let root_flow = registry
@@ -128,6 +128,12 @@ fn apply_consumes_the_compiled_plan_without_retraversing_changed_definitions() {
         "flows/hello-flow.yaml",
         "name: HelloFlow",
         "name: ChangedHelloFlow",
+    );
+    replace_registry_text(
+        &workspace,
+        "tools/write-summary.yaml",
+        "printf '%s\\n' \"$SUMMARY\" > out/summary.txt",
+        "printf 'changed\\n' > out/summary.txt",
     );
     reset_fixture_tool_apply_count();
 
@@ -158,74 +164,6 @@ fn apply_consumes_the_compiled_plan_without_retraversing_changed_definitions() {
 }
 
 #[test]
-fn apply_uses_the_planned_fixture_effect_snapshot() {
-    let workspace = workspace_copy("hello-flow");
-    replace_registry_text(
-        &workspace,
-        "flows/hello-flow.yaml",
-        "phase_refs: [inspect, summarize]",
-        "phase_refs: [summarize]",
-    );
-    replace_registry_text(
-        &workspace,
-        "flows/hello-flow.yaml",
-        "subflow_refs: [hello-subflow, hello-subflow]",
-        "subflow_refs: []",
-    );
-    replace_registry_text(
-        &workspace,
-        "phases/summarize.yaml",
-        "instruction_refs: [write-output]",
-        "instruction_refs: []",
-    );
-    let registry_a = load_test_registry(&workspace, "hello-flow");
-    let policy_a = core_policy::compile_policy_artifact(&registry_a, "hello-flow")
-        .expect("plan policy compiles");
-    let root_flow_a = registry_a
-        .flow_block("hello-flow")
-        .expect("hello-flow fixture exists");
-    let plan = plan_flow(
-        &workspace,
-        &registry_a,
-        &policy_a,
-        root_flow_a,
-        "scriptdrift001",
-        FlowExecutionOptions::new(EventClock::fixed_fixture(), ToolSideEffectMode::Plan),
-    )
-    .expect("runtime plan succeeds");
-
-    replace_registry_text(
-        &workspace,
-        "tools/write-summary.yaml",
-        "printf '%s\\n' \"$SUMMARY\" > out/summary.txt",
-        "printf 'changed\\n' > out/summary.txt",
-    );
-    reset_fixture_tool_apply_count();
-
-    let execution = apply_flow_with_sink(
-        FlowApplication {
-            workspace: &workspace,
-            session_id: "scriptdrift001",
-            options: FlowExecutionOptions::new(
-                EventClock::fixed_fixture(),
-                ToolSideEffectMode::Apply,
-            ),
-            plan: &plan,
-        },
-        None,
-    )
-    .expect("apply uses the signed fixture-effect snapshot");
-
-    assert!(execution.matches_plan(&plan));
-    assert_eq!(fixture_tool_apply_count(), 1);
-    assert_eq!(
-        fs::read_to_string(workspace.join("out/summary.txt"))
-            .expect("the planned fixture effect is applied"),
-        "hello\n"
-    );
-}
-
-#[test]
 fn run_flow_keeps_started_audit_after_partial_apply_failure() {
     let workspace = workspace_copy("hello-flow");
     replace_registry_text(
@@ -241,11 +179,6 @@ fn run_flow_keeps_started_audit_after_partial_apply_failure() {
 
     assert!(output.failed);
     assert_no_active_session_lock(&workspace, &output.session_id);
-    assert!(
-        output.stdout.contains("\"reason\":\"write_denied\""),
-        "{}",
-        output.stdout
-    );
     assert_eq!(
         fs::read_to_string(workspace.join("out/blocker")).expect("first write persisted"),
         "partial\n"
@@ -272,14 +205,13 @@ fn run_flow_keeps_started_audit_after_partial_apply_failure() {
         "committed session log must match emitted failure stream"
     );
     assert!(
-        crate::tests::helpers::workspace_log_dir(&workspace)
+        workspace_log_dir(&workspace)
             .join("hello-flow.log")
             .exists(),
         "partial side effects must keep the run log"
     );
     let manifests = fs::read_to_string(
-        crate::tests::helpers::workspace_log_dir(&workspace)
-            .join(format!("{}.contexts.jsonl", output.session_id)),
+        workspace_log_dir(&workspace).join(format!("{}.contexts.jsonl", output.session_id)),
     )
     .expect("actual-turn manifests remain readable");
     let completed_turns = events

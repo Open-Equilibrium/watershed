@@ -27,7 +27,6 @@ void main() {
         ).allMatches(workspace))
           match[1]!: match[2]!,
       };
-      // Crate directories from the repository root, closed over local path dependencies.
       final built = <String>{};
       final pending = ['liquid/liquid-bridge'];
       while (pending.isNotEmpty) {

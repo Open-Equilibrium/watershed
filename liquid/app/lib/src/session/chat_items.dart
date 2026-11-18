@@ -4,8 +4,6 @@ import '../format.dart';
 import '../rust/api/events.dart';
 import '../rust/api/thread.dart';
 
-/// One entry of the chat timeline. Its text grows in place while it streams, so only the widget
-/// that shows this item rebuilds (client architecture rule 6).
 class ItemView {
   ItemView({
     required this.id,
@@ -14,30 +12,27 @@ class ItemView {
     this.tool,
     this.target,
     this.turnEnd,
+    this.marker,
   });
 
   final int id;
   final BridgeItemKind kind;
 
-  /// The turn the item belongs to.
   final int turn;
   final String? tool;
 
-  /// What a tool call works on, such as a command or a path, on one line.
   final String? target;
 
-  /// Set on the row after a turn that says what the turn changed.
   final BridgeTurn? turnEnd;
+
+  final String? marker;
   final ValueNotifier<String> text = ValueNotifier('');
 
-  /// How the item ended, once it has; observable apart from its text.
   final ValueNotifier<ItemOutcome?> outcome = ValueNotifier(null);
 }
 
-/// How a finished item ended.
 typedef ItemOutcome = ({bool failed, int? durationMs});
 
-/// Tokens the session spent so far.
 @immutable
 class SessionTotals {
   const SessionTotals({this.input = 0, this.output = 0});

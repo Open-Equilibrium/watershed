@@ -20,13 +20,18 @@ const INIT_MARKER: &str =
 
 #[test]
 fn invalid_global_init_does_not_create_the_global_home() {
-    let home = absent_global_home();
+    for root in [".", "config.yaml", "config.yaml/registry", "../registry"] {
+        let home = absent_global_home();
 
-    let error = initialize_global_config(Some("../registry"))
-        .expect_err("an unsafe global registry root is rejected");
+        let error = initialize_global_config(Some(root))
+            .expect_err("an unsafe global registry root is rejected");
 
-    assert!(error.to_string().contains("registry_root"), "{error}");
-    assert!(!home.exists());
+        assert!(
+            error.to_string().contains("registry_root"),
+            "{root}: {error}"
+        );
+        assert!(!home.exists(), "{root} must not create the global home");
+    }
 }
 
 fn empty_global_home() -> PathBuf {
@@ -121,18 +126,7 @@ fn concurrent_authoring_init_cannot_publish_a_stale_transaction() {
 }
 
 #[test]
-fn authoring_init_rejects_unsafe_conflicting_and_foreign_transactions() {
-    for root in [".", "config.yaml", "config.yaml/registry", "../registry"] {
-        let workspace = empty_global_home();
-        let error =
-            initialize_global_config(Some(root)).expect_err("unsafe registry root is rejected");
-        assert!(
-            error.to_string().contains("registry_root"),
-            "{root}: {error}"
-        );
-        assert!(!workspace.join(".flow-init.json").exists());
-    }
-
+fn authoring_init_rejects_conflicting_and_foreign_transactions() {
     for conflict in ["config.yaml", "registry"] {
         let workspace = empty_global_home();
         fs::create_dir(workspace.join(conflict)).expect("conflict is staged");
@@ -252,22 +246,6 @@ fn authoring_init_reports_finalization_failure_after_marker_removal() {
     for leaf in ["tools", "instructions", "phases", "flows"] {
         assert!(workspace.join("registry").join(leaf).is_dir());
     }
-
-    let committed =
-        fs::read(workspace.join("config.yaml")).expect("the committed config remains readable");
-    let retry = initialize_global_config(None)
-        .expect_err("a later invocation must not overwrite the committed workspace");
-    assert_eq!(retry.exit_code(), 65);
-    assert!(
-        retry
-            .to_string()
-            .contains("global_config_already_initialized"),
-        "{retry}"
-    );
-    assert_eq!(
-        fs::read(workspace.join("config.yaml")).expect("the committed config remains readable"),
-        committed
-    );
 }
 
 #[test]

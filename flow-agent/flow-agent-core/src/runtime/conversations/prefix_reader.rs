@@ -35,9 +35,6 @@ pub(super) fn canonical_jsonl_record(line: &str, label: &str) -> Result<String, 
     Ok(canonical)
 }
 
-/// Drops the uncommitted incomplete final line of a Run's last prefix segment.
-///
-/// Exact recovery callers hold the Run lease, so no writer can append while it is removed.
 fn drop_incomplete_final_line(
     path: &AnchoredFile,
     file: &mut File,
@@ -52,7 +49,6 @@ fn drop_incomplete_final_line(
     Ok(committed)
 }
 
-/// Returns the length through the last LF among the first `bytes` bytes, scanning backwards.
 fn committed_prefix_len(file: &mut File, bytes: u64) -> std::io::Result<u64> {
     const CHUNK_BYTES: u64 = 64 * 1024;
     let mut end = bytes;

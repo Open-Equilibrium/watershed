@@ -1,7 +1,3 @@
-//! Whiteboard Blocks: strokes, shapes and text as elements of their Block's entry in the
-//! home Page's document, each written through the one pipeline.
-
-// Integration tests are test code, but clippy.toml's exemption covers only #[test] items.
 #![allow(clippy::unwrap_used)]
 
 use liquid_core::{
@@ -20,7 +16,6 @@ fn apply(workspace: &mut Workspace, mutation: Mutation) -> Result<Applied, Error
     })
 }
 
-/// A Workspace with one Page holding an empty Whiteboard.
 fn board() -> (Workspace, PageId, BlockId) {
     let mut workspace = Workspace::create(PersonId::new("benni"), MemoryStore::default()).unwrap();
     let area = match apply(
@@ -53,7 +48,6 @@ fn board() -> (Workspace, PageId, BlockId) {
     (workspace, page, block)
 }
 
-/// A stroke's points as the core stores them: x, y and pressure as little-endian f32.
 fn points(points: &[(f32, f32, f32)]) -> Vec<u8> {
     points
         .iter()
@@ -145,7 +139,6 @@ fn add(
     }
 }
 
-/// The board's elements, bottom to top.
 fn elements(
     workspace: &mut Workspace,
     page: &PageId,

@@ -5,8 +5,8 @@ use super::{
     write_terminal_run,
 };
 use crate::runtime::conversations::{
-    ConversationEntryType, MAX_CONVERSATION_RECORD_BYTES, append_conversation_entry,
-    canonical_json, create_conversation_run, read_conversation_history,
+    ConversationEntry, ConversationEntryType, MAX_CONVERSATION_RECORD_BYTES,
+    append_conversation_entry, canonical_json, create_conversation_run, read_conversation_history,
     set_event_pointer_sort_record_limit_for_test, set_history_index_sort_record_limit_for_test,
     take_history_index_metrics_for_test,
 };
@@ -179,23 +179,10 @@ fn conversation_history_work_budget() {
 
 #[test]
 fn conversation_history_raw_count_preserves_record_and_framing_bounds() {
+    let root = canonical_json(&entry("root", None, "review-1", 1)).expect("entry canonicalizes");
     for (name, bytes, expected) in [
-        (
-            "missing-lf",
-            canonical_json(&entry("root", None, "review-1", 1))
-                .expect("entry canonicalizes")
-                .into_bytes(),
-            "LF framing",
-        ),
-        (
-            "crlf",
-            format!(
-                "{}\r\n",
-                canonical_json(&entry("root", None, "review-1", 1)).expect("entry canonicalizes")
-            )
-            .into_bytes(),
-            "LF framing",
-        ),
+        ("missing-lf", root.clone().into_bytes(), "LF framing"),
+        ("crlf", format!("{root}\r\n").into_bytes(), "LF framing"),
         (
             "oversized",
             format!("{}\n", "x".repeat(MAX_CONVERSATION_RECORD_BYTES + 1)).into_bytes(),
@@ -291,39 +278,22 @@ fn conversation_entry_validation_rejects_every_malformed_persisted_shape() {
     let workspace = empty_workspace("conversation-entry-validation");
     create_review_run(&workspace);
 
-    let valid = entry("root", None, "review-1", 1);
-    let mut invalid = Vec::new();
-
-    let mut candidate = valid.clone();
-    candidate.schema = "flow-conversation-entry-v2".to_owned();
-    invalid.push(candidate);
-
-    let mut candidate = valid.clone();
-    candidate.schema = "flow-conversation-entry-v1".to_owned();
-    candidate.recovery_snapshot_hash = "A".repeat(64);
-    invalid.push(candidate);
-
-    let mut candidate = valid.clone();
-    candidate.entry_id = "INVALID".to_owned();
-    invalid.push(candidate);
-
-    let mut candidate = valid.clone();
-    candidate.parent_entry_id = Some("INVALID".to_owned());
-    invalid.push(candidate);
-
-    let mut candidate = valid.clone();
-    candidate.run_session_id = "INVALID".to_owned();
-    invalid.push(candidate);
-
-    let mut candidate = valid.clone();
-    candidate.event_sequence = 0;
-    invalid.push(candidate);
-
-    let mut candidate = valid;
-    candidate.timestamp = "not-a-timestamp".to_owned();
-    invalid.push(candidate);
-
-    for candidate in invalid {
+    type Mutation = fn(&mut ConversationEntry);
+    let mutations: [Mutation; 7] = [
+        |candidate| candidate.schema = "flow-conversation-entry-v2".to_owned(),
+        |candidate| {
+            candidate.schema = "flow-conversation-entry-v1".to_owned();
+            candidate.recovery_snapshot_hash = "A".repeat(64);
+        },
+        |candidate| candidate.entry_id = "INVALID".to_owned(),
+        |candidate| candidate.parent_entry_id = Some("INVALID".to_owned()),
+        |candidate| candidate.run_session_id = "INVALID".to_owned(),
+        |candidate| candidate.event_sequence = 0,
+        |candidate| candidate.timestamp = "not-a-timestamp".to_owned(),
+    ];
+    for mutate in mutations {
+        let mut candidate = entry("root", None, "review-1", 1);
+        mutate(&mut candidate);
         append_conversation_entry(&workspace, "review", &candidate)
             .expect_err("malformed conversation entry must fail closed");
     }

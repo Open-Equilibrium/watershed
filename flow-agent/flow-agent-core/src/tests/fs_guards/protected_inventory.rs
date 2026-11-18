@@ -10,17 +10,28 @@ use crate::tests::helpers::empty_workspace;
 use std::{
     fs,
     os::unix::fs::{PermissionsExt as _, symlink},
+    path::Path,
 };
+
+fn store(path: &Path) -> AnchoredDir {
+    open_flow_agent_home_at(path, true)
+        .expect("store opens")
+        .expect("store exists")
+}
+
+fn installation(workspace: &Path) -> AnchoredDir {
+    let path = workspace.join("installed");
+    fs::create_dir(&path).expect("synthetic installation created");
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o755))
+        .expect("installation is not a private store");
+    AnchoredDir::workspace(&path).expect("installation anchored")
+}
 
 #[test]
 fn metadata_inventory_counts_distinct_covered_names_across_overlapping_roots() {
     let workspace = empty_workspace("protected-inventory");
-    let home = open_flow_agent_home_at(&workspace.join("home"), true)
-        .expect("home opens")
-        .expect("home exists");
-    let platform = open_flow_agent_home_at(&workspace.join("platform"), true)
-        .expect("platform store opens")
-        .expect("platform store exists");
+    let home = store(&workspace.join("home"));
+    let platform = store(&workspace.join("platform"));
     let nested = home
         .private_child("nested", true, DirectoryErrorMode::Protocol)
         .expect("nested store opens")
@@ -46,11 +57,7 @@ fn metadata_inventory_counts_distinct_covered_names_across_overlapping_roots() {
     fs::remove_file(&outside).expect("test owner removes outside alias");
     verify_protected_aliases(&roots, &[]).expect("manually repaired layout is admitted");
 
-    let installed_path = workspace.join("installed");
-    fs::create_dir(&installed_path).expect("synthetic installation created");
-    fs::set_permissions(&installed_path, fs::Permissions::from_mode(0o755))
-        .expect("installation is not a private store");
-    let installed = AnchoredDir::workspace(&installed_path).expect("installation anchored");
+    let installed = installation(&workspace);
     let unrelated = installed.path.join("unrelated");
     fs::write(&unrelated, b"unselected binary").expect("unrelated image written");
     fs::hard_link(&unrelated, workspace.join("unrelated-alias"))
@@ -121,18 +128,11 @@ fn metadata_inventory_counts_distinct_covered_names_across_overlapping_roots() {
 #[test]
 fn selected_image_names_count_directory_entries_not_lookup_spellings() {
     let workspace = empty_workspace("protected-inventory-spelling");
-    let home = open_flow_agent_home_at(&workspace.join("home"), true)
-        .expect("home opens")
-        .expect("home exists");
-    let installed_path = workspace.join("installed");
-    fs::create_dir(&installed_path).expect("synthetic installation created");
-    fs::set_permissions(&installed_path, fs::Permissions::from_mode(0o755))
-        .expect("installation is not a private store");
-    let installed = AnchoredDir::workspace(&installed_path).expect("installation anchored");
+    let roots = [store(&workspace.join("home"))];
+    let installed = installation(&workspace);
     let image = installed.file("executor");
     fs::write(&image.path, b"synthetic installed image").expect("image written");
     let opened = fs::File::open(&image.path).expect("image retained");
-    let roots = [home];
 
     let sibling = installed.file("executor-copy");
     fs::hard_link(&image.path, &sibling.path).expect("second selected entry created");
@@ -142,7 +142,7 @@ fn selected_image_names_count_directory_entries_not_lookup_spellings() {
 
     let alternate = installed.file("EXECUTOR");
     if !alternate.path.exists() {
-        return; // Case-sensitive filesystems have no alternate spelling.
+        return;
     }
     fs::hard_link(&image.path, workspace.join("outside")).expect("outside alias created");
     let error = verify_protected_aliases(&roots, &[(&image, &opened), (&alternate, &opened)])
@@ -158,11 +158,7 @@ fn selected_image_names_count_directory_entries_not_lookup_spellings() {
 #[test]
 fn metadata_inventory_rejects_busy_or_incomplete_scans_and_releases_its_leases() {
     let workspace = empty_workspace("protected-inventory-interruption");
-    let roots = ["home", "platform"].map(|name| {
-        open_flow_agent_home_at(&workspace.join(name), true)
-            .expect("private store opens")
-            .expect("private store exists")
-    });
+    let roots = ["home", "platform"].map(|name| store(&workspace.join(name)));
     let publisher = fs::File::open(&roots[1].path).expect("publisher handle opens");
     publisher
         .try_lock_shared()

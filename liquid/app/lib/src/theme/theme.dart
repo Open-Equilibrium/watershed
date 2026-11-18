@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 
 import 'tokens.g.dart';
 
-/// Watershed's design tokens for the current brightness.
 @immutable
 class WsTheme extends ThemeExtension<WsTheme> {
   const WsTheme(this.palette);
@@ -12,17 +11,14 @@ class WsTheme extends ThemeExtension<WsTheme> {
   @override
   WsTheme copyWith({WsPalette? palette}) => WsTheme(palette ?? this.palette);
 
-  // Themes switch as a whole; interpolating every token would animate the switch.
   @override
   WsTheme lerp(WsTheme? other, double t) => t < 0.5 ? this : (other ?? this);
 }
 
 extension WsThemeContext on BuildContext {
-  /// The palette of the current theme.
   WsPalette get ws => Theme.of(this).extension<WsTheme>()!.palette;
 }
 
-/// The Material theme for `brightness`, built only from Watershed tokens.
 ThemeData liquidTheme(Brightness brightness) {
   final palette = brightness == Brightness.dark
       ? WsPalette.dark
@@ -52,7 +48,6 @@ ThemeData liquidTheme(Brightness brightness) {
     ),
     dividerColor: palette.border,
     splashFactory: NoSplash.splashFactory,
-    // Menus sit on the canvas with the card radius.
     popupMenuTheme: PopupMenuThemeData(
       color: palette.canvas,
       surfaceTintColor: Colors.transparent,
@@ -114,7 +109,6 @@ ThemeData liquidTheme(Brightness brightness) {
   );
 }
 
-/// Monospace text for code, paths and tool calls.
 TextStyle monoStyle(BuildContext context, {Color? color}) => TextStyle(
   fontFamily: 'Menlo',
   fontFamilyFallback: WsMetrics.fontMono,

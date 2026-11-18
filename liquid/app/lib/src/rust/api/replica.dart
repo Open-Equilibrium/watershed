@@ -18,45 +18,26 @@ import 'workspace.dart';
 
 // Rust type: RustOpaqueMoi<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<LiquidWorkspace>>
 abstract class LiquidWorkspace implements RustOpaqueInterface {
-  /// Adds pasted bytes as an attachment and answers its name.
   Future<String> addBytes({required List<int> bytes});
 
-  /// Adds the file at `path` as an attachment, sending its progress and, last, its name;
-  /// a refusal arrives as the stream's error. Add a Media Block for it with
-  /// `AddMediaBlock`.
   Stream<BridgeUpload> addFile({required String path});
 
-  /// Applies one write as the device's person through Liquid's interface, then tells the
-  /// subscribers of every resource it changed.
   Future<BridgeApplied> apply({required BridgeMutation mutation});
 
-  /// Ends a subscription, also one whose registration has not arrived yet. A Page that no
-  /// subscription follows any more leaves memory.
   Future<void> close({required PlatformInt64 subscription});
 
-  /// Opens the Workspace whose replica lives in the folder `dir`, creating both on first
-  /// use. The replica's key lives in the operating system's keychain (ADR-0237).
   static Future<LiquidWorkspace> open({required String dir}) =>
       RustLib.instance.api.crateApiReplicaLiquidWorkspaceOpen(dir: dir);
 
-  /// Reads one bounded window, one Block's text or one Database's fields.
   Future<BridgeAnswer> query({required BridgeQuery query});
 
-  /// The bytes of an attachment of at most [`MAX_SHOWN`] bytes, to show it as an image or a PDF.
   Future<Uint8List> readAttachment({required String attachment});
 
-  /// Writes an attachment's bytes to `path`, which the person chose in the save dialog,
-  /// replacing what is there only once the whole copy is written: it goes to a new hidden
-  /// file of its own beside `path` first, so a save that fails leaves `path` as it was.
   Future<void> saveAttachment({
     required String attachment,
     required String path,
   });
 
-  /// Streams `resource`'s changes to Dart under the identity `subscription`, which Dart
-  /// chooses and passes to [`LiquidWorkspace::close`] when it cancels the stream. The first
-  /// change carries the resource's current count and marks the registration: a reader queries
-  /// after it, so it misses no later change.
   Stream<BridgeChange> subscribe({
     required PlatformInt64 subscription,
     required BridgeResource resource,

@@ -1,5 +1,3 @@
-"""Package already-built native artifacts; never build, sign, download or publish."""
-
 import argparse
 import gzip
 import hashlib
@@ -40,7 +38,6 @@ def package(binaries, output, platform):
     for name in ("flow", "flow-executor"):
         check_program(sources[name], platform)
     name = f"flow-agent-{version}-{platform}"
-    # A fresh output directory prevents silently replacing a prepared release.
     output.mkdir()
     archive = output / f"{name}.tar.gz"
     with archive.open("xb") as raw, gzip.GzipFile(fileobj=raw, mode="wb", filename="", mtime=0) as compressed:
@@ -58,7 +55,6 @@ def package(binaries, output, platform):
                     bundle.addfile(entry, source)
     with archive.open("rb") as source:
         checksum = hashlib.file_digest(source, "sha256").hexdigest()
-    # Emit verification data only after the final archive has closed successfully.
     with (output / "SHA256SUMS").open("x", encoding="ascii", newline="\n") as checksums:
         checksums.write(f"{checksum}  {archive.name}\n")
     print(archive)

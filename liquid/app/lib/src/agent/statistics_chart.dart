@@ -5,7 +5,6 @@ import 'package:flutter/material.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
 
-/// One turn's column: its parts from the bottom up, and what its tooltip says.
 class ChartColumn {
   const ChartColumn({required this.parts, required this.tip});
 
@@ -13,7 +12,6 @@ class ChartColumn {
   final ChartTip tip;
 }
 
-/// A tooltip of the chart: a title, one row per part with its colour, and notes.
 class ChartTip {
   const ChartTip({
     required this.title,
@@ -24,7 +22,6 @@ class ChartTip {
   final String title;
   final List<ChartTipRow> rows;
 
-  /// Lines below the rows, in a fainter ink.
   final List<String> notes;
 }
 
@@ -36,8 +33,6 @@ class ChartTipRow {
   final String value;
 }
 
-/// The smallest axis top from the steps 1, 2, 2.5, 5 and 10 times a power of ten that holds
-/// `max`; zero for no data.
 int niceTop(int max) {
   if (max <= 0) return 0;
   final magnitude = math.pow(10, (math.log(max) / math.ln10).floor()).toInt();
@@ -48,14 +43,11 @@ int niceTop(int max) {
   return max;
 }
 
-/// The chart's size, as the statistics panel draws it: 156 px high, the axis to the left.
 const _height = 156.0;
 const _axisWidth = 54.0;
 const _top = 8.0;
 const _labelsTop = 150.0;
 
-/// A stacked column chart with one column per turn. The column under the pointer lights up and
-/// shows its tooltip.
 class TurnChart extends StatefulWidget {
   const TurnChart({
     super.key,
@@ -66,10 +58,8 @@ class TurnChart extends StatefulWidget {
 
   final List<ChartColumn> columns;
 
-  /// The colour of each part, bottom up.
   final List<Color> colors;
 
-  /// The axis label of a value, such as `12k`.
   final String Function(int value) axis;
 
   @override
@@ -142,8 +132,6 @@ class _TurnChartState extends State<TurnChart> {
 
 const _tipWidth = 196.0;
 
-/// The dark box of a statistics tooltip: the chart's column tip and a session card row's tip
-/// both take it, so they read alike.
 BoxDecoration statisticsTipDecoration(WsPalette ws) => BoxDecoration(
   color: ws.text,
   borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
@@ -246,7 +234,6 @@ class _ChartPainter extends CustomPainter {
     final plotLeft = _axisWidth;
     final plotWidth = size.width - plotLeft;
 
-    // Three gridlines: zero, half and the top of the axis.
     for (final value in [0, top ~/ 2, top]) {
       final y = baseline - (top == 0 ? 0 : plotHeight * value / top);
       canvas.drawLine(

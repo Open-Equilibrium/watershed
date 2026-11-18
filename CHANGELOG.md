@@ -4,39 +4,4 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning: [S
 
 ## [Unreleased]
 
-### Added
-
-- Product, protocol, security, testing and contributor documentation with OSS governance templates.
-- Rust workspace and Flow Agent M1: standalone CLI, canonical events, script registry, deterministic fixtures, local session logs and policy artifacts.
-- Flow Agent M1.1 practical-execution foundations: provider integration, authentication, Conversations, authoring, cancellation and durable recovery.
-- Contributor harness and mandatory cross-platform CI gates; canonical commands and policy live in `TESTING.md` and `.github/workflows/ci.yml`.
-- Liquid's agent surface on macOS, not yet released: Meta-Harness starts a pinned T3 Code server and follows its threads, and the Flutter client copies T3 Code's desktop Chat: streaming answers, approvals and questions, queued and steered prompts, the Diff per turn, Edit from here and Fork from this response, the session card with exact statistics and the session record export.
-- Liquid's Git integration for the agent's project on macOS, run by T3 Code with its behavior as shipped: commit with an optional written message, push, pull, pull requests, publishing, the ref picker with Checkout pull request, and worktrees per session.
-- Liquid's local Workspace on macOS: the `liquid-core` mutation pipeline over Automerge, an encrypted SQLite replica with its key in the keychain, and Pages with Text Blocks, Sections and Tables whose rows, fields and cells can be edited (ADR-0237, ADR-0238).
-- Meta-Harness on macOS and Linux, not yet released: the `meta` command, a login service that keeps its service running, an installer bundle that carries the pinned T3 Code release, and central configuration for Claude Code and Codex whose changes take effect only once approved, with an append-only log.
-- Meta-Harness remote access and host links over Tailscale, not yet released: `meta remote`, `meta invite` and `meta host` pair devices and hosts with single-use codes; linked T3 Code servers reach each other through a host tunnel at the access level the receiving host invites, and `meta host revoke` refuses a pairing and ends its sessions. Liquid's Settings → Agent hosts pairs with an agent host and runs its sessions there (ADR-0295, ADR-0299–ADR-0301).
-
-### Changed
-
-- Liquid's agent surface reaches the Meta-Harness service instead of embedding its core, and leaves the service and its agents running when it quits (ADR-0215).
-- Meta-Harness leaves governance to each harness: Watershed's own tool approvals are removed, and Liquid shows only the approvals a harness itself asks for (ADR-0252).
-- Liquid clients use Flutter over the Rust core on desktop and Android under binding stability invariants: no Workspace work on the Dart main isolate, bounded delta streams, viewport virtualization, durable local commit before acknowledgement and sync, an established CRDT library and owned disposal (ADR-0182).
-- Before the first release, Flow Agent removed `flow import` and compatibility for automatic flat-session migration, `flow-conversation-entry-v0`, `flow-run-log-record-v0`, `flow-provider-output-v1`, legacy Phase/Step events and Tool observations.
-- M1.2 replaces broad Tool isolation with trusted Tool invocation and native protection of this installation's Flow-owned files. A shared one-shot Executor lifecycle uses Linux Bubblewrap/seccomp or macOS Seatbelt; Ready/Start, durable intent, bounded results and Flow-owned write protection receipts remain. Mount declarations, runtime-read profiles, network policy, process/thread capacity and the systemd/cgroup service dependency are removed without compatibility aliases. Version/platform download packaging is implemented; publication and final acceptance remain pending ([status](PLAN.md#m12--flow-owned-write-protection)).
-- Controlled Run and Resume returns preserve operation, writer-finalization and ownership-cleanup failures; Drop remains only a best-effort fallback.
-- Dev/CI toolchains and dependencies use current stable pins without adding a product Node runtime; version authorities are linked from `TESTING.md`.
-- Protocol v0 applies one exclusive JSON container-recursion limit of 128 across wire, constructed-event and canonical-JSON boundaries.
-- The M1 runtime satisfies the [architecture boundaries](docs/architecture.md#architecture-boundaries); M1.1 provider and general subprocess work must preserve those boundaries.
-- M1 provider context fixed as deterministic, cache-stable `flow-context-v0`, with durable history retained outside the bounded provider projection and post-M1 compaction/retrieval preserved.
-- Provider requests use an opaque Conversation/model-scoped cache key and durably retain optional bounded input, output, cache-read and cache-write token counters without assigning currency cost.
-- Browser authentication deliberately keeps one IPv4 loopback listener and presents the existing device-code command as its fallback when the browser callback cannot complete.
-- Flow Agent no longer exposes Conversation deletion or the unused unbounded Rust session listing; operators remove retained data outside Flow Agent.
-- `flow reconcile-tool <conversation-id> <run-session-id> --result <file|->` settles exactly one derived uncertain Tool attempt without redispatch or an attempt-id argument.
-- Productive Tools run without an extra warning or confirmation under their configured Building-Block limits and Executor boundary (ADR-0135).
-- OAuth callback input, Responses output items and provider failures follow the reachable bounded contracts in `PROTOCOL.md`.
-- M1 local events use serial authoritative append before a capacity-one, caller-owned, non-blocking high-watermark notification; receivers replay by sequence and the core owns no arbitrary output transport.
-- M1 is the Flow Agent deterministic runtime foundation: fixture-bounded execution and in-process policy emulation are explicit; real providers and tools belong to M1.1, and OS isolation belongs to M1.2.
-- The complete unreleased execution domain uses Flow Agent, Flow, Subflow, `flow.*`, `flow_id`, `flow-context-v0`, `flow-agent*`, `flow-agent-cli`, `flow` and `.flow`, without legacy terminology aliases or vocabulary migration.
-- Canonical registry serialization is deterministic UTF-8 JSON of the validated, resolved building-block model.
-- CI actions are pinned; native gates follow [TESTING.md](TESTING.md), and retained performance observations follow [PERFORMANCE.md](PERFORMANCE.md).
-- Licensing is `AGPL-3.0-only`; contributions use DCO without a CLA.
+Nothing is released yet. Change history lives in Git; open work lives in [PLAN.md](PLAN.md).

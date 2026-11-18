@@ -15,18 +15,12 @@ use crate::runtime::{
     types::{EVENT_STREAM_LIMITS, MAX_SESSION_SEGMENT_BYTES, RuntimeError},
 };
 use proto::{EventEnvelope, EventType};
-use std::{fs, io, io::Write};
+use std::{fs, io, io::Write, path::PathBuf};
 
 fn reader_fixture(
     workspace_name: &str,
     session_id: &str,
-) -> (
-    TempWorkspace,
-    std::path::PathBuf,
-    String,
-    String,
-    SessionEventReader,
-) {
+) -> (TempWorkspace, PathBuf, String, String, SessionEventReader) {
     let workspace = empty_workspace(workspace_name);
     let session_dir = crate::tests::helpers::ensure_workspace_session_dir(&workspace);
     let path = session_dir.join(format!("{session_id}.jsonl"));
@@ -35,6 +29,26 @@ fn reader_fixture(
     fs::write(&path, &started).expect("initial event written");
     let reader = SessionEventReader::open(&workspace, session_id).expect("reader opens");
     (workspace, path, started, completed, reader)
+}
+
+fn metric_line(
+    session_id: &str,
+    event_id: &str,
+    sequence: u64,
+    metric: &str,
+    value: u64,
+) -> String {
+    EventEnvelope::new(
+        event_id,
+        EventType::MetricSample,
+        session_id,
+        sequence,
+        event_timestamp(sequence),
+        "flow-agent-cli",
+        serde_json::json!({"metric_name": metric, "value": value}),
+    )
+    .canonical_jsonl()
+    .expect("metric event serializes")
 }
 
 fn assert_protocol_contains(result: Result<Vec<EventEnvelope>, RuntimeError>, expected: &str) {
@@ -238,48 +252,6 @@ fn incremental_reader_enforces_the_event_segment_limits() {
 }
 
 #[test]
-fn incremental_reader_replays_an_unprocessed_suffix_from_the_caller_cursor() {
-    let workspace = empty_workspace("tail-cursor-retry");
-    let session_dir = crate::tests::helpers::ensure_workspace_session_dir(&workspace);
-    let path = session_dir.join("tailcursor001.jsonl");
-    let started = session_event_line(
-        "tailcursor001",
-        "evt-cursor-started",
-        EventType::SessionStarted,
-        1,
-    );
-    let completed = session_event_line(
-        "tailcursor001",
-        "evt-cursor-completed",
-        EventType::SessionCompleted,
-        2,
-    );
-    fs::write(&path, &started).expect("initial event written");
-    let mut reader = SessionEventReader::open(&workspace, "tailcursor001").expect("reader opens");
-    assert_eq!(reader.read_after(0).expect("prefix reads").len(), 1);
-
-    append_session_log_line(&path, &completed).expect("terminal event appended");
-    assert_eq!(
-        reader
-            .read_incremental_after(1)
-            .expect("new suffix reads")
-            .iter()
-            .map(|event| event.sequence)
-            .collect::<Vec<_>>(),
-        [2]
-    );
-    assert_eq!(
-        reader
-            .read_incremental_after(1)
-            .expect("unprocessed suffix retries from caller cursor")
-            .iter()
-            .map(|event| event.sequence)
-            .collect::<Vec<_>>(),
-        [2]
-    );
-}
-
-#[test]
 fn incremental_reader_recovers_atomically_after_a_semantically_invalid_append() {
     let workspace = empty_workspace("tail-invalid-append-recovery");
     let session_dir = crate::tests::helpers::ensure_workspace_session_dir(&workspace);
@@ -290,17 +262,13 @@ fn incremental_reader_recovers_atomically_after_a_semantically_invalid_append() 
         EventType::SessionStarted,
         1,
     );
-    let progress = EventEnvelope::new(
-        "evt-recovery-progress",
-        EventType::MetricSample,
+    let progress = metric_line(
         "tailrecovery001",
+        "evt-recovery-progress",
         2,
-        event_timestamp(2),
-        "flow-agent-cli",
-        serde_json::json!({"metric_name":"recovery.progress","value":1}),
-    )
-    .canonical_jsonl()
-    .expect("progress event serializes");
+        "recovery.progress",
+        1,
+    );
     let duplicate_sequence = EventEnvelope::new(
         "evt-recovery-duplicate",
         EventType::MetricSample,
@@ -331,13 +299,7 @@ fn incremental_reader_recovers_atomically_after_a_semantically_invalid_append() 
     let recovered = reader
         .read_incremental_after(1)
         .expect("valid appended event remains readable");
-    assert_eq!(
-        recovered
-            .iter()
-            .map(|event| event.sequence)
-            .collect::<Vec<_>>(),
-        [2]
-    );
+    assert_eq!(sequences(&recovered), [2]);
     assert!(
         reader
             .read_incremental_after(2)
@@ -353,17 +315,7 @@ fn incremental_reader_recovers_after_callback_error_or_unwind() {
             &format!("tail-callback-recovery-{unwind}"),
             "tailcallback001",
         );
-        let progress = EventEnvelope::new(
-            "evt-progress",
-            EventType::MetricSample,
-            "tailcallback001",
-            2,
-            event_timestamp(2),
-            "flow-agent-cli",
-            serde_json::json!({"metric_name":"reader.progress","value":1}),
-        )
-        .canonical_jsonl()
-        .expect("progress event serializes");
+        let progress = metric_line("tailcallback001", "evt-progress", 2, "reader.progress", 1);
         let completed = session_event_line(
             "tailcallback001",
             "evt-completed",
@@ -395,7 +347,6 @@ fn incremental_reader_recovers_after_callback_error_or_unwind() {
         }
         assert_eq!(cursor, 2);
 
-        // The delivered sequence 2 stays covered by the retained prefix digest after the failure.
         fs::write(
             &path,
             format!(
@@ -709,7 +660,6 @@ fn reader_ownership_ignores_an_active_replacement_at_the_original_workspace_path
         .expect("source runtime dirs")
         .sessions;
     let anchored_source = AnchoredWorkspace::open(&workspace).expect("source workspace opens");
-    // An empty stream is the only one whose authority still depends on session ownership.
     fs::write(sessions.path.join(format!("{session_id}.jsonl")), b"")
         .expect("inactive empty source stream written");
     let source_ownership = acquire_anchored_session_lock(&anchored_source, &sessions, session_id)

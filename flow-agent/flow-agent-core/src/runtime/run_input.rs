@@ -2,12 +2,10 @@ use crate::runtime::{types::RuntimeError, workspace_text::read_workspace_text_fi
 use proto::parse_unique_json;
 use std::path::Path;
 
-/// Maximum raw or canonical bytes in one selected-root-Flow input document.
 pub const MAX_FLOW_RUN_INPUT_BYTES: usize = 1024 * 1024;
 const MAX_FLOW_RUN_INPUT_VALUES: usize = 1024;
 pub(crate) const FLOW_RUN_INPUT_SCHEMA_V0: &str = "flow-run-input-v0";
 
-/// Reads and parses one bounded root-input file relative to the workspace.
 pub fn read_flow_run_input_file(
     workspace: impl AsRef<Path>,
     source: &str,
@@ -21,7 +19,6 @@ pub fn read_flow_run_input_file(
     parse_flow_run_input(&text)
 }
 
-/// Parses one canonical, duplicate-free `FLOW_RUN_INPUT_SCHEMA_V0` document.
 pub fn parse_flow_run_input(source: &str) -> Result<core_script::FlowValue, RuntimeError> {
     if source.len() > MAX_FLOW_RUN_INPUT_BYTES {
         return Err(input_error(format!(

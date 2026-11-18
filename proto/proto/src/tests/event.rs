@@ -1,15 +1,33 @@
 mod payload;
 
-use super::test_event;
+use super::{raw_event, test_event};
+
 use crate::{CanonicalJsonError, EventEnvelope, EventType};
+
 use payload::payload_cases;
+
 use serde_json::{Value, json};
+
+fn assert_rejected_everywhere(event: &EventEnvelope, raw: Value, needle: &str) {
+    for err in [
+        event
+            .canonical_jsonl()
+            .expect_err("canonical serialization must reject the event")
+            .to_string(),
+        serde_json::to_string(event)
+            .expect_err("ordinary serialization must reject the event")
+            .to_string(),
+        serde_json::from_value::<EventEnvelope>(raw)
+            .expect_err("deserialization must reject the event")
+            .to_string(),
+    ] {
+        assert!(err.contains(needle), "{err}");
+    }
+}
 
 #[test]
 fn optional_envelope_ids_distinguish_absence_from_invalid_present_values() {
-    let fields = ["correlation_id", "flow_id", "parent_flow_id"];
-
-    for field in fields {
+    for field in ["correlation_id", "flow_id", "parent_flow_id"] {
         let mut missing =
             serde_json::to_value(test_event(json!({"reason": "fixture-start"}))).unwrap();
         missing.as_object_mut().unwrap().remove(field);
@@ -23,11 +41,11 @@ fn optional_envelope_ids_distinguish_absence_from_invalid_present_values() {
         };
         assert_eq!(parsed_value, &None);
 
-        for (value, expectation) in [
-            (json!("id-001"), "string"),
-            (json!(""), "empty string"),
-            (Value::Null, "null"),
-            (json!(42), "wrong type"),
+        for (value, valid) in [
+            (json!("id-001"), true),
+            (json!(""), false),
+            (Value::Null, false),
+            (json!(42), false),
         ] {
             let mut raw =
                 serde_json::to_value(test_event(json!({"reason": "fixture-start"}))).unwrap();
@@ -35,17 +53,11 @@ fn optional_envelope_ids_distinguish_absence_from_invalid_present_values() {
             if field == "parent_flow_id" {
                 raw["flow_id"] = json!("child-flow");
             }
-            let result = serde_json::from_value::<EventEnvelope>(raw);
-            match expectation {
-                "string" => assert!(
-                    result.is_ok(),
-                    "{field} must accept a non-empty string: {result:?}"
-                ),
-                _ => assert!(
-                    result.is_err(),
-                    "{field} must reject a present {expectation}"
-                ),
-            }
+            assert_eq!(
+                serde_json::from_value::<EventEnvelope>(raw).is_ok(),
+                valid,
+                "{field}"
+            );
         }
     }
 }
@@ -70,27 +82,9 @@ fn event_deserialization_normalizes_identity_and_payload_strings() {
 fn event_boundaries_reject_invalid_metadata() {
     let mut event = test_event(json!({"reason": "fixture-start"}));
     event.sequence = 0;
-
-    assert!(
-        event
-            .canonical_jsonl()
-            .expect_err("canonical serialization must validate metadata")
-            .to_string()
-            .contains("sequence")
-    );
-    assert!(
-        serde_json::to_string(&event)
-            .expect_err("ordinary serialization must validate metadata")
-            .to_string()
-            .contains("sequence")
-    );
-    let raw = "{\"event_id\":\"evt-001\",\"event_type\":\"session.started\",\"payload\":{\"reason\":\"fixture-start\"},\"protocol_version\":\"0\",\"sequence\":0,\"session_id\":\"smoke001\",\"source\":\"flow-agent-cli\",\"timestamp\":\"2026-01-01T00:00:00Z\"}";
-    assert!(
-        serde_json::from_str::<EventEnvelope>(raw)
-            .expect_err("deserialization must validate metadata")
-            .to_string()
-            .contains("sequence")
-    );
+    let mut raw = raw_event(json!({"reason": "fixture-start"}));
+    raw["sequence"] = json!(0);
+    assert_rejected_everywhere(&event, raw, "sequence");
 }
 
 #[test]
@@ -104,27 +98,9 @@ fn event_boundaries_reject_missing_required_payload_fields() {
         "flow-agent-cli",
         json!({}),
     );
-
-    assert!(
-        event
-            .canonical_jsonl()
-            .expect_err("canonical serialization must validate the payload")
-            .to_string()
-            .contains("payload.reason")
-    );
-    assert!(
-        serde_json::to_string(&event)
-            .expect_err("ordinary serialization must validate the payload")
-            .to_string()
-            .contains("payload.reason")
-    );
-    let raw = "{\"event_id\":\"evt-001\",\"event_type\":\"session.failed\",\"payload\":{},\"protocol_version\":\"0\",\"sequence\":1,\"session_id\":\"smoke001\",\"source\":\"flow-agent-cli\",\"timestamp\":\"2026-01-01T00:00:00Z\"}";
-    assert!(
-        serde_json::from_str::<EventEnvelope>(raw)
-            .expect_err("deserialization must validate the payload")
-            .to_string()
-            .contains("payload.reason")
-    );
+    let mut raw = raw_event(json!({}));
+    raw["event_type"] = json!("session.failed");
+    assert_rejected_everywhere(&event, raw, "payload.reason");
 }
 
 #[test]
@@ -134,7 +110,6 @@ fn flow_scoped_event_boundaries_require_runtime_invocation_id() {
         .filter(|case| case.event_type.requires_flow_id())
     {
         let event_type = case.event_type;
-        let payload = case.valid_payload;
         let event = EventEnvelope::new(
             "evt-001",
             event_type,
@@ -142,9 +117,8 @@ fn flow_scoped_event_boundaries_require_runtime_invocation_id() {
             1,
             "2026-01-01T00:00:00Z",
             "flow-agent-cli",
-            payload.clone(),
+            case.valid_payload.clone(),
         );
-
         assert_eq!(
             event
                 .validate_v0()
@@ -152,59 +126,35 @@ fn flow_scoped_event_boundaries_require_runtime_invocation_id() {
                 .field(),
             "flow_id"
         );
-        assert!(
-            event
-                .canonical_jsonl()
-                .expect_err("canonical serialization must require flow_id")
-                .to_string()
-                .contains("flow_id")
-        );
-        assert!(
-            serde_json::to_string(&event)
-                .expect_err("ordinary serialization must require flow_id")
-                .to_string()
-                .contains("flow_id")
-        );
-        let raw = json!({
-            "event_id": "evt-001",
-            "event_type": event_type.as_str(),
-            "payload": payload,
-            "protocol_version": "0",
-            "sequence": 1,
-            "session_id": "smoke001",
-            "source": "flow-agent-cli",
-            "timestamp": "2026-01-01T00:00:00Z"
-        });
-        assert!(
-            serde_json::from_value::<EventEnvelope>(raw)
-                .expect_err("deserialization must require flow_id")
-                .to_string()
-                .contains("flow_id")
-        );
+        let mut raw = raw_event(case.valid_payload);
+        raw["event_type"] = json!(event_type.as_str());
+        assert_rejected_everywhere(&event, raw, "flow_id");
     }
 }
 
 #[test]
-fn canonical_event_jsonl_rejects_non_object_payload() {
+fn event_payload_must_be_a_json_object_at_every_entry_point() {
     let event = test_event(Value::Null);
 
     let err = event
         .canonical_jsonl()
         .expect_err("non-object payload must fail");
-
     assert!(matches!(err, CanonicalJsonError::NonObjectPayload));
     assert_eq!(err.to_string(), "event payload must be a JSON object");
+
+    let mut raw = raw_event(json!({}));
+    raw["payload"] = Value::Null;
+    assert_rejected_everywhere(&event, raw, "payload must be a JSON object");
 }
 
 #[test]
-fn canonical_event_jsonl_rejects_unsupported_protocol_version() {
+fn unsupported_protocol_version_is_rejected_at_every_entry_point() {
     let mut event = test_event(json!({"reason": "fixture-start"}));
     event.protocol_version = "1".to_owned();
 
     let err = event
         .canonical_jsonl()
         .expect_err("unsupported protocol version must fail");
-
     assert!(matches!(
         err,
         CanonicalJsonError::UnsupportedProtocolVersion { .. }
@@ -213,18 +163,10 @@ fn canonical_event_jsonl_rejects_unsupported_protocol_version() {
         err.to_string(),
         "unsupported protocol_version \"1\"; expected \"0\""
     );
-    let err = serde_json::to_string(&event)
-        .expect_err("ordinary serialization must reject unsupported protocol versions");
-    assert!(err.to_string().contains("unsupported protocol_version"));
-}
 
-#[test]
-fn event_envelope_serializer_rejects_non_object_payload() {
-    let event = test_event(Value::Null);
-
-    let err = serde_json::to_string(&event).expect_err("non-object payload must fail");
-
-    assert!(err.to_string().contains("payload must be a JSON object"));
+    let mut raw = raw_event(json!({"reason": "fixture-start"}));
+    raw["protocol_version"] = json!("1");
+    assert_rejected_everywhere(&event, raw, "unsupported protocol_version");
 }
 
 #[test]
@@ -278,8 +220,6 @@ fn event_envelope_rejects_non_nfc_additional_fields() {
 #[test]
 fn event_validation_rejects_nfc_colliding_payload_keys() {
     let colliding = json!({"\u{e9}": true, "e\u{301}": false});
-    // Additional fields need no case: a collision always has a non-NFC key, which the
-    // NFC check rejects first.
     for (payload, location) in [
         (colliding.clone(), "payload."),
         (json!({"future": colliding}), "payload.future."),
@@ -307,26 +247,6 @@ fn event_validation_rejects_nfc_colliding_payload_keys() {
         serde_json::from_value::<EventEnvelope>(wire)
             .expect_err("NFC-colliding keys must be rejected by deserialization");
     }
-}
-
-#[test]
-fn event_envelope_deserialization_rejects_non_object_payload() {
-    let err = serde_json::from_str::<EventEnvelope>(
-            "{\"event_id\":\"evt-001\",\"event_type\":\"session.started\",\"payload\":null,\"protocol_version\":\"0\",\"sequence\":1,\"session_id\":\"smoke001\",\"source\":\"flow-agent-cli\",\"timestamp\":\"2026-01-01T00:00:00Z\"}",
-        )
-        .expect_err("non-object payload must fail");
-
-    assert!(err.to_string().contains("payload must be a JSON object"));
-}
-
-#[test]
-fn event_envelope_deserialization_rejects_unsupported_protocol_version() {
-    let err = serde_json::from_str::<EventEnvelope>(
-            "{\"event_id\":\"evt-001\",\"event_type\":\"session.started\",\"payload\":{},\"protocol_version\":\"1\",\"sequence\":1,\"session_id\":\"smoke001\",\"source\":\"flow-agent-cli\",\"timestamp\":\"2026-01-01T00:00:00Z\"}",
-        )
-        .expect_err("unsupported protocol version must fail");
-
-    assert!(err.to_string().contains("unsupported protocol_version"));
 }
 
 #[test]

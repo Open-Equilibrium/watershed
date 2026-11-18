@@ -40,7 +40,6 @@ use crate::runtime::{
 use proto::EventType;
 use std::{io, path::Path};
 
-/// Resumes one current Fixture session without repeating completed work.
 pub(crate) fn resume_fixture_session_internal(
     workspace: impl AsRef<Path>,
     session_id: &str,
@@ -81,7 +80,6 @@ pub(crate) fn resume_fixture_session_internal(
     reconcile_controlled_stages(operation_result, finalization_result, cleanup_result)
 }
 
-/// Handles of one Fixture session whose session lock the caller already holds.
 struct LockedSession<'a> {
     #[cfg(test)]
     workspace: &'a Path,
@@ -92,7 +90,6 @@ struct LockedSession<'a> {
     session_id: &'a str,
 }
 
-/// Deterministic replay plus the append and context evidence that a resume writes against.
 struct ResumePlan {
     plan: FlowExecutionPlan,
     clock: EventClock,
@@ -101,7 +98,6 @@ struct ResumePlan {
     context_path: AnchoredFile,
 }
 
-/// Runs the locked resume phases in their durable order.
 fn resume_locked_session(
     session: &LockedSession<'_>,
     notifier: Option<LiveEventNotifier>,
@@ -142,7 +138,6 @@ fn resume_locked_session(
     )
 }
 
-/// Opens the session's log directory and validates the bundle that it belongs to.
 fn open_resumable_logs(session: &LockedSession<'_>) -> Result<AnchoredDir, RuntimeError> {
     let logs = open_anchored_runtime_dir(session.anchored, LOG_STORAGE_DIR)?
         .ok_or_else(|| missing_definition_metadata(session.session_id))?;
@@ -155,7 +150,6 @@ fn open_resumable_logs(session: &LockedSession<'_>) -> Result<AnchoredDir, Runti
     Ok(logs)
 }
 
-/// Replays the deterministic plan and proves that the recorded prefix and context manifests match it.
 fn plan_resume(
     session: &LockedSession<'_>,
     logs: &AnchoredDir,
@@ -241,7 +235,6 @@ fn plan_resume(
     })
 }
 
-/// Replays the resume against a preflight sink so that any mismatch is rejected before a write.
 fn preflight_resume(session: &LockedSession<'_>, resume: &ResumePlan) -> Result<(), RuntimeError> {
     let preflight_matches = {
         let mut preflight_sink = ResumePreflightSink::open(
@@ -281,7 +274,6 @@ fn preflight_resume(session: &LockedSession<'_>, resume: &ResumePlan) -> Result<
     Ok(())
 }
 
-/// Writes the resumed suffix through the serial writer and reports the resumed run.
 fn run_resume(
     session: &LockedSession<'_>,
     resume: ResumePlan,

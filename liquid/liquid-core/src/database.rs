@@ -1,14 +1,3 @@
-//! Database Blocks: typed fields and rows, kept in the Block's entry of its home Page's
-//! document (ADR-0228), read in sorted and filtered windows computed here, never in the UI
-//! (client architecture rule 13).
-//!
-//! ```text
-//! blocks: { <block>: { kind: "database", name, deleted,
-//!                      fields: { <field>: { name, kind, sort, deleted,
-//!                                           options: { <option>: { name, color, sort, deleted } } } },
-//!                      rows:   { <row>: { sort, deleted, cells: { <field>: value } } } } }
-//! ```
-
 use std::cmp::Ordering;
 use std::collections::HashMap;
 
@@ -26,60 +15,39 @@ const CELLS: &str = "cells";
 const OPTIONS: &str = "options";
 const COLOR: &str = "color";
 
-/// The most live fields a Database holds, so its fields cross the bridge in one bounded
-/// answer (client architecture rule 3, ADR-0243).
 pub const MAX_FIELDS: usize = 500;
-/// The most live options a select field holds, for the same reason.
 pub const MAX_OPTIONS: usize = 500;
 
-/// The most files a file cell holds, so a window of rows crosses the bridge bounded
-/// (client architecture rule 3).
 pub const MAX_FILES: usize = 100;
 
-/// A Database Block's name and fields.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Database {
-    /// Its name.
     pub name: String,
-    /// Its live fields, in order.
     pub fields: Vec<Field>,
 }
 
-/// A Database field.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Field {
-    /// Its identity.
     pub id: FieldId,
-    /// Its name.
     pub name: String,
-    /// Its kind.
     pub kind: FieldKind,
-    /// A select field's live options, in order; none for other kinds.
     pub options: Vec<SelectOption>,
 }
 
-/// One option of a select field.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SelectOption {
-    /// Its identity.
     pub id: OptionId,
-    /// Its name.
     pub name: String,
-    /// Its color, an index into the tag colors that the Table View's mockups define.
     pub color: u8,
 }
 
-/// One row with its non-empty cells of live fields.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Row {
-    /// Its identity.
     pub id: RowId,
-    /// Its cells that hold a value.
     pub cells: Vec<(FieldId, Cell)>,
 }
 
 impl Row {
-    /// The value of `field`, if the cell holds one.
     pub fn cell(&self, field: &FieldId) -> Option<&Cell> {
         self.cells
             .iter()
@@ -88,65 +56,42 @@ impl Row {
     }
 }
 
-/// The most characters a filter's text holds, as a name may (ADR-0251).
 pub const MAX_FILTER_TEXT: usize = 1_000;
 
-/// A window of a Database's rows.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RowQuery {
-    /// The field to sort by; the rows' own order without one.
     pub sort: Option<Sort>,
-    /// The rows to keep; all without one.
     pub filter: Option<Filter>,
-    /// The first row of the window, counted after filtering and sorting.
     pub start: usize,
-    /// How many rows at most.
     pub limit: usize,
 }
 
-/// Sorting by one field; empty cells come last either way, and ties keep the rows' order.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Sort {
-    /// The field.
     pub field: FieldId,
-    /// Largest, latest or last in the alphabet first.
     pub descending: bool,
 }
 
-/// Keeping the rows whose cell of `field` matches.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Filter {
-    /// The field.
     pub field: FieldId,
-    /// What its cell must be.
     pub matches: Match,
 }
 
-/// What a cell must be to pass a filter.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Match {
-    /// Empty.
     Empty,
-    /// Not empty.
     NotEmpty,
-    /// Exactly this value.
     Is(Cell),
-    /// Text containing this, ignoring case.
     Contains(String),
 }
 
-/// A window of rows and how many rows match in all.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Rows {
-    /// How many rows pass the filter.
     pub count: usize,
-    /// The window.
     pub rows: Vec<Row>,
 }
 
-/// A Database Block's rows in their order with their cells, kept beside its loaded Page
-/// document, so that placing a row or reading a window never reads every row from the
-/// document (client architecture rules 3 and 13).
 pub(crate) struct Index {
     rows: Vec<Indexed>,
 }
@@ -154,12 +99,10 @@ pub(crate) struct Index {
 struct Indexed {
     sort: String,
     id: RowId,
-    /// Values by field, typed by their field's kind.
     cells: HashMap<String, Cell>,
 }
 
 impl Index {
-    /// The rows as the Database's document holds them.
     pub(crate) fn read(doc: &AutoCommit, block: &BlockId) -> Result<Self, Error> {
         let entry = entry(doc, block)?;
         let fields = map(doc, &entry, FIELDS)?;
@@ -183,7 +126,6 @@ impl Index {
         self.rows.iter().position(|indexed| &indexed.id == row)
     }
 
-    /// The sort key for a row placed at `place`.
     fn key_at(&self, place: Place<&RowId>) -> Result<String, Error> {
         crate::sort_key::at(&self.rows, place, |row| &row.id, |row| Some(&row.sort))
     }
@@ -237,7 +179,6 @@ fn kind(name: Option<&str>) -> Option<FieldKind> {
     })
 }
 
-/// A live Database Block's entry.
 fn entry(doc: &AutoCommit, block: &BlockId) -> Result<ObjId, Error> {
     let entry = model::live(doc, BLOCKS, block.as_str()).ok_or(Error::NotFound)?;
     if model::string(doc, &entry, KIND).as_deref() != Some(DATABASE) {
@@ -250,8 +191,6 @@ fn map(doc: &AutoCommit, entry: &ObjId, key: &str) -> Result<ObjId, Error> {
     model::child(doc, entry, key).ok_or_else(|| Error::Document(format!("no {key} map")))
 }
 
-/// Writes a new Database Block named `name`, with one text field "Name", into the Page's
-/// blocks map.
 pub(crate) fn create(doc: &mut AutoCommit, block: &BlockId, name: &str) -> Result<(), Error> {
     let entry = model::insert(
         doc,
@@ -318,7 +257,6 @@ pub(crate) fn add_field(
     Ok(field)
 }
 
-/// A live field's entry and kind.
 fn field(doc: &AutoCommit, block: &BlockId, field: &FieldId) -> Result<(ObjId, FieldKind), Error> {
     let fields = map(doc, &entry(doc, block)?, FIELDS)?;
     let entry = model::live_in(doc, &fields, field.as_str()).ok_or(Error::NotFound)?;
@@ -436,7 +374,6 @@ pub(crate) fn set_cell(
             return Ok(());
         }
         (FieldKind::Text, Cell::Text(text)) => ScalarValue::Str(text.as_str().into()),
-        // Zero is one value: Automerge stores -0 as 0, and so does the index.
         (FieldKind::Number, Cell::Number(number)) if number.is_finite() => {
             ScalarValue::F64(*number + 0.0)
         }
@@ -460,7 +397,6 @@ pub(crate) fn set_cell(
     Ok(())
 }
 
-/// Whether `date` is a real day, `YYYY-MM-DD`.
 fn valid_date(date: &str) -> bool {
     let number = |text: &str, digits: usize| {
         (text.len() == digits && text.bytes().all(|byte| byte.is_ascii_digit()))
@@ -487,7 +423,6 @@ fn valid_date(date: &str) -> bool {
     (1..=days).contains(&of_month)
 }
 
-/// A live Database Block's name and fields, or none if `block` is no live Database.
 pub(crate) fn read(doc: &AutoCommit, block: &BlockId) -> Result<Option<Database>, Error> {
     let Ok(entry) = entry(doc, block) else {
         return Ok(None);
@@ -534,7 +469,6 @@ fn fields_entry(doc: &AutoCommit, entry: &ObjId, field: &str) -> Option<ObjId> {
     model::child(doc, &model::child(doc, entry, FIELDS)?, field)
 }
 
-/// The window `query` asks for, filtered and sorted here from the index.
 pub(crate) fn rows(
     doc: &AutoCommit,
     index: &Index,
@@ -544,14 +478,12 @@ pub(crate) fn rows(
     let database = read(doc, block)?.ok_or(Error::NotFound)?;
     let live: Vec<&FieldId> = database.fields.iter().map(|field| &field.id).collect();
     let cell = |row, field| cell(&live, row, field);
-    // A View may still name a field removed since; it then neither filters nor sorts.
     let applies = |field: &FieldId| live.contains(&field);
     let filter = query
         .filter
         .as_ref()
         .filter(|filter| applies(&filter.field));
     let sort = query.sort.as_ref().filter(|sort| applies(&sort.field));
-    // Without a filter or a sort, the window is a slice of the index.
     if filter.is_none() && sort.is_none() {
         let window = index.rows.iter().skip(query.start).take(query.limit);
         return Ok(Rows {
@@ -575,7 +507,6 @@ pub(crate) fn rows(
             .enumerate()
             .map(|(position, option)| (option.id.as_str(), position))
             .collect();
-        // A stable sort keeps the rows' own order among equal cells.
         rows.sort_by(|a, b| match (cell(a, &sort.field), cell(b, &sort.field)) {
             (None, None) => Ordering::Equal,
             (None, Some(_)) => Ordering::Greater,
@@ -600,7 +531,6 @@ pub(crate) fn rows(
     Ok(Rows { count, rows })
 }
 
-/// Refuses a sort no field of `block` can answer.
 pub(crate) fn check_sort(doc: &AutoCommit, block: &BlockId, sort: &Sort) -> Result<(), Error> {
     match field(doc, block, &sort.field)? {
         (_, FieldKind::File) => Err(Error::WrongKind),
@@ -608,7 +538,6 @@ pub(crate) fn check_sort(doc: &AutoCommit, block: &BlockId, sort: &Sort) -> Resu
     }
 }
 
-/// Refuses a filter whose value its field could never hold.
 pub(crate) fn check_filter(
     doc: &AutoCommit,
     block: &BlockId,
@@ -634,7 +563,6 @@ pub(crate) fn check_filter(
     }
 }
 
-/// A row as a window shows it: its cells of live fields that hold a value.
 fn shown(live: &[&FieldId], row: &Indexed) -> Row {
     let mut cells: Vec<(FieldId, Cell)> = live
         .iter()
@@ -647,14 +575,12 @@ fn shown(live: &[&FieldId], row: &Indexed) -> Row {
     }
 }
 
-/// A row's value of `field`, if the field is live and the cell holds one.
 fn cell<'a>(live: &[&FieldId], row: &'a Indexed, field: &FieldId) -> Option<&'a Cell> {
     live.contains(&field)
         .then(|| row.cells.get(field.as_str()))
         .flatten()
 }
 
-/// A row's cells that hold a value of their field's kind.
 fn cells(
     doc: &AutoCommit,
     rows: &ObjId,
@@ -698,13 +624,10 @@ fn cells(
 
 fn matches(cell: Option<&Cell>, matches: &Match) -> bool {
     match (matches, cell) {
-        // A value that is no cell matches the same rows as Empty: the index keeps no empty cell.
         (Match::Empty | Match::Is(Cell::Empty), cell) => cell.is_none(),
         (Match::Is(Cell::Files(files)), cell) if files.is_empty() => cell.is_none(),
         (Match::NotEmpty, cell) => cell.is_some(),
-        // A checkbox never ticked is as unticked as one ticked off.
         (Match::Is(Cell::Checkbox(false)), None) => true,
-        // Numbers by value, so either zero finds a stored zero.
         (Match::Is(Cell::Number(value)), Some(Cell::Number(stored))) => value == stored,
         (Match::Is(value), cell) => cell == Some(value),
         (Match::Contains(part), Some(Cell::Text(text))) => {
@@ -714,8 +637,6 @@ fn matches(cell: Option<&Cell>, matches: &Match) -> bool {
     }
 }
 
-/// Two values of one field: text ignoring case, numbers by value, days in time, unticked
-/// before ticked, options in their field's order.
 fn compare(a: &Cell, b: &Cell, positions: &HashMap<&str, usize>) -> Ordering {
     match (a, b) {
         (Cell::Text(a), Cell::Text(b)) => a.to_lowercase().cmp(&b.to_lowercase()),

@@ -168,7 +168,6 @@ fn live_streaming_rejects_a_rewritten_log_during_incremental_delivery() {
             .expect("worker is waiting for the first drain");
     });
     set_final_drain_observer(move || {
-        // Final verification must not mask a missing incremental corruption check.
         std::fs::write(restore_path, output.stdout).expect("fixture log is restored");
     });
 

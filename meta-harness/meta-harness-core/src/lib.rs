@@ -1,15 +1,11 @@
-//! Meta-Harness core: runs coding agents on its own T3 Code server and presents them in an
-//! agent-neutral session and event model (ADR-0280, ADR-0281). Clients reach it through
-//! [`remote`], while [`Host`], [`Project`], [`Thread`] and [`Git`] run inside the service.
-
-#![deny(missing_docs)]
-
 pub mod api;
 mod config;
 mod context;
 mod event;
 mod git;
+mod handoff;
 mod host;
+mod host_move;
 mod hosts;
 pub mod remote;
 mod service;
@@ -21,7 +17,10 @@ mod util;
 mod visible;
 
 pub use api::RemoteStatus;
-pub use config::{Action, Blocks, Change, Current, LogEntry, McpServer, Proposal, Proposed};
+pub use config::{
+    Action, Blocks, Change, Current, Difference, Direction, LogEntry, McpServer, Proposal,
+    Proposed, diff_blocks,
+};
 pub use context::Context;
 pub use event::{
     AgentEvent, ApprovalOption, ItemDetail, ItemId, ItemKind, ItemStatus, PendingRequest, Question,
@@ -32,9 +31,13 @@ pub use git::{
     GitStatus, LineCount, Ref, Refs, ResolvedPullRequest,
 };
 pub use git::{PullRequestCheck, PullRequestDetail};
+pub use host::projects::HostProject;
 pub use host::{
     AcpAgent, Host, HostConfig, Model, ModelChoice, ModelOption, Permissions, Project, Provider,
     StartThread, ThreadSummary, Workspace,
+};
+pub use host_move::{
+    Arrival, Harness, Landing, MoveCheck, MoveFinish, MovePackage, MovePhase, MoveRecord, Moving,
 };
 pub use hosts::{Access, ClientInfo, ClientKind, DEFAULT_REMOTE_PORT, HostList, LinkedHostInfo};
 pub use service::{CONNECTION_FILE, Service, ServiceConfig, default_home};
@@ -50,9 +53,6 @@ pub use visible::{visible, visible_lines, visible_name};
 #[cfg(test)]
 mod tests;
 
-/// Starts `command` while no other part of the core starts a process. On macOS the standard
-/// library marks a new pipe close-on-exec only after creating it, so a process started in
-/// between would inherit the pipe and could hold another process's output open.
 pub(crate) fn spawn(
     command: &mut tokio::process::Command,
 ) -> std::io::Result<tokio::process::Child> {

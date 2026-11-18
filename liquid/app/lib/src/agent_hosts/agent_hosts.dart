@@ -6,8 +6,8 @@ import 'package:flutter_rust_bridge/flutter_rust_bridge.dart';
 import '../rust/api/hosts.dart';
 import '../settings_file.dart';
 
-/// An agent host Liquid pairs with, as Settings keep it. Its device token is in the keychain under
-/// the address, never here.
+const thisMacName = 'This Mac';
+
 @immutable
 class SavedAgentHost {
   const SavedAgentHost({
@@ -17,7 +17,6 @@ class SavedAgentHost {
     this.active = false,
   });
 
-  /// Reads one host from `json`, or none when it lacks a name, address or device name.
   static SavedAgentHost? fromJson(Object? json) {
     if (json is! Map<String, Object?>) return null;
     final name = json['name'];
@@ -37,10 +36,8 @@ class SavedAgentHost {
   final String name;
   final String address;
 
-  /// The name this device paired under on the host, which `meta host revoke` names to remove it.
   final String client;
 
-  /// Whether Liquid's sessions run on this host (ADR-0295).
   final bool active;
 
   SavedAgentHost copyWith({required bool active}) => SavedAgentHost(
@@ -58,13 +55,10 @@ class SavedAgentHost {
   };
 }
 
-/// The saved agent hosts, besides This Mac, which is always listed first. At most one host is
-/// active; with none active, sessions run on This Mac.
 @immutable
 class AgentHostsSettings {
   const AgentHostsSettings([this.hosts = const []]);
 
-  /// Reads `json`, skipping any host it cannot read.
   factory AgentHostsSettings.fromJson(Map<String, Object?> json) {
     final hosts = json['hosts'];
     return AgentHostsSettings([
@@ -73,13 +67,11 @@ class AgentHostsSettings {
     ]);
   }
 
-  /// The settings in the file, or none before the first save.
   static Future<AgentHostsSettings> load(SettingsFile file) async =>
       AgentHostsSettings.fromJson(await file.load() ?? const {});
 
   final List<SavedAgentHost> hosts;
 
-  /// The address of the active host, or null when This Mac is active.
   String? get activeAddress =>
       hosts.where((host) => host.active).firstOrNull?.address;
 
@@ -91,7 +83,6 @@ class AgentHostsSettings {
       if (host.address != address) host,
   ]);
 
-  /// The host at `address` made the active one, or This Mac when `address` is null.
   AgentHostsSettings withActive(String? address) => AgentHostsSettings([
     for (final host in hosts) host.copyWith(active: host.address == address),
   ]);
@@ -101,25 +92,17 @@ class AgentHostsSettings {
   };
 }
 
-/// What the Settings section needs from the bridge; tests substitute a fake. A null address is
-/// This Mac.
 abstract interface class AgentHostBridge {
-  /// Pairs with the host at `address`, answering its name and the name this device pairs under.
   Future<BridgePairing> pair(String address, String code);
 
-  /// Forgets the device token of the host at `address` on this Mac.
   Future<void> forget(String address);
 
-  /// Whether the host answers now; an error names why the check failed.
   Future<BridgeReach> reach(String? address);
 }
 
-/// The bridge's agent hosts: This Mac's service in `home`, and the saved hosts through their device
-/// tokens in the keychain.
 class RustAgentHostBridge implements AgentHostBridge {
   RustAgentHostBridge({this.home});
 
-  /// This Mac's Meta-Harness data folder, or the default one.
   final String? home;
 
   @override
@@ -135,8 +118,6 @@ class RustAgentHostBridge implements AgentHostBridge {
       : reachRemoteAgentHost(address: address);
 }
 
-/// A failed change of the agent hosts: a sentence that says what failed and whether anything
-/// changed, then the tool's own message.
 class AgentHostsError implements Exception {
   const AgentHostsError(this.message);
 
@@ -146,8 +127,6 @@ class AgentHostsError implements Exception {
   String toString() => message;
 }
 
-/// The message of `error` as Liquid shows it: a bridge error's or a file's own text, ended by one
-/// period.
 String messageOf(Object error) {
   final text = switch (error) {
     AnyhowException() => error.message,
@@ -157,36 +136,36 @@ String messageOf(Object error) {
   return text.endsWith('.') ? text : '$text.';
 }
 
-/// Settings → Agent hosts: the saved hosts in use, saved at each change. Each change runs its bridge
-/// step first, so a failed step leaves the saved list as it was, and a failed save never leaves a
-/// token behind.
+String hostProblem(String? address, Object error) => address == null
+    ? messageOf(error)
+    : 'Liquid could not connect to the agent host $address: ${messageOf(error)}';
+
+abstract interface class AgentHostLinks {
+  Future<void> connect(String? address);
+
+  void disconnect(String address);
+
+  Future<String?> startOn(String? address);
+}
+
 class AgentHostsController extends ValueNotifier<AgentHostsSettings> {
   AgentHostsController({
     required AgentHostsSettings settings,
     required this.bridge,
     required this.save,
-    required this.switchTo,
+    required this.links,
   }) : super(settings);
 
   final AgentHostBridge bridge;
 
-  /// Writes the settings to Liquid's settings file.
   final Future<void> Function(AgentHostsSettings settings) save;
 
-  /// Shows the host at an address (null: This Mac) as the agent area; returns why it cannot be shown,
-  /// or null once it is. `isCurrent` tells whether the choice is still the latest, so a host chosen
-  /// meanwhile is not shown.
-  final Future<String?> Function(String? address, bool Function() isCurrent)
-  switchTo;
+  final AgentHostLinks links;
 
-  /// Counts the choices of the agent area, so that only the latest one is shown and its result kept.
   int _choices = 0;
 
-  /// The changes running. The rows wait for them; the controller outlives Settings, so a reopened
-  /// pane keeps waiting for a change in progress.
   int _changes = 0;
 
-  /// Whether a change runs now.
   bool get changing => _changes > 0;
 
   Future<T> _change<T>(Future<T> Function() change) async {
@@ -213,9 +192,7 @@ class AgentHostsController extends ValueNotifier<AgentHostsSettings> {
     value = next;
   }
 
-  /// Pairs with the host at `address` using `code`, then saves it.
   Future<SavedAgentHost> pair(String address, String code) async {
-    // Liquid saves nothing here; a host that refused the code may keep a pairing, which its message says.
     const failed = 'Could not add the agent host; nothing changed in Liquid.';
     final paired = await _step(failed, () => bridge.pair(address, code));
     final host = SavedAgentHost(
@@ -225,8 +202,8 @@ class AgentHostsController extends ValueNotifier<AgentHostsSettings> {
     );
     try {
       await _write(value.added(host));
+      await links.connect(address);
     } on Object catch (error) {
-      // The host keeps this device paired from here on, so its own revoke has to follow.
       final kept =
           '${paired.host} keeps this device paired as ${paired.client}; run meta host revoke ${paired.client} there to remove it.';
       try {
@@ -243,9 +220,6 @@ class AgentHostsController extends ValueNotifier<AgentHostsSettings> {
     return host;
   }
 
-  /// Forgets the token of `host` on this Mac, then drops it from the saved list. A host in use gives
-  /// way to This Mac only after both, so a failure of either is said by Settings that asked, and
-  /// This Mac is not shown for a list that did not save.
   Future<void> remove(SavedAgentHost host) => _change(() async {
     await _step(
       'Could not remove ${host.name}; nothing changed.',
@@ -255,29 +229,26 @@ class AgentHostsController extends ValueNotifier<AgentHostsSettings> {
       'Could not remove ${host.name} from the list; its token here is forgotten, so remove it again to finish.',
       () => _write(value.without(host.address)),
     );
+    links.disconnect(host.address);
     if (!host.active) return;
     final choice = ++_choices;
-    final failure = await switchTo(null, () => choice == _choices);
+    final failure = await links.startOn(null);
     if (failure != null && choice == _choices) {
       throw AgentHostsError(
-        'Removed ${host.name} from this device, but This Mac could not be shown for sessions, so the agent area still shows ${host.name} until Liquid restarts. $failure',
+        'Removed ${host.name} from this device, but new sessions could not start on $thisMacName. $failure',
       );
     }
   });
 
-  /// Makes the host at `address` the one sessions run on, or This Mac for null. The choice is saved
-  /// first and shown at once; when the host cannot be shown, the saved choice goes back, unless a
-  /// later choice was asked for meanwhile.
   Future<void> use(String? address) => _change(() async {
     final choice = ++_choices;
     final previous = value;
     final failed =
         'Could not use ${_nameOf(address, previous)} for sessions; nothing changed.';
     await _step(failed, () => _write(previous.withActive(address)));
-    final failure = await switchTo(address, () => choice == _choices);
+    final failure = await links.startOn(address);
     if (failure == null || choice != _choices) return;
     try {
-      // Only the active choice goes back, on the list as it is now: a host paired meanwhile stays.
       await _write(value.withActive(previous.activeAddress));
     } on Object catch (error) {
       throw AgentHostsError(
@@ -287,11 +258,10 @@ class AgentHostsController extends ValueNotifier<AgentHostsSettings> {
     throw AgentHostsError('$failed $failure');
   });
 
-  /// Whether the host at `address` answers now; null is This Mac.
   Future<BridgeReach> reach(String? address) => bridge.reach(address);
 
   static String _nameOf(String? address, AgentHostsSettings settings) =>
       address == null
-      ? 'This Mac'
+      ? thisMacName
       : settings.hosts.firstWhere((host) => host.address == address).name;
 }

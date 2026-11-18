@@ -4,8 +4,7 @@ M2 in progress; product and runtime shape: [Meta-Harness V-Spec](../docs/concept
 
 ## Layout
 
-- `meta-harness-core/` — the Rust core: the service and its API (`service.rs`, `api.rs`), the client Liquid and `meta` use (`remote.rs`), remote access (`service/listener.rs`, `service/admit.rs`), pairing and host links (`hosts/`, `tunnel.rs`), the central configuration (`config.rs`, `config/homes.rs`), the pinned T3 Code server and its client protocol (`t3/`, ADR-0281, ADR-0292), and the host, thread and Git model T3 runs (`host.rs`, `thread.rs`, `git.rs`).
-- `meta-harness-cli/` — `meta`: the service, the configuration commands, remote access and host links (`hosts.rs`), and the login service (`login.rs`).
+- `meta-harness-core/`, `meta-harness-cli/` — the crates and their responsibilities: [architecture](../docs/architecture.md#rust-workspace-crates).
 - `install.sh` — the bundle's installer.
 - `t3.lock` — the pinned T3 release and each archive's SHA-256; `scripts/install-t3.mjs` installs it.
 

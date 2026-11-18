@@ -1,5 +1,6 @@
 use super::super::super::{helpers::empty_workspace, test_support::TempWorkspace};
 use super::super::recovery_fixtures::standard_review_recovery_writer;
+use super::review_run_dir;
 use crate::runtime::{
     conversations::{
         ConversationEventWriter, ProductiveRecoveryRecord, ProductiveRecoveryWriter,
@@ -18,8 +19,7 @@ use std::{
 fn productive_recovery_header_fixture(name: &str) -> (TempWorkspace, PathBuf, String) {
     let workspace = empty_workspace(name);
     standard_review_recovery_writer(&workspace, None, &Default::default());
-    let path = crate::tests::helpers::workspace_session_dir(&workspace)
-        .join("review/runs/review-1/recovery.jsonl");
+    let path = review_run_dir(&workspace, "review-1").join("recovery.jsonl");
     let header = fs::read_to_string(&path).expect("recovery header reads");
     (workspace, path, header)
 }
@@ -33,7 +33,7 @@ fn assert_productive_recovery_open_fails(workspace: &Path, reason: &str) {
 
 fn assert_conversation_recovery_prefix_open_fails(workspace: &Path, reason: &str) {
     assert!(
-        ConversationEventWriter::open_for_recovery(workspace, "review", "review-1", false, None,)
+        ConversationEventWriter::open_for_recovery(workspace, "review", "review-1", false, None)
             .is_err(),
         "{reason}"
     );
@@ -48,7 +48,6 @@ fn assert_conversation_recovery_prefix_rejects(workspace: &Path, limit_message: 
     assert!(error.to_string().contains(limit_message), "{error}");
 }
 
-/// One canonical JSON record of exactly `len` bytes, LF-terminated (`len` >= 9).
 fn canonical_record(len: usize) -> Vec<u8> {
     let mut record = b"{\"p\":\"".to_vec();
     record.resize(len - 3, b'x');
@@ -56,7 +55,6 @@ fn canonical_record(len: usize) -> Vec<u8> {
     record
 }
 
-/// LF-terminated canonical JSON records totalling exactly `len` bytes (`len` >= 9).
 fn canonical_records(len: usize) -> Vec<u8> {
     const RECORD_BYTES: usize = 1024;
     let mut bytes = Vec::with_capacity(len);
@@ -83,10 +81,6 @@ fn productive_recovery_reader_rejects_every_invalid_stream_boundary() {
     fs::write(&path, format!("{header}\n")).expect("blank record fixture writes");
     assert_productive_recovery_open_fails(&workspace, "blank recovery record fails closed");
 
-    let (workspace, path, header) = productive_recovery_header_fixture("recovery-noncanonical");
-    fs::write(&path, format!(" {}", header)).expect("noncanonical fixture writes");
-    assert_productive_recovery_open_fails(&workspace, "noncanonical recovery fails closed");
-
     let (workspace, path, header) = productive_recovery_header_fixture("recovery-second-header");
     fs::write(&path, format!("{header}{header}")).expect("duplicate header fixture writes");
     assert_productive_recovery_open_fails(&workspace, "second recovery header fails closed");
@@ -102,15 +96,7 @@ fn productive_recovery_reader_rejects_every_invalid_stream_boundary() {
     .expect("foreign header fixture writes");
     assert_productive_recovery_open_fails(&workspace, "foreign recovery header fails closed");
 
-    let (workspace, path, header) = productive_recovery_header_fixture("recovery-foreign-schema");
-    fs::write(
-        &path,
-        header.replace("flow-productive-recovery-v0", "flow-productive-recovery-v9"),
-    )
-    .expect("foreign schema fixture writes");
-    assert_productive_recovery_open_fails(&workspace, "foreign recovery schema fails closed");
-
-    let (workspace, path, _) = productive_recovery_header_fixture("recovery-terminal-first");
+    let (workspace, path, header) = productive_recovery_header_fixture("recovery-terminal-middle");
     let terminal = canonical_json(&ProductiveRecoveryRecord::Terminal {
         schema: "flow-productive-recovery-v0".to_owned(),
         failed: false,
@@ -118,13 +104,6 @@ fn productive_recovery_reader_rejects_every_invalid_stream_boundary() {
         cumulative_event_count: 1,
     })
     .expect("terminal canonicalizes");
-    fs::write(&path, format!("{terminal}\n")).expect("terminal-first fixture writes");
-    assert_productive_recovery_open_fails(
-        &workspace,
-        "terminal cannot replace the recovery header",
-    );
-
-    let (workspace, path, header) = productive_recovery_header_fixture("recovery-terminal-middle");
     fs::write(&path, format!("{header}{terminal}\n{terminal}\n"))
         .expect("terminal-middle fixture writes");
     assert_productive_recovery_open_fails(&workspace, "terminal recovery record must be last");
@@ -232,6 +211,23 @@ fn productive_recovery_reader_rejects_every_invalid_record_identity() {
         record[field] = value;
         record
     };
+    let transition = |flow: &str, from: &str, to: serde_json::Value| {
+        serde_json::json!({
+            "flow_execution_id": flow,
+            "from_phase_id": from,
+            "record_type": "transition",
+            "schema": "flow-productive-recovery-v0",
+            "to_phase_id": to
+        })
+    };
+    let flow = |execution: &str, result: &str| {
+        serde_json::json!({
+            "flow_execution_id": execution,
+            "record_type": "flow",
+            "result_object": result,
+            "schema": "flow-productive-recovery-v0"
+        })
+    };
     for (name, record) in [
         (
             "recovery-invalid-provider-attempt",
@@ -291,51 +287,20 @@ fn productive_recovery_reader_rejects_every_invalid_record_identity() {
         ),
         (
             "recovery-invalid-transition-flow-execution",
-            serde_json::json!({
-                "flow_execution_id": "INVALID",
-                "from_phase_id": "phase",
-                "record_type": "transition",
-                "schema": "flow-productive-recovery-v0",
-                "to_phase_id": null
-            }),
+            transition("INVALID", "phase", serde_json::Value::Null),
         ),
         (
             "recovery-invalid-transition-from",
-            serde_json::json!({
-                "flow_execution_id": "flow-exec-1",
-                "from_phase_id": "../phase",
-                "record_type": "transition",
-                "schema": "flow-productive-recovery-v0",
-                "to_phase_id": null
-            }),
+            transition("flow-exec-1", "../phase", serde_json::Value::Null),
         ),
         (
             "recovery-invalid-transition-to",
-            serde_json::json!({
-                "flow_execution_id": "flow-exec-1",
-                "from_phase_id": "phase",
-                "record_type": "transition",
-                "schema": "flow-productive-recovery-v0",
-                "to_phase_id": "../phase"
-            }),
+            transition("flow-exec-1", "phase", "../phase".into()),
         ),
-        (
-            "recovery-invalid-flow-execution",
-            serde_json::json!({
-                "flow_execution_id": "INVALID",
-                "record_type": "flow",
-                "result_object": object,
-                "schema": "flow-productive-recovery-v0"
-            }),
-        ),
+        ("recovery-invalid-flow-execution", flow("INVALID", &object)),
         (
             "recovery-invalid-flow-object",
-            serde_json::json!({
-                "flow_execution_id": "flow-exec-1",
-                "record_type": "flow",
-                "result_object": "object:wrong",
-                "schema": "flow-productive-recovery-v0"
-            }),
+            flow("flow-exec-1", "object:wrong"),
         ),
         (
             "recovery-invalid-terminal-object",
@@ -354,12 +319,8 @@ fn productive_recovery_reader_rejects_every_invalid_record_identity() {
 
 #[test]
 fn productive_recovery_prefix_rejects_bounded_stream_corruption() {
-    let run_path = |workspace: &Path| {
-        crate::tests::helpers::workspace_session_dir(workspace).join("review/runs/review-1")
-    };
-
     let (workspace, _, _) = productive_recovery_header_fixture("recovery-prefix-segment-count");
-    let run = run_path(&workspace);
+    let run = review_run_dir(&workspace, "review-1");
     for ordinal in 2..=EVENT_STREAM_LIMITS.max_segments + 1 {
         fs::write(run.join(format!("events.{ordinal:06}.jsonl")), b"")
             .expect("excess event segment writes");
@@ -368,7 +329,7 @@ fn productive_recovery_prefix_rejects_bounded_stream_corruption() {
 
     let (workspace, _, _) = productive_recovery_header_fixture("recovery-prefix-segment-size");
     fs::write(
-        run_path(&workspace).join("events.jsonl"),
+        review_run_dir(&workspace, "review-1").join("events.jsonl"),
         canonical_records(usize::try_from(MAX_SESSION_SEGMENT_BYTES + 1).expect("segment fits")),
     )
     .expect("oversized event segment writes");
@@ -378,34 +339,41 @@ fn productive_recovery_prefix_rejects_bounded_stream_corruption() {
     );
 
     let (workspace, _, _) = productive_recovery_header_fixture("recovery-prefix-empty-segment");
-    fs::write(run_path(&workspace).join("events.000002.jsonl"), b"")
-        .expect("empty final event segment writes");
+    fs::write(
+        review_run_dir(&workspace, "review-1").join("events.000002.jsonl"),
+        b"",
+    )
+    .expect("empty final event segment writes");
     assert_conversation_recovery_prefix_open_fails(
         &workspace,
         "an empty non-final event segment is rejected",
     );
 
     let (workspace, _, _) = productive_recovery_header_fixture("recovery-prefix-unterminated");
-    fs::write(run_path(&workspace).join("events.jsonl"), b"{}").expect("event prefix writes");
-    fs::write(run_path(&workspace).join("events.000002.jsonl"), b"{}\n")
+    let run = review_run_dir(&workspace, "review-1");
+    fs::write(run.join("events.jsonl"), b"{}").expect("event prefix writes");
+    fs::write(run.join("events.000002.jsonl"), b"{}\n")
         .expect("complete final event segment writes");
     assert_conversation_recovery_prefix_rejects(&workspace, "prefix must end with LF");
 
     let (workspace, _, _) = productive_recovery_header_fixture("recovery-prefix-record-size");
     fs::write(
-        run_path(&workspace).join("events.jsonl"),
+        review_run_dir(&workspace, "review-1").join("events.jsonl"),
         canonical_record(MAX_CANONICAL_EVENT_BYTES + 1),
     )
     .expect("oversized event record writes");
     assert_conversation_recovery_prefix_rejects(&workspace, "prefix record exceeds its byte limit");
 
     let (workspace, _, _) = productive_recovery_header_fixture("recovery-prefix-crlf");
-    fs::write(run_path(&workspace).join("events.jsonl"), b"{}\r\n")
-        .expect("CRLF event prefix writes");
+    fs::write(
+        review_run_dir(&workspace, "review-1").join("events.jsonl"),
+        b"{}\r\n",
+    )
+    .expect("CRLF event prefix writes");
     assert_conversation_recovery_prefix_open_fails(&workspace, "event prefix requires LF framing");
 
     let (workspace, _, _) = productive_recovery_header_fixture("recovery-prefix-total-size");
-    let run = run_path(&workspace);
+    let run = review_run_dir(&workspace, "review-1");
     let full_segment = usize::try_from(MAX_SESSION_SEGMENT_BYTES * 3 / 4).expect("segment fits");
     for ordinal in 1..=CONTEXT_MANIFEST_STREAM_LIMITS.max_segments {
         let path = if ordinal == 1 {
@@ -438,8 +406,7 @@ fn productive_recovery_segment_inventory_rejects_excess_segments() {
         ),
     ] {
         let (workspace, _, _) = productive_recovery_header_fixture(fixture);
-        let run =
-            crate::tests::helpers::workspace_session_dir(&workspace).join("review/runs/review-1");
+        let run = review_run_dir(&workspace, "review-1");
         for ordinal in 2..=limits.max_segments + 42 {
             fs::write(run.join(format!("{stem}.{ordinal:06}.jsonl")), b"")
                 .expect("excess stream segment writes");

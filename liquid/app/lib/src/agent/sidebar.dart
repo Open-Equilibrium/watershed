@@ -10,24 +10,22 @@ import '../session/session_state.dart';
 import '../shortcuts/keymap.dart';
 import '../theme/icons.dart';
 import '../theme/logo.dart';
+import '../theme/machine_icon.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
 import '../workspace/explorer.dart';
 import '../workspace/workspace_state.dart';
 import 'session_menus.dart';
 
-/// What the sidebar shows about the project.
 @immutable
 class SessionInfo {
   const SessionInfo({required this.project, this.path});
 
   final String project;
 
-  /// The project's folder, when known.
   final String? path;
 }
 
-/// The open session's title, or "New thread" before it has one.
 class SessionTitle extends StatelessWidget {
   const SessionTitle({super.key, required this.state, this.style});
 
@@ -46,11 +44,8 @@ class SessionTitle extends StatelessWidget {
   );
 }
 
-/// No Page is open without a Workspace.
 final _noPage = ValueNotifier<OpenPage?>(null);
 
-/// The Explorer above the project's agent sessions, with Settings in its footer (approved Pages
-/// mockups).
 class Sidebar extends StatelessWidget {
   const Sidebar({
     super.key,
@@ -62,25 +57,23 @@ class Sidebar extends StatelessWidget {
     this.onSettings,
     this.onNewSession,
     this.onShowSession,
+    this.onMove,
   });
 
-  /// The agent session, if one started.
   final SessionState? state;
   final SessionInfo? info;
 
-  /// The Workspace, or why it did not open.
   final WorkspaceState? workspace;
   final String? workspaceProblem;
 
-  /// Why no agent session started, such as an agent host that does not answer.
   final String? agentProblem;
   final VoidCallback? onSettings;
 
-  /// Starts a new session as ⌘N does: in the chat, ready to describe the task.
   final VoidCallback? onNewSession;
 
-  /// Shows the session in place of the open Page.
   final VoidCallback? onShowSession;
+
+  final void Function(HostThread listed)? onMove;
 
   @override
   Widget build(BuildContext context) {
@@ -118,8 +111,6 @@ class Sidebar extends StatelessWidget {
           Expanded(
             child: ListView(
               children: [
-                // Hover and focus ink paints on a Material above the sidebar's background,
-                // inside the list, whose edges clip it.
                 Material(
                   type: MaterialType.transparency,
                   child: Column(
@@ -137,8 +128,23 @@ class Sidebar extends StatelessWidget {
                           padding: const EdgeInsets.only(top: WsMetrics.space3),
                           child: WarningNotice(problem),
                         ),
-                      // A Page shows the Workspace's latest problem itself; without one, it shows
-                      // here.
+                      if (state case final state?)
+                        ListenableBuilder(
+                          listenable: state.hostProblems,
+                          builder: (context, _) => Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              for (final problem
+                                  in state.hostProblems.value.values)
+                                Padding(
+                                  padding: const EdgeInsets.only(
+                                    top: WsMetrics.space3,
+                                  ),
+                                  child: WarningNotice(problem),
+                                ),
+                            ],
+                          ),
+                        ),
                       if (workspace case final workspace?)
                         ListenableBuilder(
                           listenable: Listenable.merge([
@@ -169,6 +175,7 @@ class Sidebar extends StatelessWidget {
                           state: state,
                           workspace: workspace,
                           onShow: onShowSession,
+                          onMove: onMove,
                         ),
                       ],
                     ],
@@ -220,7 +227,6 @@ class Sidebar extends StatelessWidget {
   }
 }
 
-/// The project's row, whose menu opens its folder or starts a session.
 class _ProjectRow extends StatelessWidget {
   const _ProjectRow({
     required this.state,
@@ -272,18 +278,18 @@ class _ProjectRow extends StatelessWidget {
   }
 }
 
-/// The project's sessions, newest first, as the state lists them. The open one is marked while no
-/// Page is open.
 class _Sessions extends StatelessWidget {
   const _Sessions({
     required this.state,
     required this.workspace,
     required this.onShow,
+    this.onMove,
   });
 
   final SessionState state;
   final WorkspaceState? workspace;
   final VoidCallback? onShow;
+  final void Function(HostThread listed)? onMove;
 
   @override
   Widget build(BuildContext context) => ListenableBuilder(
@@ -291,6 +297,7 @@ class _Sessions extends StatelessWidget {
       state.recent,
       state.sessionTitle,
       state.status,
+      state.model,
       workspace?.open ?? _noPage,
     ]),
     builder: (context, _) {
@@ -299,17 +306,23 @@ class _Sessions extends StatelessWidget {
       return Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          for (final thread in state.recent.value)
+          for (final listed in state.recent.value)
             _SessionRow(
               state: state,
-              thread: thread,
-              selected: open && thread.id == current,
-              status: thread.id == current
+              listed: listed,
+              selected:
+                  open &&
+                  listed.thread.id == current &&
+                  listed.address == state.sessionAddress,
+              status:
+                  listed.thread.id == current &&
+                      listed.address == state.sessionAddress
                   ? state.status.value
-                  : thread.running
+                  : listed.thread.running
                   ? RunStatus.running
                   : RunStatus.idle,
               onShow: onShow,
+              onMove: onMove,
             ),
         ],
       );
@@ -317,27 +330,29 @@ class _Sessions extends StatelessWidget {
   );
 }
 
-/// One session of the project: its status or last change, and the menu for export, archive and
-/// delete.
 class _SessionRow extends StatelessWidget {
   const _SessionRow({
     required this.state,
-    required this.thread,
+    required this.listed,
     required this.selected,
     required this.status,
     required this.onShow,
+    this.onMove,
   });
 
   final SessionState state;
-  final BridgeThreadSummary thread;
+  final HostThread listed;
   final bool selected;
   final RunStatus status;
   final VoidCallback? onShow;
+  final void Function(HostThread listed)? onMove;
 
-  /// The status word and its colour: the status while one runs, else when the session last changed.
+  BridgeThreadSummary get thread => listed.thread;
+
   (String, Color) _label(BuildContext context) {
     final ws = context.ws;
     if (thread.archived) return ('archived', ws.textFaint);
+    if (thread.moving != null) return ('Moving', ws.textFaint);
     if (status != RunStatus.idle) return statusLabel(context, status);
     final updated = thread.updatedMs;
     return (
@@ -355,19 +370,31 @@ class _SessionRow extends StatelessWidget {
         if (selected)
           RowAction('Export record', () => exportSessionRecord(state)),
         RowAction(
+          'Move to host…',
+          () => onMove?.call(listed),
+          enabled: listed.thread.movable,
+          disabledReason: listed.thread.harnessKnown
+              ? 'Only Claude Code and Codex sessions can move.'
+              : 'This host needs a newer Meta-Harness',
+        ),
+        RowAction(
           thread.archived ? 'Unarchive' : 'Archive thread',
-          () => unawaited(state.archive(thread.id, archived: !thread.archived)),
-          // T3 does not archive a running thread.
+          () => unawaited(
+            state.archive(
+              thread.id,
+              address: listed.address,
+              archived: !thread.archived,
+            ),
+          ),
           enabled: !thread.running,
         ),
         null,
         RowAction(
           'Delete',
-          () => unawaited(confirmDeleteSession(context, state, thread)),
+          () => unawaited(confirmDeleteSession(context, state, listed)),
           danger: true,
         ),
       ],
-      // Marked while it shows rather than a Page.
       builder: (context, menu, shown) => Semantics(
         selected: selected,
         child: Shortcuts(
@@ -375,8 +402,9 @@ class _SessionRow extends StatelessWidget {
           child: InkWell(
             key: Key('session-${thread.id}'),
             onTap: () {
-              if (state.session?.id != thread.id) {
-                unawaited(state.open(thread.id));
+              if (state.session?.id != thread.id ||
+                  state.sessionAddress != listed.address) {
+                unawaited(state.open(thread.id, address: listed.address));
               }
               onShow?.call();
             },
@@ -414,8 +442,13 @@ class _SessionRow extends StatelessWidget {
                             overflow: TextOverflow.ellipsis,
                           ),
                         ),
-                        // The "···" takes the status word's place while it shows; the dot keeps
-                        // the status.
+                        if (listed.machine case final kind?) ...[
+                          MachineIcon(
+                            kind,
+                            name: state.hostNameOf(listed.address),
+                          ),
+                          const SizedBox(width: WsMetrics.space2),
+                        ],
                         Stack(
                           alignment: Alignment.centerRight,
                           children: [
@@ -459,7 +492,6 @@ class _SessionRow extends StatelessWidget {
   }
 }
 
-/// Short status text and its color.
 (String, Color) statusLabel(BuildContext context, RunStatus status) {
   final ws = context.ws;
   return switch (status) {

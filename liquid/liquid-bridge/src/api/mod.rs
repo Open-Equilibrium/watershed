@@ -1,5 +1,3 @@
-//! Functions and types flutter_rust_bridge exposes to Dart.
-
 pub mod database;
 pub mod details;
 pub mod drawing;
@@ -7,6 +5,7 @@ pub mod events;
 pub mod git;
 pub mod hosts;
 pub mod media;
+pub mod moves;
 pub(crate) mod record;
 pub mod replica;
 pub mod session;

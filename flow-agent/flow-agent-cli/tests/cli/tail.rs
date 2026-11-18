@@ -28,74 +28,38 @@ fn write_non_terminal_session_prefix(fixture: &Path) -> (PathBuf, String) {
 }
 
 #[test]
-fn tail_timeout_exits_after_current_non_terminal_prefix() {
+fn tail_stops_at_the_current_prefix_without_following() {
     if super::test_support::run_current_test_isolated_session_home() {
         return;
     }
 
-    let fixture = workspace_copy("smoke-flow");
-    let (session_path, prefix) = write_non_terminal_session_prefix(&fixture);
+    for flags in [&["--timeout-ms", "25"][..], &["--no-follow"][..]] {
+        let fixture = workspace_copy("smoke-flow");
+        let (session_path, prefix) = write_non_terminal_session_prefix(&fixture);
 
-    let child = flow_command()
-        .current_dir(&fixture)
-        .args([
-            "tail",
-            "smoke-flow",
-            "smoke-flow",
-            "--emit",
-            "jsonl",
-            "--timeout-ms",
-            "25",
-        ])
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .expect("flow binary should spawn");
-    let output = wait_with_output_before(child, Duration::from_secs(2));
+        let child = flow_command()
+            .current_dir(&fixture)
+            .args(["tail", "smoke-flow", "smoke-flow", "--emit", "jsonl"])
+            .args(flags)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("flow binary should spawn");
+        let output = wait_with_output_before(child, Duration::from_secs(2));
 
-    assert!(output.status.success());
-    assert!(output.stderr.is_empty());
-    assert_eq!(
-        String::from_utf8(output.stdout).expect("stdout should be UTF-8"),
-        prefix
-    );
-    assert_eq!(
-        fs::read_to_string(session_path).expect("partial session remains readable"),
-        prefix
-    );
-}
-
-#[test]
-fn tail_no_follow_exits_after_current_non_terminal_prefix() {
-    if super::test_support::run_current_test_isolated_session_home() {
-        return;
+        assert!(output.status.success(), "{flags:?}");
+        assert!(output.stderr.is_empty(), "{flags:?}");
+        assert_eq!(
+            String::from_utf8(output.stdout).expect("stdout should be UTF-8"),
+            prefix,
+            "{flags:?}"
+        );
+        assert_eq!(
+            fs::read_to_string(session_path).expect("partial session remains readable"),
+            prefix,
+            "{flags:?}"
+        );
     }
-
-    let fixture = workspace_copy("smoke-flow");
-    let (_, prefix) = write_non_terminal_session_prefix(&fixture);
-
-    let child = flow_command()
-        .current_dir(&fixture)
-        .args([
-            "tail",
-            "smoke-flow",
-            "smoke-flow",
-            "--emit",
-            "jsonl",
-            "--no-follow",
-        ])
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .expect("flow binary should spawn");
-    let output = wait_with_output_before(child, Duration::from_secs(2));
-
-    assert!(output.status.success());
-    assert!(output.stderr.is_empty());
-    assert_eq!(
-        String::from_utf8(output.stdout).expect("stdout should be UTF-8"),
-        prefix
-    );
 }
 
 #[test]

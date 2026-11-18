@@ -4,11 +4,11 @@ mod tool;
 use super::super::support::run_isolated_test;
 use super::support::{
     CompletionBoundaryRecordingRecovery, DefinitiveFailureProvider, FakeProvider, FakeToolExecutor,
-    InjectedAttemptRecovery, InterruptingSink, MemoryAttempts, MemorySink, ScriptedProvider,
-    assert_controlled_cancellation_lifecycle, execute_scripted_productive_case,
-    execute_scripted_productive_case_with_tools,
-    execute_scripted_productive_case_with_tools_and_recovery, single_tool_provider_turn,
-    smoke_productive_execution_fixture,
+    InterruptingSink, MemoryAttempts, MemorySink, ScriptedProvider,
+    assert_controlled_cancellation_lifecycle, count_events, event_of,
+    execute_scripted_productive_case, execute_scripted_productive_case_with_tools,
+    execute_scripted_productive_case_with_tools_and_recovery, has_event, single_tool_provider_turn,
+    smoke_productive_execution_fixture, string_provider_turn,
 };
 use crate::runtime::{
     context::ContextObject,
@@ -24,6 +24,8 @@ use crate::runtime::{
     },
     types::{CANCELLED_REASON, RUNTIME_ERROR_REASON, RuntimeError},
 };
+use proto::EventType;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 #[derive(Default)]
 struct InterruptingFailureAttempts {
@@ -47,11 +49,6 @@ impl ProductiveAttemptLog for InterruptingFailureAttempts {
         self.inner.terminal(result)
     }
 }
-use proto::EventType;
-use std::{
-    collections::VecDeque,
-    sync::atomic::{AtomicUsize, Ordering},
-};
 
 #[test]
 fn cancellation_atomically_precedes_each_productive_completion_commit() {
@@ -84,13 +81,10 @@ fn cancellation_atomically_precedes_each_productive_completion_commit() {
         let mut recovery = CompletionBoundaryRecordingRecovery::default();
         let (execution, _, _, sink, _) = execute_scripted_productive_case_with_tools_and_recovery(
             &format!("completion-commit-cancellation-{index}"),
-            [ProviderTurn {
-                token_usage: None,
-                response_id: format!("completion-commit-response-{index}"),
-                output_text: "{\"type\":\"string\",\"value\":\"done\"}".to_owned(),
-                retained_items: Vec::new(),
-                tool_calls: Vec::new(),
-            }],
+            [string_provider_turn(
+                &format!("completion-commit-response-{index}"),
+                "done",
+            )],
             |_| {},
             |_| {},
             &mut recovery,
@@ -108,14 +102,12 @@ fn cancellation_atomically_precedes_each_productive_completion_commit() {
             ProductiveCompletionCommitPoint::PhaseRecovery
             | ProductiveCompletionCommitPoint::TransitionRecovery
             | ProductiveCompletionCommitPoint::FlowRecovery => recovery.commits.contains(&point),
-            ProductiveCompletionCommitPoint::PhaseEvent => sink
-                .0
-                .iter()
-                .any(|event| event.event_type == EventType::PhaseCompleted),
-            ProductiveCompletionCommitPoint::FlowEvent => sink
-                .0
-                .iter()
-                .any(|event| event.event_type == EventType::FlowCompleted),
+            ProductiveCompletionCommitPoint::PhaseEvent => {
+                has_event(&sink.0, EventType::PhaseCompleted)
+            }
+            ProductiveCompletionCommitPoint::FlowEvent => {
+                has_event(&sink.0, EventType::FlowCompleted)
+            }
         };
         if commit_survived_cancellation {
             violations.push(format!(
@@ -185,19 +177,13 @@ fn terminal_linearization_persists_exactly_one_winning_lifecycle() {
     );
     assert!(cancelled.failed);
     assert_eq!(
-        cancellation_sink
-            .events
-            .iter()
-            .filter(|event| event.event_type == EventType::SessionFailed)
-            .count(),
+        count_events(&cancellation_sink.events, EventType::SessionFailed),
         1
     );
-    assert!(
-        !cancellation_sink
-            .events
-            .iter()
-            .any(|event| event.event_type == EventType::SessionCompleted)
-    );
+    assert!(!has_event(
+        &cancellation_sink.events,
+        EventType::SessionCompleted
+    ));
 
     let (completed, completion_sink) =
         execute_terminal_race_case("completion-wins-terminal-race", EventType::SessionCompleted);
@@ -207,19 +193,13 @@ fn terminal_linearization_persists_exactly_one_winning_lifecycle() {
     );
     assert!(!completed.failed);
     assert_eq!(
-        completion_sink
-            .events
-            .iter()
-            .filter(|event| event.event_type == EventType::SessionCompleted)
-            .count(),
+        count_events(&completion_sink.events, EventType::SessionCompleted),
         1
     );
-    assert!(
-        !completion_sink
-            .events
-            .iter()
-            .any(|event| event.event_type == EventType::SessionFailed)
-    );
+    assert!(!has_event(
+        &completion_sink.events,
+        EventType::SessionFailed
+    ));
 }
 
 #[test]
@@ -230,16 +210,13 @@ fn cancellation_during_response_persistence_stops_before_completion_boundaries()
     }
 
     let output_text = "x".repeat(MAX_MESSAGE_DELTA_UTF8_BYTES + 1);
-    let mut provider = ScriptedProvider {
-        bodies: Vec::new(),
-        turns: VecDeque::from([ProviderTurn {
-            token_usage: None,
-            response_id: "response-partial-cancellation".to_owned(),
-            output_text: output_text.clone(),
-            retained_items: Vec::new(),
-            tool_calls: Vec::new(),
-        }]),
-    };
+    let mut provider = ScriptedProvider::new([ProviderTurn {
+        token_usage: None,
+        response_id: "response-partial-cancellation".to_owned(),
+        output_text: output_text.clone(),
+        retained_items: Vec::new(),
+        tool_calls: Vec::new(),
+    }]);
     let (execution, sink) = execute_terminal_race_case_with_provider(
         "response-persistence-cancellation",
         EventType::MessageDelta,
@@ -260,10 +237,7 @@ fn cancellation_during_response_persistence_stops_before_completion_boundaries()
         "a durable provider turn must finish publishing before cancellation cleanup"
     );
     assert_eq!(
-        sink.events
-            .iter()
-            .filter(|event| event.event_type == EventType::MessageCompleted)
-            .count(),
+        count_events(&sink.events, EventType::MessageCompleted),
         1,
         "only a fully published message may become completed conversation context"
     );
@@ -280,40 +254,69 @@ fn cancellation_during_response_persistence_stops_before_completion_boundaries()
 }
 
 #[test]
-fn provider_cancellation_persists_cancelled_attempt_and_lifecycle() {
-    let (_workspace, fixture) = smoke_productive_execution_fixture();
-    let flow = fixture.smoke_flow();
-    let mut provider = FakeProvider {
-        bodies: Vec::new(),
-        cancel: true,
-        cancel_after_response: false,
-        error_after_interrupt: false,
-    };
-    let mut attempts = MemoryAttempts::default();
-    let mut sink = MemorySink::default();
-    let mut tools = FakeToolExecutor::default();
-    let execution = execute_productive_flow_with_tool_executor(
-        fixture.execution(flow, "provider-cancellation-fixture"),
-        &mut provider,
-        &mut attempts,
-        &mut sink,
-        &mut tools,
-    )
-    .expect("controlled provider cancellation becomes a terminal failed run");
+fn provider_cancellation_persists_a_cancelled_attempt_and_lifecycle() {
+    const CHILD_ENV: &str = "WATERSHED_PROVIDER_CANCELLATION_CHILD";
+    if run_isolated_test(CHILD_ENV) {
+        return;
+    }
 
-    assert!(execution.failed);
-    assert!(matches!(
-        execution.terminal_error,
-        Some(RuntimeError::Cancelled)
-    ));
-    assert_eq!(provider.bodies.len(), 1);
-    assert_eq!(attempts.intents.len(), 1);
-    assert_eq!(attempts.results.len(), 1);
-    assert_eq!(attempts.results[0].0, RunAttemptKind::Provider);
-    assert_eq!(attempts.results[0].2, CANCELLED_REASON);
-    assert_eq!(attempts.results[0].3.as_deref(), Some(CANCELLED_REASON));
-    assert!(tools.invocations.is_empty());
-    assert_controlled_cancellation_lifecycle(&sink.0);
+    for (name, mut provider) in [
+        (
+            "cancelled-turn",
+            FakeProvider {
+                cancel: true,
+                ..FakeProvider::default()
+            },
+        ),
+        (
+            "error-after-cancellation",
+            FakeProvider {
+                error_after_interrupt: true,
+                ..FakeProvider::default()
+            },
+        ),
+        (
+            "cancellation-after-response",
+            FakeProvider {
+                cancel_after_response: true,
+                ..FakeProvider::default()
+            },
+        ),
+    ] {
+        crate::begin_productive_operation().expect("productive operation begins");
+        let (_workspace, fixture) = smoke_productive_execution_fixture();
+        let flow = fixture.smoke_flow();
+        let mut attempts = MemoryAttempts::default();
+        let mut sink = MemorySink::default();
+        let mut tools = FakeToolExecutor::default();
+        let execution = execute_productive_flow_with_tool_executor(
+            fixture.execution(flow, name),
+            &mut provider,
+            &mut attempts,
+            &mut sink,
+            &mut tools,
+        )
+        .expect("controlled provider cancellation becomes a terminal failed run");
+        crate::settle_productive_operation();
+
+        assert!(execution.failed, "{name}");
+        assert!(
+            matches!(execution.terminal_error, Some(RuntimeError::Cancelled)),
+            "{name}"
+        );
+        assert_eq!(provider.bodies.len(), 1, "{name}");
+        assert_eq!(attempts.intents.len(), 1, "{name}");
+        assert_eq!(attempts.results.len(), 1, "{name}");
+        assert_eq!(attempts.results[0].0, RunAttemptKind::Provider, "{name}");
+        assert_eq!(attempts.results[0].2, CANCELLED_REASON, "{name}");
+        assert_eq!(
+            attempts.results[0].3.as_deref(),
+            Some(CANCELLED_REASON),
+            "{name}"
+        );
+        assert!(tools.invocations.is_empty(), "{name}");
+        assert_controlled_cancellation_lifecycle(&sink.0);
+    }
 }
 
 #[test]
@@ -361,63 +364,23 @@ fn definitive_provider_failure_linearizes_before_attempt_persistence() {
         attempts.inner.results[0].3.as_deref(),
         Some("provider_error")
     );
-    assert_eq!(
-        sink.0
-            .iter()
-            .filter(|event| event.event_type == EventType::SessionFailed)
-            .count(),
-        1
-    );
+    assert_eq!(count_events(&sink.0, EventType::SessionFailed), 1);
 }
 
 #[test]
-fn cancellation_only_closes_attempts_with_definitive_terminal_evidence() {
+fn cancellation_leaves_a_tool_without_terminal_evidence_uncertain() {
     const CHILD_ENV: &str = "WATERSHED_EXTERNAL_ERROR_CANCELLATION_CHILD";
     if run_isolated_test(CHILD_ENV) {
         return;
     }
 
-    crate::begin_productive_operation().expect("provider operation begins");
-    let (_workspace, fixture) = smoke_productive_execution_fixture();
-    let flow = fixture.smoke_flow();
-    let mut provider = FakeProvider {
-        bodies: Vec::new(),
-        cancel: false,
-        cancel_after_response: false,
-        error_after_interrupt: true,
-    };
-    let mut attempts = MemoryAttempts::default();
-    let mut sink = MemorySink::default();
-    let mut tools = FakeToolExecutor::default();
-    let execution = execute_productive_flow_with_tool_executor(
-        fixture.execution(flow, "provider-error-cancellation-fixture"),
-        &mut provider,
-        &mut attempts,
-        &mut sink,
-        &mut tools,
-    )
-    .expect("provider error after cancellation becomes a terminal failed run");
-    crate::settle_productive_operation();
-
-    assert!(execution.failed);
-    assert!(matches!(
-        execution.terminal_error,
-        Some(RuntimeError::Cancelled)
-    ));
-    assert_eq!(attempts.results.len(), 1);
-    assert_eq!(attempts.results[0].0, RunAttemptKind::Provider);
-    assert_eq!(attempts.results[0].2, CANCELLED_REASON);
-    assert_eq!(attempts.results[0].3.as_deref(), Some(CANCELLED_REASON));
-    assert_controlled_cancellation_lifecycle(&sink.0);
-
     crate::begin_productive_operation().expect("Tool operation begins");
-    let tool_turn = single_tool_provider_turn(
-        "response-tool-error-cancellation",
-        "call-tool-error-cancellation",
-    );
     let (execution, _, attempts, sink, tools) = execute_scripted_productive_case_with_tools(
         "tool-error-cancellation-fixture",
-        [tool_turn],
+        [single_tool_provider_turn(
+            "response-tool-error-cancellation",
+            "call-tool-error-cancellation",
+        )],
         |_| {},
         |tools| tools.error_after_interrupt = true,
     )
@@ -437,98 +400,25 @@ fn cancellation_only_closes_attempts_with_definitive_terminal_evidence() {
         "a dispatched Tool without terminal Executor evidence must remain uncertain"
     );
     assert_eq!(
-        sink.0
-            .iter()
-            .find(|event| event.event_type == EventType::ToolFailed)
-            .expect("uncertain Tool emits ToolFailed")
-            .payload["error"],
+        event_of(&sink.0, EventType::ToolFailed).payload["error"],
         RUNTIME_ERROR_REASON
     );
-
-    crate::begin_productive_operation().expect("Tool recovery operation begins");
-    let mut recovery = InjectedAttemptRecovery::ToolResult(RunAttemptResult {
-        attempt_id: "tool-000001".to_owned(),
-        attempt_kind: RunAttemptKind::Tool,
-        outcome: RunAttemptOutcome::Cancelled,
-        classification: Some(CANCELLED_REASON.to_owned()),
-        exit_code: None,
-        timestamp: "2026-07-30T12:00:00Z".to_owned(),
-        durable_output: None,
-    });
-    let (execution, _, _, sink, tools) = execute_scripted_productive_case_with_tools_and_recovery(
-        "tool-error-cancellation-recovery-fixture",
-        [single_tool_provider_turn(
-            "response-tool-error-cancellation-recovery",
-            "call-tool-error-cancellation-recovery",
-        )],
-        |_| {},
-        |_| {},
-        &mut recovery,
-    )
-    .expect("receipt-less cancelled Tool recovery closes without redispatch");
-    crate::settle_productive_operation();
-
-    assert!(execution.failed);
-    assert!(matches!(
-        execution.terminal_error,
-        Some(RuntimeError::Cancelled)
-    ));
-    assert!(tools.invocations.is_empty(), "recovery must not redispatch");
-    assert_controlled_cancellation_lifecycle(&sink.0);
 }
 
 #[test]
-fn cancellation_winning_successful_provider_and_tool_results_persists_cancelled_attempts() {
+fn cancellation_winning_a_successful_tool_result_persists_a_cancelled_attempt() {
     const CHILD_ENV: &str = "WATERSHED_PROVIDER_RESPONSE_CANCELLATION_CHILD";
     if run_isolated_test(CHILD_ENV) {
         return;
     }
 
-    crate::begin_productive_operation().expect("productive operation begins");
-    let (_workspace, fixture) = smoke_productive_execution_fixture();
-    let flow = fixture.smoke_flow();
-    let mut provider = FakeProvider {
-        bodies: Vec::new(),
-        cancel: false,
-        cancel_after_response: true,
-        error_after_interrupt: false,
-    };
-    let mut attempts = MemoryAttempts::default();
-    let mut sink = MemorySink::default();
-    let mut tools = FakeToolExecutor::default();
-
-    let execution = execute_productive_flow_with_tool_executor(
-        fixture.execution(flow, "provider-response-cancellation-fixture"),
-        &mut provider,
-        &mut attempts,
-        &mut sink,
-        &mut tools,
-    )
-    .expect("controlled provider-response cancellation becomes a terminal failed run");
-    crate::settle_productive_operation();
-
-    assert!(execution.failed);
-    assert!(matches!(
-        execution.terminal_error,
-        Some(RuntimeError::Cancelled)
-    ));
-    assert_eq!(provider.bodies.len(), 1);
-    assert_eq!(attempts.intents.len(), 1);
-    assert_eq!(attempts.results.len(), 1);
-    assert_eq!(attempts.results[0].0, RunAttemptKind::Provider);
-    assert_eq!(attempts.results[0].2, CANCELLED_REASON);
-    assert_eq!(attempts.results[0].3.as_deref(), Some(CANCELLED_REASON));
-    assert!(tools.invocations.is_empty());
-    assert_controlled_cancellation_lifecycle(&sink.0);
-
     crate::begin_productive_operation().expect("Tool operation begins");
-    let tool_turn = single_tool_provider_turn(
-        "response-tool-success-cancellation",
-        "call-tool-success-cancellation",
-    );
     let (execution, _, attempts, sink, tools) = execute_scripted_productive_case_with_tools(
         "tool-success-cancellation-fixture",
-        [tool_turn],
+        [single_tool_provider_turn(
+            "response-tool-success-cancellation",
+            "call-tool-success-cancellation",
+        )],
         |_| {},
         |tools| {
             tools.cancel_before_outcome = true;
@@ -581,16 +471,12 @@ fn cancellation_during_provider_and_tool_result_persistence_never_commits_comple
             crate::ProductiveInterruptAction::Cancel
         );
     });
-    let provider_turn = ProviderTurn {
-        token_usage: None,
-        response_id: "response-provider-persist-cancellation".to_owned(),
-        output_text: "{\"type\":\"string\",\"value\":\"unused\"}".to_owned(),
-        retained_items: Vec::new(),
-        tool_calls: Vec::new(),
-    };
     let (execution, _, attempts, sink, _) = execute_scripted_productive_case(
         "provider-persist-cancellation-fixture",
-        [provider_turn],
+        [string_provider_turn(
+            "response-provider-persist-cancellation",
+            "unused",
+        )],
         |_| {},
     )
     .expect("provider persistence cancellation closes the lifecycle");
@@ -609,13 +495,12 @@ fn cancellation_during_provider_and_tool_result_persistence_never_commits_comple
             crate::ProductiveInterruptAction::Cancel
         );
     });
-    let tool_turn = single_tool_provider_turn(
-        "response-tool-persist-cancellation",
-        "call-tool-persist-cancellation",
-    );
     let (execution, _, attempts, sink, _) = execute_scripted_productive_case_with_tools(
         "tool-persist-cancellation-fixture",
-        [tool_turn],
+        [single_tool_provider_turn(
+            "response-tool-persist-cancellation",
+            "call-tool-persist-cancellation",
+        )],
         |_| {},
         |_| {},
     )

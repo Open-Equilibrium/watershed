@@ -41,7 +41,6 @@ fn observe_authoring_post_publication() -> Result<(), RuntimeError> {
     })
 }
 
-/// Reads one bounded UTF-8 authoring source relative to an opened workspace.
 pub fn read_authoring_file(
     workspace: impl AsRef<Path>,
     source: &str,

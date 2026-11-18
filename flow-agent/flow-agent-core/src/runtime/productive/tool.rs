@@ -68,7 +68,6 @@ where
     let recovered_attempt = recovered.is_some();
     let (durable_value, result) = match recovered {
         Some(recovered) => {
-            // WHY: a started Tool's cancelled envelope is validated like a completed one before replay.
             if recovered.outcome == RunAttemptOutcome::Cancelled
                 && has_tool_output_envelope(&recovered)
             {
@@ -104,7 +103,6 @@ where
         recovered_attempt,
         &result,
     )?;
-    // WHY: the Tool's answer is recorded first; its unknown cleanup then stops the Run.
     if cleanup_unknown_recorded(&result) && result.outcome != RunAttemptOutcome::Cancelled {
         return Err(RuntimeError::ProcessCleanupUnknown);
     }
@@ -120,7 +118,6 @@ where
     Ok(durable_value)
 }
 
-/// Identity of one Tool attempt, fixed before its recovery lookup or dispatch.
 struct ToolAttempt {
     attempt_id: String,
     timestamp: String,
@@ -128,7 +125,6 @@ struct ToolAttempt {
     expected_policy_digest: String,
 }
 
-/// Derives the next Tool attempt identity and prepares its exact request.
 fn prepare_tool_attempt<P, A, S, T>(
     context: &mut ProductiveContext<'_, P, A, S, T>,
     invocation_spec: &ToolInvocation,
@@ -165,7 +161,6 @@ where
     Ok((attempt, prepared))
 }
 
-/// Replays the recorded start of a recovered Tool attempt, failing closed on any inconsistent record.
 fn start_recovered_tool<P, A, S, T>(
     context: &mut ProductiveContext<'_, P, A, S, T>,
     builder: &mut RuntimeEventBuilder,
@@ -223,7 +218,6 @@ where
             &mut context.recovery_failed,
             recovered_tool_terminal(recovered),
         )?;
-        // WHY: a cancellation during preflight committed no tool.started, so none is replayed.
         if stage == ExecutorAttemptStage::Started {
             emit_tool_started(
                 builder,
@@ -257,7 +251,6 @@ where
     Ok(())
 }
 
-/// Rebuilds the durable value of a recovered Tool attempt after validating its receipt and bounds.
 fn recovered_tool_result<P, A, S, T>(
     context: &mut ProductiveContext<'_, P, A, S, T>,
     prepared: &T::Prepared,
@@ -287,7 +280,6 @@ where
     Ok((value, recovered))
 }
 
-/// Dispatches a Tool that has no recovery record: intent first, then preflight, start and persistence.
 fn dispatch_fresh_tool<P, A, S, T>(
     context: &mut ProductiveContext<'_, P, A, S, T>,
     builder: &mut RuntimeEventBuilder,
@@ -347,7 +339,6 @@ where
     )
 }
 
-/// Validates a fresh Tool request before `Start`; every failure here is definitive.
 fn preflight_fresh_tool<P, A, S, T>(
     context: &mut ProductiveContext<'_, P, A, S, T>,
     tool: &core_script::ToolBlock,
@@ -368,7 +359,6 @@ where
         }
         Err(error) => Err(error),
     };
-    // WHY: every pre-Start exit is definitive because no Tool exists before `Start`.
     let waiting = match preflight {
         Ok(ProductiveToolPreflight::Ready(waiting)) => {
             crate::runtime::cancellation::ensure_productive_dispatch_allowed().map(|()| waiting)
@@ -412,8 +402,6 @@ where
     }
 }
 
-/// Starts a preflighted Tool and returns its enforcement and outcome; failures before a completed
-/// outcome are recorded as cancelled or uncertain.
 fn start_fresh_tool<P, A, S, T>(
     context: &mut ProductiveContext<'_, P, A, S, T>,
     builder: &mut RuntimeEventBuilder,
@@ -506,7 +494,6 @@ where
     }
 }
 
-/// Persists a finished Tool's objects and terminal record, then returns its durable value and record.
 fn persist_tool_outcome<P, A, S, T>(
     context: &mut ProductiveContext<'_, P, A, S, T>,
     tool: &core_script::ToolBlock,
@@ -563,7 +550,6 @@ where
     Ok((durable.value, result))
 }
 
-/// Emits the Tool's terminal event, mapping a recovered terminal record to its event type.
 fn emit_tool_terminal<P, A, S, T>(
     context: &mut ProductiveContext<'_, P, A, S, T>,
     builder: &mut RuntimeEventBuilder,

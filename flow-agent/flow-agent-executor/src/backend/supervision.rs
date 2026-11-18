@@ -20,7 +20,6 @@ use std::{
 };
 
 pub(super) fn signal_child(child: &Child, signal: rustix::process::Signal) {
-    // Child remains unreaped while its PID is used, preventing PID reuse.
     if let Some(pid) = rustix::process::Pid::from_raw(child.id() as i32) {
         let _ = rustix::process::kill_process(pid, signal);
     }
@@ -48,8 +47,6 @@ pub(super) fn select_primary(
     candidate: PrimaryTrigger,
 ) -> bool {
     match (*primary, candidate) {
-        // A cap found while draining after root exit must not leave truncated
-        // output classified as that exit.
         (Some(_), PrimaryTrigger::CollectorFailed)
         | (Some(PrimaryTrigger::Exit), PrimaryTrigger::StdoutCap | PrimaryTrigger::StderrCap) => {
             *primary = Some(candidate);
@@ -81,7 +78,6 @@ pub(super) fn terminate_and_reap(child: &mut Child) -> ExitStatus {
 }
 
 fn fail_closed_unreaped_child() -> ! {
-    // No receipt may claim a reaped root when bounded supervision cannot prove it.
     std::process::exit(1)
 }
 
@@ -149,7 +145,6 @@ pub(super) fn run_bounded(
     let mut status_before_cleanup = None;
     let mut cleanup = None;
     loop {
-        // One bounded read per stream keeps cancellation and deadlines responsive.
         let stdout_progress = stdout.poll(stdout_limit);
         let stderr_progress = stderr.poll(stderr_limit);
         if stdout.overflow {
@@ -185,10 +180,6 @@ pub(super) fn run_bounded(
             let mut controller = CleanupController::new(started);
             if status.is_none() {
                 if let Some(control) = cancellation.take() {
-                    // The inner supervisor owns the Tool root. Terminating the
-                    // Bubblewrap monitor would kill it before it can report reaping.
-                    // EOF requests cancellation without leaving an unread byte
-                    // that could reset the returning status after a fast Tool exit.
                     let _ = control.shutdown(std::net::Shutdown::Write);
                     controller = CleanupController::delegated(started);
                 } else {

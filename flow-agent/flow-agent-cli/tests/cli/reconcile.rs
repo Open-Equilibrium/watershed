@@ -2,7 +2,12 @@ use super::{
     flow_command,
     test_support::{empty_workspace, workspace_session_dir},
 };
-use std::{fs, io::Write, process::Stdio};
+use std::{
+    fs,
+    io::Write,
+    path::Path,
+    process::{Output, Stdio},
+};
 
 const TOOL_RESULT: &str = r#"{"type":"map","value":{"exit_code":{"type":"integer","value":"0"},"schema":{"type":"string","value":"flow-tool-result-v0"},"status":{"type":"string","value":"completed"},"stderr":{"type":"string","value":""},"stdout":{"type":"string","value":""}}}"#;
 
@@ -25,7 +30,7 @@ fn reconciliation_output() -> String {
     .expect("Tool reconciliation output canonicalizes")
 }
 
-fn seed_pending_tool_attempt(workspace: &std::path::Path) {
+fn seed_pending_tool_attempt(workspace: &Path) {
     let initialized = flow_command()
         .current_dir(workspace)
         .args(["sessions", "status"])
@@ -35,8 +40,7 @@ fn seed_pending_tool_attempt(workspace: &std::path::Path) {
     assert!(initialized.stdout.is_empty());
     assert!(initialized.stderr.is_empty());
 
-    let fixture =
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/reconcile-tool");
+    let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/reconcile-tool");
     let conversation = workspace_session_dir(workspace).join("review");
     let run = conversation.join("runs/review-1");
     fs::create_dir_all(run.join("objects")).expect("pending run directories are created");
@@ -49,36 +53,38 @@ fn seed_pending_tool_attempt(workspace: &std::path::Path) {
         .expect("pending Run Log fixture is copied");
 }
 
+fn reconcile_tool(workspace: &Path, result: &str, bytes: &[u8]) -> Output {
+    if result != "-" {
+        fs::write(workspace.join(result), bytes).expect("result fixture is written");
+    }
+    let mut child = flow_command()
+        .current_dir(workspace)
+        .args(["reconcile-tool", "review", "review-1", "--result", result])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("reconciliation command should start");
+    if result == "-" {
+        child
+            .stdin
+            .take()
+            .expect("stdin is piped")
+            .write_all(bytes)
+            .expect("result is written to stdin");
+    }
+    child
+        .wait_with_output()
+        .expect("reconciliation command should finish")
+}
+
 #[test]
 fn reconcile_tool_reads_canonical_evidence_from_file_or_stdin() {
     for source in ["result.json", "-"] {
         let workspace = empty_workspace();
         seed_pending_tool_attempt(&workspace);
         let result = reconciliation_output();
-        fs::write(workspace.join("result.json"), &result).expect("result fixture is written");
-        let mut command = flow_command();
-        command
-            .current_dir(&workspace)
-            .args(["reconcile-tool", "review", "review-1", "--result", source])
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
-        if source == "-" {
-            command.stdin(Stdio::piped());
-        }
-        let mut child = command
-            .spawn()
-            .expect("reconciliation command should start");
-        if source == "-" {
-            child
-                .stdin
-                .take()
-                .expect("stdin is piped")
-                .write_all(result.as_bytes())
-                .expect("result is written to stdin");
-        }
-        let output = child
-            .wait_with_output()
-            .expect("reconciliation command should finish");
+        let output = reconcile_tool(&workspace, source, result.as_bytes());
 
         assert!(
             output.status.success(),
@@ -136,32 +142,7 @@ fn reconcile_tool_rejects_invalid_or_oversized_evidence_before_runtime_mutation(
         ("result.bin", oversized.as_slice(), "exceeds max", 65),
     ] {
         let workspace = empty_workspace();
-        if result != "-" {
-            fs::write(workspace.join(result), source).expect("invalid result file is written");
-        }
-        let mut command = flow_command();
-        command
-            .current_dir(&workspace)
-            .args(["reconcile-tool", "review", "review-1", "--result", result])
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
-        if result == "-" {
-            command.stdin(Stdio::piped());
-        }
-        let mut child = command
-            .spawn()
-            .expect("reconciliation command should start");
-        if result == "-" {
-            child
-                .stdin
-                .take()
-                .expect("stdin is piped")
-                .write_all(source)
-                .expect("invalid result is written to stdin");
-        }
-        let output = child
-            .wait_with_output()
-            .expect("reconciliation command should finish");
+        let output = reconcile_tool(&workspace, result, source);
 
         assert_eq!(output.status.code(), Some(exit_code), "source {result}");
         assert!(output.stdout.is_empty(), "source {result}");

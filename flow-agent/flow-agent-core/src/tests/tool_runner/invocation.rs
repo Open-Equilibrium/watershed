@@ -49,6 +49,18 @@ fn parameter_map(
     )
 }
 
+fn text(value: &str) -> core_script::FlowValue {
+    core_script::FlowValue::String(value.to_owned())
+}
+
+fn integer(value: &str) -> core_script::FlowValue {
+    core_script::FlowValue::Integer(value.to_owned())
+}
+
+fn boolean(value: bool) -> core_script::FlowValue {
+    core_script::FlowValue::Boolean(value)
+}
+
 #[test]
 fn tool_parameters_are_typed_complete_and_render_in_canonical_name_order() {
     let mut count = parameter("--count", core_script::ParameterValueType::Integer, true);
@@ -64,13 +76,10 @@ fn tool_parameters_are_typed_complete_and_render_in_canonical_name_order() {
     let dry_run = parameter("--dry-run", core_script::ParameterValueType::None, false);
     let tool = predefined_tool(vec![mode, path, dry_run, count]);
     let values = parameter_map([
-        (
-            "--path",
-            core_script::FlowValue::String("src/lib.rs".to_owned()),
-        ),
-        ("--mode", core_script::FlowValue::String("safe".to_owned())),
+        ("--path", text("src/lib.rs")),
+        ("--mode", text("safe")),
         ("--dry-run", core_script::FlowValue::Boolean(true)),
-        ("--count", core_script::FlowValue::Integer("3".to_owned())),
+        ("--count", integer("3")),
     ]);
 
     let invocation =
@@ -91,40 +100,22 @@ fn tool_parameters_are_typed_complete_and_render_in_canonical_name_order() {
     );
 
     for invalid in [
+        parameter_map([("--mode", text("safe")), ("--path", text("src/lib.rs"))]),
         parameter_map([
-            ("--mode", core_script::FlowValue::String("safe".to_owned())),
-            (
-                "--path",
-                core_script::FlowValue::String("src/lib.rs".to_owned()),
-            ),
+            ("--count", integer("0")),
+            ("--mode", text("safe")),
+            ("--path", text("src/lib.rs")),
         ]),
         parameter_map([
-            ("--count", core_script::FlowValue::Integer("0".to_owned())),
-            ("--mode", core_script::FlowValue::String("safe".to_owned())),
-            (
-                "--path",
-                core_script::FlowValue::String("src/lib.rs".to_owned()),
-            ),
+            ("--count", integer("3")),
+            ("--mode", text("unsafe")),
+            ("--path", text("src/lib.rs")),
         ]),
         parameter_map([
-            ("--count", core_script::FlowValue::Integer("3".to_owned())),
-            (
-                "--mode",
-                core_script::FlowValue::String("unsafe".to_owned()),
-            ),
-            (
-                "--path",
-                core_script::FlowValue::String("src/lib.rs".to_owned()),
-            ),
-        ]),
-        parameter_map([
-            ("--count", core_script::FlowValue::Integer("3".to_owned())),
-            ("--extra", core_script::FlowValue::String("x".to_owned())),
-            ("--mode", core_script::FlowValue::String("safe".to_owned())),
-            (
-                "--path",
-                core_script::FlowValue::String("src/lib.rs".to_owned()),
-            ),
+            ("--count", integer("3")),
+            ("--extra", text("x")),
+            ("--mode", text("safe")),
+            ("--path", text("src/lib.rs")),
         ]),
     ] {
         assert!(build_tool_invocation(&tool, &invalid).is_err());
@@ -142,57 +133,29 @@ fn tool_parameter_values_fail_closed_at_each_typed_boundary() {
     );
     let flag = parameter("--flag", core_script::ParameterValueType::None, true);
     let tool = predefined_tool(vec![label, path, flag]);
+    let request = |label: core_script::FlowValue, path: &str, flag: core_script::FlowValue| {
+        parameter_map([("--label", label), ("--path", text(path)), ("--flag", flag)])
+    };
 
     for (name, value, expected) in [
         (
             "path escape",
-            parameter_map([
-                ("--label", core_script::FlowValue::String("safe".to_owned())),
-                (
-                    "--path",
-                    core_script::FlowValue::String("../secret".to_owned()),
-                ),
-                ("--flag", core_script::FlowValue::Boolean(true)),
-            ]),
+            request(text("safe"), "../secret", boolean(true)),
             "must stay within the workspace",
         ),
         (
             "wrong typed value",
-            parameter_map([
-                ("--label", core_script::FlowValue::Boolean(true)),
-                (
-                    "--path",
-                    core_script::FlowValue::String("src/lib.rs".to_owned()),
-                ),
-                ("--flag", core_script::FlowValue::Boolean(true)),
-            ]),
+            request(boolean(true), "src/lib.rs", boolean(true)),
             "wrong typed value",
         ),
         (
             "false flag",
-            parameter_map([
-                ("--label", core_script::FlowValue::String("safe".to_owned())),
-                (
-                    "--path",
-                    core_script::FlowValue::String("src/lib.rs".to_owned()),
-                ),
-                ("--flag", core_script::FlowValue::Boolean(false)),
-            ]),
+            request(text("safe"), "src/lib.rs", boolean(false)),
             "wrong typed value",
         ),
         (
             "text too long",
-            parameter_map([
-                (
-                    "--label",
-                    core_script::FlowValue::String("longer".to_owned()),
-                ),
-                (
-                    "--path",
-                    core_script::FlowValue::String("src/lib.rs".to_owned()),
-                ),
-                ("--flag", core_script::FlowValue::Boolean(true)),
-            ]),
+            request(text("longer"), "src/lib.rs", boolean(true)),
             "exceeds its maximum length",
         ),
     ] {
@@ -287,17 +250,11 @@ fn parameter_patterns_match_the_complete_value() {
     label.max_length = Some(16);
     let tool = predefined_tool(vec![label]);
 
-    let valid = parameter_map([(
-        "--label",
-        core_script::FlowValue::String("lowercase".to_owned()),
-    )]);
-    assert!(build_tool_invocation(&tool, &valid).is_ok());
+    assert!(build_tool_invocation(&tool, &parameter_map([("--label", text("lowercase"))])).is_ok());
 
     for value in ["lower-case", "prefix123", "123suffix"] {
-        let invalid =
-            parameter_map([("--label", core_script::FlowValue::String(value.to_owned()))]);
         assert!(matches!(
-            build_tool_invocation(&tool, &invalid),
+            build_tool_invocation(&tool, &parameter_map([("--label", text(value))])),
             Err(ToolRunnerError::InvalidParameter(_))
         ));
     }
@@ -310,18 +267,6 @@ fn predefined_commands_have_only_the_approved_productive_mappings() {
     let echo = build_tool_invocation(&predefined_tool(Vec::new()), &parameters)
         .expect("agent-echo is productive");
     assert_eq!(echo.executable, "/bin/echo");
-
-    let mut read = predefined_tool(Vec::new());
-    read.command = core_script::ToolCommand::Predefined {
-        command_id: "agent-read".to_owned(),
-        argv: Vec::new(),
-    };
-    assert_eq!(
-        build_tool_invocation(&read, &parameters)
-            .expect("agent-read is productive")
-            .executable,
-        "/bin/cat"
-    );
 
     let mut unsupported = predefined_tool(Vec::new());
     unsupported.command = core_script::ToolCommand::Predefined {
@@ -348,10 +293,7 @@ fn agent_read_adapts_the_file_parameter_to_a_cat_operand() {
         command_id: "agent-read".to_owned(),
         argv: Vec::new(),
     };
-    let parameters = parameter_map([(
-        "--file",
-        core_script::FlowValue::String("notes/review.txt".to_owned()),
-    )]);
+    let parameters = parameter_map([("--file", text("notes/review.txt"))]);
 
     let invocation = build_tool_invocation(&read, &parameters)
         .expect("the checked-in agent-read contract builds an invocation");

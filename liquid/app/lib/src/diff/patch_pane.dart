@@ -10,7 +10,6 @@ import 'diff_lines.dart';
 import 'diff_model.dart';
 import 'diff_settings.dart';
 
-/// The shown file's changes, under the turn header with the whitespace and layout switches.
 class PatchPane extends StatelessWidget {
   const PatchPane({
     super.key,
@@ -25,15 +24,12 @@ class PatchPane extends StatelessWidget {
     required this.onWhitespace,
   });
 
-  /// The turn menu and what the shown turns are.
   final Widget? header;
   final BridgeFileChange? change;
   final List<DiffLine> lines;
 
-  /// The shown lines likely widest.
   final List<String> widest;
 
-  /// Why the file shows no lines.
   final String? note;
   final DiffSettings settings;
   final ScrollController scroll;
@@ -65,11 +61,8 @@ class PatchPane extends StatelessWidget {
     );
   }
 
-  /// The width from which the turn header and the switches fit on one line.
   static const double _oneLineWidth = 560;
 
-  /// The turn header with the whitespace and layout switches beside it, or below it where they
-  /// do not fit.
   Widget _toolbar() => LayoutBuilder(
     builder: (context, constraints) {
       final switches = [
@@ -116,7 +109,6 @@ class PatchPane extends StatelessWidget {
     },
   );
 
-  /// The shown file's path, above its lines.
   Widget _fileName(BuildContext context, String path) => Container(
     height: 36,
     padding: const EdgeInsets.symmetric(horizontal: WsMetrics.space4),
@@ -130,7 +122,6 @@ class PatchPane extends StatelessWidget {
     child: Text(path, style: monoStyle(context)),
   );
 
-  /// The lines in their frame, or why the file shows none.
   Widget _body(BuildContext context) {
     final note = this.note;
     return DecoratedBox(
@@ -140,7 +131,6 @@ class PatchPane extends StatelessWidget {
           bottom: Radius.circular(WsMetrics.radiusLg),
         ),
       ),
-      // Long lines scroll sideways together, so no change is out of reach.
       child: note != null
           ? Center(
               child: Text(note, style: Theme.of(context).textTheme.bodySmall),
@@ -149,13 +139,10 @@ class PatchPane extends StatelessWidget {
     );
   }
 
-  /// The lines, unified or split, as wide as the widest of them.
   Widget _lineList(BuildContext context, BoxConstraints constraints) {
-    // As the rows draw it: the theme's text style, such as its letter spacing, under the mono one.
     final style = DefaultTextStyle.of(context).style.merge(monoStyle(context));
     final scaler = MediaQuery.textScalerOf(context);
     final split = settings.layout == DiffLayout.split;
-    // Split shows each side as wide as the unified view's code.
     final code =
         widest.fold(
           0.0,
@@ -187,7 +174,6 @@ class PatchPane extends StatelessWidget {
   }
 }
 
-/// A switch shown as a button that stays pressed while on.
 class _Toggle extends StatelessWidget {
   const _Toggle({required this.label, required this.on, required this.onTap});
 
@@ -198,7 +184,6 @@ class _Toggle extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final ws = context.ws;
-    // Its state is told to assistive technology, not only drawn.
     return Semantics(
       toggled: on,
       child: Material(

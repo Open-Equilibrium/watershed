@@ -3,13 +3,11 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 
 import '../controls.dart';
-import '../rust/api/session.dart';
 import '../session/session_state.dart';
 import '../theme/icons.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
 
-/// One item of a row's menu.
 class RowAction {
   const RowAction(
     this.label,
@@ -17,28 +15,24 @@ class RowAction {
     this.danger = false,
     this.enabled = true,
     this.shortcut,
+    this.disabledReason,
   });
 
   final String label;
   final VoidCallback onSelected;
   final bool danger;
 
-  /// Whether the item can be chosen; a disabled item stays listed.
   final bool enabled;
   final String? shortcut;
+
+  final String? disabledReason;
 }
 
-/// A row whose menu opens on right-click or from the "···" that shows inside the row while the
-/// pointer is over it or the keyboard is on the button, as T3 Code's thread list and Notion's
-/// pages do.
 class RowMenu extends StatefulWidget {
   const RowMenu({super.key, required this.actions, required this.builder});
 
-  /// The menu's items, groups split by `null`.
   final List<RowAction?> actions;
 
-  /// Lays out the row. `menu` is the "···", which the row places at its right end inside its
-  /// highlight; `shown` says whether it is seen now, for a row that gives it another's place.
   final Widget Function(BuildContext context, Widget menu, bool shown) builder;
 
   @override
@@ -68,30 +62,33 @@ class _RowMenuState extends State<RowMenu> {
               value: action,
               enabled: action.enabled,
               height: 32,
-              child: Row(
-                children: [
-                  Flexible(
-                    child: Text(
-                      action.label,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        color: action.danger ? ws.danger : ws.text,
+              child: _withReason(
+                action,
+                Row(
+                  children: [
+                    Flexible(
+                      child: Text(
+                        action.label,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: action.danger ? ws.danger : ws.text,
+                        ),
                       ),
                     ),
-                  ),
-                  if (action.shortcut case final keys?
-                      when keys.isNotEmpty) ...[
-                    const SizedBox(width: WsMetrics.space5),
-                    Text(
-                      keys,
-                      style: TextStyle(
-                        color: ws.textFaint,
-                        fontSize: WsMetrics.fsSmall,
+                    if (action.shortcut case final keys?
+                        when keys.isNotEmpty) ...[
+                      const SizedBox(width: WsMetrics.space5),
+                      Text(
+                        keys,
+                        style: TextStyle(
+                          color: ws.textFaint,
+                          fontSize: WsMetrics.fsSmall,
+                        ),
                       ),
-                    ),
+                    ],
                   ],
-                ],
+                ),
               ),
             ),
       ],
@@ -112,7 +109,6 @@ class _RowMenuState extends State<RowMenu> {
     );
   }
 
-  /// The "···" button: always there for the keyboard and screen readers, seen while `shown`.
   Widget _menu(bool shown) => Opacity(
     opacity: shown ? 1 : 0,
     alwaysIncludeSemantics: true,
@@ -145,14 +141,12 @@ class _RowMenuState extends State<RowMenu> {
   );
 }
 
-/// Asks before deleting `thread`, as T3 Code's delete does. When it is the only thread in its
-/// worktree, T3 then asks whether the worktree goes too; Cancel keeps the worktree and still
-/// deletes the thread.
 Future<void> confirmDeleteSession(
   BuildContext context,
   SessionState state,
-  BridgeThreadSummary thread,
+  HostThread listed,
 ) async {
+  final thread = listed.thread;
   final confirmed = await showDialog<bool>(
     context: context,
     builder: (context) => DangerDialog(
@@ -171,7 +165,9 @@ Future<void> confirmDeleteSession(
   var deleteWorktree = false;
   var only = false;
   try {
-    only = worktree != null && await state.onlySessionInWorktree(thread.id);
+    only =
+        worktree != null &&
+        await state.onlySessionInWorktree(thread.id, address: listed.address);
   } on Object catch (error) {
     state.notify(NoticeLevel.error, 'Could not delete the session: $error');
     return;
@@ -194,11 +190,13 @@ Future<void> confirmDeleteSession(
         ) ??
         false;
   }
-  await state.delete(thread.id, worktree: deleteWorktree);
+  await state.delete(
+    thread.id,
+    worktree: deleteWorktree,
+    address: listed.address,
+  );
 }
 
-/// Writes the open session's record into Downloads and shows the new folder in the system's file
-/// manager; when nothing was written, nothing is shown.
 Future<void> exportSessionRecord(SessionState state) async {
   final folder = await state.exportRecord(
     host: Platform.localHostname,
@@ -207,23 +205,18 @@ Future<void> exportSessionRecord(SessionState state) async {
   if (folder != null) await openInFileManager(state, folder);
 }
 
-/// The local date as `YYYY-MM-DD`, which names a record's folder.
 String _localDay(DateTime now) =>
     '${now.year.toString().padLeft(4, '0')}-'
     '${now.month.toString().padLeft(2, '0')}-'
     '${now.day.toString().padLeft(2, '0')}';
 
-/// Starts the system's opener, `open` on macOS and `xdg-open` elsewhere. Tests replace it.
 @visibleForTesting
 Future<ProcessResult> Function(String program, List<String> arguments)
 runOpener = Process.run;
 
-/// Shows the folder at `path` in the system's file manager; a failure is reported.
 Future<void> openInFileManager(SessionState state, String path) =>
     _openWithSystem(state, path);
 
-/// Opens a page in the system's browser: an HTTPS page, or a server on this computer, which the
-/// session card's servers are; a failure is reported.
 Future<void> openInBrowser(SessionState state, String url) async {
   if (!url.startsWith('https://') && !_isLoopbackHttp(url)) {
     state.notify(NoticeLevel.error, 'Could not open $url: not an HTTPS page.');
@@ -232,7 +225,6 @@ Future<void> openInBrowser(SessionState state, String url) async {
   await _openWithSystem(state, url);
 }
 
-/// Whether `url` is plain HTTP to this computer.
 bool _isLoopbackHttp(String url) {
   final uri = Uri.tryParse(url);
   return uri != null &&
@@ -240,7 +232,6 @@ bool _isLoopbackHttp(String url) {
       const {'localhost', '127.0.0.1', '::1'}.contains(uri.host);
 }
 
-/// Opens `target` with the system's default application; a failure is reported.
 Future<void> _openWithSystem(SessionState state, String target) async {
   try {
     final result = await runOpener(Platform.isMacOS ? 'open' : 'xdg-open', [
@@ -255,4 +246,11 @@ Future<void> _openWithSystem(SessionState state, String target) async {
   } on ProcessException catch (error) {
     state.notify(NoticeLevel.error, 'Could not open $target: ${error.message}');
   }
+}
+
+Widget _withReason(RowAction action, Widget child) {
+  final reason = action.disabledReason;
+  return reason == null || action.enabled
+      ? child
+      : Tooltip(message: reason, child: child);
 }

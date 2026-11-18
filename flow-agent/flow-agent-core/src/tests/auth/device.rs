@@ -1,10 +1,10 @@
+use super::credential_record;
 use crate::runtime::{
     auth::{
         device_login_remaining, run_device_login_with_components,
         run_device_login_with_deadlines_and_clock,
     },
     deadlines::DEVICE_POLL_OVERALL_DEADLINE,
-    oauth_credential::CredentialRecord,
     types::RuntimeError,
 };
 use std::{cell::Cell, collections::VecDeque, time::Duration};
@@ -36,14 +36,7 @@ fn device_login_honors_pending_and_slow_down_before_exchange() {
             assert_eq!(code, "fixture-code");
             assert_eq!(verifier, "fixture-verifier");
             assert_eq!(redirect, "https://auth.openai.com/deviceauth/callback");
-            Ok(CredentialRecord {
-                credential_type: "oauth".to_owned(),
-                access: "access".to_owned(),
-                refresh: "refresh".to_owned(),
-                expires: 84,
-                account_id: "account".to_owned(),
-                is_fedramp: false,
-            })
+            Ok(credential_record("access", "refresh", 84, "account"))
         },
         |duration| sleeps.push(duration),
     )
@@ -101,7 +94,7 @@ fn device_poll_overall_deadline() {
                 1 => {
                     assert_eq!(deadlines.overall, Duration::from_secs(60));
                     elapsed.set(DEVICE_POLL_OVERALL_DEADLINE - Duration::from_secs(5));
-                    Ok(None) // A provider pending status carries no poll body.
+                    Ok(None)
                 }
                 2 => {
                     assert_eq!(deadlines.overall, Duration::from_secs(4));

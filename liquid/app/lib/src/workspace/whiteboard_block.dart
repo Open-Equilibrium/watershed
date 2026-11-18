@@ -15,15 +15,10 @@ import 'anchored_menu.dart';
 import 'page_views.dart';
 import 'workspace_state.dart';
 
-/// A Whiteboard's frame on the Page.
 const whiteboardHeight = 360.0;
 
-/// An annotated PDF's frame on the Page (ADR-0307).
 const documentHeight = 560.0;
 
-/// A Whiteboard Block on its Page (ADR-0306): a frame of fixed height whose canvas has no
-/// edges. A click focuses it, and the tools draw on it in place; hovering shows full screen
-/// and ⋯ with Delete. It follows only its own Block (client architecture rule 6).
 class WhiteboardBlock extends StatelessWidget {
   const WhiteboardBlock({super.key, required this.views, required this.view});
 
@@ -39,9 +34,6 @@ class WhiteboardBlock extends StatelessWidget {
   );
 }
 
-/// A drawing's frame on the Page: a Whiteboard's, or an annotated PDF's or image's
-/// (ADR-0306, ADR-0307). A click focuses it and the tools draw on it in place; hovering
-/// shows the bar, with full screen, `buttons` and ⋯ with Delete.
 class DrawingFrame extends StatefulWidget {
   const DrawingFrame({
     super.key,
@@ -57,18 +49,13 @@ class DrawingFrame extends StatefulWidget {
   final PageViews views;
   final BridgeView view;
 
-  /// What the frame's keys are named after, such as `whiteboard`.
   final String name;
   final double height;
 
-  /// Buttons the bar shows after full screen, such as Save as….
   final List<Widget> buttons;
 
-  /// Whether the frame has its border and canvas, as a Whiteboard's and a PDF's do; an
-  /// image's ink lies right on it.
   final bool framed;
 
-  /// Whether the frame shows its own bar; a Media Block's image keeps its own.
   final bool bar;
 
   @override
@@ -83,7 +70,6 @@ class _DrawingFrameState extends State<DrawingFrame> {
   final _frame = GlobalKey(debugLabel: 'Drawing frame');
   var _hovered = false;
 
-  /// The frame's size once laid out; none before.
   Size _size() => switch (_frame.currentContext?.findRenderObject()) {
     final RenderBox box when box.hasSize => box.size,
     _ => Size.zero,
@@ -99,7 +85,6 @@ class _DrawingFrameState extends State<DrawingFrame> {
     WidgetsBinding.instance.addPostFrameCallback((_) => _takeFocus());
   }
 
-  /// The tools under an image, shown while it is focused.
   final _below = OverlayPortalController();
 
   void _changed() {
@@ -110,7 +95,6 @@ class _DrawingFrameState extends State<DrawingFrame> {
     setState(() {});
   }
 
-  /// A new Whiteboard starts focused, with the pen.
   void _takeFocus() {
     if (!mounted || widget.views.focusBoard.value != widget.view.id) return;
     widget.views.focusBoard.value = null;
@@ -118,7 +102,6 @@ class _DrawingFrameState extends State<DrawingFrame> {
     _focus.requestFocus();
   }
 
-  /// Reads the ink of the pages in view and those next to them.
   void _followPages() {
     if (!mounted || !_board.paged) return;
     followPages(_board, _size());
@@ -231,7 +214,6 @@ class _DrawingFrameState extends State<DrawingFrame> {
       ),
     );
     if (widget.framed) return frame;
-    // An image's tools hang below it, where they do not cover it, and count as inside it.
     return OverlayPortal.overlayChildLayoutBuilder(
       controller: _below,
       overlayChildBuilder: (context, info) {
@@ -320,7 +302,6 @@ class _DrawingFrameState extends State<DrawingFrame> {
   }
 }
 
-/// One of a drawing frame's bar buttons, with its label as a tooltip or beside its icon.
 class BarButton extends StatelessWidget {
   const BarButton({
     super.key,
@@ -370,9 +351,6 @@ class BarButton extends StatelessWidget {
   }
 }
 
-/// The ink of the pages in a view of `size` and of those below them, so scrolling finds it
-/// read (client architecture rule 8). The read starts at the first page in view, as it
-/// keeps whole pages from its first within a budget, so a full page above cannot hide them.
 void followPages(BoardController board, Size size) {
   final view = Rect.fromLTWH(
     board.origin.dx,
@@ -388,13 +366,11 @@ void followPages(BoardController board, Size size) {
   board.showPages(shown.first, shown.last + 3 - shown.first);
 }
 
-/// Where a document's view is: "3 / 12".
 class PageCounter extends StatelessWidget {
   const PageCounter({super.key, required this.board, required this.size});
 
   final BoardController board;
 
-  /// The view's size, once laid out.
   final Size Function() size;
 
   @override
@@ -423,9 +399,6 @@ class PageCounter extends StatelessWidget {
   }
 }
 
-/// A drawing full screen over the Page's area, at the same place and zoom: a Whiteboard's,
-/// where Fit shows everything drawn, or an annotated document's, where Fit width fits the
-/// page in view and ↑↓ move by a page; esc or Done returns to the Page (ADR-0306, ADR-0307).
 class DrawingFullScreen extends StatefulWidget {
   const DrawingFullScreen({super.key, required this.views, required this.view});
 
@@ -470,11 +443,9 @@ class _DrawingFullScreenState extends State<DrawingFullScreen> {
     _ => Size.zero,
   };
 
-  /// The page whose middle is nearest the view's.
   int _page() =>
       _board.pages?.pageNear(_board.toBoard(_size().center(Offset.zero))) ?? 0;
 
-  /// Shows page `index` at the view's width, from its top.
   void _show(int index) {
     final sheets = _board.sheets;
     if (sheets.isEmpty) return;
@@ -512,7 +483,6 @@ class _DrawingFullScreenState extends State<DrawingFullScreen> {
     final paged = _board.paged;
     return Focus(
       focusNode: _focus,
-      // esc ends a text box, then clears the selection, then leaves full screen.
       onKeyEvent: (_, event) => _key(event),
       child: ColoredBox(
         key: const Key('whiteboard full'),

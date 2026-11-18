@@ -15,7 +15,6 @@ use std::{
     time::{Duration, Instant},
 };
 
-/// Accepts one connection, failing instead of waiting forever when the client sends no more.
 fn accept_within(listener: &TcpListener, within: Duration) -> io::Result<TcpStream> {
     listener.set_nonblocking(true)?;
     let deadline = Instant::now() + within;
@@ -37,7 +36,6 @@ fn accept_within(listener: &TcpListener, within: Duration) -> io::Result<TcpStre
 
 const ENDPOINT_KEY: &str = "sk-endpoint-e2e-fixture";
 
-/// Reads one HTTP request and returns its head and its body.
 fn read_request(stream: &mut TcpStream) -> (String, String) {
     let mut buffer = Vec::new();
     let mut chunk = [0_u8; 4096];

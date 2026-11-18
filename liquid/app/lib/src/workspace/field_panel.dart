@@ -8,7 +8,6 @@ import '../theme/icons.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
 
-/// A field kind's name, as the field panel lists it and a field without a name takes it.
 String fieldKindName(BridgeFieldKind kind) => switch (kind) {
   BridgeFieldKind.text => 'Text',
   BridgeFieldKind.number => 'Number',
@@ -18,7 +17,6 @@ String fieldKindName(BridgeFieldKind kind) => switch (kind) {
   BridgeFieldKind.file => 'File',
 };
 
-/// A field kind's icon, in the header and the field panel.
 IconData fieldKindIcon(BridgeFieldKind kind) => switch (kind) {
   BridgeFieldKind.text => LucideIcons.text,
   BridgeFieldKind.number => LucideIcons.hash,
@@ -28,13 +26,9 @@ IconData fieldKindIcon(BridgeFieldKind kind) => switch (kind) {
   BridgeFieldKind.file => LucideIcons.paperclip,
 };
 
-/// The panel + in a Table's header opens: the
-/// field's name, then its kind. ↑↓ choose a kind, ⏎ or a click on a kind adds the field,
-/// esc closes the panel. A field without a name takes its kind's, as in Notion.
 class FieldPanel extends StatefulWidget {
   const FieldPanel({super.key, required this.onAdd, required this.onClose});
 
-  /// Adds a field named so, of that kind; a refused one completes with an error.
   final Future<void> Function(String name, BridgeFieldKind kind) onAdd;
   final VoidCallback onClose;
 
@@ -47,13 +41,11 @@ class _FieldPanelState extends State<FieldPanel> {
   late final _focus = FocusNode(debugLabel: 'Field name', onKeyEvent: _key);
   var _kind = BridgeFieldKind.text;
 
-  /// While a field is added, so a second ⏎ or click adds no second one.
   var _adding = false;
 
   @override
   void initState() {
     super.initState();
-    // The name takes the keys, also while another field had them.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _focus.requestFocus();
     });
@@ -72,8 +64,7 @@ class _FieldPanelState extends State<FieldPanel> {
     final name = _name.text.trim();
     try {
       await widget.onAdd(name.isEmpty ? fieldKindName(kind) : name, kind);
-    } on Object {
-      // The problem shows on the Page; the panel stays to try again.
+    } on Object catch (_) {
     } finally {
       _adding = false;
     }
@@ -83,7 +74,6 @@ class _FieldPanelState extends State<FieldPanel> {
     if (event is KeyUpEvent || !_name.value.composing.isCollapsed) {
       return KeyEventResult.ignored;
     }
-    // A held ⏎ adds one field.
     if (event is KeyRepeatEvent &&
         (event.logicalKey == LogicalKeyboardKey.enter ||
             event.logicalKey == LogicalKeyboardKey.numpadEnter)) {
@@ -137,7 +127,6 @@ class _FieldPanelState extends State<FieldPanel> {
               child: TextField(
                 controller: _name,
                 focusNode: _focus,
-                // The caret stays where Liquid puts it; desktop Flutter would select all on focus.
                 selectAllOnFocus: false,
                 style: TextStyle(fontSize: WsMetrics.fsUi, color: ws.text),
                 decoration: InputDecoration.collapsed(
@@ -200,8 +189,6 @@ class _FieldPanelState extends State<FieldPanel> {
   }
 }
 
-/// The field panel while `panel` shows it, under + (see [AddField]), which it follows
-/// out of view and back as fields are added; clicking it or + keeps it open.
 class FieldPanelPortal extends StatelessWidget {
   const FieldPanelPortal({
     super.key,
@@ -214,10 +201,8 @@ class FieldPanelPortal extends StatelessWidget {
   final OverlayPortalController panel;
   final LayerLink plus;
 
-  /// Adds a field of a name and kind.
   final Future<void> Function(String name, BridgeFieldKind kind) onAdd;
 
-  /// The Table, which holds +.
   final Widget child;
 
   @override
@@ -234,7 +219,6 @@ class FieldPanelPortal extends StatelessWidget {
         child: TapRegion(
           groupId: panel,
           onTapOutside: (_) => panel.hide(),
-          // A click in the panel beside its field keeps the field's keys.
           child: TextFieldTapRegion(
             child: FieldPanel(onAdd: onAdd, onClose: panel.hide),
           ),
@@ -245,7 +229,6 @@ class FieldPanelPortal extends StatelessWidget {
   );
 }
 
-/// + after the last field, which opens the field panel.
 class AddField extends StatelessWidget {
   const AddField({
     super.key,

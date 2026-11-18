@@ -8,8 +8,6 @@ import '../rust/api/workspace.dart';
 import 'page_views.dart';
 import 'workspace_state.dart';
 
-/// Text typed at a paragraph's start that formats it, as Notion's Markdown shortcuts do
-/// (approved Pages mockups).
 const markdownShortcuts = {
   '# ': BridgeTextStyle.heading1,
   '## ': BridgeTextStyle.heading2,
@@ -21,23 +19,15 @@ const markdownShortcuts = {
   '" ': BridgeTextStyle.quote,
 };
 
-/// What turns a Text Block into a Code Block when typed at its start, as in Notion
-/// (ADR-0302).
 const codeShortcut = '```';
 
-/// Whether `text`, typed into a Text Block with the caret at `caret`, just put
-/// [codeShortcut] at its start, where `before` had none.
 bool codeTyped(String text, String before, int caret) =>
     text.startsWith(codeShortcut) &&
     !before.startsWith(codeShortcut) &&
     caret == codeShortcut.length;
 
-/// What `---` typed alone in a Text Block becomes: a Section boundary (approved Section
-/// mockups).
 const sectionBreak = '---';
 
-/// The Markdown shortcut that `text`, typed into a paragraph with the caret at `caret`, just
-/// put at its start, where `before` had none, and the style it gives; null if none.
 (String, BridgeTextStyle)? shortcutTyped(
   String text,
   String before,
@@ -55,8 +45,6 @@ const sectionBreak = '---';
   return null;
 }
 
-/// Whether `text`, typed where `before` stood, now starts a Section: `---` alone, in any Text
-/// Block but the Page's first, where a boundary already exists (approved Section mockups).
 bool startsSection(
   String text,
   String before, {
@@ -64,8 +52,6 @@ bool startsSection(
   required bool boundary,
 }) => text == sectionBreak && before != sectionBreak && index > 0 && !boundary;
 
-/// The style of the Text Block ⏎ starts, as in Notion: lists and to-dos go on, the rest
-/// becomes a paragraph.
 BridgeTextStyle nextStyle(BridgeTextStyle style) => switch (style) {
   BridgeTextStyle.bullet => BridgeTextStyle.bullet,
   BridgeTextStyle.numbered => BridgeTextStyle.numbered,
@@ -73,8 +59,6 @@ BridgeTextStyle nextStyle(BridgeTextStyle style) => switch (style) {
   _ => BridgeTextStyle.paragraph,
 };
 
-/// Where `from` and `to` differ: the start, how much of `from` goes and what `to` puts
-/// there, never between the halves of a surrogate pair, which the core refuses.
 (int, int, String) difference(String from, String to) {
   final shorter = to.length < from.length ? to.length : from.length;
   var start = 0;
@@ -98,7 +82,6 @@ BridgeTextStyle nextStyle(BridgeTextStyle style) => switch (style) {
   );
 }
 
-/// The one edit that turns `from` into `to` in `block`.
 BridgeMutation textEdit(String page, String block, String from, String to) {
   final (at, delete, insert) = difference(from, to);
   return mutation(
@@ -111,26 +94,18 @@ BridgeMutation textEdit(String page, String block, String from, String to) {
   );
 }
 
-/// A field that a change of the Page's structure starts from.
 abstract interface class EditorSource {
-  /// The Text Block it shows, or none for an empty Page's first line.
   String? get block;
 
-  /// What the field holds now.
   TextEditingValue get typed;
 
-  /// Shows `text`, what its Text Block holds once the change is done, or for the first line
-  /// gives way to the new Text Block.
   void settle(String? text);
 
-  /// Collapses a selection to its end, as a queued key that replaces it is replayed.
   void collapse();
 
-  /// Whether it has the keyboard focus, which a person may move elsewhere meanwhile.
   bool get focused;
 }
 
-/// The Text Block that typing goes to, as the editor knows it.
 class EditorTarget {
   EditorTarget({
     required this.view,
@@ -151,14 +126,9 @@ class EditorTarget {
   BridgeTextStyle style;
   bool boundary;
 
-  /// Whether an empty Page's first line made it from `/` alone, which opens slash commands
-  /// filtered by what is typed after it.
   final bool slash;
 }
 
-/// A key waiting for the change before it, with what its field held when it was pressed.
-/// A key from another field also names that field, its Text Block and what the field before
-/// held last, all of which is written before the key.
 class _Queued {
   _Queued(this.typed, this.key, {this.source, this.target, this.left});
 
@@ -169,12 +139,6 @@ class _Queued {
   final TextEditingValue? left;
 }
 
-/// A Page's ordered input queue (ADR-0240). ⏎, ⌫ at a Text Block's start and the first
-/// character on an empty Page change the Page's structure, which the core answers within
-/// milliseconds; Flutter never waits for it. Until the Text Block holding the caret takes
-/// it, what is typed stays in the field it started from and ⏎, ⌫ and ⌦ wait in order;
-/// each then takes its turn, and the typing between them goes to the Text Block that held
-/// the caret then, also when the field is gone.
 class PageEditor {
   PageEditor(this.views);
 
@@ -190,31 +154,20 @@ class PageEditor {
   final _queue = Queue<_Queued>();
   Completer<void>? _wake;
 
-  /// Done once everything typed so far is written; quitting waits for it.
   Completer<void>? _writing;
 
-  /// What the editor knows each Text Block holds, from its own writes.
   final _known = <String, String>{};
 
-  /// Whether the Page's structure is changing.
   bool get busy => _source != null;
 
-  /// The View whose Text Block a change started from, with its position: the Page keeps that
-  /// Text Block, out of sight once its View is gone, until the change is done, so the keys
-  /// typed meanwhile still reach it.
   final lingering = ValueNotifier<(BridgeView, int)?>(null);
 
   bool isSource(EditorSource source) => identical(_source, source);
 
-  /// Every field the running change took input from; what they held belongs to the queue.
   final _owned = <EditorSource>{};
 
-  /// Whether `source`'s input belongs to the running change, also after typing moved on.
   bool owns(EditorSource source) => _owned.contains(source);
 
-  /// Starts `key` in `target`, whose field is `source`: ⏎ or ⌫ at its start. While a change
-  /// runs from another field, `source` becomes the field typing goes to, and its key waits
-  /// its turn behind what the field before held.
   void start(EditorSource source, EditorTarget target, LogicalKeyboardKey key) {
     if (busy) {
       final left = _latest;
@@ -244,14 +197,12 @@ class PageEditor {
         id: target.view,
         block: target.block,
         boundary: target.boundary,
-        // The queue changes only Text Blocks.
         kind: BridgeBlockKind.text,
       ),
       target.index,
     );
   }
 
-  /// Makes the first Text Block of an empty Page from what `source` holds.
   void first(EditorSource source) {
     _begin(source);
     _state.trackPage(_page, _drive(null, _latest));
@@ -266,10 +217,8 @@ class PageEditor {
     _write();
   }
 
-  /// Liquid quits: a composition still open is taken as it stands.
   void _finish() => _wakeUp();
 
-  /// Marks that input waits to be written, so quitting waits for it.
   void _write() {
     if (_writing != null) return;
     final writing = _writing = Completer<void>();
@@ -281,7 +230,6 @@ class PageEditor {
     _writing = null;
   }
 
-  /// What the source's field holds after a change there.
   void typed(EditorSource source) {
     if (!isSource(source)) return;
     _latest = source.typed;
@@ -289,7 +237,6 @@ class PageEditor {
     _wakeUp();
   }
 
-  /// The source's field is gone; what it held last still counts.
   void left(EditorSource source) {
     if (!isSource(source)) return;
     _gone = true;
@@ -303,8 +250,6 @@ class PageEditor {
 
   Future<void> _sleep() => (_wake ??= Completer()).future;
 
-  /// A key on the source's field while the structure changes: ⏎, ⌫ and ⌦ wait their turn,
-  /// the arrows do nothing, and the rest types into the field.
   KeyEventResult queue(EditorSource source, KeyEvent event) {
     final key = event.logicalKey;
     if (key == LogicalKeyboardKey.enter ||
@@ -355,7 +300,6 @@ class PageEditor {
         _known[target.block] = target.text;
         await _markdown(target, '');
       }
-      // Where the field's caret was when the target took over, and the target's caret then.
       var boundary = _caret(prev);
       var base = target!.caret;
       int place(int field) =>
@@ -363,7 +307,6 @@ class PageEditor {
       while (true) {
         final _Queued? next = _queue.isEmpty ? null : _queue.removeFirst();
         if (next?.left case final left?) {
-          // What the field before still held goes in before the other field's key.
           final before = target!.text;
           await _route(target, prev, left, boundary, base);
           await _markdown(target, before);
@@ -378,8 +321,6 @@ class PageEditor {
         if (next != null) {
           snapshot = next.typed;
         } else {
-          // A composition ends before its text moves, unless its field is gone or Liquid
-          // quits.
           while (!_gone && !_state.quitting && !_latest.composing.isCollapsed) {
             await _sleep();
           }
@@ -394,7 +335,6 @@ class PageEditor {
           base = target.caret;
         }
         if (next != null) {
-          // The key acts where the field's caret or selection was when it was pressed.
           final selection = snapshot.selection;
           final key = next.key;
           if (selection.isValid) {
@@ -417,8 +357,6 @@ class PageEditor {
         }
         if (_queue.isNotEmpty || _latest.text != prev.text) continue;
         _written();
-        // The field it started from shows its own Text Block's text before the caret moves,
-        // so a long one leaves the target in view.
         final block = source.block;
         if (!_gone && block != null && block != target.block) {
           source.settle(_known[block]);
@@ -434,12 +372,10 @@ class PageEditor {
         if (block == target.block && settled.focused) {
           views.moveCaret(_caretOf(target));
         }
-        // Each Text Block reads its text and style again, now that the queue let go.
         if (block != null) views.reread(block);
       }
       views.reread(target.block);
     } on Object {
-      // The problem shows on the Page; the stored text stays as the core has it.
       for (final settled in sources) {
         settled.settle(null);
       }
@@ -464,15 +400,11 @@ class PageEditor {
     slash: target.slash,
   );
 
-  /// Offers the caret to the target's Text Block. True once it took it or the Page closed;
-  /// false when more input came first, which then takes its turn.
   Future<bool> _handOver(EditorTarget target, TextEditingValue prev) async {
-    // A person who moved to another field meanwhile keeps the caret there.
     if (!_gone && !(_source?.focused ?? true)) return true;
     final offered = _caretOf(target);
     views.moveCaret(offered);
     if (views.closed) return true;
-    // A target never built, as when the Page scrolled far away, leaves the caret where it is.
     var expired = false;
     final timer = Timer(const Duration(seconds: 1), () {
       expired = true;
@@ -499,8 +431,6 @@ class PageEditor {
     }
   }
 
-  /// Carries what the field gained from `from` to `to` into `target`, at the place that
-  /// position `boundary` of the field stands for there, `base`.
   Future<void> _route(
     EditorTarget target,
     TextEditingValue from,
@@ -532,7 +462,6 @@ class PageEditor {
       ..caret = start;
   }
 
-  /// Runs `key` at the target's caret and returns where typing goes next.
   Future<EditorTarget> _perform(
     LogicalKeyboardKey key,
     EditorTarget target,
@@ -540,7 +469,6 @@ class PageEditor {
     if (key == LogicalKeyboardKey.backspace) return _backspace(target);
     if (key == LogicalKeyboardKey.delete) {
       if (target.caret >= target.text.length) return target;
-      // A whole character as a person sees it, as Flutter's own ⌦ deletes.
       final next = target.text.substring(target.caret).characters.first;
       return _replace(target, target.caret, target.caret + next.length, '');
     }
@@ -564,8 +492,6 @@ class PageEditor {
     return target..style = style;
   }
 
-  /// ⏎ ends the Text Block at the caret and starts the next, as in Notion; an empty list
-  /// item or to-do becomes a paragraph instead.
   Future<EditorTarget> _enter(EditorTarget target) async {
     if (target.text.isEmpty &&
         nextStyle(target.style) != BridgeTextStyle.paragraph) {
@@ -584,8 +510,6 @@ class PageEditor {
       ),
       [target.block],
     );
-    // At the start a new empty Text Block goes above, taking any boundary, and the text
-    // stays in its own.
     if (at == 0) {
       return target
         ..index += 1
@@ -606,12 +530,8 @@ class PageEditor {
     return created;
   }
 
-  /// ⌫ deletes the character before the caret; at a start it removes a divider above, then
-  /// the formatting, then joins the Text Block to the one above, as the approved Section
-  /// mockups and Notion do.
   Future<EditorTarget> _backspace(EditorTarget target) async {
     if (target.caret > 0) {
-      // A whole character as a person sees it, as Flutter's own ⌫ deletes.
       final last = target.text.substring(0, target.caret).characters.last;
       return _replace(target, target.caret - last.length, target.caret, '');
     }
@@ -632,7 +552,6 @@ class PageEditor {
     }
     await _state.settled;
     final above = await _above(target);
-    // Only Text Blocks join.
     if (above == null || above.kind != BridgeBlockKind.text) return target;
     final answer = await _state.read(
       query(BridgeQueryKind.text, page: _page, block: above.block),
@@ -660,10 +579,7 @@ class PageEditor {
     );
   }
 
-  /// The View above the target's, as the core orders them now; the Page's own copy may
-  /// not have caught up with the changes the queue just made.
   Future<BridgeView?> _above(EditorTarget target) async {
-    // Usually the target is still where the queue last put it.
     final near = await _state.read(
       query(
         BridgeQueryKind.views,
@@ -696,8 +612,6 @@ class PageEditor {
     }
   }
 
-  /// A Markdown shortcut just typed at a paragraph's start formats it, and `---` typed
-  /// alone starts a Section, as typing in a Text Block does; true if one applied.
   Future<bool> _markdown(EditorTarget target, String before) async {
     if (await _sectionBreak(target, before)) return true;
     final shortcut = shortcutTyped(
@@ -713,7 +627,6 @@ class PageEditor {
     return true;
   }
 
-  /// `---` typed alone starts a Section (see [startsSection]).
   Future<bool> _sectionBreak(EditorTarget target, String before) async {
     if (startsSection(
       target.text,

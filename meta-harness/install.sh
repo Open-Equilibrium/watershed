@@ -1,7 +1,4 @@
 #!/bin/sh
-# Installs Meta-Harness from an unpacked download: meta, the pinned T3 Code, the licenses and, unless
-# --no-service is given, the login service (ADR-0286, ADR-0296). A newer download installs over an
-# older one; each step replaces only the files of its own kind.
 set -eu
 
 fail() {
@@ -76,7 +73,6 @@ printf '%s\n' "$version" | grep -Eq '^[0-9]+[.][0-9]+[.][0-9]+([-][0-9A-Za-z.-]+
     || fail 'invalid bundle version'
 [ "$target" = "$platform" ] || fail "download is for $target, not $platform"
 
-# The T3 Code folder is named by T3's own version, which bundle-info does not carry.
 set -- "$bundle"/lib/meta-harness/t3-*-"$platform"
 [ "$#" -eq 1 ] && [ -d "$1" ] || fail "download lacks one T3 Code folder for $platform"
 t3_source=$1
@@ -104,7 +100,6 @@ cp -R "$t3_source" "$t3_stage"
 cp "$bundle/bin/meta" "$meta_stage"
 chmod 755 "$meta_stage"
 
-# The program is renamed over the old one, so a running meta keeps its file.
 rm -rf -- "$lib/$t3_name"
 mv -- "$t3_stage" "$lib/$t3_name"
 mv -f -- "$meta_stage" "$bin/meta"

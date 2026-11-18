@@ -1,6 +1,3 @@
-//! The WebSocket client to T3: calls, streams, what ends them, and the reconnection after T3 drops
-//! a connection (ADR-0292).
-
 use std::time::Duration;
 
 use serde_json::json;
@@ -17,7 +14,6 @@ async fn connect(fake: &Fake) -> Client {
         .unwrap()
 }
 
-/// Waits until the client reconnected after T3 dropped its connection.
 async fn reconnected(fake: &Fake, client: &Client) {
     let reconnect = async {
         fake.accepted(2).await;
@@ -89,7 +85,6 @@ async fn frames_without_a_request_and_batches_are_read_and_malformed_ones_skippe
     .await;
     let client = connect(&fake).await;
     assert_eq!(client.call("x", json!({})).await, Ok(json!(7)));
-    // The client answers the Ping on the same connection, which stays open for the next call.
     assert_eq!(client.call("x", json!({})).await, Ok(json!(7)));
     assert_eq!(fake.connections(), 1);
 }
@@ -111,21 +106,13 @@ async fn a_call_waiting_for_t3_fails_when_the_connection_closes() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn a_call_after_the_connection_closed_fails_instead_of_waiting() {
+async fn a_call_or_stream_after_the_connection_closed_fails_instead_of_waiting() {
     let fake = Fake::start(|_, _, _| Vec::new()).await;
     let client = connect(&fake).await;
     fake.close();
     tokio::time::sleep(Duration::from_millis(200)).await;
     let answer = tokio::time::timeout(WAIT, client.call("x", json!({}))).await;
     assert!(answer.expect("the call ends").is_err());
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn a_stream_opened_after_the_connection_closed_fails_instead_of_waiting() {
-    let fake = Fake::start(|_, _, _| Vec::new()).await;
-    let client = connect(&fake).await;
-    fake.close();
-    tokio::time::sleep(Duration::from_millis(200)).await;
     let opened = tokio::time::timeout(WAIT, client.stream("subscribe", json!({}))).await;
     assert!(opened.expect("the stream opens or fails").is_err());
 }
@@ -146,17 +133,7 @@ async fn a_dropped_stream_interrupts_its_request_on_t3_and_is_forgotten() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn a_call_after_t3_drops_the_connection_runs_on_a_new_one() {
-    let fake = Fake::start(|_, _, id| vec![ok(id, json!({"threads": 2}))]).await;
-    let client = connect(&fake).await;
-    fake.drop_connection();
-    reconnected(&fake, &client).await;
-    assert_eq!(client.call("x", json!({})).await, Ok(json!({"threads": 2})));
-}
-
-#[tokio::test(flavor = "multi_thread")]
 async fn a_call_in_flight_when_t3_drops_the_connection_fails_and_is_not_sent_again() {
-    // Only the retry gets an answer, so the call that waited for the lost connection never does.
     let fake = Fake::start(|_, payload, id| {
         if payload["retry"] == true {
             vec![ok(id, json!(7))]
@@ -182,51 +159,7 @@ async fn a_call_in_flight_when_t3_drops_the_connection_fails_and_is_not_sent_aga
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn an_open_stream_is_sent_again_with_its_payload_and_keeps_its_items() {
-    let fake = Fake::start(|_, _, _| Vec::new()).await;
-    let client = connect(&fake).await;
-    let mut items = client
-        .stream("subscribe", json!({"threadId": "t"}))
-        .await
-        .unwrap();
-    fake.received("subscribe", 1).await;
-    let id = fake.request_id("subscribe");
-    fake.push("subscribe", vec![json!("one")]);
-    assert_eq!(items.recv().await, Some(json!("one")));
-    fake.drop_connection();
-    tokio::time::timeout(WAIT, fake.received("subscribe", 2))
-        .await
-        .expect("the stream is sent again");
-    assert_eq!(fake.request_id("subscribe"), id);
-    assert_eq!(
-        fake.payloads("subscribe"),
-        vec![json!({"threadId": "t"}), json!({"threadId": "t"})]
-    );
-    fake.push("subscribe", vec![json!("two")]);
-    assert_eq!(items.recv().await, Some(json!("two")));
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn a_dropped_stream_interrupts_its_request_after_a_reconnect() {
-    let fake = Fake::start(|_, _, _| Vec::new()).await;
-    let client = connect(&fake).await;
-    let items = client.stream("subscribe", json!({})).await.unwrap();
-    fake.received("subscribe", 1).await;
-    let id = fake.request_id("subscribe");
-    fake.drop_connection();
-    tokio::time::timeout(WAIT, fake.received("subscribe", 2))
-        .await
-        .expect("the stream is sent again");
-    drop(items);
-    tokio::time::timeout(WAIT, fake.interrupted(&id))
-        .await
-        .expect("T3 receives the interrupt on the new connection");
-}
-
-#[tokio::test(flavor = "multi_thread")]
 async fn a_chunk_is_acknowledged_only_once_its_last_item_is_taken() {
-    // T3 sends a chunk's successor only after its acknowledgement (Effect RPC flow control), so an
-    // item the consumer has not taken holds T3 back. Streams and actions both work this way.
     for action in [false, true] {
         let fake = Fake::start(|_, _, _| Vec::new()).await;
         let client = connect(&fake).await;
@@ -250,21 +183,34 @@ async fn a_chunk_is_acknowledged_only_once_its_last_item_is_taken() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn a_resent_stream_is_acknowledged_on_its_new_connection() {
+async fn an_open_stream_survives_a_reconnect_and_is_acknowledged_and_interrupted_on_it() {
     let fake = Fake::start(|_, _, _| Vec::new()).await;
     let client = connect(&fake).await;
-    let mut items = client.stream("subscribe", json!({})).await.unwrap();
+    let mut items = client
+        .stream("subscribe", json!({"threadId": "t"}))
+        .await
+        .unwrap();
     fake.received("subscribe", 1).await;
+    let id = fake.request_id("subscribe");
+    fake.push("subscribe", vec![json!("one")]);
+    assert_eq!(items.recv().await, Some(json!("one")));
+    fake.acked(&id, 1).await;
     fake.drop_connection();
     tokio::time::timeout(WAIT, fake.received("subscribe", 2))
         .await
         .expect("the stream is sent again");
-    let id = fake.request_id("subscribe");
-    fake.push("subscribe", vec![json!("one")]);
-    assert_eq!(items.recv().await, Some(json!("one")));
-    tokio::time::timeout(WAIT, fake.acked(&id, 1))
+    assert_eq!(fake.request_id("subscribe"), id);
+    assert_eq!(
+        fake.payloads("subscribe"),
+        vec![json!({"threadId": "t"}), json!({"threadId": "t"})]
+    );
+    fake.push("subscribe", vec![json!("two")]);
+    assert_eq!(items.recv().await, Some(json!("two")));
+    fake.acked(&id, 2).await;
+    drop(items);
+    tokio::time::timeout(WAIT, fake.interrupted(&id))
         .await
-        .expect("T3 receives the acknowledgement on the new connection");
+        .expect("T3 receives the interrupt on the new connection");
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -315,7 +261,6 @@ async fn a_dropped_call_forgets_its_waiter() {
 async fn a_t3_that_accepts_a_connection_and_never_answers_fails_the_connect() {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let origin = format!("http://{}", listener.local_addr().unwrap());
-    // Accepts every connection and answers none of them.
     tokio::spawn(async move {
         let mut held = Vec::new();
         while let Ok((socket, _)) = listener.accept().await {

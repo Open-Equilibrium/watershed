@@ -1,4 +1,6 @@
-use super::super::helpers::{create_directory_alias, empty_workspace, remove_directory_alias};
+use super::super::helpers::{
+    create_directory_alias, empty_workspace, remove_directory_alias, workspace_session_dir,
+};
 use super::{
     create_review_run, file_tree_bytes, open_notified_review_writer,
     recovery_fixtures::{
@@ -33,8 +35,30 @@ use proto::{EventEnvelope, EventType};
 use std::{
     fs,
     io::{self, Seek, SeekFrom, Write},
+    path::{Path, PathBuf},
     time::Duration,
 };
+
+fn review_run(workspace: &Path) -> PathBuf {
+    workspace_session_dir(workspace).join("review/runs/review-1")
+}
+
+fn open_review_writer(workspace: &Path) -> ConversationEventWriter {
+    ConversationEventWriter::open(workspace, "review", "review-1", false)
+        .expect("conversation writer opens")
+}
+
+fn started_event(event_id: &str) -> EventEnvelope {
+    EventEnvelope::new(
+        event_id,
+        EventType::SessionStarted,
+        "review-1",
+        1,
+        "2026-08-16T12:00:00Z",
+        "flow-agent-cli",
+        serde_json::json!({}),
+    )
+}
 
 #[test]
 fn conversation_writer_reservation_stays_bound_to_its_open_run() {
@@ -42,8 +66,7 @@ fn conversation_writer_reservation_stays_bound_to_its_open_run() {
     let replacement = empty_workspace("conversation-writer-bound-run-replacement");
     create_review_run(&original);
     create_review_run(&replacement);
-    let replacement_run =
-        crate::tests::helpers::workspace_session_dir(&replacement).join("review/runs/review-1");
+    let replacement_run = review_run(&replacement);
     fs::remove_file(replacement_run.join("events.jsonl"))
         .expect("replacement event stream is removed");
     let replacement_before = file_tree_bytes(&replacement_run);
@@ -51,8 +74,7 @@ fn conversation_writer_reservation_stays_bound_to_its_open_run() {
     let alias = empty_workspace("conversation-writer-bound-run-alias");
     fs::remove_dir(&*alias).expect("workspace alias starts absent");
     create_directory_alias(&alias, &original);
-    let mut writer = ConversationEventWriter::open(&alias, "review", "review-1", false)
-        .expect("conversation writer opens through the alias");
+    let mut writer = open_review_writer(&alias);
 
     remove_directory_alias(&alias);
     create_directory_alias(&alias, &replacement);
@@ -74,25 +96,15 @@ fn conversation_writer_reservation_stays_bound_to_its_open_run() {
 fn conversation_writer_rejects_a_replaced_event_stream_without_mutating_its_target() {
     let workspace = empty_workspace("conversation-writer-replaced-event-stream");
     create_review_run(&workspace);
-    let mut writer = ConversationEventWriter::open(&workspace, "review", "review-1", false)
-        .expect("conversation writer opens");
-    let events = crate::tests::helpers::workspace_session_dir(&workspace)
-        .join("review/runs/review-1/events.jsonl");
+    let mut writer = open_review_writer(&workspace);
+    let events = review_run(&workspace).join("events.jsonl");
     let outside = workspace.join("outside-events.jsonl");
     let outside_before = b"outside target\n";
     fs::write(&outside, outside_before).expect("outside target writes");
     fs::remove_file(&events).expect("validated event stream is removed");
     fs::hard_link(&outside, &events).expect("event stream is replaced by an outside hard link");
 
-    let event = EventEnvelope::new(
-        "evt-001",
-        EventType::SessionStarted,
-        "review-1",
-        1,
-        "2026-08-16T12:00:00Z",
-        "flow-agent-cli",
-        serde_json::json!({}),
-    );
+    let event = started_event("evt-001");
     let canonical = event.canonical_jsonl().expect("event canonicalizes");
     writer
         .commit(&event, &canonical, None)
@@ -107,29 +119,11 @@ fn conversation_writer_rejects_a_replaced_event_stream_without_mutating_its_targ
 fn conversation_writer_rejects_jsonl_for_a_different_event_without_mutation() {
     let workspace = empty_workspace("conversation-writer-mismatched-jsonl");
     create_review_run(&workspace);
-    let run = crate::tests::helpers::workspace_session_dir(&workspace).join("review/runs/review-1");
+    let run = review_run(&workspace);
     let before = file_tree_bytes(&run);
-    let mut writer = ConversationEventWriter::open(&workspace, "review", "review-1", false)
-        .expect("conversation writer opens");
-    let event = EventEnvelope::new(
-        "evt-001",
-        EventType::SessionStarted,
-        "review-1",
-        1,
-        "2026-08-16T12:00:00Z",
-        "flow-agent-cli",
-        serde_json::json!({}),
-    );
-    let different_event = EventEnvelope::new(
-        "evt-002",
-        EventType::SessionStarted,
-        "review-1",
-        1,
-        "2026-08-16T12:00:00Z",
-        "flow-agent-cli",
-        serde_json::json!({}),
-    );
-    let different_jsonl = different_event
+    let mut writer = open_review_writer(&workspace);
+    let event = started_event("evt-001");
+    let different_jsonl = started_event("evt-002")
         .canonical_jsonl()
         .expect("different event canonicalizes");
 
@@ -149,10 +143,8 @@ fn conversation_writer_rejects_jsonl_for_a_different_event_without_mutation() {
 fn conversation_writer_rejects_an_out_of_band_append_between_commits() {
     let workspace = empty_workspace("conversation-writer-out-of-band-append");
     create_review_run(&workspace);
-    let events_path = crate::tests::helpers::workspace_session_dir(&workspace)
-        .join("review/runs/review-1/events.jsonl");
-    let mut writer = ConversationEventWriter::open(&workspace, "review", "review-1", false)
-        .expect("conversation writer opens");
+    let events_path = review_run(&workspace).join("events.jsonl");
+    let mut writer = open_review_writer(&workspace);
     let [first, second, _] = message_prefix_events();
     let first_canonical = first.canonical_jsonl().expect("first event canonicalizes");
     writer
@@ -181,11 +173,10 @@ fn conversation_writer_rejects_an_out_of_band_append_between_commits() {
 fn conversation_writer_rejects_an_out_of_band_segment_between_commits() {
     let workspace = empty_workspace("conversation-writer-out-of-band-segment");
     create_review_run(&workspace);
-    let run = crate::tests::helpers::workspace_session_dir(&workspace).join("review/runs/review-1");
+    let run = review_run(&workspace);
     let events_path = run.join("events.jsonl");
     let unexpected_segment = run.join("events.000002.jsonl");
-    let mut writer = ConversationEventWriter::open(&workspace, "review", "review-1", false)
-        .expect("conversation writer opens");
+    let mut writer = open_review_writer(&workspace);
     let [first, second, _] = message_prefix_events();
     let first_canonical = first.canonical_jsonl().expect("first event canonicalizes");
     writer
@@ -220,10 +211,8 @@ fn conversation_writer_rejects_an_out_of_band_segment_between_commits() {
 fn conversation_writer_finish_preserves_an_all_committed_batch_failure_and_final_sync_failure() {
     let workspace = empty_workspace("conversation-all-committed-batch-failure");
     create_review_run(&workspace);
-    let events_path = crate::tests::helpers::workspace_session_dir(&workspace)
-        .join("review/runs/review-1/events.jsonl");
-    let mut writer = ConversationEventWriter::open(&workspace, "review", "review-1", false)
-        .expect("conversation writer opens");
+    let events_path = review_run(&workspace).join("events.jsonl");
+    let mut writer = open_review_writer(&workspace);
     for event in message_prefix_events() {
         let canonical = event.canonical_jsonl().expect("prefix event canonicalizes");
         writer
@@ -261,10 +250,9 @@ fn conversation_writer_finish_preserves_an_all_committed_batch_failure_and_final
 fn shutdown_syncs_events_even_when_context_sync_fails() {
     let workspace = empty_workspace("conversation-writer-context-sync-failure");
     create_review_run(&workspace);
-    let session = crate::tests::helpers::workspace_session_dir(&workspace);
-    let run = session.join("review/runs/review-1");
-    let mut writer = ConversationEventWriter::open(&workspace, "review", "review-1", false)
-        .expect("conversation writer opens");
+    let session = workspace_session_dir(&workspace);
+    let run = review_run(&workspace);
+    let mut writer = open_review_writer(&workspace);
     start_power_loss_trace(&session, None);
     for event in message_prefix_events() {
         let canonical = event.canonical_jsonl().expect("prefix event canonicalizes");
@@ -306,7 +294,7 @@ fn shutdown_syncs_events_even_when_context_sync_fails() {
 fn conversation_writer_reservation_accepts_exact_event_capacity_and_rejects_one_beyond() {
     let workspace = empty_workspace("conversation-productive-reservation-limit");
     create_review_run(&workspace);
-    let run = crate::tests::helpers::workspace_session_dir(&workspace).join("review/runs/review-1");
+    let run = review_run(&workspace);
     let events = run.join("events.jsonl");
     let mut events = fs::OpenOptions::new()
         .write(true)
@@ -322,8 +310,7 @@ fn conversation_writer_reservation_accepts_exact_event_capacity_and_rejects_one_
         .write_all(b"\n")
         .expect("base event segment stays record-terminated");
     fill_event_segments_after_base(&run, MAX_SESSION_SEGMENT_BYTES - 1);
-    let mut writer = ConversationEventWriter::open(&workspace, "review", "review-1", false)
-        .expect("conversation writer opens");
+    let mut writer = open_review_writer(&workspace);
     let one_event_byte = ProductiveDispatchReservation {
         event_bytes: 1,
         ..ProductiveDispatchReservation::default()
@@ -406,8 +393,8 @@ fn productive_reservation_rejects_a_failed_shared_object_store() {
         bytes: b"safe".to_vec(),
     };
     fs::write(
-        crate::tests::helpers::workspace_session_dir(&workspace)
-            .join("review/runs/review-1/objects")
+        review_run(&workspace)
+            .join("objects")
             .join(&expected.digest),
         b"evil",
     )
@@ -450,7 +437,7 @@ fn assert_inventoried_object_sync_failure_is_retryable(
 ) {
     let workspace = empty_workspace(label);
     create_review_run(&workspace);
-    let run = crate::tests::helpers::workspace_session_dir(&workspace).join("review/runs/review-1");
+    let run = review_run(&workspace);
     let object_dir = run.join("objects");
     let checkpoint = context_checkpoint();
     let object = &checkpoint.objects[0];
@@ -458,8 +445,7 @@ fn assert_inventoried_object_sync_failure_is_retryable(
     fs::write(&object_path, &object.bytes).expect("crash-residue object writes");
     let mut prefix = message_prefix_events().to_vec();
     prefix.push(message_delta_event());
-    let mut initial = ConversationEventWriter::open(&workspace, "review", "review-1", false)
-        .expect("initial writer opens");
+    let mut initial = open_review_writer(&workspace);
     for event in &prefix {
         let canonical = event.canonical_jsonl().expect("prefix event canonicalizes");
         initial
@@ -591,7 +577,7 @@ fn inventoried_run_object_parent_sync_failure_is_retryable_before_reference() {
 fn conversation_writer_reservation_rejects_record_boundary_segment_exhaustion() {
     let workspace = empty_workspace("conversation-productive-reservation-segments");
     create_review_run(&workspace);
-    let run = crate::tests::helpers::workspace_session_dir(&workspace).join("review/runs/review-1");
+    let run = review_run(&workspace);
     for stem in ["events", "contexts"] {
         let limits = if stem == "events" {
             EVENT_STREAM_LIMITS
@@ -617,8 +603,7 @@ fn conversation_writer_reservation_rejects_record_boundary_segment_exhaustion() 
             file.set_len(bytes).expect("stream segment fills");
         }
     }
-    let mut writer = ConversationEventWriter::open(&workspace, "review", "review-1", false)
-        .expect("conversation writer opens");
+    let mut writer = open_review_writer(&workspace);
 
     writer
         .reserve_productive_dispatch(ProductiveDispatchReservation {

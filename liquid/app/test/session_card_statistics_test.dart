@@ -10,13 +10,13 @@ import 'package:liquid/src/rust/api/events.dart';
 import 'package:liquid/src/rust/api/thread.dart';
 import 'package:liquid/src/session/session_state.dart';
 import 'package:liquid/src/theme/theme.dart';
+import 'package:liquid/src/theme/tokens.g.dart';
 
 import 'card_harness.dart';
 import 'fake_backend.dart';
 
 const info = SessionInfo(project: 'acme-api');
 
-/// Holds its statistics until `gate` completes, so the rows can be seen waiting for them.
 class GatedStatistics extends FakeSession {
   final gate = Completer<void>();
 
@@ -27,7 +27,6 @@ class GatedStatistics extends FakeSession {
   }
 }
 
-/// One turn of 14m 32s with 86 tool calls, 6 of them failed, on a model that used 1.85 M tokens.
 BridgeStatistics sessionStatistics({int? toolMs = 261000}) => BridgeStatistics(
   models: [
     BridgeModelUsage(
@@ -71,7 +70,6 @@ BridgeStatistics sessionStatistics({int? toolMs = 261000}) => BridgeStatistics(
   ],
 );
 
-/// The card with its Context row turned on, which T3 Code leaves off by default.
 const contextShown = SessionCardSettings(shown: {CardItem.context});
 
 FakeSession sessionWith({
@@ -87,7 +85,6 @@ FakeSession sessionWith({
 
 void main() {
   late SessionState state;
-  // The test's one mouse, which moves over the rows and waits for their tooltips.
   TestGesture? mouse;
   setUp(() => mouse = null);
 
@@ -117,7 +114,6 @@ void main() {
     matching: finder,
   );
 
-  /// Moves the mouse over `finder` and waits for its tooltip.
   Future<void> hover(WidgetTester tester, Finder finder) async {
     if (mouse == null) {
       final pointer = mouse = await tester.createGesture(
@@ -260,29 +256,25 @@ void main() {
     expect(inCard(find.text('Context')), findsNothing);
   });
 
-  testWidgets('the Context row warns from 80 % used', (tester) async {
-    await show(
-      tester,
-      sessionWith(window: const BridgeContext(tokens: 170000, window: 200000)),
-      settings: contextShown,
-    );
-    expect(
-      tester.widget<Text>(inCard(find.text('170 k / 200 k'))).style?.color,
-      toneOf((palette) => palette.warning),
-    );
-  });
-
-  testWidgets('the Context row is an error from 90 % used', (tester) async {
-    await show(
-      tester,
-      sessionWith(window: const BridgeContext(tokens: 190000, window: 200000)),
-      settings: contextShown,
-    );
-    expect(
-      tester.widget<Text>(inCard(find.text('190 k / 200 k'))).style?.color,
-      toneOf((palette) => palette.danger),
-    );
-  });
+  testWidgets(
+    'the Context row warns from 80 % used and is an error from 90 %',
+    (tester) async {
+      for (final (tokens, label, tone) in [
+        (170000, '170 k / 200 k', (WsPalette palette) => palette.warning),
+        (190000, '190 k / 200 k', (WsPalette palette) => palette.danger),
+      ]) {
+        await show(
+          tester,
+          sessionWith(window: BridgeContext(tokens: tokens, window: 200000)),
+          settings: contextShown,
+        );
+        expect(
+          tester.widget<Text>(inCard(find.text(label))).style?.color,
+          toneOf(tone),
+        );
+      }
+    },
+  );
 
   testWidgets(
     'the Context tooltip gives the share, the tokens and the compaction point',

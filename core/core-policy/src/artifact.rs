@@ -8,24 +8,17 @@ mod environment;
 pub use command::{AllowedParameterPolicy, CommandPolicy};
 pub use environment::{EnvironmentDefault, EnvironmentPolicy};
 
-/// Compiled Tool invocation and Phase availability policy.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PolicyArtifact {
-    /// Command policies keyed by tool id in canonical output.
     pub commands: Vec<CommandPolicy>,
-    /// Phase-to-tool availability scope.
     pub phase_scope: Vec<PhaseScope>,
-    /// Policy version. v0 artifacts use [`POLICY_VERSION_V0`].
     pub policy_version: String,
-    /// Runtime limits shared by commands in this artifact.
     pub runtime_limits: RuntimeLimits,
-    /// Source flow definition id.
     pub source_flow_definition_id: String,
 }
 
 impl PolicyArtifact {
-    /// Validates artifact invariants after compile or deserialization.
     pub fn validate(&self) -> Result<(), PolicyArtifactValidationError> {
         if self.policy_version != POLICY_VERSION_V0 {
             return Err(policy_artifact_error(
@@ -91,7 +84,6 @@ impl PolicyArtifact {
     }
 }
 
-/// Error returned when a policy artifact fails validation.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PolicyArtifactValidationError {
     pub(crate) message: String,
@@ -109,46 +101,32 @@ pub(crate) fn policy_artifact_error(message: String) -> PolicyArtifactValidation
     PolicyArtifactValidationError { message }
 }
 
-/// Tools available within a phase.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PhaseScope {
-    /// Phase id.
     pub phase_id: String,
-    /// Tool ids available in the phase.
     pub tool_ids: Vec<String>,
 }
 
-/// Runtime limits encoded in a policy artifact.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RuntimeLimits {
-    /// Whether execution is headless.
     pub headless: bool,
-    /// Timeout in milliseconds.
     pub timeout_ms: u64,
 }
 
-/// Normalized denial reason code.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DenyReasonCode {
-    /// Write was denied.
     WriteDenied,
-    /// Network access was denied.
     NetworkDenied,
-    /// Environment access was denied.
     EnvironmentDenied,
-    /// Tool was invoked out of phase.
     ToolOutOfPhase,
-    /// Symlink escape was denied.
     SymlinkEscapeDenied,
-    /// Interpreter escape was denied.
     InterpreterEscapeDenied,
 }
 
 impl DenyReasonCode {
-    /// Every stable denial reason code.
     pub const ALL: [Self; 6] = [
         Self::WriteDenied,
         Self::NetworkDenied,
@@ -158,7 +136,6 @@ impl DenyReasonCode {
         Self::InterpreterEscapeDenied,
     ];
 
-    /// Returns the stable serialized reason-code string.
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::WriteDenied => "write_denied",
@@ -171,12 +148,9 @@ impl DenyReasonCode {
     }
 }
 
-/// Error returned while canonicalizing a policy artifact.
 #[derive(Debug)]
 pub enum PolicyArtifactError {
-    /// Canonical JSON serialization failed.
     CanonicalJson(proto::CanonicalJsonError),
-    /// Serde serialization failed before canonicalization.
     Serialize(serde_json::Error),
 }
 
@@ -203,7 +177,6 @@ impl std::error::Error for PolicyArtifactError {
     }
 }
 
-/// Serializes a policy artifact with canonical ordering and a trailing newline.
 pub fn canonical_artifact_json(artifact: &PolicyArtifact) -> Result<String, PolicyArtifactError> {
     let mut artifact = artifact.clone();
     artifact.commands.sort_by(|a, b| a.tool_id.cmp(&b.tool_id));

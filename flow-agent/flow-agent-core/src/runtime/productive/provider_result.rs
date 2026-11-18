@@ -236,7 +236,6 @@ pub(crate) fn parse_provider_result(
     Ok(result)
 }
 
-/// Verifies a leaf provider result against its Phase contract, reading no object before that check.
 pub(crate) fn verify_leaf_provider_result(
     phase: &core_script::PhaseBlock,
     result: &core_script::FlowValue,

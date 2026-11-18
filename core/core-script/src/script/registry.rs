@@ -39,7 +39,6 @@ fn canonicalize_transition_references(
 }
 
 impl ResolvedRegistry {
-    /// Resolves a registry from already parsed blocks.
     pub fn from_blocks(
         blocks: impl IntoIterator<Item = RegistryBlock>,
     ) -> Result<Self, RegistryError> {
@@ -77,7 +76,6 @@ impl ResolvedRegistry {
         Ok(registry.with_canonical_references())
     }
 
-    /// Serializes the resolved registry as canonical JSON without a trailing newline.
     pub fn canonical_json(&self) -> Result<String, RegistryError> {
         let mut value = serde_json::to_value(self).map_err(RegistryError::Serialize)?;
         canonicalize_registry_value(&mut value);
@@ -117,22 +115,18 @@ impl ResolvedRegistry {
         self
     }
 
-    /// Resolves a flow by id or unambiguous name.
     pub fn flow_block(&self, reference: &str) -> Option<&FlowBlock> {
         self.named_block(RegistryBlockKind::Flow, reference, &self.flows)
     }
 
-    /// Resolves a phase by id or unambiguous name.
     pub fn phase_block(&self, reference: &str) -> Option<&PhaseBlock> {
         self.named_block(RegistryBlockKind::Phase, reference, &self.phases)
     }
 
-    /// Resolves a tool by id or unambiguous name.
     pub fn tool_block(&self, reference: &str) -> Option<&ToolBlock> {
         self.named_block(RegistryBlockKind::Tool, reference, &self.tools)
     }
 
-    /// Resolves an instruction by id or unambiguous name.
     pub fn instruction_block(&self, reference: &str) -> Option<&InstructionBlock> {
         self.named_block(
             RegistryBlockKind::Instruction,
@@ -487,8 +481,6 @@ impl ResolvedRegistry {
     }
 
     fn validate_flow_cycles(&self) -> Result<(), RegistryError> {
-        // WHY: keep the visited cache for the whole registry validation pass so duplicated
-        // subflow tails are validated once without changing duplicate execution semantics.
         let mut visited = BTreeMap::<String, FlowTailDepth>::new();
         for flow_id in self.flows.keys() {
             let mut visiting = BTreeSet::new();

@@ -1,7 +1,3 @@
-//! The Liquid Workspace for the app, opened from the device's replica: its folder's lock, its
-//! key and its four calls, each of which runs on flutter_rust_bridge's worker threads, never on
-//! the Dart main isolate. The calls take and answer the messages of [`super::workspace`].
-
 use std::fs::{File, TryLockError};
 use std::path::Path;
 use std::sync::{Mutex, MutexGuard};
@@ -24,16 +20,12 @@ use crate::frb_generated::StreamSink;
 use crate::keys::{Keychain, Keys, random_hex, replica_key};
 use crate::subscriptions::Subscriptions;
 
-/// The device's Workspace, opened from its replica.
 #[flutter_rust_bridge::frb(opaque)]
 pub struct LiquidWorkspace {
     inner: Mutex<Inner>,
-    /// The replica folder's lock, held while the Workspace is open. Fields drop in order, so
-    /// it is released only after the database has closed.
     _lock: ReplicaLock,
 }
 
-/// A taken replica lock, released when dropped.
 struct ReplicaLock(File);
 
 pub(super) struct Inner {
@@ -43,13 +35,10 @@ pub(super) struct Inner {
 
 impl Drop for ReplicaLock {
     fn drop(&mut self) {
-        // A concurrently spawned child may still hold an inherited descriptor until exec.
         let _ = self.0.unlock();
     }
 }
 
-/// Opens the replica folder's lock file without truncating it, and refuses one that is a
-/// link or no plain file, so opening never writes to a file elsewhere.
 fn open_lock(path: &Path) -> Result<File, String> {
     let mut options = std::fs::OpenOptions::new();
     options.read(true).write(true).create(true).truncate(false);
@@ -58,7 +47,6 @@ fn open_lock(path: &Path) -> Result<File, String> {
         &mut options,
         rustix::fs::OFlags::NOFOLLOW.bits() as i32,
     );
-    // FILE_FLAG_OPEN_REPARSE_POINT: opens a link itself, which the plain-file check refuses.
     #[cfg(windows)]
     std::os::windows::fs::OpenOptionsExt::custom_flags(&mut options, 0x0020_0000);
     let lock = options
@@ -77,11 +65,8 @@ fn open_lock(path: &Path) -> Result<File, String> {
     Ok(lock)
 }
 
-/// How long a held replica lock is tried again: a process this one starts holds the lock
-/// it inherited only until it runs its program, while another session holds it for good.
 const LOCK_PATIENCE: std::time::Duration = std::time::Duration::from_millis(500);
 
-/// Takes the replica's lock, trying again for a moment while it is held.
 fn take_lock(lock: &File) -> Result<(), String> {
     let since = std::time::Instant::now();
     loop {
@@ -98,38 +83,28 @@ fn take_lock(lock: &File) -> Result<(), String> {
     }
 }
 
-/// Why every call fails once a call failed midway.
 const STOPPED: &str = "the Workspace stopped after an internal error; quit and reopen Liquid";
 
 impl LiquidWorkspace {
-    /// The Workspace's state, unless a call failed while holding it: what that call left may
-    /// hold changes it never committed, so every later call is refused.
     pub(super) fn state(&self) -> Result<MutexGuard<'_, Inner>, String> {
         self.inner.lock().map_err(|_| STOPPED.to_string())
     }
 
-    /// Opens the Workspace whose replica lives in the folder `dir`, creating both on first
-    /// use. The replica's key lives in the operating system's keychain (ADR-0237).
     pub fn open(dir: String) -> Result<LiquidWorkspace, String> {
         let dir = Path::new(&dir);
-        // Created first, so the folder's canonical path is known when an older key is looked up.
         std::fs::create_dir_all(dir).map_err(|error| error.to_string())?;
         Self::open_with(dir, &Keychain)
     }
 
-    /// Opens with `keys` in place of the keychain, for tests.
     #[flutter_rust_bridge::frb(ignore)]
     pub(crate) fn open_with(dir: &Path, keys: &dyn Keys) -> Result<LiquidWorkspace, String> {
         std::fs::create_dir_all(dir).map_err(|error| error.to_string())?;
-        // Taken before the key is read or made, so two sessions opening a new folder at once
-        // cannot each store a key of their own.
         let lock = open_lock(&dir.join("replica.lock"))?;
         take_lock(&lock)?;
         let path = dir.join("replica.db");
         let key = replica_key(dir, keys, path.exists())?;
         let workspace = match Workspace::open(Sqlite::open(&path, &key).map_err(message)?) {
             Ok(workspace) => workspace,
-            // A new replica: until accounts exist, the device's person creates and owns it.
             Err(Error::NotFound) => {
                 let store = Sqlite::open(&path, &key).map_err(message)?;
                 Workspace::create(PersonId::new(random_hex()?), store).map_err(message)?
@@ -145,8 +120,6 @@ impl LiquidWorkspace {
         })
     }
 
-    /// Applies one write as the device's person through Liquid's interface, then tells the
-    /// subscribers of every resource it changed.
     pub fn apply(&self, mutation: BridgeMutation) -> Result<BridgeApplied, String> {
         let mutation = mutation.to_core()?;
         let mutation_page = match &mutation {
@@ -186,7 +159,6 @@ impl LiquidWorkspace {
             origin: Origin::Ui,
             mutation,
         });
-        // A refused write may have loaded its Page too.
         let applied = match result {
             Ok(applied) => applied,
             Err(error) => {
@@ -234,7 +206,6 @@ impl LiquidWorkspace {
         Ok(answer)
     }
 
-    /// Reads one bounded window, one Block's text or one Database's fields.
     pub fn query(&self, query: BridgeQuery) -> Result<BridgeAnswer, String> {
         let mut inner = self.state()?;
         let (start, limit) = window(query.start, query.limit)?;
@@ -382,17 +353,12 @@ impl LiquidWorkspace {
         Ok(answer)
     }
 
-    /// Streams `resource`'s changes to Dart under the identity `subscription`, which Dart
-    /// chooses and passes to [`LiquidWorkspace::close`] when it cancels the stream. The first
-    /// change carries the resource's current count and marks the registration: a reader queries
-    /// after it, so it misses no later change.
     pub fn subscribe(
         &self,
         subscription: i64,
         resource: BridgeResource,
         sink: StreamSink<BridgeChange>,
     ) -> Result<(), String> {
-        // Dart's stream sees only what the sink carries, so a refusal travels through it.
         let refused = sink.clone();
         let watched = self.watch(subscription, resource, move |change| {
             sink.add(change).is_ok()
@@ -403,9 +369,6 @@ impl LiquidWorkspace {
         Ok(())
     }
 
-    /// Hands `resource`'s changes to `deliver` until it returns `false`; tests use it instead
-    /// of a Dart stream. `deliver` runs while the Workspace is locked, so it must not call
-    /// the Workspace, as a stream sink never does.
     #[flutter_rust_bridge::frb(ignore)]
     pub(crate) fn watch(
         &self,
@@ -419,8 +382,6 @@ impl LiquidWorkspace {
             .follow(subscription, resource.normalized(), Box::new(deliver))
     }
 
-    /// Ends a subscription, also one whose registration has not arrived yet. A Page that no
-    /// subscription follows any more leaves memory.
     pub fn close(&self, subscription: i64) {
         let Ok(mut inner) = self.state() else {
             return;
@@ -441,7 +402,6 @@ impl LiquidWorkspace {
         inner.workspace.is_loaded(page)
     }
 
-    /// How many subscription identities wait for their other end: a registration or a close.
     pub(crate) fn lifecycle_markers(&self) -> usize {
         let inner = self
             .inner
@@ -452,23 +412,18 @@ impl LiquidWorkspace {
 }
 
 impl Inner {
-    /// Counts a change of `resource` and tells its subscribers; a Page whose last subscriber's
-    /// Dart stream is gone leaves memory.
     fn notify(&mut self, resource: BridgeResource) {
         for gone in self.subscriptions.notify(resource) {
             self.release(&gone);
         }
     }
 
-    /// Closes the Page `resource` reads once no other subscription follows it.
     fn release(&mut self, resource: &BridgeResource) {
         if let Some(page) = resource.page().and_then(PageId::parse) {
             self.release_page(&page);
         }
     }
 
-    /// Closes `page` unless a subscription follows it, so a Page that a call loaded for
-    /// nobody does not stay in memory.
     fn release_page(&mut self, page: &PageId) {
         if !self.subscriptions.follows(page) {
             self.workspace.close_page(page);

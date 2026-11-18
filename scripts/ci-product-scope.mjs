@@ -10,12 +10,8 @@ function git(...args) {
   return result;
 }
 
-// Repository agent setup runs no gates and documentation only the documentation gates.
 const SETUP = [":(top,exclude)AGENTS.md", ":(top,exclude).agents/**", ":(top,exclude).codex/**"];
 const DOCUMENTATION = /\.(md|html)$/;
-// A product's directories select its gates and those of its dependents: liquid_bridge
-// builds on meta-harness-core. Any other path, and any Cargo manifest because it can
-// change the features other members build with, selects every product.
 const PRODUCTS = ["flow_agent", "meta_harness", "liquid"];
 const OWNERS = [
   ["flow-agent/", ["flow_agent"]],
@@ -49,8 +45,6 @@ if (process.env.GITHUB_EVENT_NAME !== "workflow_dispatch") {
       break;
     case "push":
       base = event.before;
-      // A new branch has no previous tip, and a rebased one's can be absent from the
-      // clone: both compare the complete branch against main.
       if (
         base === "0".repeat(40) ||
         (/^[a-f0-9]{40}$/i.test(base) && git("cat-file", "-e", `${base}^{commit}`).status !== 0)
@@ -58,7 +52,6 @@ if (process.env.GITHUB_EVENT_NAME !== "workflow_dispatch") {
         const mergeBase = git("merge-base", "HEAD", "origin/main");
         if (mergeBase.status !== 0) throw new Error("Cannot find the branch's CI base");
         base = mergeBase.stdout.trim();
-        // A push to main finds its own tip as that base: no change is named, so every gate runs.
         ownTip = base === git("rev-parse", "HEAD").stdout.trim();
       }
       break;
@@ -74,7 +67,6 @@ if (process.env.GITHUB_EVENT_NAME !== "workflow_dispatch") {
     selected = new Set(paths.filter((path) => !DOCUMENTATION.test(path)).flatMap(owners));
   }
 }
-// Flow Agent's gates test the whole workspace; the others test the Liquid stack.
 const packages = selected.has("flow_agent") ? "--workspace" : "-p meta-harness-cli -p meta-harness-core -p liquid_bridge -p liquid-core -p liquid-storage";
 const outputs = [
   `docs=${docs}`,

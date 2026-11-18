@@ -3,21 +3,13 @@ import Carbon.HIToolbox
 import IOKit
 import IOKit.hidsystem
 
-// The Liquid key helper: a login item inside Liquid.app. It turns Caps Lock into the
-// Liquid key on every keyboard, opens or focuses Liquid when the key is tapped in another app
-// and turns capitals on or off with Shift + Caps Lock. It needs no permission. `--remove` gives
-// the remapping back and exits, with status 1 when a keyboard may keep it. The remapping holds
-// for the whole computer, so the helper gives it back when it quits or the user switches away.
-
 if CommandLine.arguments.dropFirst().first == "--remove" {
     if Mapping.apply(on: false) { exit(0) }
-    // Liquid quotes this to the user.
     FileHandle.standardError.write(
         Data("a keyboard may keep Caps Lock as the Liquid key\n".utf8))
     exit(1)
 }
 
-/// Liquid.app, four levels above Contents/Library/LoginItems/LiquidKey.app.
 let liquid = Bundle.main.bundleURL
     .deletingLastPathComponent().deletingLastPathComponent()
     .deletingLastPathComponent().deletingLastPathComponent()
@@ -29,13 +21,9 @@ var plain: EventHotKeyRef?
 var shifted: EventHotKeyRef?
 var press: Press?
 var shiftedDown = false
-/// Whether this user's session is in front; the remapping holds for every user's keyboards. A
-/// helper started in a background session waits until its session comes to the front.
 var sessionActive = false
-/// Whether this helper set the remapping, which only it gives back.
 var mapped = false
 
-/// Sets the remapping while this session is in front.
 func remap() {
     if sessionActive {
         Mapping.apply(on: true)
@@ -43,19 +31,12 @@ func remap() {
     }
 }
 
-/// Sets the remapping again later for what may have undone it: a keyboard's HID service
-/// appears some time after the device, a Bluetooth one later, and on a user switch the
-/// departing user's helper may give it back after this one set it.
 func remapLater() {
     for delay in [1.0, 5.0] {
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) { remap() }
     }
 }
 
-/// The periodic check while this session is in front. A departing session's helper may give the
-/// remapping back after the last retry above, and nothing else tells this helper. Five seconds
-/// matches that last retry; a check reads each keyboard's mappings and writes only one that lost
-/// the Liquid key.
 var recheck: Timer?
 
 func startRecheck() {
@@ -70,9 +51,6 @@ func stopRecheck() {
     recheck = nil
 }
 
-/// Gives the remapping back if this helper set it in this session; another user's helper may
-/// hold it now, and a helper that failed before setting it must not take that one away. Giving it
-/// back is the helper's last act, so the periodic check stops first.
 func unmap() {
     stopRecheck()
     if Mapping.givesBack(mapped: mapped, active: sessionActive) {
@@ -81,9 +59,6 @@ func unmap() {
     }
 }
 
-/// Without its hotkeys the key would be dead, so Caps Lock comes back and the helper ends.
-/// Registering exclusively fails while any other app holds the same keys, which a plain
-/// registration would accept and then never hear.
 func register(_ modifiers: Int, _ id: EventHotKeyID, _ key: inout EventHotKeyRef?) {
     let status = RegisterEventHotKey(
         UInt32(kVK_F18), UInt32(modifiers), id, GetApplicationEventTarget(),
@@ -114,7 +89,6 @@ func toggleCapsLock() {
     IOHIDSetModifierLockState(connect, Int32(kIOHIDCapsLockState), !on)
 }
 
-/// Liquid takes the key itself while it is in front, for holding and ⇪ shortcuts.
 func follow(_ app: NSRunningApplication?) {
     let inLiquid = liquidID != nil && app?.bundleIdentifier == liquidID
     if inLiquid, let key = plain {
@@ -139,10 +113,8 @@ InstallEventHandler(
             nil, MemoryLayout<EventHotKeyID>.size, nil, &id)
         let pressed = GetEventKind(event) == UInt32(kEventHotKeyPressed)
         let now = ProcessInfo.processInfo.systemUptime
-        // The time since any key went down tells whether another one did after this one.
         let lastKeyDown =
             now - CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: .keyDown)
-        // A held key may repeat its press; only the first one starts a tap or toggles.
         switch (id.id, pressed) {
         case (plainID.id, true):
             if press == nil {
@@ -162,7 +134,6 @@ InstallEventHandler(
         return noErr
     }, kinds.count, &kinds, nil, nil)
 
-/// Keyboards attached later get the Liquid key too, once their HID service exists.
 let arrivals = IONotificationPortCreate(kIOMainPortDefault)
 CFRunLoopAddSource(
     CFRunLoopGetMain(), IONotificationPortGetRunLoopSource(arrivals).takeUnretainedValue(),
@@ -179,10 +150,6 @@ IOServiceAddMatchingNotification(
     }, nil, &attached)
 drain(attached)
 
-// The system stops a login item that the user turns off with a termination signal. Handled
-// before the first remapping, a signal during startup gives it back once the helper runs: the
-// source is registered before the signal's default action is turned off, so until then a signal
-// ends the helper before it changed anything, and afterwards the source receives it.
 let terminate = DispatchSource.makeSignalSource(
     signal: SIGTERM, queue: DispatchQueue(label: "terminate"))
 terminate.setEventHandler {
@@ -198,7 +165,6 @@ registered.wait()
 signal(SIGTERM, SIG_IGN)
 
 register(shiftKey, shiftedID, &shifted)
-/// Hears the apps in front, the session's changes and the quit of Liquid.
 func observeChanges() {
     let workspace = NSWorkspace.shared.notificationCenter
     workspace.addObserver(
@@ -225,8 +191,6 @@ func observeChanges() {
         forName: NSApplication.willTerminateNotification, object: nil, queue: .main
     ) { _ in unmap() }
 }
-// The session is read after the observers are registered, so a session that resigns during the
-// start is heard or read; only a session in front gets the first remapping.
 Mapping.start(
     readSession: { CGSessionCopyCurrentDictionary() as? [String: Any] },
     observe: observeChanges,
@@ -235,7 +199,6 @@ Mapping.start(
         remap()
     })
 follow(NSWorkspace.shared.frontmostApplication)
-// Keyboards attached before the start may get their HID service later too.
 remapLater()
 startRecheck()
 

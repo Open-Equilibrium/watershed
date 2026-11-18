@@ -1,7 +1,3 @@
-//! The parts of the Workspace's messages that carry Database Blocks: field kinds, cells,
-//! a row window's sort and filter, and what a Database read answers. Like the other
-//! messages they are flat, and identities cross as text.
-
 use liquid_core::{
     Cell, Database, FieldId, FieldKind, Filter, Match, OptionId, Row, RowQuery, Sort,
 };
@@ -9,20 +5,13 @@ use liquid_core::{
 use super::media::BridgeMedia;
 use super::workspace::id;
 
-/// The kind of a Database field.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BridgeFieldKind {
-    /// Plain text.
     Text,
-    /// A finite number.
     Number,
-    /// One of the field's options.
     Select,
-    /// A day.
     Date,
-    /// Ticked or not.
     Checkbox,
-    /// Files, each a finished attachment.
     File,
 }
 
@@ -50,37 +39,23 @@ impl BridgeFieldKind {
     }
 }
 
-/// What a [`BridgeCell`] holds; each kind names the part it fills.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BridgeCellKind {
-    /// Nothing.
     Empty,
-    /// `text`.
     Text,
-    /// `number`.
     Number,
-    /// The option `text`.
     Select,
-    /// The day `text`, `YYYY-MM-DD`.
     Date,
-    /// `checked`.
     Checkbox,
-    /// `files`.
     Files,
 }
 
-/// One cell's value.
 #[derive(Debug, Clone, PartialEq)]
 pub struct BridgeCell {
-    /// What it holds.
     pub kind: BridgeCellKind,
-    /// A text, an option's identity or a day.
     pub text: Option<String>,
-    /// A number.
     pub number: f64,
-    /// Whether a checkbox is ticked.
     pub checked: bool,
-    /// Files in their order; the core reads each one's size from its attachment.
     pub files: Vec<BridgeMedia>,
 }
 
@@ -136,36 +111,24 @@ impl BridgeCell {
     }
 }
 
-/// Sorting a row window by one field; empty cells come last either way.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BridgeSort {
-    /// The field.
     pub field: String,
-    /// Largest, latest or last in the alphabet first.
     pub descending: bool,
 }
 
-/// What a cell must be to pass a [`BridgeFilter`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BridgeMatch {
-    /// Empty.
     Empty,
-    /// Not empty.
     NotEmpty,
-    /// Exactly `value`.
     Is,
-    /// Text containing `value`'s text, ignoring case.
     Contains,
 }
 
-/// Keeping a row window's rows whose cell of `field` matches.
 #[derive(Debug, Clone, PartialEq)]
 pub struct BridgeFilter {
-    /// The field.
     pub field: String,
-    /// What its cell must be.
     pub matches: BridgeMatch,
-    /// The value `Is` and `Contains` compare with.
     pub value: Option<BridgeCell>,
 }
 
@@ -195,54 +158,36 @@ impl BridgeFilter {
     }
 }
 
-/// A Database Block's name and fields.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BridgeDatabase {
-    /// Its name.
     pub name: String,
-    /// Its fields, in order.
     pub fields: Vec<BridgeField>,
 }
 
-/// A Database field.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BridgeField {
-    /// Its identity.
     pub id: String,
-    /// Its name.
     pub name: String,
-    /// Its kind.
     pub kind: BridgeFieldKind,
-    /// A select field's options, in order.
     pub options: Vec<BridgeOption>,
 }
 
-/// One option of a select field.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BridgeOption {
-    /// Its identity.
     pub id: String,
-    /// Its name.
     pub name: String,
-    /// Its color, an index into the tag colors.
     pub color: i64,
 }
 
-/// One row with its cells that hold a value.
 #[derive(Debug, Clone, PartialEq)]
 pub struct BridgeRow {
-    /// Its identity.
     pub id: String,
-    /// Its cells that hold a value.
     pub cells: Vec<BridgeFieldCell>,
 }
 
-/// A row's cell of one field.
 #[derive(Debug, Clone, PartialEq)]
 pub struct BridgeFieldCell {
-    /// The field.
     pub field: String,
-    /// Its value.
     pub value: BridgeCell,
 }
 
@@ -288,7 +233,6 @@ impl BridgeRow {
     }
 }
 
-/// The core's row window `start..start + limit`, sorted and filtered as asked.
 pub(crate) fn row_query(
     sort: &Option<BridgeSort>,
     filter: &Option<BridgeFilter>,

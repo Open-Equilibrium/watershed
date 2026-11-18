@@ -5,8 +5,6 @@ import XCTest
 @testable import Liquid
 
 class RunnerTests: XCTestCase {
-
-  /// A refused helper run shows what the helper said, or else its exit status.
   func testRefusedHelperShowsItsOwnMessage() {
     let refusal = helperRefusal(status: 1, said: Data("  Caps Lock is still held by Liquid\n".utf8))
     XCTAssertEqual(refusal.localizedDescription, "Caps Lock is still held by Liquid")

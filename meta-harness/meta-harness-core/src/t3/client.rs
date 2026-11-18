@@ -1,7 +1,3 @@
-//! T3 Code's client protocol, Effect RPC JSON frames over one WebSocket on `/ws`. T3 closes a
-//! socket when its session expires, so the client reconnects with a fresh token and sends its open
-//! subscriptions again; calls and actions are never sent twice (ADR-0292).
-
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -19,43 +15,30 @@ use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 
 use crate::util::{TIMEOUT, lock};
 
-/// The orchestration protocol this client speaks; T3 answers 426 to any other.
 const ORCHESTRATION_PROTOCOL: u32 = 2;
 
-/// The pauses before the reconnection attempts after the first, which comes at once. When every
-/// attempt fails, the client closes for good.
 const RETRY_DELAYS: [Duration; 3] = [
     Duration::from_millis(200),
     Duration::from_millis(500),
     Duration::from_secs(1),
 ];
 
-/// The failure of a call that a lost connection left unanswered. T3 may have run it, so the call is
-/// not sent again.
 const LOST_CALL: &str = "T3 closed the connection before it answered; the call was not sent again";
 
 type Socket = WebSocketStream<MaybeTlsStream<TcpStream>>;
 
-/// Issues an owner token, as `t3 auth session issue` does.
 type Issue = Arc<dyn Fn() -> BoxFuture<'static, Result<String, String>> + Send + Sync>;
 
-/// Why a request ended on a failure rather than an ordinary end.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Failure {
-    /// T3 ended the request with this failure cause, as JSON text.
     Refused(String),
-    /// The connection to T3 was lost before the request ended, so it was not sent again.
     ConnectionLost,
 }
 
-/// A request's failure, shared by its waiter and its subscription.
 type Slot = Arc<Mutex<Option<Failure>>>;
 
 enum Waiter {
     Call(oneshot::Sender<Result<Value, String>>),
-    /// An open stream and, for a subscription, the request frame that opened it, which is sent
-    /// again on a new connection. An action's stream has none: it ends with its connection, since
-    /// T3 may have done part of it already.
     Stream {
         items: mpsc::UnboundedSender<Item>,
         frame: Option<Value>,
@@ -63,37 +46,27 @@ enum Waiter {
     },
 }
 
-/// One item of a stream. The last item of a chunk carries the connection that receives the chunk's
-/// acknowledgement, which the consumer sends once it takes that item.
 struct Item {
     value: Value,
     ack: Option<mpsc::UnboundedSender<Message>>,
 }
 
-/// The state that the client's handles and subscriptions share.
 #[derive(Default)]
 struct State {
-    /// The open connection's writer; `None` while the client reconnects, and once it closed for good.
     out: Option<mpsc::UnboundedSender<Message>>,
-    /// The requests awaiting T3's replies by id.
     waiters: HashMap<String, Waiter>,
-    /// Whether the client closed for good: no request may wait any more.
     closed: bool,
-    /// Whether `close` was called: a lost connection then ends the client instead.
     stopping: bool,
 }
 
 type Link = Arc<Mutex<State>>;
 
-/// One client of a T3 server. It keeps its connection until `close`, and reconnects when T3 drops it.
 #[derive(Clone)]
 pub(crate) struct Client {
     link: Link,
     next: Arc<AtomicU64>,
 }
 
-/// A call's waiter, removed when the call's future ends before its reply: a dropped call would
-/// otherwise keep an entry that no reply removes.
 struct Waiting {
     link: Link,
     id: String,
@@ -105,8 +78,6 @@ impl Drop for Waiting {
     }
 }
 
-/// An open stream request and its items, as T3 sends them. Dropped, it tells T3 to stop the request
-/// (Effect RPC's `Interrupt`) and forgets it.
 pub(crate) struct Subscription {
     items: mpsc::UnboundedReceiver<Item>,
     id: String,
@@ -115,14 +86,10 @@ pub(crate) struct Subscription {
 }
 
 impl Subscription {
-    /// Why the request ended on a failure, once `recv` returned `None`; `None` after an ordinary
-    /// end or while the request runs.
     pub fn failure(&self) -> Option<Failure> {
         lock(&self.failure).clone()
     }
 
-    /// The next item T3 sent; `None` once the request ended. Taking a chunk's last item
-    /// acknowledges the chunk, so T3 sends the next one only after the consumer took this one.
     pub async fn recv(&mut self) -> Option<Value> {
         let item = self.items.recv().await?;
         if let Some(ack) = item.ack {
@@ -135,8 +102,6 @@ impl Subscription {
 impl Drop for Subscription {
     fn drop(&mut self) {
         let mut state = lock(&self.link);
-        // A request that already ended has nothing left to stop. Forgotten here, it is not sent again
-        // on a new connection; while the client reconnects, there is no connection to interrupt on.
         let open = state.waiters.remove(&self.id).is_some();
         if let (true, Some(out)) = (open, &state.out) {
             let frame = json!({"_tag": "Interrupt", "requestId": self.id});
@@ -146,8 +111,6 @@ impl Drop for Subscription {
 }
 
 impl Client {
-    /// Connects to `origin` (`http://127.0.0.1:<port>`) with a token from `issue`, and keeps the
-    /// connection: when T3 closes it, the client reconnects with a new token (see [`keep`]).
     pub async fn connect(
         origin: &str,
         issue: impl Fn() -> BoxFuture<'static, Result<String, String>> + Send + Sync + 'static,
@@ -163,8 +126,6 @@ impl Client {
         })
     }
 
-    /// Registers `waiter` for request `id` and sends `frame`, as one step. Fails at once while no
-    /// connection is open.
     fn request(&self, id: &str, frame: &Value, waiter: Waiter) -> Result<(), String> {
         let mut state = lock(&self.link);
         if state.closed {
@@ -183,7 +144,6 @@ impl Client {
         self.next.fetch_add(1, Ordering::Relaxed).to_string()
     }
 
-    /// Calls `tag` and returns its success value, or T3's failure as text.
     pub async fn call(&self, tag: &str, payload: Value) -> Result<Value, String> {
         let id = self.next_id();
         let (reply, answer) = oneshot::channel();
@@ -197,20 +157,15 @@ impl Client {
             .map_err(|_| "T3 connection is closed".to_owned())?
     }
 
-    /// Calls `tag` with `payload` as a command, which T3 identifies by a fresh `commandId`.
     pub async fn command(&self, tag: &str, mut payload: Value) -> Result<Value, String> {
         payload["commandId"] = json!(super::fresh_id("cmd"));
         self.call(tag, payload).await
     }
 
-    /// Opens the subscription `tag`; each received item arrives in order, already acknowledged.
-    /// A new connection opens it again.
     pub async fn stream(&self, tag: &str, payload: Value) -> Result<Subscription, String> {
         self.open_stream(tag, payload, true)
     }
 
-    /// Starts the action `tag`, whose progress streams like a subscription's items. A lost
-    /// connection ends it, and it is never sent again, as a call is not.
     pub async fn action(&self, tag: &str, payload: Value) -> Result<Subscription, String> {
         self.open_stream(tag, payload, false)
     }
@@ -237,15 +192,11 @@ impl Client {
         })
     }
 
-    /// Ends the client as its T3 is about to stop: a lost connection then ends the client instead of
-    /// reconnecting it.
     pub fn close(&self) {
         lock(&self.link).stopping = true;
     }
 }
 
-/// Keeps the client connected: serves `served`'s connection until it closes, then reconnects. When
-/// no connection opens, or the client is stopping, the client closes for good.
 async fn keep(link: Link, origin: String, issue: Issue, mut served: JoinHandle<()>) {
     loop {
         let _ = served.await;
@@ -260,8 +211,6 @@ async fn keep(link: Link, origin: String, issue: Issue, mut served: JoinHandle<(
     }
 }
 
-/// Opens a connection after the last one was lost: at once, then after each of [`RETRY_DELAYS`].
-/// `None` once the client is stopping or every attempt failed.
 async fn reconnect(origin: &str, issue: &Issue, link: &Link) -> Option<Socket> {
     for delay in std::iter::once(Duration::ZERO).chain(RETRY_DELAYS) {
         tokio::time::sleep(delay).await;
@@ -275,8 +224,6 @@ async fn reconnect(origin: &str, issue: &Issue, link: &Link) -> Option<Socket> {
     None
 }
 
-/// Makes `socket` the open connection and sends the open streams on it again. The returned task
-/// serves the connection until it closes.
 fn install(link: &Link, socket: Socket) -> JoinHandle<()> {
     let (out, outgoing) = mpsc::unbounded_channel();
     {
@@ -294,7 +241,6 @@ fn install(link: &Link, socket: Socket) -> JoinHandle<()> {
     tokio::spawn(serve(socket, outgoing, out, link.clone()))
 }
 
-/// The connection is lost: its calls fail, and its streams wait for the next connection.
 fn lose_connection(state: &mut State) {
     state.out = None;
     for (id, waiter) in std::mem::take(&mut state.waiters) {
@@ -302,7 +248,6 @@ fn lose_connection(state: &mut State) {
             Waiter::Call(reply) => {
                 let _ = reply.send(Err(LOST_CALL.to_owned()));
             }
-            // An action's stream ends here: dropping its sender ends its items.
             Waiter::Stream {
                 frame: None,
                 failure,
@@ -317,11 +262,9 @@ fn lose_connection(state: &mut State) {
     }
 }
 
-/// The client closed for good: no request waits any more, and each open stream ends.
 fn close_for_good(state: &mut State) {
     state.closed = true;
     state.out = None;
-    // Each open stream ends here, and keeps why.
     for waiter in std::mem::take(&mut state.waiters).into_values() {
         if let Waiter::Stream { failure, .. } = waiter {
             *lock(&failure) = Some(Failure::ConnectionLost);
@@ -329,7 +272,6 @@ fn close_for_good(state: &mut State) {
     }
 }
 
-/// Writes what the client sends and reads what T3 sends, until either side ends.
 async fn serve(
     socket: Socket,
     mut outgoing: mpsc::UnboundedReceiver<Message>,
@@ -368,7 +310,6 @@ async fn serve(
 }
 
 fn dispatch(link: &Link, ack: &mpsc::UnboundedSender<Message>, frame: Value) {
-    // Frames without a request, such as Pong, concern the connection only.
     let Some(request_id) = frame["requestId"].as_str() else {
         return;
     };
@@ -386,7 +327,6 @@ fn dispatch(link: &Link, ack: &mpsc::UnboundedSender<Message>, frame: Value) {
                         });
                     }
                 }
-                // Nothing waits for these items, so the chunk is acknowledged at once.
                 _ => {
                     let _ = ack.send(frame_message(
                         &json!({"_tag": "Ack", "requestId": request_id}),
@@ -400,8 +340,6 @@ fn dispatch(link: &Link, ack: &mpsc::UnboundedSender<Message>, frame: Value) {
             } else {
                 Err(frame["exit"]["cause"].to_string())
             };
-            // An ended request leaves its waiter, which ends its items. A failed stream keeps T3's
-            // cause for its subscription, stored before the items end.
             match lock(link).waiters.remove(request_id) {
                 Some(Waiter::Call(reply)) => {
                     let _ = reply.send(result);
@@ -418,7 +356,6 @@ fn dispatch(link: &Link, ack: &mpsc::UnboundedSender<Message>, frame: Value) {
     }
 }
 
-/// Opens a socket to `origin` with a new owner token.
 async fn open(origin: &str, issue: &Issue) -> Result<Socket, String> {
     let token = issue().await?;
     let url = format!(
@@ -449,12 +386,10 @@ fn frame_message(frame: &Value) -> Message {
 
 #[cfg(test)]
 impl Client {
-    /// How many requests still await T3's replies.
     pub(crate) fn waiting(&self) -> usize {
         lock(&self.link).waiters.len()
     }
 
-    /// Whether a connection is open now.
     pub(crate) fn connected(&self) -> bool {
         lock(&self.link).out.is_some()
     }

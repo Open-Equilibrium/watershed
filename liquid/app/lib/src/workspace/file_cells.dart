@@ -7,7 +7,6 @@ import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
 import 'media_block.dart';
 
-/// The most files a file cell holds, as the core caps it.
 const maxCellFiles = 100;
 
 const _chipGap = WsMetrics.space1;
@@ -17,8 +16,6 @@ const _chipIcon = 13.0;
 IconData _iconOf(BridgeMedia file) =>
     file.mediaType.startsWith('image/') ? LucideIcons.image : LucideIcons.file;
 
-/// A file cell's files, one chip each with its icon and name; those that do not fit show
-/// as "+N" (ADR-0305).
 class FileChips extends StatelessWidget {
   const FileChips(this.files, {super.key});
 
@@ -54,7 +51,6 @@ class FileChips extends StatelessWidget {
         return ClipRect(
           child: Row(
             children: [
-              // A chip wider than the cell shrinks and cuts its name.
               for (final file in files.take(shown))
                 Flexible(
                   child: Padding(
@@ -109,9 +105,6 @@ class FileChips extends StatelessWidget {
   }
 }
 
-/// A file cell's list, which ⏎ or a second click opens: each file with Save as… and
-/// Remove, and Add files…, which opens the file dialog (ADR-0305). ↑↓ choose, ⏎ saves the chosen file or adds files, ⌫ removes the
-/// chosen file, esc closes it.
 class FilesPicker extends StatefulWidget {
   const FilesPicker({
     super.key,
@@ -131,14 +124,12 @@ class FilesPicker extends StatefulWidget {
   final VoidCallback onClose;
   final ValueChanged<bool> onTab;
 
-  /// Takes the picker's keys while it is open, for keys that reach the cell first.
   final void Function(KeyEventResult Function(KeyEvent event)? keys)? onKeys;
 
   static const _labelHeight = 26.0;
   static const _itemHeight = 30.0;
   static const _width = 300.0;
 
-  /// The height the list takes with `files` files.
   static double heightFor(int files) =>
       2 * WsMetrics.space2 +
       (files > 0 ? _labelHeight + files * _itemHeight + 9 : 0) +
@@ -153,7 +144,6 @@ class _FilesPickerState extends State<FilesPicker> {
   final _list = ScrollController();
   var _chosen = 0;
 
-  /// Chooses the item at `index` and scrolls a file into view.
   void _choose(int index) {
     setState(() => _chosen = index);
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -283,7 +273,6 @@ class _FilesPickerState extends State<FilesPicker> {
                   ),
                 ),
               ),
-              // The files scroll in the height the list has; Add files… stays below.
               Flexible(
                 child: ListView.builder(
                   controller: _list,

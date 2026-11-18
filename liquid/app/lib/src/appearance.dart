@@ -7,7 +7,6 @@ import 'settings_file.dart';
 import 'theme/theme.dart';
 import 'theme/tokens.g.dart';
 
-/// Which theme Liquid uses.
 enum ThemeChoice {
   system(ThemeMode.system),
   light(ThemeMode.light),
@@ -18,8 +17,6 @@ enum ThemeChoice {
   final ThemeMode mode;
 }
 
-/// How large Liquid draws its text and rows: Default is the base size,
-/// Compact and Large scale text and rows together.
 enum TextSize {
   compact(13 / 14),
   standard(1),
@@ -30,7 +27,6 @@ enum TextSize {
   final double scale;
 }
 
-/// Settings → Appearance; kept across restarts.
 @immutable
 class Appearance {
   const Appearance({
@@ -38,7 +34,6 @@ class Appearance {
     this.textSize = TextSize.standard,
   });
 
-  /// Reads what it knows from `json` and keeps the defaults for the rest.
   factory Appearance.fromJson(Map<String, Object?> json) => Appearance(
     theme: ThemeChoice.values.asNameMap()[json['theme']] ?? ThemeChoice.system,
     textSize:
@@ -59,7 +54,6 @@ class Appearance {
   };
 }
 
-/// The appearance in use; each change applies at once and is saved.
 class AppearanceController extends SavedSettings<Appearance> {
   AppearanceController([
     Appearance value = const Appearance(),
@@ -79,8 +73,6 @@ class AppearanceController extends SavedSettings<Appearance> {
   }
 }
 
-/// Draws `child` at `scale`, laying it out in correspondingly less room, so text, rows and
-/// panels grow or shrink together.
 class UiScale extends StatelessWidget {
   const UiScale({super.key, required this.scale, required this.child});
 
@@ -119,8 +111,6 @@ class UiScale extends StatelessWidget {
   }
 }
 
-/// Settings → Appearance: the theme, the text size and the session card's thread details, applied
-/// at once.
 class AppearancePane extends StatelessWidget {
   const AppearancePane({
     super.key,
@@ -130,10 +120,8 @@ class AppearancePane extends StatelessWidget {
 
   final AppearanceController appearance;
 
-  /// The session card's rows, which Thread details sets; none leaves that row out.
   final SessionCardSettingsController? cardSettings;
 
-  /// Changes the appearance in use now, so two choices before the next frame both apply.
   void _change(Appearance Function(Appearance appearance) change) =>
       appearance.change(change(appearance.value));
 
@@ -222,8 +210,6 @@ class AppearancePane extends StatelessWidget {
   }
 }
 
-/// The thread details menu: how many of the session card's rows show, and the rows menu the card's
-/// right-click opens, which sets the same settings.
 class _ThreadDetailsMenu extends StatefulWidget {
   const _ThreadDetailsMenu({required this.settings});
 
@@ -245,7 +231,6 @@ class _ThreadDetailsMenuState extends State<_ThreadDetailsMenu> {
     super.dispose();
   }
 
-  /// Opens the menu and moves the focus into it, so its keys work.
   void _open() {
     _menu.open();
     WidgetsBinding.instance.addPostFrameCallback((_) {

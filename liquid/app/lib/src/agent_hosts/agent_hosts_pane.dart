@@ -11,12 +11,8 @@ import '../theme/tokens.g.dart';
 import 'add_agent_host_dialog.dart';
 import 'agent_hosts.dart';
 
-/// One host's check: its answer, or the reason the check failed.
 typedef _Check = ({BridgeReach? reach, String? error});
 
-/// Settings → Agent hosts (ADR-0295): This Mac and the saved hosts, each with its status and the one
-/// Liquid's sessions use. Opening the section checks every host, again every 10 s and when Liquid
-/// comes back to the front; a failed change shows at the top of Settings.
 class AgentHostsPane extends StatefulWidget {
   const AgentHostsPane({
     super.key,
@@ -26,7 +22,6 @@ class AgentHostsPane extends StatefulWidget {
 
   final AgentHostsController hosts;
 
-  /// Receives the message of a failed change, or null once a change went through.
   final void Function(String? failure) saveOutcome;
 
   @override
@@ -34,11 +29,8 @@ class AgentHostsPane extends StatefulWidget {
 }
 
 class _AgentHostsPaneState extends State<AgentHostsPane> {
-  /// The latest check of each host by address, with null for This Mac. A host without one is still
-  /// being checked.
   final _checks = <String?, _Check>{};
 
-  /// The hosts whose check runs now, so checks do not pile up behind a slow host.
   final _checking = <String?>{};
 
   late final Timer _recheck;
@@ -91,8 +83,6 @@ class _AgentHostsPaneState extends State<AgentHostsPane> {
     unawaited(_check(added.address));
   }
 
-  /// Shows the outcome of a change of the hosts at the top of Settings: its failure, or the clearing
-  /// of an earlier one.
   Future<void> _report(Future<void> Function() change) async {
     try {
       await change();
@@ -123,7 +113,6 @@ class _AgentHostsPaneState extends State<AgentHostsPane> {
     await _report(() => widget.hosts.remove(host));
   }
 
-  /// The status word of a host; it is text, so no color carries it alone.
   String _status(String? address) => switch (_checks[address]) {
     null => 'Connecting',
     (reach: _, error: final error?) => 'Connection failed: $error',
@@ -248,7 +237,7 @@ class _AgentHostsPaneState extends State<AgentHostsPane> {
             _row(
               context,
               address: null,
-              name: 'This Mac',
+              name: thisMacName,
               active: active == null,
               icon: LucideIcons.laptop,
             ),

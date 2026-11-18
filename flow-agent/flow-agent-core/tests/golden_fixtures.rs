@@ -41,13 +41,6 @@ fn every_fixture_workspace_has_config_and_expected_stream() {
 }
 
 #[test]
-fn every_expected_stream_is_protocol_valid() {
-    for stream_path in expected_streams() {
-        load_stream_from_path(&stream_path);
-    }
-}
-
-#[test]
 fn smoke_flow_stream_matches_m0_order_contract() {
     let stream = load_stream("smoke-flow", "smoke-flow.jsonl");
     let event_types = event_types(&stream);
@@ -124,7 +117,8 @@ fn every_golden_stream_matches_runtime_output() {
                 {
                     failures.push(format!(
                         "{label}: authoritative session log byte mismatch (expected {} bytes, actual {} bytes)",
-                        expected.len(), actual.len()
+                        expected.len(),
+                        actual.len()
                     ));
                 }
             }
@@ -137,22 +131,16 @@ fn every_golden_stream_matches_runtime_output() {
         }
         if failures.len() != failure_start {
             eprintln!(
-                "{label}: complete actual stdout ({} UTF-8 bytes, JSON-encoded):\n{}",
-                output.stdout.len(),
+                "{label}: complete actual stdout:\n{}",
                 serde_json::to_string(&output.stdout).expect("actual stdout encodes")
             );
-            if let Ok(actual) = &session_log {
-                if actual == &output.stdout {
-                    eprintln!(
-                        "{label}: authoritative session log is byte-identical to actual stdout"
-                    );
-                } else {
-                    eprintln!(
-                        "{label}: complete actual session log ({} UTF-8 bytes, JSON-encoded):\n{}",
-                        actual.len(),
-                        serde_json::to_string(actual).expect("actual session log encodes")
-                    );
-                }
+            if let Ok(actual) = &session_log
+                && actual != &output.stdout
+            {
+                eprintln!(
+                    "{label}: complete actual session log:\n{}",
+                    serde_json::to_string(actual).expect("actual session log encodes")
+                );
             }
         }
     }
@@ -242,27 +230,20 @@ fn negative_streams_fail_without_completion_events() {
     for stream_path in stream_paths {
         let stream = load_stream_from_path(&stream_path);
         let event_types = event_types(&stream);
+        let path = stream_path.display();
 
-        assert!(
-            event_types.contains(&EventType::Error),
-            "{} must contain error",
-            stream_path.display()
-        );
-        assert!(
-            event_types.contains(&EventType::FlowFailed),
-            "{} must contain flow.failed",
-            stream_path.display()
-        );
-        assert!(
-            event_types.contains(&EventType::SessionFailed),
-            "{} must contain session.failed",
-            stream_path.display()
-        );
-        assert!(
-            event_types.contains(&EventType::PhaseFailed),
-            "{} must contain phase.failed",
-            stream_path.display()
-        );
+        for required in [
+            EventType::Error,
+            EventType::FlowFailed,
+            EventType::SessionFailed,
+            EventType::PhaseFailed,
+        ] {
+            assert!(
+                event_types.contains(&required),
+                "{path} must contain {}",
+                required.as_str()
+            );
+        }
         assert_eq!(
             event_types
                 .iter()
@@ -276,8 +257,7 @@ fn negative_streams_fail_without_completion_events() {
                 EventType::FlowFailed,
                 EventType::SessionFailed,
             ],
-            "{} must end with error, flow.failed and session.failed",
-            stream_path.display()
+            "{path} must end with error, flow.failed and session.failed"
         );
         if negative_attempts_tool_launch(&stream_path) {
             assert!(
@@ -286,36 +266,26 @@ fn negative_streams_fail_without_completion_events() {
                         && event.payload["tool_id"].is_string()
                         && event.payload["error"].is_string()
                 }),
-                "{} must contain tool.failed with tool_id and error",
-                stream_path.display()
+                "{path} must contain tool.failed with tool_id and error"
             );
         } else {
             assert!(
                 !event_types.contains(&EventType::ToolFailed),
-                "{} must not contain tool.failed",
-                stream_path.display()
+                "{path} must not contain tool.failed"
             );
         }
-        assert!(
-            !event_types.contains(&EventType::ToolCompleted),
-            "{} must not contain tool.completed",
-            stream_path.display()
-        );
-        assert!(
-            !event_types.contains(&EventType::PhaseCompleted),
-            "{} must not contain phase.completed",
-            stream_path.display()
-        );
-        assert!(
-            !event_types.contains(&EventType::FlowCompleted),
-            "{} must not contain flow.completed",
-            stream_path.display()
-        );
-        assert!(
-            !event_types.contains(&EventType::SessionCompleted),
-            "{} must not contain session.completed",
-            stream_path.display()
-        );
+        for forbidden in [
+            EventType::ToolCompleted,
+            EventType::PhaseCompleted,
+            EventType::FlowCompleted,
+            EventType::SessionCompleted,
+        ] {
+            assert!(
+                !event_types.contains(&forbidden),
+                "{path} must not contain {}",
+                forbidden.as_str()
+            );
+        }
     }
 }
 
@@ -421,21 +391,7 @@ fn assert_smoke_flow_payload_dimensions(stream: &[EventEnvelope]) {
         serde_json::json!(["say-smoke"]),
     );
 
-    let tool_started = find_payload_event(
-        stream,
-        EventType::ToolStarted,
-        "tool_id",
-        serde_json::json!("echo"),
-    );
-    assert_eq!(
-        tool_started.payload,
-        serde_json::json!({
-            "allowed_parameters": [],
-            "tool_id": "echo",
-            "tool_kind": "predefined-command",
-            "tool_name": "Echo",
-        })
-    );
+    assert_tool_started(stream, "echo", "predefined-command", "Echo", &[]);
 }
 
 fn assert_hello_flow_payload_dimensions(stream: &[EventEnvelope]) {
@@ -489,37 +445,14 @@ fn assert_hello_flow_payload_dimensions(stream: &[EventEnvelope]) {
         serde_json::json!(["write-output"]),
     );
 
-    let read_file = find_payload_event(
+    assert_tool_started(
         stream,
-        EventType::ToolStarted,
-        "tool_id",
-        serde_json::json!("read-file"),
+        "read-file",
+        "predefined-command",
+        "ReadFile",
+        &["--file"],
     );
-    assert_eq!(
-        read_file.payload,
-        serde_json::json!({
-            "allowed_parameters": ["--file"],
-            "tool_id": "read-file",
-            "tool_kind": "predefined-command",
-            "tool_name": "ReadFile",
-        })
-    );
-
-    let write_summary = find_payload_event(
-        stream,
-        EventType::ToolStarted,
-        "tool_id",
-        serde_json::json!("write-summary"),
-    );
-    assert_eq!(
-        write_summary.payload,
-        serde_json::json!({
-            "allowed_parameters": [],
-            "tool_id": "write-summary",
-            "tool_kind": "own-script",
-            "tool_name": "WriteSummary",
-        })
-    );
+    assert_tool_started(stream, "write-summary", "own-script", "WriteSummary", &[]);
 
     let subflow_started = stream
         .iter()
@@ -554,6 +487,30 @@ fn assert_hello_flow_payload_dimensions(stream: &[EventEnvelope]) {
             "hello-flow subflow invocations must use distinct flow_id values"
         );
     }
+}
+
+fn assert_tool_started(
+    stream: &[EventEnvelope],
+    tool_id: &str,
+    tool_kind: &str,
+    tool_name: &str,
+    allowed_parameters: &[&str],
+) {
+    let event = find_payload_event(
+        stream,
+        EventType::ToolStarted,
+        "tool_id",
+        serde_json::json!(tool_id),
+    );
+    assert_eq!(
+        event.payload,
+        serde_json::json!({
+            "allowed_parameters": allowed_parameters,
+            "tool_id": tool_id,
+            "tool_kind": tool_kind,
+            "tool_name": tool_name,
+        })
+    );
 }
 
 fn phase_execution_ids(stream: &[EventEnvelope], event_type: EventType) -> Vec<&str> {

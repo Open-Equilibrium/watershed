@@ -6,9 +6,6 @@ import '../controls.dart';
 import '../theme/tokens.g.dart';
 import 'agent_hosts.dart';
 
-/// Add Agent Host (ADR-0295): the address and pairing code another agent host shows for a device
-/// (`meta invite --device`). Add pairs with it and saves it, and the dialog closes with the host;
-/// Cancel closes it without a change.
 class AddAgentHostDialog extends StatefulWidget {
   const AddAgentHostDialog({super.key, required this.hosts});
 
@@ -28,7 +25,6 @@ class _AddAgentHostDialogState extends State<AddAgentHostDialog> {
   @override
   void initState() {
     super.initState();
-    // The dialog's own autofocus takes the keys after the field's, so the Host field asks once shown.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _addressFocus.requestFocus();
     });
@@ -78,8 +74,6 @@ class _AddAgentHostDialogState extends State<AddAgentHostDialog> {
     }
   }
 
-  /// A labeled field: the label is what the field is named by, for assistive technology, and it
-  /// shows above the field as T3 Code's does.
   Widget _field(
     BuildContext context,
     String label,

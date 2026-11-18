@@ -2,15 +2,11 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 
-/// The key Liquid sees for the Liquid key: macOS turns Caps Lock into F18 while it is
-/// on.
 const liquidKey = LogicalKeyboardKey.f18;
 
-/// Esc pressed afresh and alone, which closes what is open.
 final ShortcutActivator escapeKey = const Keys(LogicalKeyboardKey.escape)
     .activator;
 
-/// A key with the modifiers held for it; `liquid` is the Liquid key.
 @immutable
 class Keys {
   const Keys(
@@ -29,19 +25,13 @@ class Keys {
   final bool shift;
   final bool control;
 
-  /// Accepts exactly these keys when pressed: a binding without the Liquid key ignores its
-  /// key while the Liquid key is held, so ⇪⏎ never also runs ⏎. A key held from before, such
-  /// as one that just answered a question, runs nothing.
   ShortcutActivator get activator => _KeysActivator(this);
 
-  /// Like [activator], and also while the key is held, as for moving through a list.
   ShortcutActivator get repeating => _KeysActivator(this, repeats: true);
 
-  /// These keys without the Liquid key, as the macOS menu bar takes them.
   Keys get withoutLiquid =>
       Keys(key, meta: meta, alt: alt, shift: shift, control: control);
 
-  /// These keys as the macOS menu bar shows them; none with the Liquid key.
   SingleActivator? get menuShortcut => liquid
       ? null
       : SingleActivator(
@@ -52,14 +42,11 @@ class Keys {
           control: control,
         );
 
-  /// Whether these keys type or edit in a text field: a character, alone or with ⇧ or ⌥, a
-  /// ⌃ character, which moves the cursor, or a cursor or delete key with any modifier.
   bool get types =>
       !liquid &&
       (_editing.contains(key) ||
           (!meta && (key.keyLabel.runes.length == 1 || _numpad.contains(key))));
 
-  /// Numpad keys that type a character; their labels name them, as in "Numpad 1".
   static final _numpad = {
     LogicalKeyboardKey.numpad0,
     LogicalKeyboardKey.numpad1,
@@ -96,7 +83,6 @@ class Keys {
     LogicalKeyboardKey.pageDown,
   };
 
-  /// How badges and Settings show the keys, modifiers in macOS order.
   String get label => [
     if (control) '⌃',
     if (alt) '⌥',
@@ -118,7 +104,6 @@ class Keys {
     LogicalKeyboardKey.arrowDown: '↓',
   };
 
-  /// The keys held now with `key`, as Settings records them.
   factory Keys.pressed(LogicalKeyboardKey key, HardwareKeyboard keyboard) =>
       Keys(
         key,
@@ -179,7 +164,6 @@ class Keys {
   String toString() => label;
 }
 
-/// Accepts its key with exactly its modifiers, the Liquid key among them.
 class _KeysActivator extends ShortcutActivator {
   const _KeysActivator(this.keys, {this.repeats = false});
 
@@ -203,12 +187,8 @@ class _KeysActivator extends ShortcutActivator {
   String debugDescribeKeys() => keys.label;
 }
 
-/// Where a command's keys work. Keys conflict within one area, and the ⌘ keys of the app area,
-/// which the menu bar runs, in every area.
 enum Area { app, input, question, diff, page }
 
-/// Keys that never change, as Settings → Shortcuts lists them per area; no command may take
-/// them there.
 enum Fixed {
   newLine('New line', Area.input, '⇧⏎', [
     Keys(LogicalKeyboardKey.enter, shift: true),
@@ -254,14 +234,11 @@ enum Fixed {
   final String label;
   final Area area;
 
-  /// The keys as Settings show them.
   final String display;
   final List<Keys> keys;
 
-  /// Whether a held key acts again, as for moving through a list; a switch acts once.
   final bool repeats;
 
-  /// Binds each key to the action at its position, such as ↑ to back and ↓ to on.
   Map<ShortcutActivator, VoidCallback> bind(List<VoidCallback> actions) {
     assert(actions.length == keys.length, '$name binds ${keys.length} keys');
     return {
@@ -271,7 +248,6 @@ enum Fixed {
   }
 }
 
-/// Every action with keys the user can change in Settings → Shortcuts.
 enum Command {
   newSession(
     'New Session',
@@ -297,7 +273,6 @@ enum Command {
     Keys(LogicalKeyboardKey.keyD, meta: true),
     liquid: true,
   ),
-  // Stored by enum name in shortcuts.json, so the name stays while the label says Session card.
   sessionDetails(
     'Session card',
     Area.app,
@@ -352,11 +327,8 @@ enum Command {
   final String label;
   final Area area;
 
-  /// The Standard profile's keys.
   final Keys keys;
 
-  /// Whether the Liquid key profile adds ⇪ + the same key; platform standards such as
-  /// Settings… keep ⌘ only.
   final bool liquid;
 }
 
@@ -367,14 +339,10 @@ enum Profile {
 
   const Profile(this.label);
 
-  /// The profile's name, as Liquid shows it.
   final String label;
 }
 
-/// What a command's keys may not be: keys a fixed row or macOS uses, or keys that type where the
-/// command works; null when the keys are free.
 String? reserved(Command command, Keys keys) {
-  // The menu bar ignores the Liquid key, so ⇪⌘Q still quits.
   final menu = keys.withoutLiquid;
   for (final (area, reserved, use) in _reserved) {
     if (area == null
@@ -383,8 +351,6 @@ String? reserved(Command command, Keys keys) {
       return use;
     }
   }
-  // With Shift pressed first, macOS takes Caps Lock as its capitals toggle, so the Liquid key
-  // never arrives.
   if (keys.liquid && keys.shift) return 'capitals';
   final typing = {
     Area.app,
@@ -395,7 +361,6 @@ String? reserved(Command command, Keys keys) {
   return typing && keys.types ? 'typing' : null;
 }
 
-/// macOS standards everywhere, and the fixed keys per area.
 final _reserved = <(Area?, Keys, String)>[
   (null, const Keys(LogicalKeyboardKey.keyQ, meta: true), 'Quit'),
   (null, const Keys(LogicalKeyboardKey.keyW, meta: true), 'Close'),
@@ -421,8 +386,6 @@ final _reserved = <(Area?, Keys, String)>[
     for (final keys in fixed.keys) (fixed.area, keys, fixed.label),
 ];
 
-/// The Custom profile: the profile it started from, whether Caps Lock is the Liquid key and
-/// every changed command's keys, the first shown on its badge.
 @immutable
 class CustomProfile {
   const CustomProfile(this.base, this.liquidKey, this.changes);
@@ -447,8 +410,6 @@ class CustomProfile {
   int get hashCode => Object.hash(base, liquidKey, changes.length);
 }
 
-/// The active profile, and the Custom profile kept while another one is active, so choosing
-/// Custom again brings it back.
 @immutable
 class ShortcutSettings {
   const ShortcutSettings._(this.profile, this.custom);
@@ -461,24 +422,19 @@ class ShortcutSettings {
 
   final Profile profile;
 
-  /// The Custom profile, if the user made one.
   final CustomProfile? custom;
 
   CustomProfile? get _active => profile == Profile.custom ? custom : null;
 
-  /// The profile Custom started from; the profile itself otherwise.
   Profile get base => _active?.base ?? profile;
 
-  /// Whether Caps Lock is the Liquid key.
   bool get liquidKey => _active?.liquidKey ?? profile == Profile.liquidKey;
 
-  /// Every changed command's keys in the active profile.
   Map<Command, List<Keys>> get changes => _active?.changes ?? const {};
 
   List<Keys> _defaults(Command command) =>
       _defaultKeys(command, liquidKey: liquidKey);
 
-  /// What `command` runs by default, with its Liquid key combination while `liquidKey` is on.
   static List<Keys> _defaultKeys(Command command, {required bool liquidKey}) =>
       [
         if (command.liquid && liquidKey)
@@ -492,13 +448,11 @@ class ShortcutSettings {
         command.keys,
       ];
 
-  /// Every key combination that runs `command`; Liquid key combinations only while it is on.
   List<Keys> bindings(Command command) => [
     for (final keys in changes[command] ?? _defaults(command))
       if (liquidKey || !keys.liquid) keys,
   ];
 
-  /// Shortcut bindings that run each command's action with all of its keys.
   Map<ShortcutActivator, VoidCallback> bind(
     Map<Command, VoidCallback> actions,
   ) => {
@@ -506,27 +460,20 @@ class ShortcutSettings {
       for (final keys in bindings(command)) keys.activator: action,
   };
 
-  /// What a badge shows for `command`; empty without keys.
   String label(Command command) => bindings(command).firstOrNull?.label ?? '';
 
-  /// A hint naming `command`'s keys and what they do; empty without keys.
   String hint(Command command, String what) {
     final keys = label(command);
     return keys.isEmpty ? '' : '$keys $what';
   }
 
-  /// The keys the macOS menu bar can show: ⌘ without the Liquid key.
   Keys? menu(Command command) =>
       bindings(command).where((keys) => keys.meta && !keys.liquid).firstOrNull;
 
   bool changed(Command command) => changes.containsKey(command);
 
-  /// What `command` shows when unchanged.
   String defaultLabel(Command command) => _defaults(command).first.label;
 
-  /// Whether `bound`, a combination of `other`, runs `keys` of `command` too: the same keys in
-  /// one area. When either is in the app area, also the same ⌘ keys, which the menu bar runs
-  /// with or without the Liquid key.
   static bool _runsSame(
     Command command,
     Keys keys,
@@ -538,8 +485,6 @@ class ShortcutSettings {
           bound.meta &&
           bound.withoutLiquid == keys.withoutLiquid);
 
-  /// The other commands that `keys` already run for `command`: in their area, or across areas
-  /// for the app area's ⌘ keys.
   List<Command> conflicts(Command command, Keys keys) => [
     for (final other in Command.values)
       if (other != command &&
@@ -548,8 +493,6 @@ class ShortcutSettings {
         other,
   ];
 
-  /// The kept Custom profile a change here would replace, when it holds anything its base
-  /// does not.
   CustomProfile? get replaced => switch (custom) {
     final kept?
         when profile != Profile.custom &&
@@ -559,13 +502,9 @@ class ShortcutSettings {
     _ => null,
   };
 
-  /// The Custom profile to change: the active one, or a new one based on the active profile.
   CustomProfile get _editable =>
       _active ?? CustomProfile(profile, liquidKey, const {});
 
-  /// Gives `command` new first keys, or none, keeping the ⌘ keys beside the Liquid key;
-  /// `clear` gives up the same keys. Changing a profile other than Custom starts a new Custom
-  /// profile from it.
   ShortcutSettings change(
     Command command,
     Keys? keys, {
@@ -582,7 +521,6 @@ class ShortcutSettings {
       }
     }
 
-    // The first key shown gives way; Liquid key combinations stay while the key is off.
     final on = from.withLiquidKey(true);
     final shown = from.bindings(command).firstOrNull;
     final rest = on
@@ -616,8 +554,6 @@ class ShortcutSettings {
     null => this,
   };
 
-  /// Restores `command`'s default keys and takes them from the other commands that run them now,
-  /// Liquid key combinations included while that key is off: they come back with it.
   ShortcutSettings resetTaking(Command command) {
     final custom = _active;
     if (custom == null) return this;
@@ -647,8 +583,6 @@ class ShortcutSettings {
     );
   }
 
-  /// Drops every change; a Custom profile that then matches its base becomes that profile, so
-  /// resetting never turns the Liquid key on or off.
   ShortcutSettings resetAll() => switch (_active) {
     final custom? when custom.liquidKey == (custom.base == Profile.liquidKey) =>
       ShortcutSettings._(custom.base, null),
@@ -667,15 +601,12 @@ class ShortcutSettings {
     );
   }
 
-  /// These settings without the Liquid key: Standard for the Liquid key profile, Custom with
-  /// its switch off otherwise.
   ShortcutSettings withoutLiquidKey() => switch (profile) {
     _ when !liquidKey => this,
     Profile.liquidKey => ShortcutSettings._(Profile.standard, custom),
     _ => withLiquidKey(false),
   };
 
-  /// Activates `profile`; Custom comes back as it was left, or starts from the active profile.
   ShortcutSettings choose(Profile profile) => switch (profile) {
     Profile.custom => ShortcutSettings._(Profile.custom, custom ?? _editable),
     _ => ShortcutSettings._(profile, custom),
@@ -695,8 +626,6 @@ class ShortcutSettings {
       },
   };
 
-  /// The settings in `json`; unknown commands and malformed keys fall back to their defaults.
-  /// Another version, an unknown profile or Custom without its profile yields none.
   static ShortcutSettings? fromJson(Map<String, Object?> json) {
     final profile = Profile.values.asNameMap()[json['profile']];
     if (json['version'] != 1 || profile == null) return null;
@@ -720,16 +649,12 @@ class ShortcutSettings {
         if (command == null || value is! List) continue;
         final keys = value.map(Keys.decode).toList();
         if (keys.contains(null)) continue;
-        // Keys listed twice would run the command twice.
         changes[command] = keys.nonNulls.toSet().toList();
       }
     }
     return CustomProfile(base, liquidKey, _leaveTakenDefaultsUnbound(changes));
   }
 
-  /// Leaves a default unbound when a binding of the user's own takes its keys: the user's binding
-  /// wins, and Settings shows the command unbound with its default to restore. The Liquid key
-  /// counts as on, so its combinations are checked as well.
   static Map<Command, List<Keys>> _leaveTakenDefaultsUnbound(
     Map<Command, List<Keys>> changes,
   ) {
@@ -763,11 +688,9 @@ class ShortcutSettings {
   int get hashCode => Object.hash(profile, custom);
 }
 
-/// Gives the widgets below the shortcut settings in use.
 class Keymap extends InheritedNotifier<ValueListenable<ShortcutSettings>> {
   const Keymap({super.key, required super.notifier, required super.child});
 
-  /// The settings in use; Standard without a [Keymap] above `context`.
   static ShortcutSettings of(BuildContext context) =>
       context.dependOnInheritedWidgetOfExactType<Keymap>()?.notifier?.value ??
       _standard;

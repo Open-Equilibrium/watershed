@@ -16,6 +16,7 @@ use crate::runtime::{
 };
 use proto::{EventEnvelope, EventType};
 use std::{fs, path::Path};
+
 fn create_hello_flow_run(workspace: &Path) -> String {
     create_conversation_run(
         workspace,
@@ -29,6 +30,17 @@ fn create_hello_flow_run(workspace: &Path) -> String {
     expected_stream("hello-flow", "hello-flow.jsonl")
 }
 
+fn write_run_events(workspace: &Path, run_session_id: &str, events: impl AsRef<[u8]>) {
+    fs::write(
+        crate::tests::helpers::workspace_session_dir(workspace)
+            .join("review/runs")
+            .join(run_session_id)
+            .join("events.jsonl"),
+        events,
+    )
+    .expect("event stream writes");
+}
+
 fn write_hello_flow_history(workspace: &Path) -> u64 {
     let events = create_hello_flow_run(workspace);
     let terminal = serde_json::from_str::<EventEnvelope>(
@@ -38,18 +50,21 @@ fn write_hello_flow_history(workspace: &Path) -> u64 {
             .expect("golden stream has a terminal event"),
     )
     .expect("golden terminal event parses");
-    fs::write(
-        crate::tests::helpers::workspace_session_dir(workspace)
-            .join("review/runs/hello-flow/events.jsonl"),
-        events,
-    )
-    .expect("golden event stream writes");
+    write_run_events(workspace, "hello-flow", events);
     write_history_records(
         workspace,
         "review",
         [entry("root", None, "hello-flow", terminal.sequence)],
     );
     terminal.sequence
+}
+
+fn segment_leaf(ordinal: u64) -> String {
+    if ordinal == 1 {
+        "events.jsonl".to_owned()
+    } else {
+        format!("events.{ordinal:06}.jsonl")
+    }
 }
 
 #[test]
@@ -90,12 +105,7 @@ fn conversation_history_event_pointer_rejects_duplicate_event_identity() {
     .into_iter()
     .map(|event| event.canonical_jsonl().expect("event serializes"))
     .collect::<String>();
-    fs::write(
-        crate::tests::helpers::workspace_session_dir(&workspace)
-            .join("review/runs/review-1/events.jsonl"),
-        events,
-    )
-    .expect("duplicate event stream writes");
+    write_run_events(&workspace, "review-1", events);
     write_history_records(&workspace, "review", [entry("root", None, "review-1", 2)]);
 
     let error = read_conversation_history(&workspace, "review")
@@ -137,12 +147,7 @@ fn conversation_history_rejects_exact_duplicate_inside_a_digest_collision() {
         .iter()
         .map(|event| event.canonical_jsonl().expect("event serializes"))
         .collect::<String>();
-    fs::write(
-        crate::tests::helpers::workspace_session_dir(&workspace)
-            .join("review/runs/hello-flow/events.jsonl"),
-        events,
-    )
-    .expect("colliding event stream writes");
+    write_run_events(&workspace, "hello-flow", events);
     write_history_records(
         &workspace,
         "review",
@@ -193,24 +198,16 @@ fn conversation_history_event_pointer_state_stays_within_the_memory_budget() {
                 serde_json::json!({"flow_definition_id":"review-flow"}),
             );
             if segment.len() + line.len() > MAX_SESSION_SEGMENT_BYTES as usize {
-                let leaf = if segment_ordinal == 1 {
-                    "events.jsonl".to_owned()
-                } else {
-                    format!("events.{segment_ordinal:06}.jsonl")
-                };
-                fs::write(run.join(leaf), &segment).expect("event segment writes");
+                fs::write(run.join(segment_leaf(segment_ordinal)), &segment)
+                    .expect("event segment writes");
                 segment.clear();
                 segment_ordinal += 1;
             }
             segment.push_str(&line);
         }
     }
-    let leaf = if segment_ordinal == 1 {
-        "events.jsonl".to_owned()
-    } else {
-        format!("events.{segment_ordinal:06}.jsonl")
-    };
-    fs::write(run.join(leaf), segment).expect("final event segment writes");
+    fs::write(run.join(segment_leaf(segment_ordinal)), segment)
+        .expect("final event segment writes");
     write_history_records(
         &workspace,
         "review",
@@ -306,12 +303,7 @@ fn conversation_history_event_pointer_preserves_message_roles() {
         ),
     ]
     .concat();
-    fs::write(
-        crate::tests::helpers::workspace_session_dir(&workspace)
-            .join("review/runs/review-1/events.jsonl"),
-        events,
-    )
-    .expect("message event prefix writes");
+    write_run_events(&workspace, "review-1", events);
     write_history_records(&workspace, "review", [entry("root", None, "review-1", 5)]);
 
     read_conversation_history(&workspace, "review").expect("message prefix validates");
@@ -325,12 +317,7 @@ fn early_pointer_validation_stops_at_the_referenced_event() {
         events.lines().count() > 2,
         "the golden stream has a long suffix after its first event"
     );
-    fs::write(
-        crate::tests::helpers::workspace_session_dir(&workspace)
-            .join("review/runs/hello-flow/events.jsonl"),
-        events,
-    )
-    .expect("golden event stream writes");
+    write_run_events(&workspace, "hello-flow", events);
     write_history_records(&workspace, "review", [entry("root", None, "hello-flow", 1)]);
 
     let history = read_conversation_history(&workspace, "review")

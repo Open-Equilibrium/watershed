@@ -11,7 +11,6 @@ import '../theme/tokens.g.dart';
 import 'input_lane.dart';
 import 'sidebar.dart';
 
-/// The start page: T3 Code's greeting for the project, above the input area that starts a session.
 class StartPage extends StatelessWidget {
   const StartPage({super.key, required this.state, required this.info});
 
@@ -37,8 +36,6 @@ class StartPage extends StatelessWidget {
   );
 }
 
-/// The chips under the input area that set up a new session, as T3 Code's composer shows them:
-/// workspace, model with its options, and permissions.
 class StartChips extends StatelessWidget {
   const StartChips({super.key, required this.state});
 
@@ -70,8 +67,6 @@ class StartChips extends StatelessWidget {
   );
 }
 
-/// The workspace selector: a new session starts in the project folder or in a new worktree from a
-/// base ref, as T3 Code's workspace selector lets it.
 class WorkspaceMenu extends StatelessWidget {
   const WorkspaceMenu({super.key, required this.state});
 
@@ -87,7 +82,6 @@ class WorkspaceMenu extends StatelessWidget {
     builder: (context, _) {
       final worktree = state.newWorktree.value;
       final base = state.base.value;
-      // T3's resolveCurrentWorkspaceLabel.
       final current = state.worktree.value == null
           ? 'Current checkout'
           : 'Current worktree';
@@ -125,7 +119,6 @@ class WorkspaceMenu extends StatelessWidget {
     },
   );
 
-  /// Lists the project's refs under the chip and sets the one picked as the base.
   Future<void> _pickBase(BuildContext context) async {
     final box = context.findRenderObject()! as RenderBox;
     final overlay =
@@ -154,8 +147,6 @@ class WorkspaceMenu extends StatelessWidget {
   }
 }
 
-/// The model picker: the models grouped by provider, under "Choose model", with a chip for each
-/// option the chosen model has, such as its reasoning effort.
 class ModelMenu extends StatelessWidget {
   const ModelMenu({
     super.key,
@@ -177,7 +168,6 @@ class ModelMenu extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       spacing: WsMetrics.space2,
       children: [
-        // A long model name shortens in the chip rather than overflowing the chips' row.
         Flexible(
           child: PopupMenuButton<BridgeModelChoice>(
             tooltip: 'Model',
@@ -224,7 +214,6 @@ class ModelMenu extends StatelessWidget {
   }
 }
 
-/// One select option of the chosen model, such as its reasoning effort.
 class _EffortMenu extends StatelessWidget {
   const _EffortMenu({
     required this.option,
@@ -257,7 +246,6 @@ class _EffortMenu extends StatelessWidget {
   }
 }
 
-/// `choice` with option `optionId` set to `value`.
 BridgeModelChoice _withValue(
   BridgeModelChoice choice,
   String optionId,
@@ -280,7 +268,6 @@ BridgeModelChoice _withValue(
   );
 }
 
-/// The model `choice` names, as `providers` list it.
 BridgeModel? modelOf(
   List<BridgeProvider> providers,
   BridgeModelChoice choice,
@@ -290,11 +277,9 @@ BridgeModel? modelOf(
     .where((model) => model.id == choice.model)
     .firstOrNull;
 
-/// The model's name for `choice`, or its id when no provider lists it.
 String modelName(List<BridgeProvider> providers, BridgeModelChoice choice) =>
     modelOf(providers, choice)?.name ?? choice.model;
 
-/// T3's name and description of a permission mode.
 (String, String) permissionsText(BridgePermissions mode) => switch (mode) {
   BridgePermissions.supervised => (
     'Supervised',
@@ -314,7 +299,6 @@ String modelName(List<BridgeProvider> providers, BridgeModelChoice choice) =>
   ),
 };
 
-/// The permissions chip: what the agent may do without asking, as T3 Code's composer footer shows.
 class PermissionsMenu extends StatelessWidget {
   const PermissionsMenu({
     super.key,

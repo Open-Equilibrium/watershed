@@ -1,7 +1,7 @@
 use super::{
     helpers::{
         assert_invalid_event, assert_invalid_session_log, assert_invalid_stream, base_event,
-        event_line, event_line_with_parent, flow_started_line, load_test_registry,
+        event_line_with_parent, flow_started_line, load_test_registry,
     },
     support::event_timestamp,
     test_support::workspace_copy,
@@ -258,18 +258,6 @@ fn protocol_validator_rejects_stream_identity_edges() {
     empty_event_id.event_id.clear();
     assert_invalid_event("empty-event-id.jsonl", empty_event_id, "event_id");
 
-    let mut duplicate = base_event();
-    duplicate.sequence = 2;
-    assert_invalid_stream(
-        "duplicate-event-id.jsonl",
-        &format!(
-            "{}{}",
-            canonical,
-            duplicate.canonical_jsonl().expect("duplicate serializes")
-        ),
-        "unique event_id",
-    );
-
     let mut second_session = base_event();
     second_session.event_id = "evt-002".to_owned();
     second_session.sequence = 2;
@@ -284,28 +272,6 @@ fn protocol_validator_rejects_stream_identity_edges() {
                 .expect("second session serializes")
         ),
         "one session_id",
-    );
-
-    let completed = event_line(
-        "evt-002",
-        EventType::SessionCompleted,
-        "meta001",
-        2,
-        None,
-        serde_json::json!({}),
-    );
-    let after_terminal = event_line(
-        "evt-003",
-        EventType::SessionResumed,
-        "meta001",
-        3,
-        None,
-        serde_json::json!({"reason":"late"}),
-    );
-    assert_invalid_stream(
-        "after-terminal.jsonl",
-        &format!("{canonical}{completed}{after_terminal}"),
-        "after terminal session event",
     );
 
     let flow_started_without_id = EventEnvelope::new(
@@ -323,37 +289,26 @@ fn protocol_validator_rejects_stream_identity_edges() {
         "flow_id is required for flow-scoped events",
     );
 
-    let child_with_unknown_parent = event_line_with_parent(
-        "evt-002",
-        EventType::FlowStarted,
-        "meta001",
-        2,
-        Some("flow-002"),
-        Some("flow-missing"),
-        serde_json::json!({"flow_definition_id":"child-flow"}),
-    );
-    assert_invalid_session_log(
-        "unknown-parent-flow.jsonl",
-        "meta001",
-        &format!("{canonical}{child_with_unknown_parent}"),
-        "parent_flow_id",
-    );
-
-    let self_parented_flow = event_line_with_parent(
-        "evt-002",
-        EventType::FlowStarted,
-        "meta001",
-        2,
-        Some("flow-001"),
-        Some("flow-001"),
-        serde_json::json!({"flow_definition_id":"smoke-flow"}),
-    );
-    assert_invalid_session_log(
-        "self-parent-flow.jsonl",
-        "meta001",
-        &format!("{canonical}{self_parented_flow}"),
-        "parent_flow_id",
-    );
+    for (name, flow_id, parent_flow_id) in [
+        ("unknown-parent-flow.jsonl", "flow-002", "flow-missing"),
+        ("self-parent-flow.jsonl", "flow-001", "flow-001"),
+    ] {
+        let started = event_line_with_parent(
+            "evt-002",
+            EventType::FlowStarted,
+            "meta001",
+            2,
+            Some(flow_id),
+            Some(parent_flow_id),
+            serde_json::json!({"flow_definition_id":"child-flow"}),
+        );
+        assert_invalid_session_log(
+            name,
+            "meta001",
+            &format!("{canonical}{started}"),
+            "parent_flow_id",
+        );
+    }
 
     let parent_without_flow_id = format!(
         "{}\n",

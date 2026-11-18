@@ -1,6 +1,5 @@
-use super::{Fixture, assert_success, pty::Terminal, wait_for_file};
+use super::{Fixture, assert_success, denied, pty::Terminal, wait_for_file};
 use serde_json::{Value, json};
-use sha2::{Digest, Sha256};
 use std::{
     fs::{self, File, OpenOptions},
     io::{Read, Write},
@@ -19,14 +18,8 @@ fn results(fixture: &Fixture, rows: &[Value], allowed: impl Fn(&Value) -> bool) 
     }
 }
 
-fn denied(result: &Value) -> bool {
-    matches!(result["errno"].as_i64(), Some(1 | 13 | 30))
-}
-
 #[test]
 fn selected_home_external_store_and_programs_cover_later_trusted_publications() {
-    // Admission/discovery and publication-lease tests belong to the controller.
-    // Here its explicit complete inventory is enforced by the actual Executor.
     for guarded in [false, true] {
         let mut fixture = Fixture::with_image_name("custom-executor");
         let store = fixture.root.join("platform-store");
@@ -75,7 +68,6 @@ fn selected_home_external_store_and_programs_cover_later_trusted_publications() 
             wait_for_file(&fixture.project.join("helper-ready"));
             running
         });
-        // Trusted publication is deliberately after the guarded Tool has started.
         fs::write(fixture.home.join("created"), b"created by owner").unwrap();
         OpenOptions::new()
             .append(true)
@@ -106,20 +98,10 @@ fn selected_home_external_store_and_programs_cover_later_trusted_publications() 
         )
         .unwrap();
         fs::write(store.join("new-record"), b"external publication by owner").unwrap();
-        let digest = |path: &std::path::Path| {
-            let mut hash = Sha256::new();
-            let mut file = File::open(path).unwrap();
-            let mut buffer = [0; 8192];
-            loop {
-                let count = file.read(&mut buffer).unwrap();
-                if count == 0 {
-                    break;
-                }
-                hash.update(&buffer[..count]);
-            }
-            hash.finalize()
-        };
-        let expected = paths.iter().map(|path| digest(path)).collect::<Vec<_>>();
+        let expected = paths
+            .iter()
+            .map(|path| fs::read(path).unwrap())
+            .collect::<Vec<_>>();
         if let Some(running) = &mut running {
             fs::write(fixture.project.join("release"), b"go").unwrap();
             assert_success(&running.completed(&request));
@@ -135,7 +117,12 @@ fn selected_home_external_store_and_programs_cover_later_trusted_publications() 
         });
         for (path, expected) in paths.iter().zip(expected) {
             if guarded {
-                assert_eq!(digest(path), expected, "{} changed", path.display());
+                assert_eq!(
+                    fs::read(path).unwrap(),
+                    expected,
+                    "{} changed",
+                    path.display()
+                );
             } else {
                 assert_eq!(fs::read(path).unwrap(), b"changed", "{}", path.display());
             }
@@ -155,14 +142,7 @@ fn protected_metadata_mapped_bytes_and_hardlinks_have_real_allowed_controls() {
                    "auxiliary": fixture.project.join("hardlink")})
         });
         let request = fixture.operations(json!(rows), false);
-        if guarded {
-            let mut running = fixture.spawn(&request);
-            running.ready(&request);
-            running.start(&request);
-            assert_success(&running.completed(&request));
-        } else {
-            fixture.baseline(&request, &[]);
-        }
+        fixture.execute(&request, guarded);
         results(&fixture, &rows, |result| {
             if guarded {
                 denied(result) || (result["case"] == "link" && result["errno"] == 18)
@@ -229,7 +209,6 @@ fn writable_and_internal_handles_do_not_reach_the_tool() {
             let mut baseline_handles = handles.to_vec();
             baseline_handles.extend([(directory.as_raw_fd(), 32), (image.as_raw_fd(), 33)]);
             fixture.baseline(&request, &baseline_handles);
-            // The writable terminal really received bytes, not just an open fd.
             rustix::fs::fcntl_setfl(&terminal.master, rustix::fs::OFlags::NONBLOCK).unwrap();
             let mut bytes = [0; 7];
             terminal.master.read_exact(&mut bytes).unwrap();
@@ -268,8 +247,6 @@ fn current_and_later_host_terminals_are_inaccessible_to_the_tool() {
     results(&baseline, &rows, |result| result["errno"] == 0);
     fs::write(fixture.project.join("release"), b"go").unwrap();
     assert_success(&running.completed(&request));
-    // Linux's private device view may hide a live host PTY; the real baseline
-    // above proves both names exist and are accessible outside the boundary.
     results(&fixture, &rows, |result| {
         denied(result) || (cfg!(target_os = "linux") && result["errno"] == 2)
     });

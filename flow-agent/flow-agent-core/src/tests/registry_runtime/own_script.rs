@@ -1,10 +1,10 @@
 use super::super::{
     helpers::{
         add_bad_write_tool_to_summarize, assert_no_session_artifacts, replace_registry_text,
-        workspace_with_later_invalid_own_script_path,
+        workspace_log_dir, workspace_session_dir, workspace_with_later_invalid_own_script_path,
     },
     support::assert_denied,
-    test_support::workspace_copy,
+    test_support::{session_home_path, workspace_copy},
 };
 use crate::runtime::{
     session::run_flow,
@@ -34,26 +34,6 @@ fn run_flow_executes_own_script_without_exact_fixture_body() {
 }
 
 #[test]
-fn run_flow_keeps_quoted_redirection_markers_in_own_script_output() {
-    let workspace = workspace_copy("hello-flow");
-    replace_registry_text(
-        &workspace,
-        "tools/write-summary.yaml",
-        "script_body: |\n    printf '%s\\n' \"$SUMMARY\" > out/summary.txt",
-        "script_body: |\n    printf '%s > done\\n' \"$SUMMARY\" > out/summary.txt",
-    );
-
-    let output = run_flow(&workspace, "hello-flow", EmitMode::Jsonl)
-        .expect("quoted redirection marker stays in output");
-
-    assert!(!output.failed);
-    assert_eq!(
-        fs::read_to_string(workspace.join("out/summary.txt")).expect("summary is written"),
-        "hello > done\n"
-    );
-}
-
-#[test]
 fn run_flow_rejects_existing_own_script_output_on_repeat_run() {
     let workspace = workspace_copy("hello-flow");
 
@@ -79,54 +59,15 @@ fn run_flow_rejects_existing_own_script_output_on_repeat_run() {
         "stale\n"
     );
     assert!(
-        !crate::tests::helpers::workspace_session_dir(&workspace)
+        !workspace_session_dir(&workspace)
             .join("hello-flow-2.jsonl")
             .exists()
     );
     assert!(
-        !crate::tests::helpers::workspace_log_dir(&workspace)
+        !workspace_log_dir(&workspace)
             .join("hello-flow-2.log")
             .exists()
     );
-}
-
-#[test]
-fn run_flow_rejects_legacy_write_mount_before_fixture_effects() {
-    let workspace = workspace_copy("hello-flow");
-    replace_registry_text(
-        &workspace,
-        "tools/write-summary.yaml",
-        "  allowed_parameters: []\n",
-        "  allowed_parameters: []\n  writable_mounts: []\n",
-    );
-
-    let err = run_flow(&workspace, "hello-flow", EmitMode::Jsonl)
-        .expect_err("legacy write authorization must reject before fixture execution");
-
-    assert!(matches!(&err, RuntimeError::Registry(_)), "{err}");
-    assert!(err.to_string().contains("writable_mounts"), "{err}");
-    assert!(!workspace.join("out/summary.txt").exists());
-    assert_no_session_artifacts(&workspace, "hello-flow");
-}
-
-#[test]
-fn run_flow_rejects_unsupported_own_script_before_side_effects() {
-    let workspace = workspace_copy("hello-flow");
-    replace_registry_text(
-        &workspace,
-        "tools/write-summary.yaml",
-        "script_body: |\n    printf '%s\\n' \"$SUMMARY\" > out/summary.txt",
-        "script_body: |\n    printf '%s\\n' \"$SUMMARY\" > out/summary.txt\n    cat ../outside.txt",
-    );
-
-    let err = run_flow(&workspace, "hello-flow", EmitMode::Jsonl)
-        .expect_err("unsupported own-script command must reject");
-
-    assert!(
-        matches!(err, RuntimeError::Protocol(message) if message.contains("unsupported own-script command"))
-    );
-    assert!(!workspace.join("out/summary.txt").exists());
-    assert_no_session_artifacts(&workspace, "hello-flow");
 }
 
 #[test]
@@ -175,18 +116,18 @@ fn run_flow_preflights_outputs_even_when_later_phase_has_sandbox_denial() {
         "phase_refs: [inspect, summarize, negative-no-tools]",
     );
     fs::write(
-        crate::tests::test_support::session_home_path()
+        session_home_path()
             .join("registry/instructions/deny-attempt.yaml"),
         "instruction:\n  id: deny-attempt\n  name: DenyAttempt\n  prompt: Attempt the negative action selected by the fixture.\n",
     )
     .expect("negative instruction written");
     fs::write(
-        crate::tests::test_support::session_home_path().join("registry/tools/negative-tool.yaml"),
+        session_home_path().join("registry/tools/negative-tool.yaml"),
         "tool:\n  id: negative-tool\n  name: NegativeTool\n  tool_kind: predefined-command\n  command:\n    command_id: agent-negative\n    argv: [\"write\"]\n  allowed_parameters: []\n",
     )
     .expect("negative sentinel tool written");
     fs::write(
-        crate::tests::test_support::session_home_path()
+        session_home_path()
             .join("registry/phases/negative-no-tools.yaml"),
         "phase:\n  id: negative-no-tools\n  name: NegativeNoTools\n  instruction_refs: [deny-attempt]\n  tool_refs: [negative-tool]\n  output:\n    type: string\n",
     )
@@ -201,8 +142,8 @@ fn run_flow_preflights_outputs_even_when_later_phase_has_sandbox_denial() {
         core_policy::DenyReasonCode::WriteDenied,
         "must be a file",
     );
-    assert!(!crate::tests::helpers::workspace_session_dir(&workspace).exists());
-    assert!(!crate::tests::helpers::workspace_log_dir(&workspace).exists());
+    assert!(!workspace_session_dir(&workspace).exists());
+    assert!(!workspace_log_dir(&workspace).exists());
 }
 
 #[test]

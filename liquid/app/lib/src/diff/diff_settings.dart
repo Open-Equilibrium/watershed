@@ -4,7 +4,6 @@ import '../settings_file.dart';
 
 enum DiffLayout { unified, split }
 
-/// How the Diff panel shows a run's changes; kept across restarts.
 @immutable
 class DiffSettings {
   const DiffSettings({
@@ -13,7 +12,6 @@ class DiffSettings {
     this.width,
   });
 
-  /// Reads what it knows from `json` and keeps the defaults for the rest.
   factory DiffSettings.fromJson(Map<String, Object?> json) => DiffSettings(
     layout: DiffLayout.values.asNameMap()[json['layout']] ?? DiffLayout.unified,
     hideWhitespace: json['hideWhitespace'] == true,
@@ -25,10 +23,8 @@ class DiffSettings {
 
   final DiffLayout layout;
 
-  /// Whether changes that are only whitespace are left out.
   final bool hideWhitespace;
 
-  /// The panel's width as the user dragged it; null until dragged.
   final double? width;
 
   DiffSettings copyWith({
@@ -48,7 +44,6 @@ class DiffSettings {
   };
 }
 
-/// The Diff panel's settings in use; each change is saved.
 class DiffSettingsController extends SavedSettings<DiffSettings> {
   DiffSettingsController([
     DiffSettings value = const DiffSettings(),

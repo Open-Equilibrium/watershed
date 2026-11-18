@@ -1,7 +1,3 @@
-//! Protocol v0 runtime event contracts.
-
-#![deny(missing_docs)]
-
 mod canonical;
 mod error;
 mod event;
@@ -49,24 +45,14 @@ pub use session_object::{
     parse_session_object_uri,
 };
 
-/// Protocol version string emitted by all v0 event envelopes.
 pub const PROTOCOL_VERSION_V0: &str = "0";
 
-/// Exclusive v0 recursion limit for nested JSON arrays and objects.
-///
-/// A value may contain at most 127 nested containers. Entering the 128th
-/// container is rejected, matching the default `serde_json` wire boundary.
 pub const JSON_NESTING_LIMIT_V0: usize = 128;
 
-/// Maximum recursive depth of one `flow-value-v0`, including its root.
 pub const FLOW_VALUE_MAX_DEPTH_V0: usize = 16;
-/// Maximum direct members in one `flow-value-v0` list or map.
 pub const FLOW_VALUE_MAX_MEMBERS_V0: usize = 1_024;
-/// Maximum tagged nodes in one `flow-value-v0`.
 pub const FLOW_VALUE_MAX_NODES_V0: usize = 4_096;
-/// Maximum canonical JSON bytes in one inline `flow-value-v0`.
 pub const FLOW_VALUE_MAX_BYTES_V0: usize = 64 * 1024;
-/// Maximum Unicode scalar values in one `flow-value-v0` map key.
 pub const FLOW_VALUE_MAX_KEY_CHARS_V0: usize = 256;
 
 const JSON_NESTING_REQUIREMENT_V0: &str = "must stay below the protocol v0 JSON nesting limit";

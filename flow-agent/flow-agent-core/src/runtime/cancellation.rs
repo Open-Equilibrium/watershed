@@ -6,14 +6,10 @@ use std::sync::{
 
 static PRODUCTIVE_OPERATION: ProductiveOperationCoordinator = ProductiveOperationCoordinator::new();
 
-/// Result of linearizing one Unix interrupt against the productive-operation state.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ProductiveInterruptAction {
-    /// The interrupt won and controlled cancellation must begin.
     Cancel,
-    /// Durable completion already won, so the interrupt is deferred until disarm.
     Defer,
-    /// No cancellable operation exists, or cancellation is already in progress.
     Exit,
 }
 
@@ -320,12 +316,10 @@ pub(crate) fn productive_cancellation() -> &'static AtomicBool {
     &PRODUCTIVE_OPERATION.cancelled
 }
 
-/// Registers one process-wide productive CLI operation.
 pub fn begin_productive_operation() -> Result<(), RuntimeError> {
     PRODUCTIVE_OPERATION.begin()
 }
 
-/// Linearizes one Unix interrupt against the active productive operation.
 pub fn request_productive_interrupt() -> ProductiveInterruptAction {
     PRODUCTIVE_OPERATION.interrupt()
 }
@@ -341,25 +335,21 @@ pub(crate) fn ensure_productive_dispatch_allowed() -> Result<(), RuntimeError> {
         .ok_or(RuntimeError::Cancelled)
 }
 
-/// Claims the finite transition that orders an external effect before or after Ctrl-C.
 pub(crate) fn claim_productive_effect_dispatch()
 -> Result<ProductiveEffectDispatch<'static>, RuntimeError> {
     PRODUCTIVE_OPERATION.claim_effect_dispatch()
 }
 
-/// Claims one bounded durable commit and orders it before or after Ctrl-C.
 pub(crate) fn claim_productive_durable_commit()
 -> Result<ProductiveDurableCommit<'static>, RuntimeError> {
     PRODUCTIVE_OPERATION.claim_durable_commit()
 }
 
-/// Claims the cancellable preparation and bounded commit of one Run publication.
 pub(crate) fn claim_productive_run_creation_publication()
 -> Result<ProductiveRunPublication<'static>, RuntimeError> {
     PRODUCTIVE_OPERATION.claim_run_creation_publication()
 }
 
-/// Disarms the process-wide operation after its complete CLI result has been handled.
 pub fn settle_productive_operation() -> bool {
     PRODUCTIVE_OPERATION.settle()
 }

@@ -1,5 +1,8 @@
 use super::{
-    helpers::{base_event, event_line, first_event_line, flow_started_line},
+    helpers::{
+        base_event, event_line, first_event_line, flow_completed_line, flow_started_line,
+        phase_entered_line, session_event_line,
+    },
     support::validate_appended_session_log_text,
     test_support::{expected_stream, workspace_copy},
 };
@@ -106,51 +109,15 @@ fn session_log_filename_must_match_envelope_session_id() {
 
 #[test]
 fn session_log_rejects_events_after_flow_terminal() {
-    let stream = [
-        event_line(
-            "evt-001",
-            EventType::SessionStarted,
-            "flow-terminal",
-            1,
-            None,
-            serde_json::json!({"reason":"fixture-start"}),
-        ),
-        event_line(
-            "evt-002",
-            EventType::FlowStarted,
-            "flow-terminal",
-            2,
-            Some("flow-001"),
-            serde_json::json!({"flow_definition_id":"smoke-flow"}),
-        ),
-        event_line(
-            "evt-003",
-            EventType::FlowCompleted,
-            "flow-terminal",
-            3,
-            Some("flow-001"),
-            serde_json::json!({"flow_definition_id":"smoke-flow"}),
-        ),
-        event_line(
-            "evt-004",
-            EventType::PhaseEntered,
-            "flow-terminal",
-            4,
-            Some("flow-001"),
-            serde_json::json!({
-                "instruction_ids": [],
-                "iteration": 1,
-                "phase_execution_id": "phase-after-terminal",
-                "phase_id": "phase-001",
-                "phase_kind": "leaf",
-                "phase_name": "AfterTerminal",
-                "tool_ids": [],
-            }),
-        ),
-    ]
-    .concat();
+    let started = base_event().canonical_jsonl().expect("started serializes");
+    let stream = format!(
+        "{started}{}{}{}",
+        flow_started_line("evt-002", 2),
+        flow_completed_line("evt-003", 3),
+        phase_entered_line("evt-004", 4),
+    );
 
-    let err = validate_session_log_text(Path::new("flow-terminal.jsonl"), "flow-terminal", &stream)
+    let err = validate_session_log_text(Path::new("flow-terminal.jsonl"), "meta001", &stream)
         .expect_err("flow-scoped events after flow terminal must be rejected");
 
     assert!(
@@ -158,219 +125,143 @@ fn session_log_rejects_events_after_flow_terminal() {
     );
 }
 
+fn reuse_phase(
+    first_sequence: u64,
+    phase_execution_id: &str,
+    phase_id: &str,
+    phase_name: &str,
+    result: &str,
+) -> String {
+    let event = |offset: u64, event_type: EventType, payload: serde_json::Value| {
+        let sequence = first_sequence + offset;
+        event_line(
+            &format!("evt-{sequence:03}"),
+            event_type,
+            "meta001",
+            sequence,
+            Some("flow-001"),
+            payload,
+        )
+    };
+    [
+        event(
+            0,
+            EventType::PhaseEntered,
+            serde_json::json!({
+                "instruction_ids": [],
+                "iteration": 1,
+                "phase_execution_id": phase_execution_id,
+                "phase_id": phase_id,
+                "phase_kind": "leaf",
+                "phase_name": phase_name,
+                "tool_ids": ["echo"],
+            }),
+        ),
+        event(
+            1,
+            EventType::ToolStarted,
+            serde_json::json!({
+                "allowed_parameters": [],
+                "tool_id": "echo",
+                "tool_kind": "predefined-command",
+                "tool_name": "Echo",
+            }),
+        ),
+        event(
+            2,
+            EventType::ToolCompleted,
+            serde_json::json!({"exit_code":0,"tool_id":"echo"}),
+        ),
+        event(
+            3,
+            EventType::PhaseCompleted,
+            serde_json::json!({
+                "iteration":1,
+                "phase_execution_id":phase_execution_id,
+                "phase_id":phase_id,
+                "phase_kind":"leaf",
+                "result":{"type":"string","value":result},
+            }),
+        ),
+    ]
+    .concat()
+}
+
 #[test]
 fn session_log_allows_tool_reuse_in_later_phase_execution() {
-    let mut events = vec![
-        event_line(
-            "evt-001",
-            EventType::SessionStarted,
-            "reuse-lifecycle",
-            1,
-            None,
-            serde_json::json!({"reason":"fixture-start"}),
+    let started = base_event().canonical_jsonl().expect("started serializes");
+    let stream = [
+        started,
+        flow_started_line("evt-002", 2),
+        reuse_phase(3, "phase-execution-a", "phase-a", "PhaseA", "a"),
+        reuse_phase(7, "phase-execution-b", "phase-b", "PhaseB", "b"),
+        flow_completed_line("evt-011", 11),
+        session_event_line("meta001", "evt-012", EventType::SessionCompleted, 12),
+    ]
+    .concat();
+
+    validate_session_log_text(Path::new("reuse-lifecycle.jsonl"), "meta001", &stream)
+        .expect("Tool ids may be reused in later Phase executions");
+}
+
+#[test]
+fn appended_session_log_validator_rejects_each_boundary_violation() {
+    let started = base_event().canonical_jsonl().expect("started serializes");
+    let completed = session_event_line("meta001", "evt-002", EventType::SessionCompleted, 2);
+    let cases = [
+        (
+            "session change",
+            started.clone(),
+            session_event_line("other001", "evt-002", EventType::SessionCompleted, 2),
+            "one session_id",
         ),
-        event_line(
-            "evt-002",
-            EventType::FlowStarted,
-            "reuse-lifecycle",
-            2,
-            Some("flow-001"),
-            serde_json::json!({"flow_definition_id":"reuse-flow"}),
+        (
+            "duplicate event id",
+            started.clone(),
+            session_event_line("meta001", "evt-001", EventType::SessionCompleted, 2),
+            "unique event_id",
+        ),
+        (
+            "event after terminal session",
+            format!("{started}{completed}"),
+            event_line(
+                "evt-003",
+                EventType::SessionResumed,
+                "meta001",
+                3,
+                None,
+                serde_json::json!({"reason":"late"}),
+            ),
+            "after terminal session event",
+        ),
+        (
+            "duplicate flow id",
+            format!("{started}{}", flow_started_line("evt-002", 2)),
+            event_line(
+                "evt-003",
+                EventType::FlowStarted,
+                "meta001",
+                3,
+                Some("flow-001"),
+                serde_json::json!({"flow_definition_id":"other-flow"}),
+            ),
+            "unique flow_id",
         ),
     ];
-    for (sequence, phase_execution_id, phase_id, phase_name, result) in [
-        (3, "phase-execution-a", "phase-a", "PhaseA", "a"),
-        (7, "phase-execution-b", "phase-b", "PhaseB", "b"),
-    ] {
-        events.extend([
-            event_line(
-                &format!("evt-{:03}", sequence),
-                EventType::PhaseEntered,
-                "reuse-lifecycle",
-                sequence,
-                Some("flow-001"),
-                serde_json::json!({
-                    "instruction_ids": [],
-                    "iteration": 1,
-                    "phase_execution_id": phase_execution_id,
-                    "phase_id": phase_id,
-                    "phase_kind": "leaf",
-                    "phase_name": phase_name,
-                    "tool_ids": ["echo"],
-                }),
-            ),
-            event_line(
-                &format!("evt-{:03}", sequence + 1),
-                EventType::ToolStarted,
-                "reuse-lifecycle",
-                sequence + 1,
-                Some("flow-001"),
-                serde_json::json!({
-                    "allowed_parameters": [],
-                    "tool_id": "echo",
-                    "tool_kind": "predefined-command",
-                    "tool_name": "Echo",
-                }),
-            ),
-            event_line(
-                &format!("evt-{:03}", sequence + 2),
-                EventType::ToolCompleted,
-                "reuse-lifecycle",
-                sequence + 2,
-                Some("flow-001"),
-                serde_json::json!({"exit_code":0,"tool_id":"echo"}),
-            ),
-            event_line(
-                &format!("evt-{:03}", sequence + 3),
-                EventType::PhaseCompleted,
-                "reuse-lifecycle",
-                sequence + 3,
-                Some("flow-001"),
-                serde_json::json!({
-                    "iteration":1,
-                    "phase_execution_id":phase_execution_id,
-                    "phase_id":phase_id,
-                    "phase_kind":"leaf",
-                    "result":{"type":"string","value":result},
-                }),
-            ),
-        ]);
+    for (name, prior, appended, expected) in cases {
+        let prior_events = validate_session_log_text(Path::new("append.jsonl"), "meta001", &prior)
+            .expect("prior events validate");
+        let Err(err) = validate_appended_session_log_text(
+            Path::new("append.jsonl"),
+            "meta001",
+            &prior_events,
+            &appended,
+        ) else {
+            panic!("{name} must be rejected");
+        };
+        assert!(
+            matches!(err, RuntimeError::Protocol(ref message) if message.contains(expected)),
+            "{name}: {err}"
+        );
     }
-    events.extend([
-        event_line(
-            "evt-011",
-            EventType::FlowCompleted,
-            "reuse-lifecycle",
-            11,
-            Some("flow-001"),
-            serde_json::json!({"flow_definition_id":"reuse-flow"}),
-        ),
-        event_line(
-            "evt-012",
-            EventType::SessionCompleted,
-            "reuse-lifecycle",
-            12,
-            None,
-            serde_json::json!({}),
-        ),
-    ]);
-    let stream = events.concat();
-
-    validate_session_log_text(
-        Path::new("reuse-lifecycle.jsonl"),
-        "reuse-lifecycle",
-        &stream,
-    )
-    .expect("Tool ids may be reused in later Phase executions");
-}
-
-#[test]
-fn appended_session_log_validator_rejects_cross_boundary_session_change() {
-    let started = base_event().canonical_jsonl().expect("started serializes");
-    let prior_events = validate_session_log_text(Path::new("append.jsonl"), "meta001", &started)
-        .expect("prior event validates");
-
-    let other_session = event_line(
-        "evt-002",
-        EventType::SessionCompleted,
-        "other001",
-        2,
-        None,
-        serde_json::json!({}),
-    );
-    assert!(matches!(
-        validate_appended_session_log_text(
-            Path::new("append.jsonl"),
-            "meta001",
-            &prior_events,
-            &other_session
-        ),
-        Err(RuntimeError::Protocol(message)) if message.contains("one session_id")
-    ));
-}
-
-#[test]
-fn appended_session_log_validator_preserves_event_and_terminal_state() {
-    let started = base_event().canonical_jsonl().expect("started serializes");
-    let prior_events = validate_session_log_text(Path::new("append.jsonl"), "meta001", &started)
-        .expect("prior event validates");
-    let completed = event_line(
-        "evt-002",
-        EventType::SessionCompleted,
-        "meta001",
-        2,
-        None,
-        serde_json::json!({}),
-    );
-
-    let duplicate_event_id = event_line(
-        "evt-001",
-        EventType::SessionCompleted,
-        "meta001",
-        2,
-        None,
-        serde_json::json!({}),
-    );
-    assert!(matches!(
-        validate_appended_session_log_text(
-            Path::new("append.jsonl"),
-            "meta001",
-            &prior_events,
-            &duplicate_event_id
-        ),
-        Err(RuntimeError::Protocol(message)) if message.contains("unique event_id")
-    ));
-
-    let terminal_events = validate_session_log_text(
-        Path::new("append-terminal.jsonl"),
-        "meta001",
-        &format!("{started}{completed}"),
-    )
-    .expect("terminal prior validates");
-    let late_resumed = event_line(
-        "evt-003",
-        EventType::SessionResumed,
-        "meta001",
-        3,
-        None,
-        serde_json::json!({"reason":"late"}),
-    );
-    assert!(matches!(
-        validate_appended_session_log_text(
-            Path::new("append-terminal.jsonl"),
-            "meta001",
-            &terminal_events,
-            &late_resumed
-        ),
-        Err(RuntimeError::Protocol(message)) if message.contains("after terminal session event")
-    ));
-}
-
-#[test]
-fn appended_session_log_validator_preserves_flow_identity() {
-    let started = base_event().canonical_jsonl().expect("started serializes");
-    let flow_started = flow_started_line("evt-002", 2);
-    let prior_events = validate_session_log_text(
-        Path::new("append-flow.jsonl"),
-        "meta001",
-        &format!("{started}{flow_started}"),
-    )
-    .expect("flow prior validates");
-    let duplicate_flow = event_line(
-        "evt-003",
-        EventType::FlowStarted,
-        "meta001",
-        3,
-        Some("flow-001"),
-        serde_json::json!({"flow_definition_id":"other-flow"}),
-    );
-    assert!(matches!(
-        validate_appended_session_log_text(
-            Path::new("append-flow.jsonl"),
-            "meta001",
-            &prior_events,
-            &duplicate_flow
-        ),
-        Err(RuntimeError::Protocol(message)) if message.contains("unique flow_id")
-    ));
 }

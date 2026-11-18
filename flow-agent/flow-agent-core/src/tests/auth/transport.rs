@@ -1,18 +1,17 @@
-use super::jwt_with_account;
+use super::{credential_record, jwt_with_account, jwt_with_account_routing, token_body_with_id};
 use crate::{
     runtime::{
         auth::{
-            DevicePoll, MAX_OAUTH_DEVICE_POLL_BODY_BYTES, MAX_OAUTH_TOKEN_BODY_BYTES,
-            MAX_OAUTH_USER_CODE_BODY_BYTES, base64url_encode, exchange_authorization_code_at,
-            exchange_authorization_code_body_with_transport, parse_device_authorization_body,
-            parse_device_poll_body, parse_token_body,
+            DeviceAuthorization, DevicePoll, MAX_OAUTH_DEVICE_POLL_BODY_BYTES,
+            MAX_OAUTH_TOKEN_BODY_BYTES, MAX_OAUTH_USER_CODE_BODY_BYTES, base64url_encode,
+            exchange_authorization_code_at, exchange_authorization_code_body_with_transport,
+            parse_device_authorization_body, parse_device_poll_body, parse_token_body,
             poll_device_authorization_body_with_transport, post_device_poll_with_deadlines,
             post_json_with_deadlines, read_loopback_callback, refresh_credential_at,
             refresh_credential_with_transport, request_device_authorization_body_with_transport,
             send_auth_request_async,
         },
         deadlines::{AUTH_HTTP_DEADLINES, HttpDeadlines, build_http_client},
-        oauth_credential::CredentialRecord,
         types::RuntimeError,
     },
     tests::deadlines::{
@@ -28,14 +27,27 @@ use std::{
     time::Duration,
 };
 
-fn padded_json(mut prefix: String, target: usize) -> Vec<u8> {
+fn budget_bodies(mut prefix: String, target: usize) -> [(Vec<u8>, bool); 2] {
     let suffix = "\"}";
     prefix.push_str(",\"padding\":\"");
     assert!(prefix.len() + suffix.len() <= target);
     prefix.push_str(&"p".repeat(target - prefix.len() - suffix.len()));
     prefix.push_str(suffix);
     assert_eq!(prefix.len(), target);
-    prefix.into_bytes()
+    let exact = prefix.into_bytes();
+    let mut oversized = exact.clone();
+    oversized.insert(oversized.len() - 2, b'p');
+    [(exact, true), (oversized, false)]
+}
+
+fn deliver(body: Vec<u8>, maximum: usize, delivered: &Cell<bool>) -> Result<Vec<u8>, RuntimeError> {
+    if body.len() > maximum {
+        return Err(RuntimeError::Protocol(
+            "fixture response exceeds selected maximum".to_owned(),
+        ));
+    }
+    delivered.set(true);
+    Ok(body)
 }
 
 fn read_form_body(stream: &mut TcpStream) -> String {
@@ -112,10 +124,7 @@ fn oauth_callback_http_head_budget() {
 #[test]
 fn oauth_user_code_body_budget() {
     let prefix = r#"{"device_auth_id":"d","interval":1,"user_code":"u","verification_uri":"https://auth.openai.com/codex""#.to_owned();
-    let exact = padded_json(prefix, MAX_OAUTH_USER_CODE_BODY_BYTES);
-    let mut oversized = exact.clone();
-    oversized.insert(oversized.len() - 2, b'p');
-    for (body, accepted) in [(exact, true), (oversized, false)] {
+    for (body, accepted) in budget_bodies(prefix, MAX_OAUTH_USER_CODE_BODY_BYTES) {
         let delivered = Cell::new(false);
         let result =
             request_device_authorization_body_with_transport(|endpoint, request, maximum| {
@@ -128,13 +137,7 @@ fn oauth_user_code_body_budget() {
                     &serde_json::json!({"client_id": "app_EMoamEEZ73f0CkXaXp7hrann"})
                 );
                 assert_eq!(maximum, MAX_OAUTH_USER_CODE_BODY_BYTES);
-                if body.len() > maximum {
-                    return Err(RuntimeError::Protocol(
-                        "fixture response exceeds selected maximum".to_owned(),
-                    ));
-                }
-                delivered.set(true);
-                Ok(body)
+                deliver(body, maximum, &delivered)
             })
             .and_then(|body| parse_device_authorization_body(&body));
         assert_eq!(result.is_ok(), accepted);
@@ -145,16 +148,13 @@ fn oauth_user_code_body_budget() {
 #[test]
 fn oauth_device_poll_body_budget() {
     let prefix = r#"{"authorization_code":"c","code_verifier":"v""#.to_owned();
-    let exact = padded_json(prefix, MAX_OAUTH_DEVICE_POLL_BODY_BYTES);
-    let mut oversized = exact.clone();
-    oversized.insert(oversized.len() - 2, b'p');
-    let authorization = crate::runtime::auth::DeviceAuthorization {
+    let authorization = DeviceAuthorization {
         device_auth_id: "device".to_owned(),
         interval_seconds: 1,
         user_code: "USER-CODE".to_owned(),
         verification_uri: "https://auth.openai.com/codex/device".to_owned(),
     };
-    for (body, accepted) in [(exact, true), (oversized, false)] {
+    for (body, accepted) in budget_bodies(prefix, MAX_OAUTH_DEVICE_POLL_BODY_BYTES) {
         let delivered = Cell::new(false);
         let result = poll_device_authorization_body_with_transport(
             &authorization,
@@ -173,13 +173,7 @@ fn oauth_device_poll_body_budget() {
                 );
                 assert_eq!(maximum, MAX_OAUTH_DEVICE_POLL_BODY_BYTES);
                 assert_eq!(deadlines, AUTH_HTTP_DEADLINES);
-                if body.len() > maximum {
-                    return Err(RuntimeError::Protocol(
-                        "fixture response exceeds selected maximum".to_owned(),
-                    ));
-                }
-                delivered.set(true);
-                Ok(Some(body))
+                deliver(body, maximum, &delivered).map(Some)
             },
         )
         .and_then(|body| parse_device_poll_body(&body.expect("fixture body")));
@@ -197,10 +191,7 @@ fn oauth_token_body_budget() {
     let prefix = format!(
         "{{\"access_token\":{access:?},\"id_token\":{access:?},\"expires_in\":1,\"refresh_token\":\"r\""
     );
-    let exact = padded_json(prefix, MAX_OAUTH_TOKEN_BODY_BYTES);
-    let mut oversized = exact.clone();
-    oversized.insert(oversized.len() - 2, b'p');
-    for (body, accepted) in [(exact, true), (oversized, false)] {
+    for (body, accepted) in budget_bodies(prefix, MAX_OAUTH_TOKEN_BODY_BYTES) {
         let delivered = Cell::new(false);
         let result = exchange_authorization_code_body_with_transport(
             "https://auth.openai.com/oauth/token",
@@ -225,13 +216,7 @@ fn oauth_token_body_budget() {
                 );
                 assert_eq!(maximum, MAX_OAUTH_TOKEN_BODY_BYTES);
                 assert_eq!(deadlines, AUTH_HTTP_DEADLINES);
-                if body.len() > maximum {
-                    return Err(RuntimeError::Protocol(
-                        "fixture response exceeds selected maximum".to_owned(),
-                    ));
-                }
-                delivered.set(true);
-                Ok(body)
+                deliver(body, maximum, &delivered)
             },
         )
         .and_then(|body| parse_token_body(&body, 0));
@@ -244,19 +229,9 @@ fn oauth_token_body_budget() {
 fn oauth_refresh_body_budget() {
     let access = jwt_with_account("a");
     let prefix = format!("{{\"access_token\":{access:?},\"expires_in\":1,\"refresh_token\":\"r\"");
-    let exact = padded_json(prefix, MAX_OAUTH_TOKEN_BODY_BYTES);
-    let mut oversized = exact.clone();
-    oversized.insert(oversized.len() - 2, b'p');
-    let prior = CredentialRecord {
-        credential_type: "oauth".to_owned(),
-        access,
-        refresh: "prior-refresh".to_owned(),
-        expires: 1,
-        account_id: "a".to_owned(),
-        is_fedramp: false,
-    };
+    let prior = credential_record(&access, "prior-refresh", 1, "a");
 
-    for (body, accepted) in [(exact, true), (oversized, false)] {
+    for (body, accepted) in budget_bodies(prefix, MAX_OAUTH_TOKEN_BODY_BYTES) {
         let delivered = Cell::new(false);
         let result = refresh_credential_with_transport(
             "https://auth.openai.com/oauth/token",
@@ -273,13 +248,7 @@ fn oauth_refresh_body_budget() {
                     ]
                 );
                 assert_eq!(maximum, MAX_OAUTH_TOKEN_BODY_BYTES);
-                if body.len() > maximum {
-                    return Err(RuntimeError::Protocol(
-                        "fixture response exceeds selected maximum".to_owned(),
-                    ));
-                }
-                delivered.set(true);
-                Ok(body)
+                deliver(body, maximum, &delivered)
             },
         );
         assert_eq!(result.is_ok(), accepted);
@@ -289,13 +258,12 @@ fn oauth_refresh_body_budget() {
 
 #[test]
 fn oauth_form_transport_exchanges_and_refreshes_tokens_over_loopback() {
-    let initial_body = serde_json::to_vec(&serde_json::json!({
-        "access_token": "initial-access",
-        "id_token": jwt_with_account("account"),
-        "expires_in": 60,
-        "refresh_token": "refresh+initial",
-    }))
-    .expect("initial token JSON");
+    let initial_body = token_body_with_id(
+        "initial-access",
+        &jwt_with_account("account"),
+        "refresh+initial",
+        60.into(),
+    );
     let refresh_body = serde_json::to_vec(&serde_json::json!({
         "access_token": "refreshed-access",
         "expires_in": 120,
@@ -352,14 +320,7 @@ fn oauth_form_transport_exchanges_and_refreshes_tokens_over_loopback() {
 
 #[test]
 fn oauth_refresh_requires_a_replacement_access_token() {
-    let prior = CredentialRecord {
-        credential_type: "oauth".to_owned(),
-        access: jwt_with_account("account"),
-        refresh: "prior-refresh".to_owned(),
-        expires: 1,
-        account_id: "account".to_owned(),
-        is_fedramp: false,
-    };
+    let prior = credential_record(&jwt_with_account("account"), "prior-refresh", 1, "account");
 
     for body in [b"{}".as_slice(), br#"{"expires_in":3600}"#] {
         assert!(
@@ -376,19 +337,12 @@ fn oauth_refresh_requires_a_replacement_access_token() {
 
 #[test]
 fn oauth_refresh_uses_returned_access_expiry_and_id_token_routing() {
-    let prior = CredentialRecord {
-        credential_type: "oauth".to_owned(),
-        access: "prior-access".to_owned(),
-        refresh: "prior-refresh".to_owned(),
-        expires: 1,
-        account_id: "account".to_owned(),
-        is_fedramp: false,
-    };
+    let prior = credential_record("prior-access", "prior-refresh", 1, "account");
     let access_payload = base64url_encode(br#"{"exp":2}"#);
     let access = format!("e30.{access_payload}.x");
     let body = serde_json::to_vec(&serde_json::json!({
         "access_token": access,
-        "id_token": super::jwt_with_account_routing("account", Some(true))
+        "id_token": jwt_with_account_routing("account", Some(true))
     }))
     .expect("refresh JSON");
 
@@ -407,7 +361,7 @@ fn oauth_refresh_uses_returned_access_expiry_and_id_token_routing() {
 
     let changed_account = serde_json::to_vec(&serde_json::json!({
         "access_token": access,
-        "id_token": super::jwt_with_account("other-account")
+        "id_token": jwt_with_account("other-account")
     }))
     .expect("changed-account JSON");
     assert!(
@@ -423,14 +377,7 @@ fn oauth_refresh_uses_returned_access_expiry_and_id_token_routing() {
 
 #[test]
 fn oauth_refresh_access_expiry_fallback_obeys_the_one_day_budget() {
-    let prior = CredentialRecord {
-        credential_type: "oauth".to_owned(),
-        access: "prior-access".to_owned(),
-        refresh: "prior-refresh".to_owned(),
-        expires: 1,
-        account_id: "account".to_owned(),
-        is_fedramp: false,
-    };
+    let prior = credential_record("prior-access", "prior-refresh", 1, "account");
 
     for (expiry_seconds, accepted) in [(86_401, true), (86_402, false)] {
         let access_payload = base64url_encode(format!(r#"{{"exp":{expiry_seconds}}}"#).as_bytes());
@@ -451,14 +398,7 @@ fn oauth_refresh_access_expiry_fallback_obeys_the_one_day_budget() {
 
 #[test]
 fn oauth_refresh_expiry_uses_the_response_time_clock() {
-    let prior = CredentialRecord {
-        credential_type: "oauth".to_owned(),
-        access: "prior-access".to_owned(),
-        refresh: "prior-refresh".to_owned(),
-        expires: 1,
-        account_id: "account".to_owned(),
-        is_fedramp: false,
-    };
+    let prior = credential_record("prior-access", "prior-refresh", 1, "account");
     let clock = Cell::new(1_000);
     let body = serde_json::to_vec(&serde_json::json!({
         "access_token": "refreshed-access",
@@ -466,7 +406,6 @@ fn oauth_refresh_expiry_uses_the_response_time_clock() {
     }))
     .expect("refresh JSON");
 
-    // The response is received at 3 s, after the request started at 1 s.
     let refreshed = refresh_credential_with_transport(
         "https://auth.openai.com/oauth/token",
         &prior,
@@ -479,7 +418,6 @@ fn oauth_refresh_expiry_uses_the_response_time_clock() {
     .expect("refresh succeeds");
     assert_eq!(refreshed.expires, 4_000);
 
-    // A fallback access token that expired at 2 s, before the response arrived, is rejected.
     let clock = Cell::new(1_000);
     let access = format!("e30.{}.x", base64url_encode(br#"{"exp":2}"#));
     let body =
@@ -496,8 +434,15 @@ fn oauth_refresh_expiry_uses_the_response_time_clock() {
     assert!(result.is_err());
 }
 
+fn reply(status: &str, body: &str) -> String {
+    format!(
+        "HTTP/1.1 {status}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        body.len()
+    )
+}
+
 fn fake_auth_post<T>(
-    response: &'static str,
+    response: String,
     maximum: usize,
     post: impl FnOnce(&str, &serde_json::Value, usize, HttpDeadlines) -> Result<T, RuntimeError>,
 ) -> Result<T, RuntimeError> {
@@ -529,65 +474,37 @@ fn fake_auth_post<T>(
 #[test]
 fn device_poll_treats_provider_pending_statuses_as_pending() {
     for (response, expected) in [
-        (
-            "HTTP/1.1 403 Forbidden\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}",
-            Some(None),
-        ),
-        (
-            "HTTP/1.1 404 Not Found\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}",
-            Some(None),
-        ),
-        (
-            "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}",
-            Some(Some(b"{}".to_vec())),
-        ),
-        (
-            "HTTP/1.1 401 Unauthorized\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}",
-            None,
-        ),
-        (
-            "HTTP/1.1 500 Internal Server Error\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}",
-            None,
-        ),
+        (reply("403 Forbidden", "{}"), Some(None)),
+        (reply("404 Not Found", "{}"), Some(None)),
+        (reply("200 OK", "{}"), Some(Some(b"{}".to_vec()))),
+        (reply("401 Unauthorized", "{}"), None),
+        (reply("500 Internal Server Error", "{}"), None),
     ] {
-        let result = fake_auth_post(response, 2, post_device_poll_with_deadlines);
+        let result = fake_auth_post(response.clone(), 2, post_device_poll_with_deadlines);
         assert_eq!(result.ok(), expected, "{response}");
     }
 }
 
 #[test]
 fn authentication_http_response_enforces_status_and_size() {
-    fn request(response: &'static str, maximum: usize) -> Result<Vec<u8>, RuntimeError> {
+    fn request(response: String, maximum: usize) -> Result<Vec<u8>, RuntimeError> {
         fake_auth_post(response, maximum, post_json_with_deadlines)
     }
 
     assert_eq!(
-        request(
-            "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}",
-            2,
-        )
-        .expect("bounded response"),
+        request(reply("200 OK", "{}"), 2).expect("bounded response"),
         b"{}"
     );
+    assert!(request(reply("401 Unauthorized", "{}"), 2).is_err());
+    assert!(request(reply("200 OK", "abc"), 2).is_err());
     assert!(
         request(
-            "HTTP/1.1 401 Unauthorized\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}",
+            "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n3\r\nabc\r\n0\r\n\r\n"
+                .to_owned(),
             2,
         )
         .is_err()
     );
-    assert!(
-        request(
-            "HTTP/1.1 200 OK\r\nContent-Length: 3\r\nConnection: close\r\n\r\nabc",
-            2,
-        )
-        .is_err()
-    );
-    assert!(request(
-        "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n3\r\nabc\r\n0\r\n\r\n",
-        2,
-    )
-    .is_err());
 }
 
 #[test]

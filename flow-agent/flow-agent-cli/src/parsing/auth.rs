@@ -11,10 +11,7 @@ pub(crate) enum AuthProvider {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum AuthLogin {
     Subscription(AuthLoginMode),
-    /// The base URL is an argument; the key itself is read from standard input.
-    ApiKey {
-        base_url: String,
-    },
+    ApiKey { base_url: String },
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

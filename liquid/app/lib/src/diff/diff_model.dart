@@ -4,7 +4,6 @@ import 'dart:math' as math;
 
 import '../rust/api/events.dart';
 
-/// One row of the changed-files tree: a folder or a changed file.
 class FileRow {
   const FileRow({
     required this.name,
@@ -16,12 +15,10 @@ class FileRow {
   final String name;
   final int depth;
 
-  /// The folder's path, used to collapse it.
   final String folder;
   final BridgeFileChange? change;
 }
 
-/// Lists changed files as a folder tree, folders before files, each sorted by name.
 List<FileRow> fileTree(List<BridgeFileChange> changes) {
   final root = _Folder('');
   for (final change in changes) {
@@ -68,7 +65,6 @@ class _Folder {
 
 enum DiffKind { hunk, context, added, removed }
 
-/// One displayed line of a patch.
 class DiffLine {
   const DiffLine(this.kind, this.text, {this.oldNumber, this.newNumber});
 
@@ -78,12 +74,8 @@ class DiffLine {
   final int? newNumber;
 }
 
-/// The characters of a line the Diff panel shows; a longer one, such as a minified bundle's,
-/// shows them and an ellipsis, so laying out one line stays cheap.
 const shownChars = 1000;
 
-/// The start of `text` the Diff panel shows, without a split character pair, and whether it is
-/// cut.
 ({String text, bool cut}) shownText(String text) {
   if (text.length <= shownChars) return (text: text, cut: false);
   final end = text.codeUnitAt(shownChars - 1) & 0xFC00 == 0xD800
@@ -92,11 +84,6 @@ const shownChars = 1000;
   return (text: text.substring(0, end), cut: true);
 }
 
-/// The shown text of the lines likely widest, which the caller lays out: the longest by
-/// characters, which is their width when each takes one column, and the longest by a count
-/// that takes every non-ASCII character as two wide, so wide characters such as Chinese ones
-/// count as the width they take. Neither alone finds every widest line, since wide-scored
-/// lines of one script could crowd out a longer line of another.
 List<String> widestLines(List<DiffLine> lines, {int count = 8}) {
   int columns(String text) {
     var sum = 0;
@@ -125,14 +112,12 @@ List<String> widestLines(List<DiffLine> lines, {int count = 8}) {
 
 final _hunk = RegExp(r'^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@');
 
-/// Turns a unified diff into numbered lines, skipping the file headers.
 List<DiffLine> parsePatch(String patch) {
   final lines = <DiffLine>[];
   var oldNumber = 0;
   var newNumber = 0;
   var inHunk = false;
   for (final line in patch.split('\n')) {
-    // Git writes some changes of one file, such as a file becoming a link, as two sections.
     if (line.startsWith('diff --git ')) {
       inHunk = false;
       continue;
@@ -167,17 +152,11 @@ List<DiffLine> parsePatch(String patch) {
   return lines;
 }
 
-/// Reads a patch into lines. The window passes [parsePatchInBackground]; tests pass
-/// [parsePatch] itself, as fake time does not run isolates.
 typedef PatchParser = FutureOr<List<DiffLine>> Function(String patch);
 
-/// Parses [patch] on a background isolate, so a large patch (up to 4 MiB) does not stall the
-/// window.
 Future<List<DiffLine>> parsePatchInBackground(String patch) =>
     Isolate.run(() => parsePatch(patch));
 
-/// One row of the split view: a hunk header across both sides, or a line of the file before
-/// the run beside its line after it.
 class SplitRow {
   const SplitRow({this.hunk, this.left, this.right});
 
@@ -186,8 +165,6 @@ class SplitRow {
   final DiffLine? right;
 }
 
-/// Sets a patch's lines side by side: unchanged lines on both sides, and each run of removed
-/// lines beside the added lines that follow it.
 List<SplitRow> splitRows(List<DiffLine> lines) {
   final rows = <SplitRow>[];
   final removed = <DiffLine>[];

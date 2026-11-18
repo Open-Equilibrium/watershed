@@ -1,19 +1,3 @@
-//! Observation workload for the local replica (PERFORMANCE.md, Liquid). A first run types with
-//! one durable commit per keystroke, builds a long Page and prints the replica's path; a second
-//! run, a new process as when Liquid starts again, reopens that Page and removes the replica.
-//! A run with `--attachment` adds one file as an attachment in its own replica and reads it
-//! back (ADR-0305); one with `--whiteboard` draws strokes on a Whiteboard one by one and reads
-//! the board back, then fills one to its point cap (ADR-0306). It prints a summary and never
-//! compares with a threshold. Run from the repository root:
-//!
-//! ```sh
-//! cargo build --release -p liquid-storage --example replica_observe
-//! /usr/bin/time -l target/release/examples/replica_observe
-//! /usr/bin/time -l target/release/examples/replica_observe <printed path>
-//! /usr/bin/time -l target/release/examples/replica_observe --attachment
-//! /usr/bin/time -l target/release/examples/replica_observe --whiteboard
-//! ```
-
 use std::path::Path;
 use std::time::{Duration, Instant};
 
@@ -24,10 +8,8 @@ use liquid_core::{
 use liquid_storage::Sqlite;
 
 const KEYSTROKES: usize = 2_000;
-/// The attachment workload's file: 256 MiB, as a short video is.
 const ATTACHMENT: usize = 256 << 20;
 const BLOCKS: usize = 1_000;
-/// The Whiteboard workload: strokes drawn one by one, of points each, as handwriting has.
 const STROKES: usize = 2_000;
 const STROKE_POINTS: usize = 150;
 const KEY: [u8; 32] = [7; 32];
@@ -94,8 +76,6 @@ fn main() {
     std::fs::create_dir_all(&dir).expect("the temporary directory can be created");
     let path = dir.join("replica.db");
 
-    // Typing: one durable commit per keystroke, the worst case for an editor that groups
-    // keystrokes into one commit.
     let mut workspace = Workspace::create(
         PersonId::new("observer"),
         Sqlite::open(&path, &KEY).expect("a new replica opens"),
@@ -130,7 +110,6 @@ fn main() {
         times,
     );
 
-    // A long Page, then a new session that opens it.
     let mut after = None;
     for _ in 0..BLOCKS {
         let add = Mutation::AddTextBlock {
@@ -160,8 +139,6 @@ fn main() {
     println!("replica: {}", path.display());
 }
 
-/// Opens the replica at `path`, reads its first Page's Views as the Explorer opens it, and
-/// removes the replica.
 fn reopen(path: &Path) {
     let start = Instant::now();
     let mut workspace =
@@ -186,8 +163,6 @@ fn reopen(path: &Path) {
         start.elapsed().as_secs_f64() * 1e3
     );
     drop(workspace);
-    // Only the replica's own files go, so a folder that holds other files keeps them. The
-    // replica may have any name, so its files are the given path and its WAL and shared memory.
     let name = path.file_name().expect("the replica has a file name");
     for suffix in ["", "-wal", "-shm"] {
         let mut file = name.to_os_string();
@@ -201,8 +176,6 @@ fn reopen(path: &Path) {
     let _ = std::fs::remove_dir(path.parent().expect("the replica is in its own directory"));
 }
 
-/// Adds a 256 MiB file to a new replica part by part, as the bridge reads one from disk,
-/// then reads it back part by part, as Save as… writes it out, and removes the replica.
 fn attachment() {
     let dir =
         std::env::temp_dir().join(format!("liquid-attachment-observe-{}", std::process::id()));
@@ -256,7 +229,6 @@ fn attachment() {
     std::fs::remove_dir_all(&dir).expect("the replica is removed");
 }
 
-/// A stroke of `points` points, drawn left to right at `row`.
 fn stroke(row: usize, points: usize) -> Element {
     let y = (row % 400) as f32 * 3.0;
     let bytes: Vec<u8> = (0..points)
@@ -293,9 +265,6 @@ fn draw(workspace: &mut Workspace<Sqlite>, page: &PageId, block: &BlockId, add: 
         .expect("the board takes the strokes");
 }
 
-/// Draws strokes on a Whiteboard one durable edit each, as a person writes, reads the whole
-/// board back after the Page loads again, then fills a second board to its point cap and
-/// reads that one, the most a board ever crosses to Dart.
 fn whiteboard() {
     let dir =
         std::env::temp_dir().join(format!("liquid-whiteboard-observe-{}", std::process::id()));

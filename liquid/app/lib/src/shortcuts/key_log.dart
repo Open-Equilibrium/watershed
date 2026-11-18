@@ -5,9 +5,6 @@ import 'package:flutter/widgets.dart';
 
 import 'keymap.dart';
 
-/// One key event as the key log writes it: kind, logical key and label, physical key,
-/// character, the keys held and the focused node, to find why some Liquid key shortcuts do
-/// nothing. Labels, not debug names, so a release build reads the same.
 String describeKeyEvent(
   KeyEvent event, {
   required Set<LogicalKeyboardKey> pressed,
@@ -29,9 +26,6 @@ String describeKeyEvent(
   ].join(' ');
 }
 
-/// Whether the log takes `event`: with the Liquid key, or with ⌘ or ⌃ but not ⌥, so plain
-/// typing, such as a password or token, stays out of it; ⌥ types characters such as @ on many
-/// layouts, and AltGr reaches Flutter as ⌃⌥ on Windows.
 bool logsKey(KeyEvent event, Set<LogicalKeyboardKey> pressed) {
   bool held(LogicalKeyboardKey modifier) =>
       pressed.any(LogicalKeyboardKey.expandSynonyms({modifier}).contains);
@@ -47,15 +41,9 @@ final _modifiers = LogicalKeyboardKey.expandSynonyms({
   LogicalKeyboardKey.shift,
 });
 
-/// The lines of the key log: [logsKey] takes a modifier or the Liquid key, and a typed key only
-/// with its key-down. A typed key's repeats and key-up follow that key-down, so a key typed
-/// alone stays out even when ⌘ or ⌃ is held after it. A line names only the modifiers, the
-/// Liquid key and the typed keys the log took.
 class KeyLog {
-  /// The typed keys whose key-down the log took and that are not released yet.
   final _logged = <LogicalKeyboardKey>{};
 
-  /// The line for `event`, or null when the log leaves it out.
   String? line(
     KeyEvent event, {
     required Set<LogicalKeyboardKey> pressed,
@@ -90,8 +78,6 @@ class KeyLog {
   }
 }
 
-/// With `LIQUID_KEY_LOG=1`, writes the lines of [KeyLog] for the key events Flutter receives to
-/// stderr; the macOS runner logs the native events beside them.
 void logKeysIfAsked(Map<String, String> environment) {
   if (environment['LIQUID_KEY_LOG'] != '1') return;
   final log = KeyLog();

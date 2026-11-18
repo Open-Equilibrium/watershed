@@ -51,10 +51,8 @@ macro_rules! payload_token_enum {
         }
 
         impl $type_name {
-            /// Every canonical v0 value.
             pub const ALL: [Self; $count] = [$(Self::$variant),+];
 
-            /// Returns the stable protocol string.
             pub const fn as_str(self) -> &'static str {
                 match self {
                     $(Self::$variant => $token),+
@@ -107,31 +105,23 @@ macro_rules! payload_token_enum {
 }
 
 payload_token_enum! {
-    /// Canonical v0 Phase payload kinds.
     pub enum PhaseKind;
-    /// Error returned when a string is not a canonical v0 Phase kind.
     error UnknownPhaseKind;
     label "Phase kind";
     count 2;
     {
-        /// A Phase that directly executes Instructions or Tools.
         Leaf => "leaf",
-        /// A Phase that invokes child Phases.
         Composite => "composite",
     }
 }
 
 payload_token_enum! {
-    /// Canonical v0 `tool.started` Tool kinds.
     pub enum ToolKind;
-    /// Error returned when a string is not a canonical v0 `tool.started` Tool kind.
     error UnknownToolKind;
     label "tool.started Tool kind";
     count 2;
     {
-        /// A trusted predefined command.
         PredefinedCommand => "predefined-command",
-        /// An inline script owned by the Tool definition.
         OwnScript => "own-script",
     }
 }

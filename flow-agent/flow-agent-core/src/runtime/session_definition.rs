@@ -13,7 +13,6 @@ pub struct SessionDefinitionMetadata {
     pub(crate) flow_definition_id: String,
     pub(crate) registry_hash: String,
     pub(crate) flow_definition_hash: String,
-    /// Whether the Run started with a root input; the Fixture bundle stores the input itself nowhere.
     pub(crate) root_input: bool,
 }
 

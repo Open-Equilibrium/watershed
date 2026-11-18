@@ -8,8 +8,6 @@ use std::{
     path::{Path, PathBuf},
 };
 
-/// Maps each stable refusal fragment to its recorded class. A diagnostic that matches no
-/// fragment is recorded as `unclassified`, so a changed message fails the corpus loudly.
 const REFUSAL_CLASSES: [(&str, &str); 19] = [
     ("DenyAnchors", "anchor"),
     ("MergeKeyPolicy", "merge-key"),
@@ -50,8 +48,6 @@ fn refusal_class(message: &str) -> String {
         )
 }
 
-/// Runs one case through the registry read path. Returns `accepted` with the canonical JSON
-/// of the parsed block, or `refused <class>`.
 fn observe(root: &RegistryRoot, file: &RegistryFile) -> (String, Option<String>) {
     let name = file.path.display().to_string();
     let parsed = read_registry_file_to_string(root, file, MAX_REGISTRY_FILE_BYTES)

@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-"""Dev-only macOS sandbox-exec feasibility probe; never a runtime backend."""
 
 import argparse
 import errno
@@ -108,13 +107,12 @@ def profile(protected_root: Path, protect_ancestors: bool = False,
 
 
 def limit_output(file_limit: int) -> None:
-    import resource  # macOS-only call site
+    import resource
     resource.setrlimit(resource.RLIMIT_FSIZE, (file_limit, file_limit))
 
 
 def invoke(command: list[str], cwd: Path, log: Path, fds: tuple[int, ...] = (),
            timeout_seconds: int = TIMEOUT, file_limit: int = OUTPUT_LIMIT) -> dict:
-    """No stdin, no inherited environment, bounded wait, and OS-enforced output cap."""
     try:
         with log.open("wb") as output:
             child = subprocess.Popen(command, cwd=cwd, env=CHILD_ENV, stdin=subprocess.DEVNULL,
@@ -195,7 +193,7 @@ def run_case(mode: str, root: Path, name: str, kind: str) -> dict:
             outcome = "red_control" if not intact else "failure"
         else:
             outcome = "pass" if permitted else "failure"
-    elif kind == "link" and auxiliary.exists():  # the alias was created: link creation itself was allowed
+    elif kind == "link" and auxiliary.exists():
         outcome = "violation"
     elif not denied:
         outcome = "pass" if succeeded and permitted else "violation" if explicit_denial else "failure"

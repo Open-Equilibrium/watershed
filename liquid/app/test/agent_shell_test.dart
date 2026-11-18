@@ -24,7 +24,6 @@ import 'fake_workspace.dart';
 
 const info = SessionInfo(project: 'acme-api');
 
-/// A disk that is always full.
 class _FullDisk extends SettingsFile {
   _FullDisk() : super(File('unused'));
 
@@ -38,8 +37,6 @@ void main() {
   late SessionState state;
   var sequence = 0;
 
-  /// Shows an open session whose chat, turns and requests are `transcript`, `turns` and
-  /// `requests`, as Meta-Harness's snapshot holds them. Events sent later are numbered after it.
   Future<void> show(
     WidgetTester tester, {
     List<BridgeTranscriptItem> transcript = const [],
@@ -70,7 +67,6 @@ void main() {
     await tester.pumpAndSettle();
   }
 
-  /// Sends a live event of the open session and lets the Chat show it.
   Future<void> emit(
     WidgetTester tester,
     BridgeEvent Function(int) build,
@@ -82,7 +78,6 @@ void main() {
   bool focused(WidgetTester tester, Key key) =>
       tester.widget<TextField>(find.byKey(key)).focusNode?.hasFocus ?? false;
 
-  /// Lets a question take clicks and keys, as it does 0.5 s after it could be read.
   Future<void> read(WidgetTester tester) =>
       tester.pump(const Duration(milliseconds: 500));
 
@@ -91,25 +86,16 @@ void main() {
       .controller!
       .text;
 
-  /// Types `text` into the composer and sends it with the button that shows then.
-  Future<void> typeAndSend(
-    WidgetTester tester,
-    String text,
-    String button,
-  ) async {
+  Future<void> typeInComposer(WidgetTester tester, String text) async {
     await tester.enterText(find.byKey(const Key('composer')), text);
-    await tester.pumpAndSettle();
-    await tester.tap(find.text(button));
     await tester.pumpAndSettle();
   }
 
-  /// What the session was asked to do, without the Diff's reads of the changes.
   List<String> actions() => [
     for (final call in project.session.calls)
       if (!call.startsWith('changes')) call,
   ];
 
-  /// Points at `finder`, which shows a message's actions while the pointer is over it.
   Future<void> hover(WidgetTester tester, Finder finder) async {
     final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
     await mouse.addPointer(location: tester.getCenter(finder));
@@ -117,7 +103,6 @@ void main() {
     await tester.pumpAndSettle();
   }
 
-  /// Presses `key` with ⌘ held, and with ⌥ too when `option` is set.
   Future<void> chord(
     WidgetTester tester,
     LogicalKeyboardKey key, {
@@ -131,7 +116,6 @@ void main() {
     await tester.pumpAndSettle();
   }
 
-  /// Gives the session's Chat a turn in progress.
   BridgeTurn running(int number) =>
       turnOf(number, status: BridgeTurnStatus.running);
 
@@ -169,24 +153,17 @@ void main() {
         item: item(7, BridgeItemKind.assistantMessage),
       ),
     );
-    await emit(
-      tester,
-      (seq) => event(
-        BridgeEventKind.contentDelta,
-        seq,
-        item: item(7, BridgeItemKind.assistantMessage),
-        text: 'Hel',
-      ),
-    );
-    await emit(
-      tester,
-      (seq) => event(
-        BridgeEventKind.contentDelta,
-        seq,
-        item: item(7, BridgeItemKind.assistantMessage),
-        text: 'lo',
-      ),
-    );
+    for (final text in ['Hel', 'lo']) {
+      await emit(
+        tester,
+        (seq) => event(
+          BridgeEventKind.contentDelta,
+          seq,
+          item: item(7, BridgeItemKind.assistantMessage),
+          text: text,
+        ),
+      );
+    }
     expect(find.text('Hello'), findsOneWidget);
   });
 
@@ -203,7 +180,9 @@ void main() {
       isNull,
       reason: 'nothing to send yet',
     );
-    await typeAndSend(tester, 'Fix login', 'Submit message');
+    await typeInComposer(tester, 'Fix login');
+    await tester.tap(find.text('Submit message'));
+    await tester.pumpAndSettle();
     expect(actions(), ['send Fix login']);
     expect(composerText(tester), isEmpty);
   });
@@ -212,17 +191,12 @@ void main() {
     'while the agent runs, Enter steers it and ⌥⏎ queues a follow-up',
     (tester) async {
       await show(tester, turns: [running(1)]);
-      await tester.enterText(
-        find.byKey(const Key('composer')),
-        'Use the faster API',
-      );
-      await tester.pumpAndSettle();
+      await typeInComposer(tester, 'Use the faster API');
       await tester.sendKeyEvent(LogicalKeyboardKey.enter);
       await tester.pumpAndSettle();
       expect(actions(), ['steer Use the faster API']);
 
-      await tester.enterText(find.byKey(const Key('composer')), 'Add a test');
-      await tester.pumpAndSettle();
+      await typeInComposer(tester, 'Add a test');
       await tester.sendKeyDownEvent(LogicalKeyboardKey.altLeft);
       await tester.sendKeyEvent(LogicalKeyboardKey.enter);
       await tester.sendKeyUpEvent(LogicalKeyboardKey.altLeft);
@@ -288,6 +262,22 @@ void main() {
     },
   );
 
+  testWidgets('Revert files too also undoes the files of the turn', (
+    tester,
+  ) async {
+    await show(
+      tester,
+      transcript: [userMessage(1, 'Fix login')],
+      turns: [turnOf(1, prompt: 'Fix login', files: 1, added: 1)],
+    );
+    await hover(tester, find.text('Fix login'));
+    await tester.tap(find.text('Edit from here'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Revert files too'));
+    await tester.pumpAndSettle();
+    expect(actions(), ['revert 1 files=true']);
+  });
+
   testWidgets(
     'Revert files too is offered only once the turn\'s checkpoint is ready',
     (tester) async {
@@ -306,22 +296,6 @@ void main() {
       expect(actions(), ['revert 1 files=false']);
     },
   );
-
-  testWidgets('Revert files too also undoes the files of the turn', (
-    tester,
-  ) async {
-    await show(
-      tester,
-      transcript: [userMessage(1, 'Fix login')],
-      turns: [turnOf(1, prompt: 'Fix login', files: 1, added: 1)],
-    );
-    await hover(tester, find.text('Fix login'));
-    await tester.tap(find.text('Edit from here'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Revert files too'));
-    await tester.pumpAndSettle();
-    expect(actions(), ['revert 1 files=true']);
-  });
 
   testWidgets('a turn ends with its changes, Open diff and the revert', (
     tester,
@@ -351,7 +325,6 @@ void main() {
     );
     await hover(tester, find.text('Done'));
     await tester.tap(find.text('Fork from this response'));
-    // Opening replaces the attached session, which waits on the real event loop.
     await tester.runAsync(
       () => Future<void>.delayed(const Duration(milliseconds: 10)),
     );
@@ -360,7 +333,6 @@ void main() {
     expect(project.calls, contains('open fork-of-thread-1'));
   });
 
-  /// Records what the app copies to the clipboard; the getter returns the last copy.
   String? Function() recordClipboard(WidgetTester tester) {
     String? copied;
     tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
@@ -381,23 +353,19 @@ void main() {
     return () => copied;
   }
 
-  testWidgets('Copy message copies the message text', (tester) async {
-    final copied = recordClipboard(tester);
-    await show(tester, transcript: [userMessage(1, 'Fix login')]);
-    await hover(tester, find.text('Fix login'));
-    await tester.tap(find.text('Copy message'));
-    await tester.pumpAndSettle();
-    expect(copied(), 'Fix login');
-  });
-
-  testWidgets('Copy message copies a reply too', (tester) async {
-    final copied = recordClipboard(tester);
-    await show(tester, transcript: [reply(1, 'Done')]);
-    await hover(tester, find.text('Done'));
-    await tester.tap(find.text('Copy message'));
-    await tester.pumpAndSettle();
-    expect(copied(), 'Done');
-  });
+  for (final (message, text) in [
+    (userMessage(1, 'Fix login'), 'Fix login'),
+    (reply(1, 'Done'), 'Done'),
+  ]) {
+    testWidgets('Copy message copies the text of $text', (tester) async {
+      final copied = recordClipboard(tester);
+      await show(tester, transcript: [message]);
+      await hover(tester, find.text(text));
+      await tester.tap(find.text('Copy message'));
+      await tester.pumpAndSettle();
+      expect(copied(), text);
+    });
+  }
 
   testWidgets('a command approval shows what it runs and Approve answers it', (
     tester,
@@ -440,36 +408,55 @@ void main() {
     expect(actions(), ['respond a1 acceptForSession']);
   });
 
-  testWidgets('questions step through their answers and submit them together', (
-    tester,
-  ) async {
-    await show(
-      tester,
-      requests: [
-        questionsOf('q1', [
-          questionOf('scope', 'Which scope?', options: ['Small', 'Large']),
-          questionOf(
-            'style',
-            'Which styles?',
-            options: ['Plain', 'Bold'],
-            multiSelect: true,
-          ),
-        ]),
-      ],
-    );
-    await read(tester);
+  testWidgets(
+    'questions step through their answers, Previous returns to an answered one, and they submit together',
+    (tester) async {
+      await show(
+        tester,
+        requests: [
+          questionsOf('q1', [
+            const BridgeQuestion(
+              id: 'scope',
+              header: 'scope',
+              question: 'Which scope?',
+              options: ['Small', 'Large'],
+              descriptions: ['Only the login flow', ''],
+              multiSelect: false,
+              custom: true,
+            ),
+            questionOf(
+              'style',
+              'Which styles?',
+              options: ['Plain', 'Bold'],
+              multiSelect: true,
+            ),
+          ]),
+        ],
+      );
+      await read(tester);
 
-    await tester.tap(find.text('Small'));
-    await tester.pump(const Duration(milliseconds: 300));
-    await tester.pumpAndSettle();
-    expect(find.text('2/2'), findsOneWidget);
-    await tester.tap(find.text('Plain'));
-    await tester.tap(find.text('Bold'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Submit answers'));
-    await tester.pumpAndSettle();
-    expect(actions(), ['answer q1 scope=Small style=Plain+Bold']);
-  });
+      await tester.tap(find.text('Small'));
+      await tester.pump(const Duration(milliseconds: 300));
+      await tester.pumpAndSettle();
+      expect(find.text('2/2'), findsOneWidget);
+      expect(find.text('Which styles?'), findsOneWidget);
+
+      await tester.tap(find.text('Previous'));
+      await tester.pumpAndSettle();
+      expect(find.text('Which scope?'), findsOneWidget);
+      expect(find.text('Only the login flow'), findsOneWidget);
+
+      await tester.tap(find.text('Small'));
+      await tester.pump(const Duration(milliseconds: 300));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Plain'));
+      await tester.tap(find.text('Bold'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Submit answers'));
+      await tester.pumpAndSettle();
+      expect(actions(), ['answer q1 scope=Small style=Plain+Bold']);
+    },
+  );
 
   testWidgets('Dismiss question without answering sends the dismissal', (
     tester,
@@ -490,22 +477,11 @@ void main() {
     expect(actions(), ['dismiss q1']);
   });
 
-  testWidgets('a notice shows in the status bar', (tester) async {
-    await show(tester);
-    state.notify(NoticeLevel.error, 'Could not read the sessions: boom');
-    await tester.pumpAndSettle();
-    expect(find.text('Could not read the sessions: boom'), findsOneWidget);
-  });
-
   testWidgets('⌘L focuses the composer from the Chat', (tester) async {
     await show(tester);
     expect(focused(tester, const Key('composer')), isFalse);
 
-    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
-    await tester.sendKeyEvent(LogicalKeyboardKey.keyL);
-    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
-    await tester.pump();
-    await tester.pumpAndSettle();
+    await chord(tester, LogicalKeyboardKey.keyL);
     expect(focused(tester, const Key('composer')), isTrue);
   });
 
@@ -740,11 +716,7 @@ void main() {
 
       await tester.tap(find.text('Edit'));
       await tester.pumpAndSettle();
-      await tester.enterText(
-        find.byKey(const Key('composer')),
-        'Add two tests',
-      );
-      await tester.pumpAndSettle();
+      await typeInComposer(tester, 'Add two tests');
       await tester.tap(find.text('Update queued message'));
       await tester.pumpAndSettle();
       expect(actions().last, 'edit 2 Add two tests');
@@ -753,49 +725,12 @@ void main() {
 
   testWidgets('a held Enter types no line and sends nothing', (tester) async {
     await show(tester, turns: [running(1)]);
-    await tester.enterText(
-      find.byKey(const Key('composer')),
-      'Use the faster API',
-    );
-    await tester.pumpAndSettle();
+    await typeInComposer(tester, 'Use the faster API');
     await tester.sendKeyRepeatEvent(LogicalKeyboardKey.enter);
     await tester.pumpAndSettle();
     expect(composerText(tester), 'Use the faster API');
     expect(actions(), isEmpty);
   });
-
-  testWidgets(
-    'Previous returns to an answered question, which keeps its answer',
-    (tester) async {
-      await show(
-        tester,
-        requests: [
-          questionsOf('q1', [
-            const BridgeQuestion(
-              id: 'scope',
-              header: 'scope',
-              question: 'Which scope?',
-              options: ['Small', 'Large'],
-              descriptions: ['Only the login flow', ''],
-              multiSelect: false,
-              custom: true,
-            ),
-            questionOf('style', 'Which styles?', options: ['Plain', 'Bold']),
-          ]),
-        ],
-      );
-      await read(tester);
-      await tester.tap(find.text('Small'));
-      await tester.pump(const Duration(milliseconds: 300));
-      await tester.pumpAndSettle();
-      expect(find.text('Which styles?'), findsOneWidget);
-
-      await tester.tap(find.text('Previous'));
-      await tester.pumpAndSettle();
-      expect(find.text('Which scope?'), findsOneWidget);
-      expect(find.text('Only the login flow'), findsOneWidget);
-    },
-  );
 
   testWidgets('⌥⌘B hides the session card and shows it again', (tester) async {
     await show(tester);
@@ -838,19 +773,14 @@ void main() {
       );
       project.session.revertedPrompt = 'Fix login';
       await hover(tester, find.text('Fix login'));
-      await tester.enterText(
-        find.byKey(const Key('composer')),
-        'Also add a test',
-      );
-      await tester.pumpAndSettle();
+      await typeInComposer(tester, 'Also add a test');
       await tester.tap(find.text('Edit from here'));
       await tester.pumpAndSettle();
       await tester.tap(find.text('Revert and keep changes'));
       await tester.pumpAndSettle();
       expect(composerText(tester), 'Fix login\n\nAlso add a test');
 
-      await tester.enterText(find.byKey(const Key('composer')), 'Fix login');
-      await tester.pumpAndSettle();
+      await typeInComposer(tester, 'Fix login');
       await tester.tap(find.text('Edit from here'));
       await tester.pumpAndSettle();
       await tester.tap(find.text('Revert and keep changes'));

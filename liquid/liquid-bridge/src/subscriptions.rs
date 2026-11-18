@@ -1,7 +1,3 @@
-//! Who follows which Workspace resource. A subscription's registration and its close arrive
-//! on flutter_rust_bridge's worker threads in either order, and each resource counts its
-//! changes, so a reader that sees a gap knows to query again.
-
 use std::collections::{HashMap, HashSet};
 
 use liquid_core::PageId;
@@ -12,20 +8,13 @@ type Deliver = Box<dyn FnMut(BridgeChange) -> bool + Send>;
 
 #[derive(Default)]
 pub(crate) struct Subscriptions {
-    /// Open subscriptions by the identity Dart chose.
     open: HashMap<i64, (BridgeResource, Deliver)>,
-    /// Subscriptions whose close arrived before their registration, which calls on
-    /// flutter_rust_bridge's worker threads may do.
     closed: HashSet<i64>,
-    /// Subscriptions that ended because their stream was gone, until Dart's close arrives.
     ended: HashSet<i64>,
-    /// Each changed resource's change count.
     seqs: HashMap<BridgeResource, i64>,
 }
 
 impl Subscriptions {
-    /// Registers `subscription` for `resource`, as normalized, and hands `deliver` the
-    /// resource's current count. A refused registration ends the subscription like any other end.
     pub(crate) fn follow(
         &mut self,
         subscription: i64,
@@ -41,7 +30,6 @@ impl Subscriptions {
                 return Err(error);
             }
         };
-        // Dart cancelled it before it arrived, which is a normal end, not an error.
         if self.closed.remove(&subscription) {
             return Ok(());
         }
@@ -61,8 +49,6 @@ impl Subscriptions {
         Ok(())
     }
 
-    /// Ends `subscription`, also one whose registration has not arrived yet, and answers the
-    /// resource it followed.
     pub(crate) fn close(&mut self, subscription: i64) -> Option<BridgeResource> {
         match self.open.remove(&subscription) {
             Some((resource, _)) => Some(resource),
@@ -74,8 +60,6 @@ impl Subscriptions {
         }
     }
 
-    /// Counts a change of `resource` and tells its subscribers, ending those whose Dart
-    /// stream is gone; answers the resources those followed.
     pub(crate) fn notify(&mut self, resource: BridgeResource) -> Vec<BridgeResource> {
         let seq = self.seqs.entry(resource.clone()).or_default();
         *seq += 1;
@@ -98,14 +82,12 @@ impl Subscriptions {
             .collect()
     }
 
-    /// Whether a subscription reads `page`.
     pub(crate) fn follows(&self, page: &PageId) -> bool {
         self.open
             .values()
             .any(|(other, _)| other.page() == Some(page.as_str()))
     }
 
-    /// How many subscription identities wait for their other end: a registration or a close.
     #[cfg(test)]
     pub(crate) fn lifecycle_markers(&self) -> usize {
         self.closed.len() + self.ended.len()

@@ -36,12 +36,9 @@
 
     <section id="purpose" class="section"><h2>1. Purpose & scope</h2><div class="body">
       <p><strong>Meta-Harness is a self-contained, host-scoped headless control plane.</strong> It centralizes configuration, starts and monitors CLI agents on its own host, normalizes their events, runs agent schedules and triggers, and computes AgentPulse metrics. External coding agents (Codex CLI, Claude Code and future agents) plug in through adapters — Codex is an adapter/target, not a Flow Agent base or fork.</p>
-      <p>Meta-Harness is the Watershed platform's <strong>control layer</strong> and its orchestration wedge (see <a href="../../PLAN.md">PLAN.md</a>). Standalone job: <em>orchestrate, observe and measure agents of any harness, durably across agent hosts.</em> It is a vendor-neutral, self-hostable control plane for heterogeneous host-local CLI agents, not limited to Flow Agent.</p>
-      <p>Native targets and current availability follow <a href="../../PLATFORMS.md">PLATFORMS.md</a>. The clean product model across the three Watershed tools:</p>
-      <pre><code>Flow Agent    = standalone agent runtime
-Meta-Harness  = standalone headless many-agent control plane
-Liquid        = standalone native workspace / app-building product</code></pre>
-      <p><strong>Meta-Harness can run without Liquid.</strong> Its CLI/API/service may be reached locally or, with authenticated transport, from another device. Remote API reachability never grants ownership of a CLI process on another host. Liquid is the primary rich UI, not a prerequisite; Meta-Harness does not ship a competing rich GUI in the MVP (packaging: ADR-0286).</p>
+      <p>Meta-Harness is the Watershed platform's <strong>control layer</strong> and its orchestration wedge (<a href="../../GLOSSARY.md">GLOSSARY.md</a>, <a href="../../VISION.md">VISION.md</a>, <a href="../../PLAN.md">PLAN.md</a>). It is a vendor-neutral, self-hostable control plane for heterogeneous host-local CLI agents, not limited to Flow Agent.</p>
+      <p>The three-layer model is in <a href="../../VISION.md#thesis">VISION.md</a>; native targets and current availability follow <a href="../../PLATFORMS.md">PLATFORMS.md</a>.</p>
+      <p><strong>Meta-Harness can run without Liquid.</strong> Its CLI/API/service may be reached locally or, with authenticated transport, from another device; execution ownership stays host-local (<a href="../../PROTOCOL.md#topology-and-ownership-invariants">PROTOCOL.md</a>). Liquid is the primary rich UI, not a prerequisite; Meta-Harness does not ship a competing rich GUI in the MVP (packaging: ADR-0286).</p>
     </div></section>
 
     <section id="boundary" class="section"><h2>2. Product boundary</h2><div class="body">
@@ -76,25 +73,12 @@ Liquid        = standalone native workspace / app-building product</code></pre>
           <li>a full separate rich GUI in the MVP.</li>
         </ul></div>
       </div>
-      <p><strong>Session record (ADR-0257):</strong> “Export record” writes what Meta-Harness holds about one session as a folder in Downloads: T3's record of the thread (<code>thread.json</code>), <code>record.json</code> (<code>"schema": "watershed-session-record-v2"</code>) with each turn's times, how it ended and the files its end checkpoint changed, and a <code>README.txt</code> that says what it leaves out. It is observe-only, adds no gate or recording, and claims no completeness (ADR-0222).</p>
+      <p><strong>Session record (ADR-0257):</strong> “Export record” writes what Meta-Harness holds about one session as a folder in Downloads: T3's record of the thread (<code>thread.json</code>), <code>record.json</code> (<code>"schema": "watershed-session-record-v2"</code>) with each turn's times, how it ended and the files its end checkpoint changed, and a <code>README.txt</code> that says what it leaves out. It is observe-only and adds no gate or recording; trust limits are in <a href="../../SECURITY.md">SECURITY.md</a>.</p>
     </div></section>
 
     <section id="flow-agent" class="section"><h2>3. Relationship to Flow Agent</h2><div class="body">
       <p><strong>Meta-Harness consumes Flow Agent; it does not own it.</strong> Flow Agent is a <a href="V-Spec_FlowAgent.html">standalone CLI product</a> usable without Meta-Harness or Liquid.</p>
-      <pre><code>Flow Agent
-  owns one local agent runtime
-  owns deterministic flow execution
-  owns local transcript/session persistence
-  owns run/replay/tail/resume and JSONL runtime surfaces
-
-Meta-Harness
-  launches Flow Agent on the same host
-  consumes its public runtime surfaces
-  manages host-local agents and sessions
-  normalizes events across providers
-  resolves shared config to target CLIs
-  computes cross-agent metrics</code></pre>
-      <p>Meta-Harness integrates through Flow Agent's <strong>public runtime surfaces</strong>: run/replay/tail/resume and JSONL now; RPC/control and export when implemented; embedding only if D-020 selects it. Its agent executor and each whole CLI agent process share a host, but Meta-Harness never reads Flow Agent's private session store directly or reaches into Flow Agent internals. It does not replace Flow Agent's runtime kernel, deterministic FSM or transcript persistence. Cross-host process control is outside the architecture.</p>
+      <p>Flow Agent's ownership is in its <a href="V-Spec_FlowAgent.html">V-Spec</a>. Meta-Harness launches it on the same host and integrates through its <strong>public runtime surfaces</strong>: run/replay/tail/resume and JSONL now; RPC/control and export when implemented; embedding only if D-020 selects it. Its agent executor and each whole CLI agent process share a host, but Meta-Harness never reads Flow Agent's private session store directly or reaches into Flow Agent internals. It does not replace Flow Agent's runtime kernel, deterministic FSM or transcript persistence. Cross-host process control is outside the architecture.</p>
     </div></section>
 
     <section id="liquid" class="section"><h2>4. Relationship to Liquid</h2><div class="body">
@@ -107,15 +91,15 @@ Liquid
   native UI / workspace
   Pages, Blocks, Views, PowerBar
   visual session / config / metric surfaces</code></pre>
-      <p>Projections from one or more Meta-Harness instances may be combined visually, but every record retains instance identity, freshness and authority; every live command routes back to the owning instance.</p>
+      <p>Projections from one or more Meta-Harness instances may be combined visually; their ownership rules are in <a href="../../PROTOCOL.md#topology-and-ownership-invariants">PROTOCOL.md</a>.</p>
       <p>Liquid <strong>must not duplicate</strong> a Meta-Harness session registry, adapter logic, config resolution, AgentPulse engine or scheduling engine, and it must not invent global cross-instance authority.</p>
-      <p><strong>Liquid is a standalone local-first workspace product, not merely Meta-Harness's UI.</strong> Workspace sync is independent from this live control plane. When an owning Meta-Harness is unreachable, Liquid may render cached state only as offline/stale and must not queue commands as if success were guaranteed. Meta-Harness and its agents access Liquid only through the workspace CLI/API/mutation pipeline, never Liquid storage internals.</p>
+      <p><strong>Liquid is a standalone local-first workspace product, not merely Meta-Harness's UI.</strong> When an owning Meta-Harness is unreachable, Liquid may render cached state only as offline/stale and must not queue commands as if success were guaranteed. Boundaries: <a href="../../VISION.md">VISION.md</a> and <a href="../../PROTOCOL.md">PROTOCOL.md</a>.</p>
       <p>A provisioned local Meta-Harness may start a same-host Flow Agent backed by a local model endpoint without Internet access. This does not let a remote client control an unreachable host. Cross-device Portable continuation uses Flow Agent's future public export/import surface and creates a child Run at the destination; Meta-Harness never copies Flow Agent's private store or transfers a live process claim. Exact archive/ownership behavior remains <a href="../decisions/open-decisions.html#d-058">D-058</a>, archive authenticity remains <a href="../decisions/open-decisions.html#d-062">D-062</a>, and local inference process trust remains <a href="../decisions/open-decisions.html#d-061">D-061</a>.</p>
       <h3 id="git-integration">Git integration</h3>
-      <p>Accepted; implemented on macOS (ADR-0282, ADR-0294, ADR-0295). T3 Code runs Git for every harness with its behavior as shipped, and Liquid's session card and dialogs copy T3's desktop app; Watershed keeps no Git rules of its own. Its trust boundary is in <a href="../../SECURITY.md#mvp-vcs-boundary">SECURITY.md</a>.</p>
+      <p>Accepted; implemented on macOS (ADR-0282, ADR-0294, ADR-0295). Liquid's session card and dialogs copy T3 Code's desktop app, and Git runs as T3 ships it; trust boundary: <a href="../../SECURITY.md#mvp-vcs-boundary">SECURITY.md</a>.</p>
       <ul>
         <li><strong>Checkpoints and revert:</strong> T3 stores each turn's files under <code>refs/t3/</code> in the project's repository. “Edit from here” rewinds the session to before a prompt and returns it to the input area; “Revert files too” restores the files only for a session in its own worktree, otherwise T3 rewinds the conversation only.</li>
-        <li><strong>Git actions:</strong> T3's quick action and menu (Commit, Push, Create PR, Publish repository), its commit dialog, the confirmation on the default branch and its ref picker with Checkout pull request. One writer model writes commit messages left blank, pull request text and session titles (ADR-0294).</li>
+        <li><strong>Git actions:</strong> T3's quick action and menu (Commit, Push, Create PR, Publish repository), its commit dialog, the confirmation on the default branch and its ref picker with Checkout pull request. The writer model (<a href="../../GLOSSARY.md">GLOSSARY.md</a>) writes commit messages left blank, pull request text and session titles (ADR-0294).</li>
         <li><strong>Worktrees:</strong> a new session starts in a new worktree from the default branch, T3's default, which T3 creates under its data folder and names; deleting a worktree's only session asks whether to delete the worktree too.</li>
       </ul>
       <h3 id="statistics">Session card and statistics</h3>
@@ -163,6 +147,12 @@ meta config propose FILE
 meta config approve N
 meta config reject N
 meta config revert N
+meta remote on | off | status
+meta invite --device | --host
+meta host add ADDRESS CODE
+meta host list | remove NAME
+meta host revoke NAME
+meta host agents on | off
 meta service install
 meta service uninstall
 meta uninstall</code></pre>
@@ -180,9 +170,9 @@ meta uninstall</code></pre>
           <li>approval, rejection and revert of configuration-change proposals.</li>
         </ul></div>
       </div>
-      <p id="remote-control">Accepted target (ADR-0185): an agent executor controls only whole CLI agent processes created or adopted on its own host under an explicit local identity and rejects cross-host process claims. Exposing the API to another device requires authenticated, integrity-protected transport and does not expand agent-executor authority. Liquid must route live commands to the instance that owns the addressed session/configuration and must not treat cached state as controllable while that instance is unreachable.</p>
+      <p id="remote-control">Accepted target (ADR-0185): an agent executor controls only whole CLI agent processes created or adopted on its own host under an explicit local identity and rejects cross-host process claims. Exposing the API to another device requires authenticated, integrity-protected transport and does not expand agent-executor authority. Command routing: <a href="../../PROTOCOL.md#topology-and-ownership-invariants">PROTOCOL.md</a>.</p>
       <h3>Service / daemon surface</h3>
-      <p>Implemented on macOS and Linux (ADR-0215, ADR-0286, ADR-0297). <code>meta serve</code> runs the service in its own process; the login service starts it at login and again after it ends. It owns its data folder, <code>META_HARNESS_HOME</code> or else <code>~/.meta-harness</code>: the configuration store <code>meta-harness.sqlite</code>, T3's data in <code>t3/</code>, the harness homes in <code>harness/</code> and <code>service.log</code>; a second service on the same folder refuses to start. It serves one WebSocket on 127.0.0.1 at a free port, as T3 Code serves its clients, and admits only connections with the bearer token it writes, with its address, into <code>connection.json</code> (<a href="../../SECURITY.md#meta-harness-service-and-configuration">trust limits</a>). With remote access on (ADR-0299), it serves the same WebSocket on this computer's Tailscale addresses as well.</p>
+      <p>Implemented; platform availability is in <a href="../../PLATFORMS.md">PLATFORMS.md</a> (ADR-0215, ADR-0286, ADR-0297). <code>meta serve</code> runs the service in its own process; the login service starts it at login and again after it ends. It owns its data folder, <code>META_HARNESS_HOME</code> or else <code>~/.meta-harness</code>: the configuration store <code>meta-harness.sqlite</code>, T3's data in <code>t3/</code>, the harness homes in <code>harness/</code> and <code>service.log</code>. It serves one WebSocket on 127.0.0.1 at a free port, as T3 Code serves its clients, and admits only connections with the bearer token it writes, with its address, into <code>connection.json</code> (<a href="../../SECURITY.md#meta-harness-service-and-configuration">trust limits</a>). With remote access on (ADR-0299), it serves the same WebSocket on this computer's Tailscale addresses as well.</p>
       <ul>
         <li><strong>Messages:</strong> JSON text frames, defined in <code>meta-harness-core/src/api.rs</code>: a call gets one answer; a stream gets a first value, such as a thread's snapshot (ADR-0290), then items until it ends or the client cancels it. Every thread call names its project and thread, so a client that reconnects goes on without opening anything again. Each connection names its API version in the <code>meta-harness-api</code> header; the service refuses any other or missing version with HTTP 426. The message set stays internal until the BYOA deliverable in <a href="../../PLAN.md">PLAN.md</a>.</li>
         <li><strong>Clients:</strong> <code>meta</code> and Liquid's agent surface, which keeps nothing of the core or T3 running in its process and leaves the service and its agents running when it quits. A lost connection fails the calls it left unanswered, which are never sent again, and ends its streams; Liquid retries only a lost or missing connection, and any other error ends that follow; a reader that falls 4,096 items behind loses its stream and restores from a snapshot. A connection holds at most 256 requests in progress, calls and open streams together; one more, or a client that does not read the error replies to malformed requests, ends the connection.</li>
@@ -192,9 +182,9 @@ meta uninstall</code></pre>
 
     <section id="architecture" class="section"><h2>7. Architecture</h2><div class="body">
       <h3 id="t3-stack">Agent host on T3 Code</h3>
-      <p>Accepted (ADR-0280 to ADR-0282, ADR-0286); implemented on macOS and Linux as the Meta-Harness service. The pipeline further down predates building on T3 Code and follows it once reworked.</p>
+      <p>Accepted (ADR-0280 to ADR-0282, ADR-0286); implemented as the Meta-Harness service, with platforms in <a href="../../PLATFORMS.md">PLATFORMS.md</a>. The pipeline further down predates building on T3 Code and follows it once reworked.</p>
       <ul>
-        <li><strong>Start:</strong> Meta-Harness runs the pinned <code>t3</code> itself with <code>serve --host 127.0.0.1</code>, its own <code>T3CODE_HOME</code>, <code>T3CODE_TELEMETRY_ENABLED=false</code> and <code>T3CODE_OTEL_SDK_DISABLED=true</code>, reads the port from <code>userdata/server-runtime.json</code> and takes an owner token from <code>t3 auth session issue</code>. Before starting, it stops the pinned <code>t3 serve</code> the data folder records as running, such as one a dead Meta-Harness left; one data folder belongs to one Meta-Harness.</li>
+        <li><strong>Start:</strong> Meta-Harness runs the pinned <code>t3</code> itself on 127.0.0.1 with its own <code>T3CODE_HOME</code> and telemetry off (<a href="../../SECURITY.md#meta-harness-agent-sessions">SECURITY.md</a>), reads the port from <code>userdata/server-runtime.json</code> and takes an owner token from <code>t3 auth session issue</code>. Before starting, it stops a pinned <code>t3 serve</code> that the data folder records as running, such as one a dead Meta-Harness left.</li>
         <li><strong>Protocol:</strong> Effect RPC JSON messages on <code>/ws?orchestrationProtocol=2</code> over <code>tokio-tungstenite</code>, acknowledging every streamed message (ADR-0292). A followed thread keeps T3's projection, updated by each event as T3's own client applies it. T3 closes a socket when its session expires, so the client reconnects with a new 24 h owner token, sends its open streams again, and a thread restarts from the snapshot T3 then sends, so Liquid reloads its Chat.</li>
         <li><strong>Version pin and contract tests (ADR-0281):</strong> <code>meta-harness/t3.lock</code> holds the T3 version and each archive's SHA-256 from the release's <code>SHA256SUMS</code>. The contract tests start that T3 with an empty data folder and a scripted local ACP agent as the provider, with no model or account, and check what Meta-Harness relies on; live providers stay a manual check.</li>
       </ul>
@@ -211,14 +201,14 @@ meta uninstall</code></pre>
         </div>
         <div>
           <div class="pd-cap">Start and packaging (ADR-0286, ADR-0296)</div>
-          <div class="pd-b pd-ws">One archive per platform with <code>SHA256SUMS</code><small><code>meta</code>, the pinned T3 release and <code>install.sh</code>, downloaded like Flow Agent's</small></div>
-          <div class="pd-a"><code>install.sh</code> into <code>~/.local/meta-harness</code>, then <code>meta service install</code></div>
+          <div class="pd-b pd-ws">Installer<small>steps in <a href="../../meta-harness/README.md#install">meta-harness/README.md</a></small></div>
+          <div class="pd-a"><code>meta service install</code></div>
           <div class="pd-b pd-ws">Login service, no administrator rights<small>a launch agent or a systemd user unit; a Windows per-user autostart with ADR-0291</small></div>
           <div class="pd-a">at sign-in and after a crash</div>
           <div class="pd-b pd-ws">Meta-Harness<small>own state in SQLite with an append-only approval log</small></div>
           <div class="pd-a">starts and supervises</div>
           <div class="pd-b pd-t3">T3 Code</div>
-          <div class="pd-box"><strong>Windows 11:</strong> Liquid, Meta-Harness, T3 Code and the harnesses run natively, without WSL (ADR-0291).</div>
+          <div class="pd-box"><strong>Windows 11:</strong> target (ADR-0291); availability in <a href="../../PLATFORMS.md">PLATFORMS.md</a>.</div>
         </div>
       </div>
       <div class="flow" aria-label="Meta-Harness control-plane pipeline">
@@ -226,11 +216,11 @@ meta uninstall</code></pre>
         <div class="node">Meta-Harness agent executor</div><div class="arrow">→</div><div class="node">Agent adapter</div><div class="arrow">→</div><div class="node">Artifact index</div>
         <div class="node">AgentPulse</div><div class="arrow">→</div><div class="node">Metrics / events</div><div class="arrow">→</div><div class="node">API / service</div>
       </div>
-      <p>Crates: <code>meta-harness-core</code> (T3's server and client, the session model, the service and its API, the central configuration and the client Liquid uses) and <code>meta-harness-cli</code> (<code>meta</code>); Liquid consumes the API and duplicates no backend logic.</p>
+      <p>Crates and their responsibilities: <a href="../architecture.md#rust-workspace-crates">architecture.md</a>.</p>
       <ul>
         <li><strong>Control plane:</strong> session registry, task state, attention state and schedules for this instance/host.</li>
         <li><strong>Config resolver:</strong> writes the configuration blocks into each harness home (<a href="#config">central config</a>).</li>
-        <li><strong>Meta-Harness agent executor:</strong> host-local supervisor for whole CLI agents. It validates that every launched or controlled CLI process belongs to this instance's host; cross-host execution is outside the architecture.</li>
+        <li><strong>Meta-Harness agent executor:</strong> host-local supervisor for whole CLI agents (<a href="../../GLOSSARY.md">GLOSSARY.md</a>); cross-host execution is outside the architecture.</li>
         <li><strong>Adapters:</strong> T3 Code runs each harness through its built-in providers or as a local ACP command (ADR-0282).</li>
         <li><strong>Artifact index:</strong> logs, summaries, checkpoints, handoff packs and host-provided diffs.</li>
         <li><strong>Policy gate:</strong> every configuration change is a proposal that needs approval (<a href="#policy-gate">approval and log</a>); control commands leave governance to the harness (ADR-0252).</li>
@@ -257,18 +247,18 @@ meta uninstall</code></pre>
  {"mcp_server": {"name": "wiki",
    "server": {"url": {"url": "https://example.com/mcp"}}}}]</code></pre>
       <p>A skill needs a <code>SKILL.md</code> and relative file paths; a proposal holds at most 256 changes.</p>
-      <p>Until Liquid syncs (M3c), the configuration lives in Meta-Harness's SQLite on its host and changes through <code>meta config</code> and the API; Liquid then edits it across devices, after approved mockups. Flow Agent joins with ACP and needs a public way to replace a home's configuration; its target stays global-only, with project behavior as explicit Flows in its global authority (<a href="../../PROTOCOL.md">PROTOCOL.md</a>). A host's Runtime binding stays device-local and is not copied into shared configuration. Target (ADR-0225): every harness can use local inference; Meta-Harness will write endpoints per host, and Flow Agent uses its device-local Runtime binding. Configuration is not a project VCS.</p>
-      <p id="policy-gate"><strong>Approval and log (ADR-0298):</strong> every change, from any client, is a proposal that takes effect only once approved, and anyone on the account approves or rejects it through the CLI or the API. Proposals, revisions and the log only grow: the log keeps each proposal, approval and rejection with its time and the client's own name for itself, and a revert proposes an earlier revision's blocks, approved like any change. Harness sessions started after an approval use the new revision. An approval counts only once both homes took the new revision; otherwise nothing changes. If the homes cannot even be restored, or did not take the current revision at start, they count as not reconciled until an approval's write succeeds, and <code>meta status</code> says so. A service whose homes cannot take its current revision still starts, so a revert stays possible. Trust limits: <a href="../../SECURITY.md#meta-harness-service-and-configuration">SECURITY.md</a>. An area may later be kept to local models, which Meta-Harness checks before a session starts (ADR-0225).</p>
+      <p>Until Liquid syncs (M3c), the configuration lives in Meta-Harness's SQLite on its host and changes through <code>meta config</code> and the API; Liquid then edits it across devices, after approved mockups. Flow Agent joins with ACP and needs a public way to replace a home's configuration; its target stays global-only, with project behavior as explicit Flows in its global authority (<a href="../../PROTOCOL.md">PROTOCOL.md</a>). A host's Runtime binding stays device-local and is not copied into shared configuration. Target (ADR-0225): every harness can use local inference; Meta-Harness will write endpoints per host, and Flow Agent uses its device-local Runtime binding.</p>
+      <p id="policy-gate"><strong>Approval and log (ADR-0298):</strong> a change from any client is a proposal (<a href="../../GLOSSARY.md">GLOSSARY.md</a>) that takes effect only once approved through the CLI or the API. Proposals, revisions and the log only grow: the log keeps each proposal, approval and rejection with its time and the client's own name for itself, and a revert proposes an earlier revision's blocks, approved like any change. Harness sessions started after an approval use the new revision. An approval counts only once both homes took the new revision; otherwise nothing changes. If the homes cannot even be restored, or did not take the current revision at start, they count as not reconciled until an approval's write succeeds, and <code>meta status</code> says so. A service whose homes cannot take its current revision still starts, so a revert stays possible. Trust limits: <a href="../../SECURITY.md#meta-harness-service-and-configuration">SECURITY.md</a>. An area may later be kept to local models, which Meta-Harness checks before a session starts (ADR-0225).</p>
     </div></section>
 
     <section id="agentpulse" class="section"><h2>9. AgentPulse</h2><div class="body">
       <p><strong>AgentPulse belongs to Meta-Harness, not Liquid.</strong> Each instance computes and stores metrics from normalized events/artifacts produced on its host. Liquid may render them through Blocks/Views and visually compare instances, but never rewrites their ownership. Metrics are queryable through the CLI/API.</p>
-      <ul><li>rework ratio;</li><li>first-attempt success;</li><li>cost-per-productive-outcome;</li><li>flow comparison across agents/configs.</li></ul>
-      <p>AgentPulse is the last, low-priority roadmap item; its formulas are open in <a href="../decisions/open-decisions.html#d-010">D-010</a>.</p>
+      <ul><li>the v0 metrics in <a href="../../GLOSSARY.md">GLOSSARY.md</a>;</li><li>flow comparison across agents/configs.</li></ul>
+      <p>Roadmap position: <a href="../../PLAN.md#agentpulse--last-roadmap-item">PLAN.md</a>; open formulas: <a href="../decisions/open-decisions.html#d-010">D-010</a>.</p>
     </div></section>
 
     <section id="automations" class="section"><h2>10. Agent scheduling &amp; orchestration</h2><div class="body">
-      <p>Meta-Harness owns schedules, triggers and orchestration for agent sessions on its host. Liquid may render and configure them through the public API. These are distinct from Liquid Workspace Automations, which connect Liquid events, conditions and actions and may call an authorized Meta-Harness action. Examples owned by Meta-Harness:</p>
+      <p>Meta-Harness owns schedules, triggers and orchestration for agent sessions on its host. Liquid may render and configure them through the public API. Liquid Automations are a separate concept (<a href="../../GLOSSARY.md">GLOSSARY.md</a>). Examples owned by Meta-Harness:</p>
       <ul>
         <li>recurring tasks;</li>
         <li>event-driven agent starts;</li>
@@ -309,11 +299,11 @@ meta uninstall</code></pre>
         </div>
       </div>
       <ul>
-        <li><strong>Interim (ADR-0299):</strong> until the Liquid account exists, the same link runs over Tailscale. The receiving host issues a pairing code; the linking host's Meta-Harness pairs with that host's remote access, starts a loopback tunnel on a port that stays the same across restarts unless it is taken, when the link is made again on a free one, and has T3 make its peer link through it (ADR-0288). A link older than 25 days is made again, while peer links last 30 days. The tunnel passes only the requests a link makes, naming a registration after its host: <code>GET /.well-known/t3/environment</code>; <code>POST</code> to <code>/oauth/mcp/register</code>, <code>/oauth/mcp/decision</code> and <code>/oauth/mcp/token</code>; and <code>GET</code>, <code>POST</code> and <code>DELETE</code> on <code>/mcp</code>, which linked agents use. It answers every other request with 403, and refuses a decision that asks for a level above the one the receiving host invited, and a decision or token exchange whose client_id names another pairing (ADR-0300, ADR-0301). Commands: <a href="../../meta-harness/README.md#remote-access-and-host-links">README</a>.</li>
+        <li><strong>Interim (ADR-0299):</strong> until the Liquid account exists, the same link runs over Tailscale. The receiving host issues a pairing code; the linking host's Meta-Harness pairs with that host's remote access, starts a loopback tunnel on a port that stays the same across restarts unless it is taken, when the link is made again on a free one, and has T3 make its peer link through it (ADR-0288). A link older than 25 days is made again, while peer links last 30 days. The tunnel passes only the requests a link makes, naming a registration after its host: <code>GET /.well-known/t3/environment</code>; <code>POST</code> to <code>/oauth/mcp/register</code>, <code>/oauth/mcp/decision</code> and <code>/oauth/mcp/token</code>; and <code>GET</code>, <code>POST</code> and <code>DELETE</code> on <code>/mcp</code>, which linked agents use. It answers every other request with 403; its refusals are in <a href="../../SECURITY.md#meta-harness-service-and-configuration">SECURITY.md</a> (ADR-0300, ADR-0301). Commands: <a href="../../meta-harness/README.md#remote-access-and-host-links">README</a>.</li>
         <li><strong>Authority:</strong> the caller's mode limits the remote work, so a subagent never exceeds its parent (ADR-0223); a plan-mode agent cannot start full-access work.</li>
         <li><strong>Below full access</strong> linked work changes only threads of its own origin and no projects, settings or schedules, and setup scripts are skipped; it can still read every thread on that host. At full access it runs as the receiving host's user, unfenced, still stamped with its origin.</li>
         <li><strong>The person</strong> sees each child under its parent in Liquid and can stop it.</li>
-        <li><strong>Spike result (T3 0.1.9):</strong> all three checks pass, so the fallback is not needed. Two T3 servers linked through a byte-forwarding tunnel on <code>http://127.0.0.1:&lt;port&gt;</code>, and a Claude Code thread on one ran <code>delegate_task</code> on the other.
+        <li><strong>Constraints of T3 0.1.9 that the link relies on:</strong>
           <ul>
             <li><strong>Address:</strong> <code>t3 environment link</code> accepts plain http only on loopback or Tailscale names and https elsewhere; it refuses loopback only when a person picks a known machine in T3's UI. The tunnel must keep the HTTP <code>Host</code> header unchanged, because the receiving T3 binds the link's OAuth token to it, and each peer keeps a stable local port, because T3 refuses the same peer at a second address while a link lives.</li>
             <li><strong>Pairing:</strong> <code>t3 auth pairing create --json</code> mints a single-use code valid for 5 minutes; linking needs no approval on either side. The link's session lasts 30 days, then Meta-Harness pairs again.</li>
@@ -332,7 +322,7 @@ meta uninstall</code></pre>
         <tr><th>Level</th><th>Who</th><th>How</th></tr>
         <tr><td>A · Switch the client</td><td>Meta-Harness</td><td>Liquid on any device attaches to Meta-Harness on the host, through the host connection when remote (ADR-0285).</td></tr>
         <tr><td>B · Survive a crash</td><td>T3 Code</td><td>T3 resumes the harness session and sends a continue prompt; the login service restarts Meta-Harness, which restarts T3 (ADR-0278, ADR-0286).</td></tr>
-        <tr><td>C · Move a session</td><td>Meta-Harness</td><td>Another host continues at a turn boundary by a handoff that feels like a compaction (ADR-0284, ADR-0289).</td></tr>
+        <tr><td>C · Move a session</td><td>Meta-Harness</td><td>Another host continues at a turn boundary by a handoff that feels like a compaction (ADR-0284, ADR-0289); today only while both hosts answer (ADR-0308, <a href="#host-move">host move</a>).</td></tr>
         <tr><td>D · Several hosts</td><td>T3 Code over Meta-Harness's connection</td><td>Agents start and steer threads on other hosts with T3's tools (ADR-0288, <a href="#orchestration">orchestration</a>).</td></tr>
       </table>
       </div>
@@ -356,6 +346,7 @@ meta uninstall</code></pre>
         </div>
       </div>
       <h3 id="host-move">Moving a session to another host</h3>
+      <p>Until the account exists, a live move (ADR-0308) carries a session while both hosts answer; a host too old for moves is not offered. The source ends its running turn and pushes the session's branch through the project's Git remote. The target starts the session on that branch, in a clean checkout it already has or a new worktree, from a handoff of at most 16,000 bytes, keeps the earlier transcript as the move record and delivers the queued messages the move carried; only then does it report the move landed, and the source seals the session. Each move has a transfer id and every step can be repeated. The target's record decides an interrupted move: landed seals the source; once the target has refused the transfer for good, the source is released; while the target does not answer, the session waits. The Liquid that started the move finishes it; any other Liquid can from five minutes after the move began or was handed over. A person can cancel: the target refuses the transfer and the source is released; a target still starting the session refuses the cancel, and one that already landed it finishes the move. If the target does not answer, the source is released anyway, and a session the target already started runs on both hosts. A move never removes a checkout. The calls are in <code>meta-harness-core/src/api.rs</code>.</p>
       <p>Accepted target (ADR-0284, ADR-0289). Usually the old host is gone, for example crashed, so the move asks the person for as little as possible and feels like a compaction: only the transcript becomes a summary, and every other part of the session is restored.</p>
       <div class="pd-row">
         <div>
@@ -406,7 +397,7 @@ meta uninstall</code></pre>
     </div></section>
 
     <section id="open" class="section"><h2>14. Open decisions</h2><div class="body">
-      <p>See <a href="../decisions/open-decisions.html">open-decisions.html</a>: building on T3 Code (ADR-0280 to ADR-0291) and AgentPulse formulas (<a href="../decisions/open-decisions.html#d-010">D-010</a>). Host-scoped execution and multi-instance projection ownership are decided, not open.</p>
+      <p>Live entries in <a href="../decisions/open-decisions.html">open-decisions.html</a> that this V-Spec links: <a href="../decisions/open-decisions.html#d-010">D-010</a> AgentPulse formulas, <a href="../decisions/open-decisions.html#d-020">D-020</a> embedding, <a href="../decisions/open-decisions.html#d-058">D-058</a> portable archive, <a href="../decisions/open-decisions.html#d-061">D-061</a> local inference trust and <a href="../decisions/open-decisions.html#d-062">D-062</a> archive authenticity. Host-scoped execution and multi-instance projection ownership are decided, not open.</p>
     </div></section>
   </main>
 </div>

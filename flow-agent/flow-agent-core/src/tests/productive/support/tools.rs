@@ -66,11 +66,10 @@ impl ProductiveToolExecutor for FakeToolExecutor {
         &mut self,
         invocation: &ToolInvocation,
         _workspace: &AnchoredWorkspace,
-        policy: &core_policy::PolicyArtifact,
-        command_policy: &core_policy::CommandPolicy,
-        request_id: &str,
+        _policy: &core_policy::PolicyArtifact,
+        _command_policy: &core_policy::CommandPolicy,
+        _request_id: &str,
     ) -> Result<Self::Prepared, RuntimeError> {
-        let _ = (policy, command_policy, request_id);
         if matches!(self.fault, FakeToolExecutionFault::PrepareError) {
             return Err(RuntimeError::Protocol(
                 "fixture Executor preparation failure".to_owned(),

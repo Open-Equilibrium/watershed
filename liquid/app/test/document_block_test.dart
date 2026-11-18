@@ -16,7 +16,6 @@ import 'package:liquid/src/workspace/pdf_pages.dart';
 import 'fake_workspace.dart';
 import 'page_kit.dart';
 
-/// Annotating PDFs and images in place (ADR-0307).
 void main() {
   final kit = PageKit();
   late ui.Image page;
@@ -31,7 +30,6 @@ void main() {
       ..highlighterOnly = false;
   });
 
-  /// A three-page PDF of A4 pages, as the system's renderer would open it.
   Future<void> showPdf(
     WidgetTester tester, {
     List<Size> sizes = const [Size(595, 842), Size(595, 842), Size(595, 842)],
@@ -73,7 +71,6 @@ void main() {
 
   BoardController board(WidgetTester tester) => kit.boardOf(tester);
 
-  /// The screen point of board point `at`.
   Offset screen(WidgetTester tester, Offset at) =>
       tester.getTopLeft(find.byKey(const Key('whiteboard canvas'))) +
       board(tester).toView(at);
@@ -116,7 +113,6 @@ void main() {
     await tester.tap(find.byKey(const Key('document')));
     await tester.pumpAndSettle();
     final second = board(tester).sheets[1];
-    // Into view, then a stroke on the second page.
     board(tester)
       ..origin = Offset(board(tester).origin.dx, second.top - 20)
       ..notifyListeners();

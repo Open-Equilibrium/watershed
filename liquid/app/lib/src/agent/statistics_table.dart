@@ -4,7 +4,6 @@ import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
 import '../workspace/row_menu.dart';
 
-/// A breakdown table: a `#` column, a name that takes the rest, then right-aligned numbers.
 class StatisticsTable extends StatelessWidget {
   const StatisticsTable({
     super.key,
@@ -16,7 +15,6 @@ class StatisticsTable extends StatelessWidget {
   final List<String> headers;
   final List<List<Widget>> rows;
 
-  /// Called with the index of a row when it is chosen; rows choose nothing without it.
   final ValueChanged<int>? onSelect;
 
   @override
@@ -76,11 +74,9 @@ class StatisticsTable extends StatelessWidget {
   }
 }
 
-/// The legend of a chart or a share bar: a dot, its label and, when given, its value.
 class StatisticsLegend extends StatelessWidget {
   const StatisticsLegend(this.items, {super.key});
 
-  /// Each item's label, colour and value; an empty value shows the label alone.
   final List<(String, Color, String)> items;
 
   @override
@@ -119,7 +115,6 @@ class StatisticsLegend extends StatelessWidget {
   }
 }
 
-/// A small square of a series' colour, as the legends and the card's rows show it.
 class ColourDot extends StatelessWidget {
   const ColourDot(this.colour, {super.key, this.size = 8, this.radius = 4});
 
@@ -138,8 +133,6 @@ class ColourDot extends StatelessWidget {
   );
 }
 
-/// A breakdown row: it takes the hover colour while the pointer is over it, and runs `onTap`
-/// when it is selectable.
 class _BreakdownRow extends StatefulWidget {
   const _BreakdownRow({required this.onTap, required this.child});
 
@@ -160,7 +153,6 @@ class _BreakdownRowState extends State<_BreakdownRow> {
       if (mounted) setState(() => _hovered = hovered);
     },
     child: InkWell(
-      // A row that selects takes the keyboard, and Enter and Space select it, as a button does.
       canRequestFocus: widget.onTap != null,
       onTap: widget.onTap,
       onFocusChange: (focused) {

@@ -3,7 +3,7 @@ use super::{
     support::assert_active_session,
 };
 use crate::runtime::{
-    fs_guards::AnchoredWorkspace,
+    fs_guards::{AnchoredDir, AnchoredWorkspace},
     session_authority::{
         SessionOwnershipLease, SessionOwnershipObserver, stable_native_path_bytes,
     },
@@ -12,7 +12,6 @@ use crate::runtime::{
 };
 use std::{
     fs,
-    ops::{Deref, DerefMut},
     path::{Path, PathBuf},
     thread,
     time::{Duration, Instant},
@@ -96,6 +95,14 @@ fn run_session_ownership_child() -> bool {
     true
 }
 
+fn runtime_sessions(workspace: &Path) -> (AnchoredWorkspace, AnchoredDir) {
+    let sessions = ensure_runtime_dirs(workspace)
+        .expect("runtime dirs")
+        .sessions;
+    let anchored = AnchoredWorkspace::open(workspace).expect("workspace opens");
+    (anchored, sessions)
+}
+
 #[test]
 fn host_local_owner_survives_deleted_workspace_marker_across_processes() {
     if run_session_ownership_child() {
@@ -105,30 +112,16 @@ fn host_local_owner_survives_deleted_workspace_marker_across_processes() {
     let session_id = "crossprocess001";
     let mut child = spawn_session_ownership_child(&workspace, session_id);
     wait_for_ownership_child(&workspace, &mut child);
-    let sessions = ensure_runtime_dirs(&workspace)
-        .expect("runtime dirs")
-        .sessions;
-    let anchored = AnchoredWorkspace::open(&workspace).expect("workspace opens");
+    let (anchored, sessions) = runtime_sessions(&workspace);
     fs::remove_file(sessions.path.join(format!("{session_id}.lock")))
         .expect("workspace marker removed directly");
 
     let second = acquire_anchored_session_lock(&anchored, &sessions, session_id);
     release_ownership_child(&workspace, &mut child);
-    let violated_exclusivity = match second {
-        Ok(guard) => {
-            drop(guard);
-            true
-        }
-        Err(error) => {
-            assert_active_session(error, session_id, &format!("{session_id}.lock"));
-            false
-        }
+    let Err(error) = second else {
+        panic!("deleting the workspace marker must not grant a second process ownership");
     };
-
-    assert!(
-        !violated_exclusivity,
-        "deleting the workspace marker must not grant a second process ownership"
-    );
+    assert_active_session(error, session_id, &format!("{session_id}.lock"));
 }
 
 #[test]
@@ -140,12 +133,9 @@ fn crashed_owner_releases_host_local_authority_without_marker_cleanup() {
     let session_id = "crossprocess002";
     let mut child = spawn_session_ownership_child(&workspace, session_id);
     wait_for_ownership_child(&workspace, &mut child);
-    child.kill().expect("ownership child terminates abruptly");
-    child.wait().expect("terminated ownership child reaped");
-    let sessions = ensure_runtime_dirs(&workspace)
-        .expect("runtime dirs")
-        .sessions;
-    let anchored = AnchoredWorkspace::open(&workspace).expect("workspace opens");
+    child.0.kill().expect("ownership child terminates abruptly");
+    child.0.wait().expect("terminated ownership child reaped");
+    let (anchored, sessions) = runtime_sessions(&workspace);
     assert!(
         sessions.path.join(format!("{session_id}.lock")).is_file(),
         "abrupt termination leaves the workspace marker"
@@ -168,31 +158,36 @@ fn host_local_authority_is_independent_of_process_temp_environment() {
     let alternate_temp = workspace.join("alternate-process-temp");
     fs::create_dir(&alternate_temp).expect("alternate process temp directory created");
     let session_id = "crossprocess003";
-    let mut child =
-        spawn_session_ownership_child_with_temp(&workspace, session_id, &alternate_temp);
+    let mut child = OwnershipChild(
+        session_ownership_child_command(&workspace, session_id)
+            .env("TMPDIR", &alternate_temp)
+            .env("TMP", &alternate_temp)
+            .env("TEMP", &alternate_temp)
+            .spawn()
+            .expect("ownership child starts"),
+    );
     wait_for_ownership_child(&workspace, &mut child);
 
-    let sessions = ensure_runtime_dirs(&workspace)
-        .expect("runtime dirs")
-        .sessions;
-    let anchored = AnchoredWorkspace::open(&workspace).expect("workspace opens");
+    let (anchored, sessions) = runtime_sessions(&workspace);
     let second = acquire_anchored_session_lock(&anchored, &sessions, session_id);
     release_ownership_child(&workspace, &mut child);
-    let violated_exclusivity = match second {
-        Ok(guard) => {
-            drop(guard);
-            true
-        }
-        Err(error) => {
-            assert_active_session(error, session_id, &format!("{session_id}.lock"));
-            false
-        }
+    let Err(error) = second else {
+        panic!("process temp configuration must not select a different ownership authority");
     };
+    assert_active_session(error, session_id, &format!("{session_id}.lock"));
+}
+
+fn assert_session_store_authority(workspace: &Path, session_id: &str) {
+    let reservation = reserve_session_log(workspace, session_id)
+        .expect("session ownership uses the session store");
 
     assert!(
-        !violated_exclusivity,
-        "process temp configuration must not select a different ownership authority"
+        workspace_store_dir(workspace)
+            .join("leases/session-ownership-v1")
+            .is_dir(),
+        "the session store owns its lease namespace"
     );
+    reservation.release_lock().expect("reservation rolls back");
 }
 
 #[test]
@@ -201,16 +196,7 @@ fn ownership_authority_uses_the_session_store() {
     let workspace = parent.join(".Watershed-Flow-Agent");
     fs::create_dir(&workspace).expect("case-aliased workspace created");
 
-    let reservation = reserve_session_log(&workspace, "storeauthority001")
-        .expect("session ownership uses the session store");
-
-    assert!(
-        workspace_store_dir(&workspace)
-            .join("leases/session-ownership-v1")
-            .is_dir(),
-        "tests keep session data and ownership in one scoped store"
-    );
-    reservation.release_lock().expect("reservation rolls back");
+    assert_session_store_authority(&workspace, "storeauthority001");
 }
 
 #[test]
@@ -224,16 +210,7 @@ fn adjacent_workspace_files_do_not_select_session_authority() {
     )
     .expect("coordinator obstruction written");
 
-    let reservation = reserve_session_log(&workspace, "storeauthority002")
-        .expect("adjacent files do not affect session authority");
-
-    assert!(
-        workspace_store_dir(&workspace)
-            .join("leases/session-ownership-v1")
-            .is_dir(),
-        "the session store owns its lease namespace"
-    );
-    reservation.release_lock().expect("reservation rolls back");
+    assert_session_store_authority(&workspace, "storeauthority002");
 }
 
 #[test]
@@ -248,16 +225,7 @@ fn adjacent_directory_permissions_do_not_select_session_authority() {
     fs::set_permissions(&coordinator, fs::Permissions::from_mode(0o777))
         .expect("unsafe coordinator mode installed");
 
-    let reservation = reserve_session_log(&workspace, "storeauthority003")
-        .expect("adjacent directory permissions do not affect session authority");
-
-    assert!(
-        workspace_store_dir(&workspace)
-            .join("leases/session-ownership-v1")
-            .is_dir(),
-        "the session store owns its lease namespace"
-    );
-    reservation.release_lock().expect("reservation rolls back");
+    assert_session_store_authority(&workspace, "storeauthority003");
 }
 
 #[test]
@@ -269,8 +237,6 @@ fn session_authority_keys_preserve_native_unix_path_bytes() {
     assert_eq!(stable_native_path_bytes(&path), [b'a', 0xff, b'z']);
 }
 
-/// Kills and reaps a helper that is still running when its test unwinds, so a failed
-/// assertion cannot leave a process holding ownership. Explicit waits leave nothing to kill.
 struct OwnershipChild(std::process::Child);
 
 impl Drop for OwnershipChild {
@@ -282,38 +248,9 @@ impl Drop for OwnershipChild {
     }
 }
 
-impl Deref for OwnershipChild {
-    type Target = std::process::Child;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl DerefMut for OwnershipChild {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
-    }
-}
-
 fn spawn_session_ownership_child(workspace: &Path, session_id: &str) -> OwnershipChild {
     OwnershipChild(
         session_ownership_child_command(workspace, session_id)
-            .spawn()
-            .expect("ownership child starts"),
-    )
-}
-
-fn spawn_session_ownership_child_with_temp(
-    workspace: &Path,
-    session_id: &str,
-    temp: &Path,
-) -> OwnershipChild {
-    OwnershipChild(
-        session_ownership_child_command(workspace, session_id)
-            .env("TMPDIR", temp)
-            .env("TMP", temp)
-            .env("TEMP", temp)
             .spawn()
             .expect("ownership child starts"),
     )
@@ -330,36 +267,41 @@ fn session_ownership_child_command(workspace: &Path, session_id: &str) -> std::p
     command
 }
 
-fn wait_for_ownership_child(workspace: &Path, child: &mut std::process::Child) {
+fn wait_for_ownership_child(workspace: &Path, child: &mut OwnershipChild) {
     let ready = workspace.join("ownership-child-ready");
     let deadline = Instant::now() + Duration::from_secs(10);
     while Instant::now() < deadline {
         if ready.is_file() {
             return;
         }
-        if let Some(status) = child.try_wait().expect("ownership child status reads") {
+        if let Some(status) = child.0.try_wait().expect("ownership child status reads") {
             panic!("ownership child exited before readiness: {status}");
         }
         thread::sleep(Duration::from_millis(10));
     }
-    child.kill().expect("timed-out ownership child terminates");
-    child.wait().expect("timed-out ownership child reaped");
+    child
+        .0
+        .kill()
+        .expect("timed-out ownership child terminates");
+    child.0.wait().expect("timed-out ownership child reaped");
     panic!("ownership child did not become ready");
 }
 
-fn release_ownership_child(workspace: &Path, child: &mut std::process::Child) {
+fn release_ownership_child(workspace: &Path, child: &mut OwnershipChild) {
     fs::write(workspace.join("ownership-child-release"), b"release")
         .expect("ownership child release marker written");
-    // Bounded like readiness, so a hung child fails this test instead of stalling it.
     let deadline = Instant::now() + Duration::from_secs(10);
     while Instant::now() < deadline {
-        if let Some(status) = child.try_wait().expect("ownership child status reads") {
+        if let Some(status) = child.0.try_wait().expect("ownership child status reads") {
             assert!(status.success(), "ownership child failed: {status}");
             return;
         }
         thread::sleep(Duration::from_millis(10));
     }
-    child.kill().expect("timed-out ownership child terminates");
-    child.wait().expect("timed-out ownership child reaped");
+    child
+        .0
+        .kill()
+        .expect("timed-out ownership child terminates");
+    child.0.wait().expect("timed-out ownership child reaped");
     panic!("ownership child did not exit after release");
 }

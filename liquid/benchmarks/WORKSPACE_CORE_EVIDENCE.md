@@ -1,6 +1,6 @@
 # Liquid Workspace core evidence
 
-Observational evidence for `liquid-core`'s mutation pipeline and `liquid-storage`'s local replica, under the [evidence convention](../../PERFORMANCE.md#evidence-convention). No value here is a threshold; compare only like-for-like runs.
+Observational evidence for `liquid-core`'s mutation pipeline and `liquid-storage`'s local replica, kept under the [evidence convention](../../PERFORMANCE.md#evidence-convention).
 
 ## Environment
 
@@ -50,27 +50,15 @@ Each loaded Database Block keeps its rows with their cells as an index beside th
 
 Each loaded Page keeps its View order as an index, so adding a Text Block at the end does not read every View, and readers take a window of the order rather than all of it.
 
-A keystroke through the pipeline with the in-memory store costs about 10 µs. The 3.7 ms maximum is the snapshot the pipeline writes after every 1,000 chunks of a document. The pipeline checks a text position against the elements beside it rather than reading the whole text, which took about 40 µs per keystroke in a 5,000-character Text Block.
+A keystroke through the pipeline with the in-memory store costs about 10 µs. The 3.7 ms maximum is the snapshot the pipeline writes after every 1,000 chunks of a document. The pipeline checks a text position against the elements beside it rather than reading the whole text.
 
 A durable commit is almost entirely the flush to the storage medium: F_FULLFSYNC, which macOS needs for a commit to survive a power loss (ADR-0237). The editor may group consecutive keystrokes into one commit (client architecture rule 9; the approved History mockup shows one entry per pause), and typing is designed not to wait for a commit (rule 7).
 
-Adding an attachment costs about 11 ms per 1 MiB part, so a 5 GiB file takes about a minute and a half; memory stays flat, as each part is written and dropped. Bridge calls take the Workspace's lock for one part at a time, so other writes wait at most one part's commit. A probe at `7fe7ed84` that put 16 parts into each commit reached only about 85 MiB/s while holding the lock for up to 0.7 s, so most of the cost is SQLCipher's encryption and the write-ahead log rather than the flush, and each part stays its own commit.
+Adding an attachment costs about 11 ms per 1 MiB part; memory stays flat, as each part is written and dropped. Bridge calls take the Workspace's lock for one part at a time, so other writes wait at most one part's commit.
 
 A stroke's edit is a durable commit of its points, about 1.8 KB here, and of a dozen values; it also counts the board's live elements and points against their caps, which a probe at `aa72dab6` saw add about 1 µs per element: about 6 ms per stroke for the first 200 strokes and 8 ms for the last 200. The maxima are the snapshots after every 1,000 chunks. The process's footprint is mostly the second board's 12 MB of points, held by the document and its recorded Actions; reading a board at its cap, the most one ever crosses to Dart, takes about 34 ms.
 
-Reopening is mostly Automerge loading the Page's snapshot. Earlier records reopened inside the process that had written the replica and measured 14.4 to 16.0 ms; a first load's time there depends on that process's earlier work, so only new-process runs are comparable (probe below).
-
-### Probe of the long Page's snapshot
-
-Once each at `6c06f0b` and at `cbfd545`, a modified `replica_observe` loaded the Page's stored chunks with `AutoCommit::load` after the writes, and read every View's sort key:
-
-```text
-6c06f0b: chunk 0: 136386 bytes, alone loads in 29.517583ms, changes 3001
-cbfd545: chunk 0: 136277 bytes, alone loads in 11.423917ms, changes 3001
-6c06f0b: branch binary loads branch snapshot in 12.090292ms (then 12.5 ms, 13.7 ms)
-6c06f0b: branch binary loads main snapshot in 11.450084ms (then 10.9 ms, 10.9 ms)
-6c06f0b and cbfd545 alike: views 1001 max sort 204 total 104304
-```
+Reopening is mostly Automerge loading the Page's snapshot.
 
 Each of the 1,000 Text Blocks is placed after the previous one and before the typing Block's View, so fractional indexing lengthens their sort keys by about one character per five placements: the longest has 204 characters, and all keys together take 104 KB.
 

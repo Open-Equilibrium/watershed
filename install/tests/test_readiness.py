@@ -45,7 +45,6 @@ class _UnreapedExit:
 
 
 def _terminate_owned_group(child, notice=None):
-    # Only the original, still-unreaped start_new_session child owns this group.
     if child.returncode is not None:
         raise AssertionError("fixture group was already reaped")
     primary = None
@@ -54,8 +53,6 @@ def _terminate_owned_group(child, notice=None):
     except ProcessLookupError:
         pass
     except PermissionError as error:
-        # Darwin excludes zombies from group signaling and returns EPERM when
-        # none remain. These fixture groups cannot change UID; keep live errors.
         if sys.platform != "darwin" or notice is None or not notice.exited():
             primary = error
     except BaseException as error:
@@ -80,6 +77,16 @@ def _cleanup_errors(primary, errors):
         primary.add_note(f"fixture teardown: {error!r}")
 
 
+def _release(primary, *actions):
+    errors = []
+    for action in actions:
+        try:
+            action()
+        except BaseException as error:
+            errors.append(error)
+    _cleanup_errors(primary, errors)
+
+
 @contextlib.contextmanager
 def _captured_readiness(command, **options):
     child = subprocess.Popen(command, start_new_session=True,
@@ -89,28 +96,13 @@ def _captured_readiness(command, **options):
         notice = _UnreapedExit(child)
         yield child, notice
     finally:
-        primary, errors = sys.exc_info()[1], []
-        try:
-            if child.returncode is None:
-                _terminate_owned_group(child, notice)
-        except BaseException as error:
-            errors.append(error)
-        for stream in (child.stdin, child.stdout, child.stderr):
-            if stream is not None:
-                try:
-                    stream.close()
-                except BaseException as error:
-                    errors.append(error)
-        if notice is not None:
-            try:
-                notice.close()
-            except BaseException as error:
-                errors.append(error)
-        _cleanup_errors(primary, errors)
+        _release(sys.exc_info()[1],
+                 lambda: child.returncode is None and _terminate_owned_group(child, notice),
+                 *(stream.close for stream in (child.stdin, child.stdout, child.stderr) if stream is not None),
+                 lambda: notice is not None and notice.close())
 
 
 def _receive_inner(server, deadline):
-    # Keep the real inner argv/control/capture descriptors, but own its sole wait.
     server.settimeout(max(0, deadline - time.monotonic()))
     peer, _ = server.accept()
     descriptors = array.array("i")
@@ -172,7 +164,6 @@ def filter_result(program, syscall, argument=0):
 
 class ReadinessContractTest(unittest.TestCase):
     def privileged_installer_acceptance(self):
-        # Explicit CI invocation only; ordinary discovery remains unprivileged.
         import errno
         import pwd
         import pty
@@ -234,7 +225,6 @@ class ReadinessContractTest(unittest.TestCase):
         finally:
             os.close(terminal)
             if status is None:
-                # The original child stays ours until this sole waitpid reaps it.
                 try:
                     os.kill(child, signal.SIGKILL)
                 except ProcessLookupError:
@@ -245,7 +235,7 @@ class ReadinessContractTest(unittest.TestCase):
         program = linux_fault_filter("user-namespace")
         for syscall, argument in ((272, 0x10000000), (56, 0x10000011)):
             self.assertEqual(filter_result(program, syscall, argument), 0x50001)
-        self.assertEqual(filter_result(program, 435), 0x50026)  # clone3 -> ENOSYS
+        self.assertEqual(filter_result(program, 435), 0x50026)
         for syscall, argument in ((56, 17), (59, 0), (157, 22), (317, 1)):
             self.assertEqual(filter_result(program, syscall, argument), 0x7FFF0000)
 
@@ -271,7 +261,6 @@ class ReadinessContractTest(unittest.TestCase):
             with self.subTest(phase=phase, separate_group=separate_group, scanner=scanner), tempfile.TemporaryDirectory() as temporary:
                 root = pathlib.Path(temporary)
                 if scanner == "slow-pgrep":
-                    # A slow host must not stretch the bounded escalation.
                     scanner = root / scanner
                     scanner.write_text('#!/bin/sh\n/bin/sleep 0.3\nexec /usr/bin/pgrep "$@"\n')
                     scanner.chmod(0o755)
@@ -301,7 +290,6 @@ class ReadinessContractTest(unittest.TestCase):
                     "pathlib.Path(marker).touch()\n"
                     "if phase == 'term-during-wait':\n"
                     "    sys.stdin.read()\n"
-                    "    # A member signals the group while the supervisor sleeps in the foreground.\n"
                     "    while subprocess.run(['/usr/bin/pgrep', '-g', '0', '-f', '^/bin/sleep 0.1$'],\n"
                     "                         stdout=subprocess.DEVNULL).returncode: time.sleep(.001)\n"
                     "    os.killpg(0, signal.SIGTERM)\n"
@@ -358,23 +346,10 @@ class ReadinessContractTest(unittest.TestCase):
                             else:
                                 self.assertFalse((home / "status").exists())
                         finally:
-                            primary, errors = sys.exc_info()[1], []
-                            if inner is not None:
-                                try:
-                                    _terminate_owned_group(inner, inner_notice)
-                                except BaseException as error:
-                                    errors.append(error)
-                            if peer is not None:
-                                try:
-                                    peer.close()  # The helper receives our owned shutdown EOF.
-                                except BaseException as error:
-                                    errors.append(error)
-                            if inner_notice is not None:
-                                try:
-                                    inner_notice.close()
-                                except BaseException as error:
-                                    errors.append(error)
-                            _cleanup_errors(primary, errors)
+                            _release(sys.exc_info()[1],
+                                     lambda: inner is not None and _terminate_owned_group(inner, inner_notice),
+                                     lambda: peer is not None and peer.close(),
+                                     lambda: inner_notice is not None and inner_notice.close())
 
     def test_probe_has_only_retained_native_metadata(self):
         probe = dict(backend="seatbelt", backend_version="27.0",

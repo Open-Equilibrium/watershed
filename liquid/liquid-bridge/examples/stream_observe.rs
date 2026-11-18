@@ -1,14 +1,3 @@
-//! Observation workload for Liquid's token streaming (PERFORMANCE.md, Liquid): a scripted ACP
-//! agent streams one response of 20,000 text chunks through the pinned T3 Code server, the
-//! Meta-Harness service and the bridge to a consumer that takes and confirms each event at once,
-//! as Liquid confirms what it applies. It prints one JSON line per sample and a summary and never
-//! compares with a threshold. Run from the repository root with the pinned `t3`:
-//!
-//! ```sh
-//! cargo build --release -p liquid_bridge --example stream_observe
-//! META_HARNESS_T3=<pinned t3> /usr/bin/time -l target/release/examples/stream_observe
-//! ```
-
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
@@ -81,6 +70,7 @@ fn main() {
                 },
                 workspace: Workspace::Checkout,
                 permissions: Permissions::FullAccess,
+                message_id: None,
             }))
             .expect("thread starts");
         let session = AgentSession::follow(thread, repo.to_string_lossy().into_owned());
@@ -133,7 +123,6 @@ fn main() {
     );
 }
 
-/// The nearest-rank percentile of sorted samples.
 fn rank(sorted: &[f64], quantile: f64) -> f64 {
     let index = ((quantile * sorted.len() as f64).ceil() as usize).clamp(1, sorted.len());
     sorted[index - 1]

@@ -7,7 +7,6 @@ use std::io;
 
 pub const MAX_UNIQUE_SESSION_CANDIDATES: u32 = 10_000;
 
-/// Ordered by precedence: conclusive occupancy always wins over a probe hint.
 #[derive(Clone, Copy, Eq, Ord, PartialEq, PartialOrd)]
 pub enum SessionCandidateHint {
     Free,
@@ -94,7 +93,6 @@ fn classify_session_candidate_leaf<'a>(
         return Some((name, SessionCandidateHint::Occupied));
     }
     if let Some(id) = SessionBundlePaths::split_lock_leaf(name) {
-        // Any present lock, including a symlink, occupies its ID (fail closed).
         let hint = match dir.file(name).metadata() {
             Ok(_) => SessionCandidateHint::Occupied,
             Err(RuntimeError::Io { source, .. })

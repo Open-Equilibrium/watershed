@@ -104,8 +104,6 @@ impl RuntimeEventBuilder {
         parent_flow_id: Option<String>,
     ) -> Result<FlowInvocation, RuntimeError> {
         let next_flow_counter = self.flow_counter + 1;
-        // WHY: flow invocation budgets preserve duplicate subflow execution semantics while
-        // bounding the total runtime work one session can request.
         if next_flow_counter > MAX_FLOW_INVOCATIONS {
             return Err(RuntimeError::Protocol(format!(
                 "flow invocation budget exceeded: next invocation {next_flow_counter} exceeds max {MAX_FLOW_INVOCATIONS}"
@@ -246,8 +244,6 @@ impl RuntimeEventBuilder {
         payload: serde_json::Value,
     ) -> Result<(), RuntimeError> {
         let sequence = self.sequence + 1;
-        // WHY: enforce event budgets before storing the event so oversized in-cap flows
-        // cannot accumulate unbounded memory.
         if sequence > MAX_FLOW_EVENTS {
             return Err(RuntimeError::Protocol(format!(
                 "runtime event budget exceeded: next event {sequence} exceeds max {MAX_FLOW_EVENTS}"

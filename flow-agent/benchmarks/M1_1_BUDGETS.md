@@ -7,10 +7,10 @@ This is the canonical M1.1 source for hard functional limits, their boundary pro
 - Binary units are used. A byte cap counts the bytes identified in the row, not Unicode scalars, allocator capacity or a transport's framing overhead.
 - `F:<name>` is a required functional test in the workspace `nextest` gate on Flow Agent's native targets; capability-specific evidence follows [TESTING.md](../../TESTING.md). For a byte or count cap `N`, a valid `N` fixture succeeds and `N + 1` fails before unbounded allocation or productive effects. Parameterized rows execute every named field or operation separately. Required malformed, missing, zero, negative and checked-arithmetic cases remain part of the relevant protocol test even when they are not additional numeric selections.
 - A deadline test uses a fake monotonic clock unless the row explicitly requires a child process. Fake-clock tests assert that at `limit - 1 ns` the operation remains eligible; at `limit` it reaches exactly one terminal timeout path; advancing past the limit cannot create another effect or terminal result. Real-process tests assert the outcomes and elapsed ranges named in the row; these observations do not prove exact transition times.
-- `P:<name>` is a release-mode, one-process-at-a-time observation on the fixed `ubuntu-24.04` x64 runner. Five warmups and 30 measured fresh-child samples produce `target/m11-performance/m11-performance-evidence.jsonl` with schema `flow-m11-performance-evidence-v0`. The report records unadjusted elapsed-time and Linux `post-workload VmHWM - pre-workload VmRSS` observations without threshold comparisons.
+- `P:<name>` is a release-mode observation on the fixed `ubuntu-24.04` x64 runner, collected under the [evidence convention](../../PERFORMANCE.md#evidence-convention): five warmups and 30 measured fresh-child samples write `target/m11-performance/m11-performance-evidence.jsonl` with schema `flow-m11-performance-evidence-v0`. Elapsed time is unadjusted; the RSS observation is Linux `post-workload VmHWM - pre-workload VmRSS`.
 - `P:rss_detection_fixture` is always present. It allocates, touches and frees exactly 4 MiB in a fresh child and must report at least 4 MiB minus the documented 512 KiB Linux accounting tolerance. This validates measurement integrity; it is not a product RSS limit.
 - `F`-only rows are intentionally excluded from maximum-load observation because they exercise parser, cardinality or fake-clock boundaries rather than representative product work.
-- The report records the commit, runner image/version, CPU, logical CPU count, total memory, exact inputs, exclusions, raw samples and aggregates. CI uploads the JSONL artifact and fails only when workload, lifecycle, schema, measurement, report or artifact integrity fails.
+- The report records the commit, runner image/version, CPU, logical CPU count, total memory, exact inputs, exclusions, raw samples and aggregates. CI uploads it as the `m11-performance-evidence` artifact; its integrity gate follows [PERFORMANCE.md](../../PERFORMANCE.md#evidence-convention).
 
 The functional proofs run in the workspace `nextest` gate. The reference evidence command is:
 
@@ -45,7 +45,7 @@ HTTP body caps count decoded response-body bytes delivered by the HTTP client, b
 | OA-16 | Polling interval: at most 60 s | `F:oauth_poll_interval_budget`; integer and trimmed-string `60` succeed, `61` rejects, `slow_down` accepts 55 + 5 and rejects 60 + 5 with checked addition. | F-only: fake-clock/protocol boundary. |
 | OA-17 | `expires_in`: at most 86,400 s | `F:oauth_expiry_budget`; integer `86400` succeeds, `86401` rejects, and millisecond/epoch overflow rejects before replacement. | F-only: arithmetic/protocol boundary. |
 | OA-18 | Credential-store lock: 5 s | `F:credential_lock_deadline`; a competing holder exercises 5 s through the deadline convention and proves the prior record is unchanged. | F-only: fake-clock contention lifecycle. |
-| OA-19 | HTTP connect deadline: 10 s | `F:auth_connect_deadline`; fake monotonic time keeps a production client request pending through 10 s - 1 ns and observes its sole timeout at 10 s. | F-only: exact production deadline lifecycle. |
+| OA-19 | HTTP connect deadline: 10 s | `F:configured_connect_deadlines_fire_exactly_at_their_limit`; fake monotonic time keeps a production client request pending through 10 s - 1 ns and observes its sole timeout at 10 s. | F-only: exact production deadline lifecycle. |
 | OA-20 | Response-header deadline: 30 s | `F:auth_header_deadline`; fake monotonic time keeps the production request pending through 30 s - 1 ns and observes its sole timeout at 30 s. | F-only: exact production deadline lifecycle. |
 | OA-21 | Response-body deadline: 30 s | `F:auth_body_deadline`; after headers, fake monotonic time keeps the production body read pending through 30 s - 1 ns and observes its sole timeout at 30 s. | F-only: exact production deadline lifecycle. |
 | OA-22 | Complete authentication request: 60 s | `F:auth_overall_deadline`; body progress cannot extend the production request past the sole exact 60 s fake-time timeout. | F-only: exact production deadline lifecycle. |
@@ -61,7 +61,7 @@ A raw SSE line excludes its LF delimiter and an immediately preceding CR. An ass
 | RS-01 | Raw SSE line: 256 KiB | `F:responses_line_budget`; valid comment/data lines at 262,144 bytes and the same line plus one byte. | F-only: incremental parser boundary. |
 | RS-02 | Assembled event: 1 MiB | `F:responses_event_budget`; multiple individually valid data lines assemble to 1,048,576/1,048,577 bytes. | F-only: parser aggregation boundary. |
 | RS-06 | Events: 4,096 | `F:responses_event_count_budget`; 4,096 minimal valid events complete and event 4,097 rejects before dispatch. | F-only: cardinality boundary. |
-| RS-08 | Connect deadline: 10 s | `F:responses_connect_deadline`; fake monotonic time keeps a production client request pending through 10 s - 1 ns and observes its sole timeout at 10 s. | F-only: exact production deadline lifecycle. |
+| RS-08 | Connect deadline: 10 s | `F:configured_connect_deadlines_fire_exactly_at_their_limit`; fake monotonic time keeps a production client request pending through 10 s - 1 ns and observes its sole timeout at 10 s. | F-only: exact production deadline lifecycle. |
 | RS-09 | Response-header deadline: 30 s | `F:responses_header_deadline`; fake monotonic time keeps the production request pending through 30 s - 1 ns and observes its sole timeout at 30 s. | F-only: exact production deadline lifecycle. |
 | RS-10 | Idle/inter-event deadline: 120 s | `F:responses_idle_deadline`; after one event, fake monotonic time keeps the production stream pending through 120 s - 1 ns and observes its sole timeout at 120 s. | F-only: exact production deadline lifecycle. |
 | RS-11 | Complete response deadline: 30 min | `F:responses_overall_deadline`; stream progress cannot extend the production request past the sole exact 1,800 s fake-time timeout. | F-only: exact production deadline lifecycle. |
@@ -71,7 +71,7 @@ A raw SSE line excludes its LF delimiter and an immediately preceding CR. An ass
 
 ## Productive dispatch reservation
 
-The concrete Run writer inventories current stored usage and admits the complete applicable envelope before durable attempt intent. Reservation uses checked sums against the 352 MiB/22-segment event stream, 48 MiB context stream, 16 MiB metadata, 5,216 MiB and 131,072-object inventory, and unchanged 5.5 GiB bundle. The bounded route to the next dispatch and its lifecycle closure require 69 maximum-size Event records plus 33 objects totaling 18 MiB.
+The concrete Run writer inventories current stored usage and admits the complete applicable envelope before durable attempt intent. Reservation uses checked sums against the [storage limits](../../PERFORMANCE.md#safety-envelope), including the 16 MiB session-metadata limit. The bounded route to the next dispatch and its lifecycle closure require 69 maximum-size Event records plus 33 objects totaling 18 MiB.
 
 | ID | Selected contract | Exact fixture and functional proof | Performance observation or exclusion |
 |---|---|---|---|
@@ -86,10 +86,10 @@ Stream caps count raw bytes read from each pipe before UTF-8 classification.
 
 | ID | Selected contract | Exact fixture and functional proof | Performance observation or exclusion |
 |---|---|---|---|
-| TR-01 | Stdout: 4 MiB | `F:runner_stdout_budget`; a child emits 4,194,304 bytes, then 4,194,305 bytes, with stderr empty. | `P:runner_dual_stream_caps` also emits exactly 4 MiB on both pipes concurrently. |
-| TR-02 | Stderr: 4 MiB | `F:runner_stderr_budget`; the TR-01 pair on stderr with stdout empty. | Covered by `P:runner_dual_stream_caps`. |
+| TR-01 | Stdout: 4 MiB | `F:runner_stream_budgets_accept_the_cap_and_fail_one_byte_beyond`; a child emits 4,194,304 bytes, then 4,194,305 bytes, with stderr empty. | `P:runner_dual_stream_caps` also emits exactly 4 MiB on both pipes concurrently. |
+| TR-02 | Stderr: 4 MiB | `F:runner_stream_budgets_accept_the_cap_and_fail_one_byte_beyond`; the TR-01 pair on stderr with stdout empty. | Covered by `P:runner_dual_stream_caps`. |
 | TR-03 | TERM grace: 1 s | `F:runner_term_grace`; a child ignores TERM; the runner returns `TimedOut`/`ToolTimedOut` with stdout `ready` and total elapsed time `>= 1 s` and `< 3 s`. | `P:runner_termination` observes post-readiness TERM through reaping and EOF; the ignored-TERM second remains a safety deadline, not a latency target. |
-| TR-04 | Forced reap: 1 s | `F:runner_forced_reap`; an injected forced-reap timeout returns `Failed`/`ProcessReapFailed` with total elapsed time `>= 2 s` and `< 4 s`. | F-only: intentional timeout path. |
+| TR-04 | Forced reap: 1 s | `F:forced_reap_fails_the_run_and_hands_the_leader_to_a_reaper`; an injected forced-reap timeout returns `Failed`/`ProcessReapFailed` with total elapsed time `>= 2 s` and `< 4 s`. | F-only: intentional timeout path. |
 | TR-05 | Output drain: 1 s | `F:runner_output_drain`; a descendant retains both pipe handles; the runner returns `Failed`/`OutputDrainTimeout`, stdout containing `leader-done` and total elapsed time `< 3 s`. | F-only: intentional timeout path; ordinary EOF is covered by the stream observation. |
 | TR-06 | Exec-vector entries: 2,048 | `F:runner_exec_entry_budget`; exact complete vectors with 2,048/2,049 entries include executable and generated parameter tokens. | F-only: construction boundary. |
 | TR-07 | Encoded exec vector: 128 KiB | `F:runner_exec_byte_budget`; exact 131,072/131,073-byte vectors cover strings, terminators and pointer arrays on each supported pointer width. | F-only: construction boundary. |

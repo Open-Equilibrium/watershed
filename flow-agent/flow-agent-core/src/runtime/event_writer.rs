@@ -365,7 +365,6 @@ impl<A: EventLogAppender> SerialEventBackend for WriterWorker<'_, A> {
     }
 
     fn wait_timeout(&self, now: Instant) -> Duration {
-        // WHY: a stopped or failed writer never syncs, so its expired deadline must not spin the worker.
         if self.stopped || self.pending_error.is_some() {
             return EVENT_WRITER_DIRTY_SYNC_INTERVAL;
         }

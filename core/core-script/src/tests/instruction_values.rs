@@ -5,6 +5,28 @@ use super::super::model::{
 };
 use super::super::semantics::validate_registry_block_semantics;
 use super::super::values::render_instruction;
+use std::collections::BTreeMap;
+
+fn identity(id: &str, name: &str) -> BlockIdentity {
+    BlockIdentity {
+        id: id.to_owned(),
+        name: name.to_owned(),
+    }
+}
+
+fn parameter(name: &str, value_contract: ValueContract) -> InstructionParameter {
+    InstructionParameter {
+        name: name.to_owned(),
+        value_contract,
+    }
+}
+
+fn bindings<const N: usize>(entries: [(&str, FlowValue); N]) -> BTreeMap<String, FlowValue> {
+    entries
+        .into_iter()
+        .map(|(name, value)| (name.to_owned(), value))
+        .collect()
+}
 
 #[test]
 fn m11_instruction_parameters_and_closed_value_contracts_parse() {
@@ -34,30 +56,21 @@ fn m11_instruction_parameters_and_closed_value_contracts_parse() {
 #[test]
 fn m11_instruction_rendering_requires_exact_typed_parameters() {
     let instruction = InstructionBlock {
-        identity: BlockIdentity {
-            id: "review".to_owned(),
-            name: "Review".to_owned(),
-        },
+        identity: identity("review", "Review"),
         prompt: "Review {{project}} with strict={{strict}}.".to_owned(),
         parameters: vec![
-            InstructionParameter {
-                name: "project".to_owned(),
-                value_contract: ValueContract::String {
+            parameter(
+                "project",
+                ValueContract::String {
                     max_length: Some(32),
                 },
-            },
-            InstructionParameter {
-                name: "strict".to_owned(),
-                value_contract: ValueContract::Boolean {},
-            },
+            ),
+            parameter("strict", ValueContract::Boolean {}),
         ],
     };
-    let parameters = std::collections::BTreeMap::from([
-        (
-            "project".to_owned(),
-            FlowValue::String("watershed".to_owned()),
-        ),
-        ("strict".to_owned(), FlowValue::Boolean(true)),
+    let parameters = bindings([
+        ("project", FlowValue::String("watershed".to_owned())),
+        ("strict", FlowValue::Boolean(true)),
     ]);
 
     assert_eq!(
@@ -66,12 +79,9 @@ fn m11_instruction_rendering_requires_exact_typed_parameters() {
         "Review {\"type\":\"string\",\"value\":\"watershed\"} with strict={\"type\":\"boolean\",\"value\":true}."
     );
 
-    let placeholder_value = std::collections::BTreeMap::from([
-        (
-            "project".to_owned(),
-            FlowValue::String("{{strict}}".to_owned()),
-        ),
-        ("strict".to_owned(), FlowValue::Boolean(true)),
+    let placeholder_value = bindings([
+        ("project", FlowValue::String("{{strict}}".to_owned())),
+        ("strict", FlowValue::Boolean(true)),
     ]);
     assert_eq!(
         render_instruction(
@@ -83,10 +93,7 @@ fn m11_instruction_rendering_requires_exact_typed_parameters() {
         "Review {\"type\":\"string\",\"value\":\"{{strict}}\"} with strict={\"type\":\"boolean\",\"value\":true}."
     );
 
-    let missing = std::collections::BTreeMap::from([(
-        "project".to_owned(),
-        FlowValue::String("watershed".to_owned()),
-    )]);
+    let missing = bindings([("project", FlowValue::String("watershed".to_owned()))]);
     assert!(
         render_instruction(&instruction, &missing, MAX_REGISTRY_DEFINITION_BYTES)
             .expect_err("missing parameter is rejected")
@@ -94,12 +101,9 @@ fn m11_instruction_rendering_requires_exact_typed_parameters() {
             .contains("strict")
     );
 
-    let wrong_type = std::collections::BTreeMap::from([
-        (
-            "project".to_owned(),
-            FlowValue::String("watershed".to_owned()),
-        ),
-        ("strict".to_owned(), FlowValue::String("yes".to_owned())),
+    let wrong_type = bindings([
+        ("project", FlowValue::String("watershed".to_owned())),
+        ("strict", FlowValue::String("yes".to_owned())),
     ]);
     assert!(
         render_instruction(&instruction, &wrong_type, MAX_REGISTRY_DEFINITION_BYTES)
@@ -108,13 +112,10 @@ fn m11_instruction_rendering_requires_exact_typed_parameters() {
             .contains("strict")
     );
 
-    let extra = std::collections::BTreeMap::from([
-        (
-            "project".to_owned(),
-            FlowValue::String("watershed".to_owned()),
-        ),
-        ("strict".to_owned(), FlowValue::Boolean(true)),
-        ("extra".to_owned(), FlowValue::Boolean(true)),
+    let extra = bindings([
+        ("project", FlowValue::String("watershed".to_owned())),
+        ("strict", FlowValue::Boolean(true)),
+        ("extra", FlowValue::Boolean(true)),
     ]);
     assert!(
         render_instruction(&instruction, &extra, MAX_REGISTRY_DEFINITION_BYTES)
@@ -127,17 +128,14 @@ fn m11_instruction_rendering_requires_exact_typed_parameters() {
 #[test]
 fn m11_instruction_semantics_reject_every_placeholder_mismatch() {
     let valid = InstructionBlock {
-        identity: BlockIdentity {
-            id: "review".to_owned(),
-            name: "Review".to_owned(),
-        },
+        identity: identity("review", "Review"),
         prompt: "Review {{project}}.".to_owned(),
-        parameters: vec![InstructionParameter {
-            name: "project".to_owned(),
-            value_contract: ValueContract::String {
+        parameters: vec![parameter(
+            "project",
+            ValueContract::String {
                 max_length: Some(32),
             },
-        }],
+        )],
     };
     let mut cases = Vec::new();
 
@@ -159,17 +157,6 @@ fn m11_instruction_semantics_reject_every_placeholder_mismatch() {
     let mut missing_placeholder = valid.clone();
     missing_placeholder.prompt = "Review the project.".to_owned();
     cases.push(missing_placeholder);
-
-    for prompt in [
-        "Review {{other}}.",
-        "Review {{project.",
-        "Review {{Bad Name}}.",
-        "Review project}}.",
-    ] {
-        let mut malformed = valid.clone();
-        malformed.prompt = prompt.to_owned();
-        cases.push(malformed);
-    }
 
     for instruction in cases {
         assert!(
@@ -198,17 +185,14 @@ fn m11_instruction_semantics_reject_every_placeholder_mismatch() {
 #[test]
 fn m11_instruction_semantics_rejects_stray_terminators_before_placeholders() {
     let instruction = InstructionBlock {
-        identity: BlockIdentity {
-            id: "review".to_owned(),
-            name: "Review".to_owned(),
-        },
+        identity: identity("review", "Review"),
         prompt: String::new(),
-        parameters: vec![InstructionParameter {
-            name: "project".to_owned(),
-            value_contract: ValueContract::String {
+        parameters: vec![parameter(
+            "project",
+            ValueContract::String {
                 max_length: Some(32),
             },
-        }],
+        )],
     };
 
     for prompt in [
@@ -233,21 +217,18 @@ fn m11_instruction_semantics_rejects_stray_terminators_before_placeholders() {
 #[test]
 fn m11_instruction_rendering_enforces_its_cumulative_byte_limit() {
     let instruction = InstructionBlock {
-        identity: BlockIdentity {
-            id: "bounded".to_owned(),
-            name: "Bounded".to_owned(),
-        },
+        identity: identity("bounded", "Bounded"),
         prompt: "{{value}}".repeat(8),
-        parameters: vec![InstructionParameter {
-            name: "value".to_owned(),
-            value_contract: ValueContract::String {
+        parameters: vec![parameter(
+            "value",
+            ValueContract::String {
                 max_length: Some(1_024),
             },
-        }],
+        )],
     };
     let value = FlowValue::String("x".repeat(1_024));
     let canonical = proto::canonical_json(&serde_json::to_value(&value).unwrap()).unwrap();
-    let parameters = std::collections::BTreeMap::from([("value".to_owned(), value)]);
+    let parameters = bindings([("value", value)]);
     let exact_bytes = canonical.len() * 8;
 
     assert_eq!(

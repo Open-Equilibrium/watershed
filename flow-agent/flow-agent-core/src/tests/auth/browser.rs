@@ -1,4 +1,4 @@
-use super::{jwt_with_account, token_body};
+use super::{credential_record, jwt_with_account, token_body};
 use crate::{
     runtime::{
         RuntimeError,
@@ -8,18 +8,31 @@ use crate::{
             system_browser_launcher,
         },
         credential_store::CredentialStore,
-        oauth_credential::CredentialRecord,
     },
     tests::helpers::empty_workspace,
 };
 use rustix::process::test_kill_process;
 use std::{
     io::{Read, Write},
-    net::{TcpListener, TcpStream},
+    net::{SocketAddr, TcpListener, TcpStream},
     process::Command,
     thread,
     time::{Duration, Instant},
 };
+
+fn send_callback(address: SocketAddr, request_target: &str) -> String {
+    let mut stream = TcpStream::connect(address).expect("callback connects");
+    write!(
+        stream,
+        "GET {request_target} HTTP/1.1\r\nHost: localhost\r\n\r\n"
+    )
+    .expect("callback writes");
+    let mut response = String::new();
+    stream
+        .read_to_string(&mut response)
+        .expect("callback response reads");
+    response
+}
 
 #[test]
 fn system_browser_launcher_does_not_depend_on_path_lookup() {
@@ -63,40 +76,18 @@ fn browser_login_presents_opens_and_exchanges_one_matching_callback() {
         |url| {
             opened = url.to_owned();
             client = Some(thread::spawn(move || {
-                let mut stream = TcpStream::connect(address).expect("callback connects");
-                stream
-                    .write_all(
-                        b"GET / HTTP/1.1\r\nHost: localhost\r\n\r\n",
-                    )
-                    .expect("invalid callback writes");
-                let mut response = String::new();
-                stream
-                    .read_to_string(&mut response)
-                    .expect("invalid callback response reads");
-                let mut stream = TcpStream::connect(address).expect("valid callback connects");
-                stream
-                    .write_all(
-                        b"GET /auth/callback?state=fixture-state&code=fixture-code HTTP/1.1\r\nHost: localhost\r\n\r\n",
-                    )
-                    .expect("valid callback writes");
-                let mut valid_response = String::new();
-                stream
-                    .read_to_string(&mut valid_response)
-                    .expect("valid callback response reads");
-                (response, valid_response)
+                let invalid = send_callback(address, "/");
+                let valid = send_callback(
+                    address,
+                    "/auth/callback?state=fixture-state&code=fixture-code",
+                );
+                (invalid, valid)
             }));
             Ok(())
         },
         |code, verifier, redirect| {
             exchange = Some((code.to_owned(), verifier.to_owned(), redirect.to_owned()));
-            Ok(CredentialRecord {
-                credential_type: "oauth".to_owned(),
-                access: "access".to_owned(),
-                refresh: "refresh".to_owned(),
-                expires: 42,
-                account_id: "account".to_owned(),
-                is_fedramp: false,
-            })
+            Ok(credential_record("access", "refresh", 42, "account"))
         },
     )
     .expect("browser login completes");
@@ -144,17 +135,10 @@ fn browser_login_ends_on_a_state_matching_oauth_denial() {
         &mut |_| Ok(()),
         |_| {
             client = Some(thread::spawn(move || {
-                let mut stream = TcpStream::connect(address).expect("callback connects");
-                stream
-                    .write_all(
-                        b"GET /auth/callback?state=fixture-state&error=access_denied HTTP/1.1\r\nHost: localhost\r\n\r\n",
-                    )
-                    .expect("denial callback writes");
-                let mut response = String::new();
-                stream
-                    .read_to_string(&mut response)
-                    .expect("denial response reads");
-                // A login that kept waiting would accept this later code.
+                let response = send_callback(
+                    address,
+                    "/auth/callback?state=fixture-state&error=access_denied",
+                );
                 if let Ok(mut stream) = TcpStream::connect(address) {
                     let _ = stream.write_all(
                         b"GET /auth/callback?state=fixture-state&code=fixture-code HTTP/1.1\r\nHost: localhost\r\n\r\n",
@@ -194,17 +178,10 @@ fn browser_login_does_not_claim_completion_before_exchange_succeeds() {
         &mut |_| Ok(()),
         |_| {
             client = Some(thread::spawn(move || {
-                let mut stream = TcpStream::connect(address).expect("callback connects");
-                stream
-                    .write_all(
-                        b"GET /auth/callback?state=fixture-state&code=fixture-code HTTP/1.1\r\nHost: localhost\r\n\r\n",
-                    )
-                    .expect("callback writes");
-                let mut response = String::new();
-                stream
-                    .read_to_string(&mut response)
-                    .expect("callback response reads");
-                response
+                send_callback(
+                    address,
+                    "/auth/callback?state=fixture-state&code=fixture-code",
+                )
             }));
             Ok(())
         },

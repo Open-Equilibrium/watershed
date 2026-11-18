@@ -1,31 +1,17 @@
-//! The login service that keeps `meta serve` running for the user, without administrator rights
-//! (ADR-0286): a launch agent on macOS and a systemd user unit on Linux, written and started as
-//! T3 Code's `t3 service install` does.
-
 use std::path::{Path, PathBuf};
 
-/// The launch agent's label and the systemd unit's name.
 pub const LABEL: &str = "io.github.open-equilibrium.meta-harness";
 const UNIT: &str = "meta-harness.service";
 
-/// What the login service runs.
 pub struct Plan {
-    /// The installed `meta`.
     program: PathBuf,
-    /// Meta-Harness's data folder, where the service also logs.
     home: PathBuf,
-    /// The variables the service gets. A login service reads no shell profile, so they come from
-    /// the installing shell.
     environment: Vec<(&'static str, String)>,
 }
 
-/// Variables the service takes from the installing shell when set: where the person keeps the
-/// harnesses' own logins, which the harness homes link to (SECURITY.md).
 const PASSED: [&str; 2] = ["CODEX_HOME", "CLAUDE_CONFIG_DIR"];
 
 impl Plan {
-    /// The plan for `program` and `home`, with variables from `var`. `PATH` keeps only absolute
-    /// folders, so the service never runs a program from whatever folder it works in.
     pub fn new(
         program: PathBuf,
         home: PathBuf,
@@ -37,11 +23,9 @@ impl Plan {
             .filter(|folder| folder.starts_with('/'))
             .map(str::to_owned)
             .collect();
-        // An empty PATH makes some programs search the working folder, so the system folders stand in.
         if path.is_empty() {
             path = vec!["/usr/bin".to_owned(), "/bin".to_owned()];
         }
-        // Service files hold text, so a path that is not UTF-8 would be written as another path.
         let utf8 = |p: &Path| {
             p.to_str().map(str::to_owned).ok_or_else(|| {
                 format!(
@@ -59,7 +43,6 @@ impl Plan {
                 environment.push((name, value));
             }
         }
-        // A service file is line-based; a control character would end or break an entry.
         let program_text = utf8(&program)?;
         for value in std::iter::once(program_text.as_str())
             .chain(environment.iter().map(|(_, v)| v.as_str()))
@@ -82,7 +65,6 @@ impl Plan {
     }
 }
 
-/// One command the installer runs, and whether its failure stops the installation.
 #[derive(Debug, PartialEq, Eq)]
 pub struct Step {
     pub program: &'static str,
@@ -98,23 +80,17 @@ fn step(program: &'static str, args: &[&str], required: bool) -> Step {
     }
 }
 
-/// A platform's service manager: where the service file goes, what it holds and the commands
-/// that start and stop it.
 pub struct Manager {
-    /// The service file.
     pub file: PathBuf,
     render: fn(&Plan) -> String,
-    /// The data folder a service file's text names.
     home_of: fn(&str) -> Option<String>,
     start: Vec<Step>,
     stop: Vec<Step>,
-    /// Run after the previous file is restored, so the manager loads it again. A failure is
-    /// reported, not required.
     restore: Vec<Step>,
+    restart: Vec<Step>,
 }
 
 impl Manager {
-    /// The launch agent of the user `uid` whose home folder is `user_home`.
     pub fn launchd(user_home: &Path, uid: u32) -> Self {
         let file = user_home
             .join("Library/LaunchAgents")
@@ -125,7 +101,6 @@ impl Manager {
         Self {
             render: plist_of,
             home_of: plist_home,
-            // A job that is still loaded refuses bootstrap, and a persisted disable blocks it.
             start: vec![
                 step("launchctl", &["bootout", &target], false),
                 step("launchctl", &["enable", &target], false),
@@ -133,11 +108,11 @@ impl Manager {
             ],
             stop: vec![step("launchctl", &["bootout", &target], false)],
             restore: Vec::new(),
+            restart: vec![step("launchctl", &["bootstrap", &domain, &plist], true)],
             file,
         }
     }
 
-    /// The systemd user unit, under `config` (`XDG_CONFIG_HOME`, else `~/.config`).
     pub fn systemd(config: &Path) -> Self {
         Self {
             file: config.join("systemd/user").join(UNIT),
@@ -154,10 +129,10 @@ impl Manager {
                 false,
             )],
             restore: vec![step("systemctl", &["--user", "daemon-reload"], false)],
+            restart: vec![step("systemctl", &["--user", "restart", UNIT], true)],
         }
     }
 
-    /// The manager of this platform for the current user.
     pub fn current() -> Result<Self, String> {
         let home = std::env::home_dir().ok_or("The home folder is unknown.")?;
         if cfg!(target_os = "macos") {
@@ -173,8 +148,6 @@ impl Manager {
         }
     }
 
-    /// Writes the service file for `plan` and starts the service, replacing one already
-    /// installed. `run` runs each step and says whether it succeeded.
     pub fn install(
         &self,
         plan: &Plan,
@@ -190,13 +163,13 @@ impl Manager {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
             Err(e) => return Err(format!("Could not read {}: {e}", self.file.display())),
         };
-        std::fs::write(&self.file, (self.render)(plan))
+        let had_previous = previous.is_some();
+        replace_file(&self.file, (self.render)(plan).as_bytes())
             .map_err(|e| format!("Could not write {}: {e}", self.file.display()))?;
         let started = run_all(&self.start, &mut run).map(|_| ());
         if let Err(error) = started {
-            // The file keeps naming the data folder the service ran with, which uninstall checks.
             let restored = match previous {
-                Some(bytes) => std::fs::write(&self.file, bytes),
+                Some(bytes) => replace_file(&self.file, &bytes),
                 None => match std::fs::remove_file(&self.file) {
                     Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e),
                     _ => Ok(()),
@@ -204,11 +177,16 @@ impl Manager {
             };
             return Err(match restored {
                 Ok(()) => {
-                    // Only required steps fail as Err, and none is required here.
-                    let reloads = run_all(&self.restore, &mut run).unwrap_or_default();
-                    reloads
-                        .iter()
-                        .fold(error, |message, failure| format!("{message}. {failure}"))
+                    let mut message = error;
+                    for failure in run_all(&self.restore, &mut run).unwrap_or_else(|e| vec![e]) {
+                        message = format!("{message}. {failure}");
+                    }
+                    if had_previous && let Err(failure) = run_all(&self.restart, &mut run) {
+                        message = format!(
+                            "{message}. The previous service did not start again: {failure}"
+                        );
+                    }
+                    message
                 }
                 Err(e) => format!(
                     "{error}. The previous service file could not be restored: {e} ({})",
@@ -219,22 +197,30 @@ impl Manager {
         Ok(())
     }
 
-    /// The data folder the installed service keeps, from its file; `None` without a file.
     pub fn recorded_home(&self) -> Result<Option<PathBuf>, String> {
         match std::fs::read_to_string(&self.file) {
-            Ok(text) => Ok((self.home_of)(&text).map(PathBuf::from)),
+            Ok(text) => match (self.home_of)(&text) {
+                Some(home) => Ok(Some(PathBuf::from(home))),
+                None => Err(format!(
+                    "The login service file {} does not name its data folder, so nothing was removed.",
+                    self.file.display()
+                )),
+            },
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
             Err(e) => Err(format!("Could not read {}: {e}", self.file.display())),
         }
     }
 
-    /// Stops the service and removes its file; the data folder stays. Returns the failures of
-    /// the stop steps, which do not stop the removal.
     pub fn uninstall(
         &self,
         mut run: impl FnMut(&Step) -> Result<(), String>,
     ) -> Result<Vec<String>, String> {
         let failures = run_all(&self.stop, &mut run)?;
+        if let Some(failure) = failures.iter().find(|failure| !not_loaded(failure)) {
+            return Err(format!(
+                "The login service could not be stopped ({failure}), so nothing was removed. Stop it, then run uninstall again."
+            ));
+        }
         match std::fs::remove_file(&self.file) {
             Err(e) if e.kind() != std::io::ErrorKind::NotFound => {
                 Err(format!("Could not remove {}: {e}", self.file.display()))
@@ -244,7 +230,56 @@ impl Manager {
     }
 }
 
-/// Runs `steps` in order. A failed step that is not required is returned, not acted on.
+fn not_loaded(failure: &str) -> bool {
+    [
+        "not loaded",
+        "No such process",
+        "Could not find service",
+        "Could not find specified service",
+    ]
+    .iter()
+    .any(|phrase| failure.contains(phrase))
+}
+
+fn replace_file(file: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    use std::io::Write;
+    let name = file.file_name().unwrap_or_default().to_string_lossy();
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let temporary = file.with_file_name(format!(".{name}.{}.{nanos}.tmp", std::process::id()));
+    let written = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&temporary)
+        .and_then(|mut file| {
+            file.write_all(bytes)?;
+            file.sync_all()
+        });
+    let result = written
+        .and_then(|()| std::fs::rename(&temporary, file))
+        .and_then(|()| sync_directory(file));
+    if result.is_err() {
+        let _ = std::fs::remove_file(&temporary);
+    }
+    result
+}
+
+#[cfg(unix)]
+fn sync_directory(file: &Path) -> std::io::Result<()> {
+    let dir = match file.parent() {
+        Some(dir) if !dir.as_os_str().is_empty() => dir,
+        _ => Path::new("."),
+    };
+    std::fs::File::open(dir)?.sync_all()
+}
+
+#[cfg(not(unix))]
+fn sync_directory(_file: &Path) -> std::io::Result<()> {
+    Ok(())
+}
+
 fn run_all(
     steps: &[Step],
     run: &mut impl FnMut(&Step) -> Result<(), String>,
@@ -267,7 +302,6 @@ fn xml(value: &str) -> String {
         .replace('>', "&gt;")
 }
 
-/// The launch agent: it starts at login and again 5 seconds after `meta serve` ends.
 fn plist_of(plan: &Plan) -> String {
     let program = xml(&plan.program.to_string_lossy());
     let log = xml(&plan.log().to_string_lossy());
@@ -316,7 +350,6 @@ fn plist_of(plan: &Plan) -> String {
     )
 }
 
-/// A systemd value: quoted, with `\`, `"` and `%` (specifiers) escaped.
 fn systemd_value(value: &str) -> String {
     let escaped = value
         .replace('\\', "\\\\")
@@ -325,12 +358,14 @@ fn systemd_value(value: &str) -> String {
     format!("\"{escaped}\"")
 }
 
-/// The data folder a launch agent names, read back from its environment.
 fn plist_home(text: &str) -> Option<String> {
-    let rest = text
-        .split_once("<key>META_HARNESS_HOME</key>\n    <string>")?
-        .1;
-    let value = rest.split_once("</string>")?.0;
+    let value = text
+        .split_once("<key>META_HARNESS_HOME</key>")?
+        .1
+        .trim_start()
+        .strip_prefix("<string>")?
+        .split_once("</string>")?
+        .0;
     Some(
         value
             .replace("&lt;", "<")
@@ -339,17 +374,20 @@ fn plist_home(text: &str) -> Option<String> {
     )
 }
 
-/// The data folder a systemd unit names, read back from its `Environment=` line, which
-/// `systemd_value` quoted and escaped.
 fn unit_home(text: &str) -> Option<String> {
-    let quoted = text
-        .lines()
-        .find_map(|line| line.strip_prefix("Environment=\"META_HARNESS_HOME="))?
-        .strip_suffix('"')?;
+    let quoted = text.lines().find_map(|line| {
+        line.trim()
+            .strip_prefix("Environment")?
+            .trim_start()
+            .strip_prefix('=')?
+            .trim_start()
+            .strip_prefix('"')?
+            .strip_suffix('"')?
+            .strip_prefix("META_HARNESS_HOME=")
+    })?;
     let mut value = String::new();
     let mut chars = quoted.chars();
     while let Some(c) = chars.next() {
-        // A backslash or a percent sign escapes the character after it.
         if c == '\\' || c == '%' {
             value.push(chars.next()?);
         } else {
@@ -359,8 +397,6 @@ fn unit_home(text: &str) -> Option<String> {
     Some(value)
 }
 
-/// The systemd user unit: it starts with the user's session and 5 seconds after
-/// `meta serve` ends; stopping it signals Meta-Harness first, which stops T3.
 fn unit_of(plan: &Plan) -> String {
     let log = plan.log().to_string_lossy().replace('%', "%%");
     format!(
@@ -382,7 +418,6 @@ fn unit_of(plan: &Plan) -> String {
          \n\
          [Install]\n\
          WantedBy=default.target\n",
-        // ExecStart= expands `$` variables, which Environment= does not.
         systemd_value(&plan.program.to_string_lossy().replace('$', "$$")),
         plan.environment
             .iter()
@@ -449,14 +484,12 @@ mod tests {
         );
         let broken = Plan::new(dir.0.join("meta"), dir.0.join("da\nta"), |_| None);
         assert!(broken.is_err_and(|e| e.contains("control character")));
-        // A path that is not UTF-8 would be written as another path, so it is refused.
         #[cfg(unix)]
         {
             use std::os::unix::ffi::OsStrExt;
             let not_utf8 = PathBuf::from(std::ffi::OsStr::from_bytes(b"/data/\xff"));
             assert!(Plan::new(dir.0.join("meta"), not_utf8, |_| None).is_err());
         }
-        // Without an absolute folder, PATH names the system folders, never none.
         let relative = Plan::new(dir.0.join("meta"), dir.0.join("data"), |name| {
             (name == "PATH").then(|| ".:bin".to_owned())
         })
@@ -551,7 +584,6 @@ mod tests {
         .unwrap();
         let (unit, _) = installed(&manager, &plan);
         let root = dir.0.display();
-        // systemd expands `$` in ExecStart= only; a `$` in Environment= is literal.
         assert!(unit.contains(&format!("ExecStart=\"{root}/$$bin/meta\" serve\n")));
         assert!(unit.contains(&format!("Environment=\"META_HARNESS_HOME={root}/data$\"\n")));
     }
@@ -574,7 +606,6 @@ mod tests {
         let outside = Plan::new(dir.0.join("bin/meta"), dir.0.join("outside"), |_| None).unwrap();
         let result = manager.install(&outside, |_| Err("daemon-reload failed".to_owned()));
         assert!(result.is_err());
-        // Uninstall checks the folder this file names, so the old one must still be named.
         assert_eq!(manager.recorded_home(), Ok(Some(old.home)));
     }
 
@@ -594,10 +625,12 @@ mod tests {
             }
         });
         assert!(result.is_err());
-        // systemd keeps the definition it loaded until it reads the restored file again.
         assert_eq!(
-            ran.last().map(String::as_str),
-            Some("systemctl --user daemon-reload"),
+            ran.last_chunk::<2>(),
+            Some(&[
+                "systemctl --user daemon-reload".to_owned(),
+                "systemctl --user restart meta-harness.service".to_owned(),
+            ]),
             "{ran:?}"
         );
     }
@@ -607,7 +640,6 @@ mod tests {
         let dir = Dir::new();
         let manager = Manager::launchd(&dir.0, 501);
         let plan = plan(&dir.0);
-        // Only bootstrap is required: a job that was not loaded fails bootout and enable.
         let result = manager.install(&plan, |step| match step.args[0].as_str() {
             "bootstrap" => Err("Bootstrap failed: 5: Input/output error".to_owned()),
             _ => Err("not loaded".to_owned()),
@@ -618,11 +650,141 @@ mod tests {
         );
 
         std::fs::write(plan.home.join("meta-harness.sqlite"), "").unwrap();
-        // A failed stop is reported, and the file goes anyway.
         let warnings = manager.uninstall(|_| Err("not loaded".to_owned()));
         assert_eq!(warnings, Ok(vec!["not loaded".to_owned()]));
         assert!(!manager.file.exists());
         assert!(plan.home.join("meta-harness.sqlite").exists());
         assert_eq!(manager.uninstall(|_| Ok(())), Ok(Vec::new()));
+    }
+
+    #[test]
+    fn a_service_file_whose_home_cannot_be_read_refuses_to_be_uninstalled() {
+        let dir = Dir::new();
+        let manager = Manager::systemd(&dir.0.join("config"));
+        std::fs::create_dir_all(manager.file.parent().unwrap()).unwrap();
+        std::fs::write(&manager.file, "[Service]\nExecStart=/bin/meta serve\n").unwrap();
+        assert!(manager.recorded_home().is_err());
+    }
+
+    #[test]
+    fn a_service_file_names_its_home_whatever_the_layout() {
+        let dir = Dir::new();
+        let launchd = Manager::launchd(&dir.0, 501);
+        std::fs::create_dir_all(launchd.file.parent().unwrap()).unwrap();
+        std::fs::write(
+            &launchd.file,
+            "<dict><key>META_HARNESS_HOME</key><string>/data &amp; 100%</string></dict>",
+        )
+        .unwrap();
+        assert_eq!(
+            launchd.recorded_home(),
+            Ok(Some(PathBuf::from("/data & 100%")))
+        );
+        let systemd = Manager::systemd(&dir.0.join("config"));
+        std::fs::create_dir_all(systemd.file.parent().unwrap()).unwrap();
+        std::fs::write(
+            &systemd.file,
+            "[Service]\n  Environment = \"META_HARNESS_HOME=/data 100%%\"\n",
+        )
+        .unwrap();
+        assert_eq!(
+            systemd.recorded_home(),
+            Ok(Some(PathBuf::from("/data 100%")))
+        );
+    }
+
+    #[test]
+    fn launchd_and_systemd_saying_the_service_is_absent_count_as_not_loaded() {
+        for failure in [
+            "Boot-out failed: 3: No such process",
+            "Boot-out failed: 113: Could not find specified service",
+            "Could not find service \"x\" in domain for user gui: 502",
+            "Unit x.service not loaded.",
+        ] {
+            assert!(not_loaded(failure), "{failure}");
+        }
+        assert!(!not_loaded("Boot-out failed: 1: Operation not permitted"));
+        assert!(!not_loaded(
+            "Failed to disable unit: Unit file x.service does not exist."
+        ));
+    }
+
+    #[test]
+    fn a_stop_that_fails_for_another_reason_keeps_the_service_file() {
+        let dir = Dir::new();
+        let manager = Manager::launchd(&dir.0, 501);
+        installed(&manager, &plan(&dir.0));
+        let result = manager.uninstall(|_| Err("Operation not permitted".to_owned()));
+        assert!(result.is_err(), "{result:?}");
+        assert!(manager.file.exists());
+    }
+
+    #[test]
+    fn a_failed_replacement_restarts_the_previous_unit_and_reports_a_failed_restart() {
+        let dir = Dir::new();
+        let manager = Manager::systemd(&dir.0.join("config"));
+        installed(&manager, &plan(&dir.0));
+        let outside = Plan::new(dir.0.join("bin/meta"), dir.0.join("outside"), |_| None).unwrap();
+        let mut ran = Vec::new();
+        let mut restarts = 0;
+        let result = manager.install(&outside, |step| {
+            ran.push(format!("{} {}", step.program, step.args.join(" ")));
+            if step.args.iter().any(|arg| arg == "restart") {
+                restarts += 1;
+                return Err(if restarts == 1 {
+                    "start failed".to_owned()
+                } else {
+                    "previous restart failed".to_owned()
+                });
+            }
+            Ok(())
+        });
+        let message = result.unwrap_err();
+        assert!(message.contains("previous restart failed"), "{message}");
+        assert_eq!(
+            ran.last().map(String::as_str),
+            Some("systemctl --user restart meta-harness.service"),
+            "{ran:?}"
+        );
+    }
+
+    #[test]
+    fn a_failed_replacement_bootstraps_the_previous_agent_again() {
+        let dir = Dir::new();
+        let manager = Manager::launchd(&dir.0, 501);
+        installed(&manager, &plan(&dir.0));
+        let outside = Plan::new(dir.0.join("bin/meta"), dir.0.join("outside"), |_| None).unwrap();
+        let mut bootstraps = Vec::new();
+        let result = manager.install(&outside, |step| {
+            if step.args[0] == "bootstrap" {
+                bootstraps.push(step.args.join(" "));
+                return Err(if bootstraps.len() == 1 {
+                    "first bootstrap failed".to_owned()
+                } else {
+                    "previous bootstrap failed".to_owned()
+                });
+            }
+            Ok(())
+        });
+        let message = result.unwrap_err();
+        assert!(message.contains("previous bootstrap failed"), "{message}");
+        assert_eq!(bootstraps.len(), 2, "{bootstraps:?}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_reinstall_replaces_the_service_file_whole_for_a_reader_that_has_it_open() {
+        use std::io::Read;
+        let dir = Dir::new();
+        let manager = Manager::systemd(&dir.0.join("config"));
+        installed(&manager, &plan(&dir.0));
+        let previous = std::fs::read_to_string(&manager.file).unwrap();
+        let mut reader = std::fs::File::open(&manager.file).unwrap();
+        let other = Plan::new(dir.0.join("bin/meta"), dir.0.join("other"), |_| None).unwrap();
+        manager.install(&other, |_| Ok(())).unwrap();
+        let mut seen = String::new();
+        reader.read_to_string(&mut seen).unwrap();
+        assert_eq!(seen, previous);
+        assert_ne!(std::fs::read_to_string(&manager.file).unwrap(), previous);
     }
 }
