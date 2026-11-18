@@ -228,8 +228,7 @@ class BoardController extends ChangeNotifier {
         ),
         [view.block],
       );
-    } on Object {
-      // The Page shows the problem; the board as stored comes back.
+    } on Object catch (_) {
     } finally {
       _writing--;
       if (!_disposed) unawaited(read());
@@ -387,8 +386,7 @@ class BoardController extends ChangeNotifier {
         ),
         [view.block],
       );
-    } on Object {
-      // The Page shows the problem; the style as stored comes back.
+    } on Object catch (_) {
     } finally {
       _writing--;
       if (!_disposed) unawaited(read());

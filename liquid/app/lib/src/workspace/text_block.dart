@@ -553,9 +553,7 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
     try {
       await boundary(added, true);
       if (last) await boundary(view.id, false);
-    } on Object {
-      // Shown on the Page.
-    }
+    } on Object catch (_) {}
   }
 
   Future<void> _addWhiteboard() async {
@@ -592,9 +590,7 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
           [view.block],
         );
       }
-    } on Object {
-      // The problem shows on the Page.
-    }
+    } on Object catch (_) {}
   }
 
   Future<void> _paste() async {
