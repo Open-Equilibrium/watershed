@@ -488,8 +488,9 @@ pub enum Error {
     WrongKind,
     /// A Database holds [`crate::MAX_FIELDS`] fields, or a select field
     /// [`crate::MAX_OPTIONS`] options, already, or a file cell would hold more than
-    /// [`crate::MAX_FILES`] files, or a drawing's page or a stroke past its caps
-    /// ([`crate::MAX_ELEMENTS`], [`crate::MAX_BOARD_POINTS`], [`crate::MAX_POINTS`]).
+    /// [`crate::MAX_FILES`] files, or a drawing, its page or a stroke past its caps
+    /// ([`crate::MAX_DRAWING_ELEMENTS`], [`crate::MAX_DRAWING_POINTS`],
+    /// [`crate::MAX_ELEMENTS`], [`crate::MAX_BOARD_POINTS`], [`crate::MAX_POINTS`]).
     TooMany,
     /// A placement needs a sort key the core cannot write (ADR-0304): one past the cap, after
     /// too many objects were placed at one spot, or one before a neighbor with no usable key;

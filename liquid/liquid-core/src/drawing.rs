@@ -50,8 +50,7 @@ pub const MAX_POINTS: usize = 10_000;
 /// together, so a board or a page reads and crosses the bridge bounded, at 12 bytes a point
 /// (client architecture rule 3).
 pub const MAX_BOARD_POINTS: usize = 1_000_000;
-/// The most live elements one drawing holds on all its pages: ten boards, so the Page's
-/// document, which loads and syncs whole, stays bounded (ADR-0307).
+/// The most live elements one drawing holds on all its pages: ten boards (ADR-0307).
 pub const MAX_DRAWING_ELEMENTS: usize = 10 * MAX_ELEMENTS;
 /// The most points one drawing's live strokes hold on all its pages: ten boards.
 pub const MAX_DRAWING_POINTS: usize = 10 * MAX_BOARD_POINTS;
