@@ -17,7 +17,7 @@ use liquid_core::{
 };
 
 use super::database::{
-    BridgeCell, BridgeDatabase, BridgeFieldKind, BridgeFilter, BridgeRow, BridgeSort,
+    BridgeCell, BridgeDatabase, BridgeFieldKind, BridgeFilter, BridgeRow, BridgeSort, row_query,
 };
 use super::drawing::{BridgeDrawing, BridgeDrawingEdit, BridgeDrawingStyle};
 use super::media::BridgeMedia;
@@ -41,6 +41,10 @@ pub enum BridgeMutationKind {
     EditText,
     /// Removes `view` from `page`.
     RemoveView,
+    /// Sets how `view` sorts its rows, to `sort` or to none.
+    SetViewSort,
+    /// Sets which rows `view` keeps, to `filter` or to all.
+    SetViewFilter,
     /// Ends `block`, shown by `view` on its home `page`, at `at`, as ⏎ does: the text from
     /// there moves to a new Text Block of `style` after `view`.
     SplitTextBlock,
@@ -185,6 +189,10 @@ pub struct BridgeMutation {
     pub color: i64,
     /// A cell's new value.
     pub cell: Option<BridgeCell>,
+    /// A View's new sort.
+    pub sort: Option<BridgeSort>,
+    /// A View's new filter.
+    pub filter: Option<BridgeFilter>,
     /// A file's media type, such as `image/png`; empty if unknown.
     pub media_type: Option<String>,
     /// A finished attachment's name.
@@ -308,7 +316,7 @@ pub enum BridgeBlockKind {
 }
 
 /// A View on a Page.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct BridgeView {
     /// Its identity.
     pub id: String,
@@ -318,6 +326,10 @@ pub struct BridgeView {
     pub boundary: bool,
     /// The kind of Block it shows.
     pub kind: BridgeBlockKind,
+    /// How it sorts a Table's rows.
+    pub sort: Option<BridgeSort>,
+    /// Which of a Table's rows it keeps.
+    pub filter: Option<BridgeFilter>,
 }
 
 /// The answer to a query; the query's kind names the parts it fills.
@@ -471,6 +483,16 @@ impl BridgeMutation {
             BridgeMutationKind::RemoveView => Mutation::RemoveView {
                 page: id(&self.page, PageId::parse, "page")?,
                 view: id(&self.view, ViewId::parse, "view")?,
+            },
+            BridgeMutationKind::SetViewSort => Mutation::SetViewSort {
+                page: id(&self.page, PageId::parse, "page")?,
+                view: id(&self.view, ViewId::parse, "view")?,
+                sort: row_query(&self.sort, &None, 0, 0)?.sort,
+            },
+            BridgeMutationKind::SetViewFilter => Mutation::SetViewFilter {
+                page: id(&self.page, PageId::parse, "page")?,
+                view: id(&self.view, ViewId::parse, "view")?,
+                filter: row_query(&None, &self.filter, 0, 0)?.filter,
             },
             BridgeMutationKind::SplitTextBlock => Mutation::SplitTextBlock {
                 page: id(&self.page, PageId::parse, "page")?,

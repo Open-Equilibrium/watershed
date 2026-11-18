@@ -11,7 +11,7 @@ import 'media.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
 // These functions are ignored because they are not marked as `pub`: `id`, `message`, `normalized`, `of`, `of`, `optional_id`, `page`, `place`, `to_core`, `to_core`, `units`, `window`
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `hash`, `hash`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `hash`, `hash`
 
 /// The answer to a query; the query's kind names the parts it fills.
 class BridgeAnswer {
@@ -286,6 +286,12 @@ class BridgeMutation {
   /// A cell's new value.
   final BridgeCell? cell;
 
+  /// A View's new sort.
+  final BridgeSort? sort;
+
+  /// A View's new filter.
+  final BridgeFilter? filter;
+
   /// A file's media type, such as `image/png`; empty if unknown.
   final String? mediaType;
 
@@ -317,6 +323,8 @@ class BridgeMutation {
     this.fieldKind,
     required this.color,
     this.cell,
+    this.sort,
+    this.filter,
     this.mediaType,
     this.attachment,
     this.drawingStyle,
@@ -343,6 +351,8 @@ class BridgeMutation {
       fieldKind.hashCode ^
       color.hashCode ^
       cell.hashCode ^
+      sort.hashCode ^
+      filter.hashCode ^
       mediaType.hashCode ^
       attachment.hashCode ^
       drawingStyle.hashCode ^
@@ -371,6 +381,8 @@ class BridgeMutation {
           fieldKind == other.fieldKind &&
           color == other.color &&
           cell == other.cell &&
+          sort == other.sort &&
+          filter == other.filter &&
           mediaType == other.mediaType &&
           attachment == other.attachment &&
           drawingStyle == other.drawingStyle &&
@@ -397,6 +409,12 @@ enum BridgeMutationKind {
 
   /// Removes `view` from `page`.
   removeView,
+
+  /// Sets how `view` sorts its rows, to `sort` or to none.
+  setViewSort,
+
+  /// Sets which rows `view` keeps, to `filter` or to all.
+  setViewFilter,
 
   /// Ends `block`, shown by `view` on its home `page`, at `at`, as ⏎ does: the text from
   /// there moves to a new Text Block of `style` after `view`.
@@ -685,16 +703,29 @@ class BridgeView {
   /// The kind of Block it shows.
   final BridgeBlockKind kind;
 
+  /// How it sorts a Table's rows.
+  final BridgeSort? sort;
+
+  /// Which of a Table's rows it keeps.
+  final BridgeFilter? filter;
+
   const BridgeView({
     required this.id,
     required this.block,
     required this.boundary,
     required this.kind,
+    this.sort,
+    this.filter,
   });
 
   @override
   int get hashCode =>
-      id.hashCode ^ block.hashCode ^ boundary.hashCode ^ kind.hashCode;
+      id.hashCode ^
+      block.hashCode ^
+      boundary.hashCode ^
+      kind.hashCode ^
+      sort.hashCode ^
+      filter.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -704,5 +735,7 @@ class BridgeView {
           id == other.id &&
           block == other.block &&
           boundary == other.boundary &&
-          kind == other.kind;
+          kind == other.kind &&
+          sort == other.sort &&
+          filter == other.filter;
 }

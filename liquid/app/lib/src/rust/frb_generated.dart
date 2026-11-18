@@ -5040,8 +5040,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   BridgeMutation dco_decode_bridge_mutation(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 22)
-      throw Exception('unexpected arr length: expect 22 but see ${arr.length}');
+    if (arr.length != 24)
+      throw Exception('unexpected arr length: expect 24 but see ${arr.length}');
     return BridgeMutation(
       kind: dco_decode_bridge_mutation_kind(arr[0]),
       area: dco_decode_opt_String(arr[1]),
@@ -5061,10 +5061,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       fieldKind: dco_decode_opt_box_autoadd_bridge_field_kind(arr[15]),
       color: dco_decode_i_64(arr[16]),
       cell: dco_decode_opt_box_autoadd_bridge_cell(arr[17]),
-      mediaType: dco_decode_opt_String(arr[18]),
-      attachment: dco_decode_opt_String(arr[19]),
-      drawingStyle: dco_decode_opt_box_autoadd_bridge_drawing_style(arr[20]),
-      drawing: dco_decode_opt_box_autoadd_bridge_drawing_edit(arr[21]),
+      sort: dco_decode_opt_box_autoadd_bridge_sort(arr[18]),
+      filter: dco_decode_opt_box_autoadd_bridge_filter(arr[19]),
+      mediaType: dco_decode_opt_String(arr[20]),
+      attachment: dco_decode_opt_String(arr[21]),
+      drawingStyle: dco_decode_opt_box_autoadd_bridge_drawing_style(arr[22]),
+      drawing: dco_decode_opt_box_autoadd_bridge_drawing_edit(arr[23]),
     );
   }
 
@@ -5577,13 +5579,15 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   BridgeView dco_decode_bridge_view(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 4)
-      throw Exception('unexpected arr length: expect 4 but see ${arr.length}');
+    if (arr.length != 6)
+      throw Exception('unexpected arr length: expect 6 but see ${arr.length}');
     return BridgeView(
       id: dco_decode_String(arr[0]),
       block: dco_decode_String(arr[1]),
       boundary: dco_decode_bool(arr[2]),
       kind: dco_decode_bridge_block_kind(arr[3]),
+      sort: dco_decode_opt_box_autoadd_bridge_sort(arr[4]),
+      filter: dco_decode_opt_box_autoadd_bridge_filter(arr[5]),
     );
   }
 
@@ -7166,6 +7170,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     );
     var var_color = sse_decode_i_64(deserializer);
     var var_cell = sse_decode_opt_box_autoadd_bridge_cell(deserializer);
+    var var_sort = sse_decode_opt_box_autoadd_bridge_sort(deserializer);
+    var var_filter = sse_decode_opt_box_autoadd_bridge_filter(deserializer);
     var var_mediaType = sse_decode_opt_String(deserializer);
     var var_attachment = sse_decode_opt_String(deserializer);
     var var_drawingStyle = sse_decode_opt_box_autoadd_bridge_drawing_style(
@@ -7193,6 +7199,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       fieldKind: var_fieldKind,
       color: var_color,
       cell: var_cell,
+      sort: var_sort,
+      filter: var_filter,
       mediaType: var_mediaType,
       attachment: var_attachment,
       drawingStyle: var_drawingStyle,
@@ -7773,11 +7781,15 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_block = sse_decode_String(deserializer);
     var var_boundary = sse_decode_bool(deserializer);
     var var_kind = sse_decode_bridge_block_kind(deserializer);
+    var var_sort = sse_decode_opt_box_autoadd_bridge_sort(deserializer);
+    var var_filter = sse_decode_opt_box_autoadd_bridge_filter(deserializer);
     return BridgeView(
       id: var_id,
       block: var_block,
       boundary: var_boundary,
       kind: var_kind,
+      sort: var_sort,
+      filter: var_filter,
     );
   }
 
@@ -9656,6 +9668,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_opt_box_autoadd_bridge_field_kind(self.fieldKind, serializer);
     sse_encode_i_64(self.color, serializer);
     sse_encode_opt_box_autoadd_bridge_cell(self.cell, serializer);
+    sse_encode_opt_box_autoadd_bridge_sort(self.sort, serializer);
+    sse_encode_opt_box_autoadd_bridge_filter(self.filter, serializer);
     sse_encode_opt_String(self.mediaType, serializer);
     sse_encode_opt_String(self.attachment, serializer);
     sse_encode_opt_box_autoadd_bridge_drawing_style(
@@ -10105,6 +10119,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_String(self.block, serializer);
     sse_encode_bool(self.boundary, serializer);
     sse_encode_bridge_block_kind(self.kind, serializer);
+    sse_encode_opt_box_autoadd_bridge_sort(self.sort, serializer);
+    sse_encode_opt_box_autoadd_bridge_filter(self.filter, serializer);
   }
 
   @protected

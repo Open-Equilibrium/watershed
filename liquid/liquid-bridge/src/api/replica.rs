@@ -12,7 +12,7 @@ use liquid_core::{
 };
 use liquid_storage::Sqlite;
 
-use super::database::{BridgeDatabase, BridgeRow, row_query};
+use super::database::{BridgeDatabase, BridgeFilter, BridgeRow, BridgeSort, row_query};
 use super::drawing::BridgeDrawing;
 use super::media::BridgeMedia;
 use super::workspace::{
@@ -156,6 +156,8 @@ impl LiquidWorkspace {
             Mutation::AddTextBlock { page, .. }
             | Mutation::EditText { page, .. }
             | Mutation::RemoveView { page, .. }
+            | Mutation::SetViewSort { page, .. }
+            | Mutation::SetViewFilter { page, .. }
             | Mutation::SplitTextBlock { page, .. }
             | Mutation::JoinTextBlock { page, .. }
             | Mutation::SetTextStyle { page, .. }
@@ -314,6 +316,8 @@ impl LiquidWorkspace {
                             BlockKind::Whiteboard => BridgeBlockKind::Whiteboard,
                             BlockKind::Unknown => BridgeBlockKind::Unknown,
                         },
+                        sort: view.sort.as_ref().map(BridgeSort::of),
+                        filter: view.filter.as_ref().map(BridgeFilter::of),
                     })
                     .collect();
             }

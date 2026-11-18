@@ -14,6 +14,7 @@ use std::collections::HashMap;
 
 use automerge::transaction::Transactable;
 use automerge::{AutoCommit, ObjId, ObjType, ReadDoc, ScalarValue, Value};
+use serde::{Deserialize, Serialize};
 
 use crate::model::{self, BLOCKS, KIND, NAME, SORT};
 use crate::{BlockId, Cell, Error, FieldId, FieldKind, OptionId, Place, RowId};
@@ -87,6 +88,9 @@ impl Row {
     }
 }
 
+/// The most characters a filter's text holds, as a name may (ADR-0251).
+pub const MAX_FILTER_TEXT: usize = 1_000;
+
 /// A window of a Database's rows.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RowQuery {
@@ -101,7 +105,7 @@ pub struct RowQuery {
 }
 
 /// Sorting by one field; empty cells come last either way, and ties keep the rows' order.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Sort {
     /// The field.
     pub field: FieldId,
@@ -110,7 +114,7 @@ pub struct Sort {
 }
 
 /// Keeping the rows whose cell of `field` matches.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Filter {
     /// The field.
     pub field: FieldId,
@@ -119,7 +123,7 @@ pub struct Filter {
 }
 
 /// What a cell must be to pass a filter.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Match {
     /// Empty.
     Empty,
@@ -540,15 +544,22 @@ pub(crate) fn rows(
     let database = read(doc, block)?.ok_or(Error::NotFound)?;
     let live: Vec<&FieldId> = database.fields.iter().map(|field| &field.id).collect();
     let cell = |row, field| cell(&live, row, field);
+    // A View may still name a field removed since; it then neither filters nor sorts.
+    let applies = |field: &FieldId| live.contains(&field);
+    let filter = query
+        .filter
+        .as_ref()
+        .filter(|filter| applies(&filter.field));
+    let sort = query.sort.as_ref().filter(|sort| applies(&sort.field));
     // Without a filter or a sort, the window is a slice of the index.
-    if query.filter.is_none() && query.sort.is_none() {
+    if filter.is_none() && sort.is_none() {
         let window = index.rows.iter().skip(query.start).take(query.limit);
         return Ok(Rows {
             count: index.rows.len(),
             rows: window.map(|row| shown(&live, row)).collect(),
         });
     }
-    let mut rows: Vec<&Indexed> = match &query.filter {
+    let mut rows: Vec<&Indexed> = match filter {
         Some(filter) => index
             .rows
             .iter()
@@ -556,7 +567,7 @@ pub(crate) fn rows(
             .collect(),
         None => index.rows.iter().collect(),
     };
-    if let Some(sort) = &query.sort {
+    if let Some(sort) = sort {
         let positions: HashMap<&str, usize> = database
             .fields
             .iter()
@@ -587,6 +598,40 @@ pub(crate) fn rows(
         .map(|row| shown(&live, row))
         .collect();
     Ok(Rows { count, rows })
+}
+
+/// Refuses a sort no field of `block` can answer.
+pub(crate) fn check_sort(doc: &AutoCommit, block: &BlockId, sort: &Sort) -> Result<(), Error> {
+    match field(doc, block, &sort.field)? {
+        (_, FieldKind::File) => Err(Error::WrongKind),
+        _ => Ok(()),
+    }
+}
+
+/// Refuses a filter whose value its field could never hold.
+pub(crate) fn check_filter(
+    doc: &AutoCommit,
+    block: &BlockId,
+    filter: &Filter,
+) -> Result<(), Error> {
+    let (entry, kind) = field(doc, block, &filter.field)?;
+    let long = |text: &str| text.chars().count() > MAX_FILTER_TEXT;
+    match (kind, &filter.matches) {
+        (_, Match::Empty | Match::NotEmpty) => Ok(()),
+        (FieldKind::Text, Match::Contains(text) | Match::Is(Cell::Text(text))) if long(text) => {
+            Err(Error::TooLong)
+        }
+        (FieldKind::Text, Match::Contains(_) | Match::Is(Cell::Text(_))) => Ok(()),
+        (FieldKind::Number, Match::Is(Cell::Number(number))) if number.is_finite() => Ok(()),
+        (FieldKind::Date, Match::Is(Cell::Date(date))) if valid_date(date) => Ok(()),
+        (FieldKind::Checkbox, Match::Is(Cell::Checkbox(_))) => Ok(()),
+        (FieldKind::Select, Match::Is(Cell::Select(option))) => {
+            let options = map(doc, &entry, OPTIONS)?;
+            model::live_in(doc, &options, option.as_str()).ok_or(Error::NotFound)?;
+            Ok(())
+        }
+        _ => Err(Error::WrongKind),
+    }
 }
 
 /// A row as a window shows it: its cells of live fields that hold a value.
@@ -657,6 +702,8 @@ fn matches(cell: Option<&Cell>, matches: &Match) -> bool {
         (Match::Empty | Match::Is(Cell::Empty), cell) => cell.is_none(),
         (Match::Is(Cell::Files(files)), cell) if files.is_empty() => cell.is_none(),
         (Match::NotEmpty, cell) => cell.is_some(),
+        // A checkbox never ticked is as unticked as one ticked off.
+        (Match::Is(Cell::Checkbox(false)), None) => true,
         // Numbers by value, so either zero finds a stored zero.
         (Match::Is(Cell::Number(value)), Some(Cell::Number(stored))) => value == stored,
         (Match::Is(value), cell) => cell == Some(value),

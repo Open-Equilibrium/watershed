@@ -8,7 +8,8 @@
 //!                        style?, elements? })
 //!                       (a Database Block's entry is in `database.rs`, a Whiteboard's and
 //!                        a Media Block's drawing in `drawing.rs`)
-//!                       views: { <view>: { block, sort, boundary, deleted } } }
+//!                       views: { <view>: { block, sort, boundary, deleted,
+//!                                          row-sort?, row-filter? } } }
 //! ```
 
 use std::collections::HashMap;
@@ -36,6 +37,8 @@ pub(crate) const TEXT: &str = "text";
 pub(crate) const BLOCK: &str = "block";
 pub(crate) const STYLE: &str = "style";
 pub(crate) const BOUNDARY: &str = "boundary";
+pub(crate) const ROW_SORT: &str = "row-sort";
+pub(crate) const ROW_FILTER: &str = "row-filter";
 pub(crate) const LANGUAGE: &str = "language";
 pub(crate) const TYPE: &str = "type";
 pub(crate) const ATTACHMENT: &str = "attachment";
@@ -72,6 +75,10 @@ pub struct View {
     pub boundary: bool,
     /// The kind of Block it shows.
     pub kind: BlockKind,
+    /// How it sorts a Database Block's rows.
+    pub sort: Option<crate::Sort>,
+    /// Which of a Database Block's rows it keeps.
+    pub filter: Option<crate::Filter>,
 }
 
 /// The kind of a Block.

@@ -32,8 +32,8 @@ mod workspace;
 
 pub use attachment::{Attachment, AttachmentId, MAX_ATTACHMENT, Media, PART, Upload};
 pub use database::{
-    Database, Field, Filter, MAX_FIELDS, MAX_FILES, MAX_OPTIONS, Match, Row, RowQuery, Rows,
-    SelectOption, Sort,
+    Database, Field, Filter, MAX_FIELDS, MAX_FILES, MAX_FILTER_TEXT, MAX_OPTIONS, Match, Row,
+    RowQuery, Rows, SelectOption, Sort,
 };
 pub use drawing::{
     Content, Drawing, DrawingStyle, Element, ElementChange, Frame, InkColor, MAX_BOARD_POINTS,

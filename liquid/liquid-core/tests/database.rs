@@ -6,9 +6,9 @@
 #![allow(clippy::unwrap_used)]
 
 use liquid_core::{
-    Actor, Applied, BlockId, BlockKind, Cell, Created, Error, FieldId, FieldKind, MAX_FIELDS,
-    MAX_OPTIONS, Match, MemoryStore, Mutation, Origin, PageId, PersonId, Place, Request, RowId,
-    RowQuery, Sort,
+    Actor, Applied, BlockId, BlockKind, Cell, Created, Error, FieldId, FieldKind, Filter,
+    MAX_FIELDS, MAX_FILTER_TEXT, MAX_OPTIONS, Match, MemoryStore, Mutation, Origin, PageId,
+    PersonId, Place, Request, RowId, RowQuery, Sort, ViewId,
 };
 
 type Workspace = liquid_core::Workspace<MemoryStore>;
@@ -883,4 +883,192 @@ fn actions_stored_before_places_still_read() {
         let read: Mutation = serde_json::from_value(stored).unwrap();
         assert_eq!(read, add(place));
     }
+}
+
+fn set_sort(
+    workspace: &mut Workspace,
+    page: &PageId,
+    view: &ViewId,
+    sort: Option<Sort>,
+) -> Result<Applied, Error> {
+    let set = Mutation::SetViewSort {
+        page: page.clone(),
+        view: view.clone(),
+        sort,
+    };
+    apply(workspace, set)
+}
+
+fn set_filter(
+    workspace: &mut Workspace,
+    page: &PageId,
+    view: &ViewId,
+    field: &FieldId,
+    matches: Match,
+) -> Result<Applied, Error> {
+    let filter = Some(Filter {
+        field: field.clone(),
+        matches,
+    });
+    let set = Mutation::SetViewFilter {
+        page: page.clone(),
+        view: view.clone(),
+        filter,
+    };
+    apply(workspace, set)
+}
+
+#[test]
+fn a_view_keeps_its_sort_and_filter() {
+    let (mut workspace, page, block) = expenses();
+    let amount = field(&mut workspace, &page, &block, "Amount", FieldKind::Number);
+    let view = workspace.views(&page, 0, 1).unwrap().remove(0);
+    assert_eq!((view.sort.clone(), view.filter.clone()), (None, None));
+    let sort = Sort {
+        field: amount.clone(),
+        descending: true,
+    };
+    set_sort(&mut workspace, &page, &view.id, Some(sort.clone())).unwrap();
+    set_filter(
+        &mut workspace,
+        &page,
+        &view.id,
+        &amount,
+        Match::Is(Cell::Number(5.0)),
+    )
+    .unwrap();
+    let filter = Filter {
+        field: amount,
+        matches: Match::Is(Cell::Number(5.0)),
+    };
+    workspace.close_page(&page);
+    let read = workspace.views(&page, 0, 1).unwrap().remove(0);
+    assert_eq!(read.sort, Some(sort));
+    assert_eq!(read.filter, Some(filter));
+    set_sort(&mut workspace, &page, &view.id, None).unwrap();
+    let cleared = Mutation::SetViewFilter {
+        page: page.clone(),
+        view: view.id.clone(),
+        filter: None,
+    };
+    apply(&mut workspace, cleared).unwrap();
+    workspace.close_page(&page);
+    let read = workspace.views(&page, 0, 1).unwrap().remove(0);
+    assert_eq!((read.sort, read.filter), (None, None));
+}
+
+#[test]
+fn a_view_takes_only_a_sort_and_filter_its_table_can_answer() {
+    let (mut workspace, page, block) = expenses();
+    let amount = field(&mut workspace, &page, &block, "Amount", FieldKind::Number);
+    let note = field(&mut workspace, &page, &block, "Note", FieldKind::Text);
+    let files = field(&mut workspace, &page, &block, "Files", FieldKind::File);
+    let text = Mutation::AddTextBlock {
+        page: page.clone(),
+        after: None,
+        text: "Above".into(),
+    };
+    apply(&mut workspace, text).unwrap();
+    let [paragraph, table] = <[_; 2]>::try_from(workspace.views(&page, 0, 2).unwrap()).unwrap();
+    let id = table.id;
+    let on = |field: &FieldId| Sort {
+        field: field.clone(),
+        descending: false,
+    };
+    assert_eq!(
+        set_sort(&mut workspace, &page, &paragraph.id, Some(on(&amount))).unwrap_err(),
+        Error::WrongKind
+    );
+    assert_eq!(
+        set_sort(&mut workspace, &page, &id, Some(on(&files))).unwrap_err(),
+        Error::WrongKind
+    );
+    let refused = [
+        (&amount, Match::Is(Cell::Text("5".into())), Error::WrongKind),
+        (&amount, Match::Is(Cell::Number(f64::NAN)), Error::WrongKind),
+        (&amount, Match::Is(Cell::Empty), Error::WrongKind),
+        (&amount, Match::Contains("5".into()), Error::WrongKind),
+        (&files, Match::Is(Cell::Files(Vec::new())), Error::WrongKind),
+        (
+            &note,
+            Match::Contains("x".repeat(MAX_FILTER_TEXT + 1)),
+            Error::TooLong,
+        ),
+    ];
+    for (field, matches, error) in refused {
+        assert_eq!(
+            set_filter(&mut workspace, &page, &id, field, matches).unwrap_err(),
+            error
+        );
+    }
+    set_filter(&mut workspace, &page, &id, &files, Match::NotEmpty).unwrap();
+    set_filter(
+        &mut workspace,
+        &page,
+        &id,
+        &note,
+        Match::Contains("x".into()),
+    )
+    .unwrap();
+}
+
+#[test]
+fn a_removed_field_no_longer_sorts_or_filters() {
+    let (mut workspace, page, block) = expenses();
+    let amount = field(&mut workspace, &page, &block, "Amount", FieldKind::Number);
+    let name = workspace.database(&page, &block).unwrap().unwrap().fields[0]
+        .id
+        .clone();
+    for label in ["a", "b"] {
+        let added = row(&mut workspace, &page, &block, None);
+        set(
+            &mut workspace,
+            &page,
+            &block,
+            &added,
+            &name,
+            Cell::Text(label.into()),
+        )
+        .unwrap();
+    }
+    let remove = Mutation::RemoveField {
+        page: page.clone(),
+        block: block.clone(),
+        field: amount.clone(),
+    };
+    apply(&mut workspace, remove).unwrap();
+    let query = RowQuery {
+        filter: Some(Filter {
+            field: amount,
+            matches: Match::NotEmpty,
+        }),
+        ..all()
+    };
+    assert_eq!(workspace.rows(&page, &block, &query).unwrap().count, 2);
+}
+
+#[test]
+fn an_unticked_filter_finds_boxes_never_ticked() {
+    let (mut workspace, page, block) = expenses();
+    let paid = field(&mut workspace, &page, &block, "Paid", FieldKind::Checkbox);
+    let never = row(&mut workspace, &page, &block, None);
+    let ticked = row(&mut workspace, &page, &block, None);
+    set(
+        &mut workspace,
+        &page,
+        &block,
+        &ticked,
+        &paid,
+        Cell::Checkbox(true),
+    )
+    .unwrap();
+    let query = RowQuery {
+        filter: Some(Filter {
+            field: paid,
+            matches: Match::Is(Cell::Checkbox(false)),
+        }),
+        ..all()
+    };
+    let rows = workspace.rows(&page, &block, &query).unwrap().rows;
+    assert_eq!(rows.iter().map(|row| &row.id).collect::<Vec<_>>(), [&never]);
 }
