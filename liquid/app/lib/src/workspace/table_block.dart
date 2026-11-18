@@ -45,7 +45,7 @@ double _width(BridgeFieldKind kind) => switch (kind) {
   BridgeFieldKind.file => 180,
 };
 
-/// A Table on its Page, as the approved Table View mockups show it: its name, a header of
+/// A Table on its Page: its name, a header of
 /// its fields, its rows, read in windows and scrolling inside a fixed height, and their
 /// count. Fields wider than the reading column scroll sideways with the first field in
 /// view. It follows only its own Block (client architecture rule 6).
@@ -267,7 +267,7 @@ class _TableBlockState extends State<TableBlock> implements CellDrop {
   void didUpdateWidget(TableBlock old) {
     super.didUpdateWidget(old);
     if (widget.view.sort == old.view.sort &&
-        widget.view.filter == old.view.filter) {
+        sameFilter(widget.view.filter, old.view.filter)) {
       return;
     }
     // The rows now start elsewhere.
@@ -297,7 +297,7 @@ class _TableBlockState extends State<TableBlock> implements CellDrop {
   }
 
   void _setFilter(BridgeFilter? filter) {
-    if (filter == widget.view.filter) return;
+    if (sameFilter(filter, widget.view.filter)) return;
     _setQuery(
       mutation(
         BridgeMutationKind.setViewFilter,
@@ -448,19 +448,11 @@ class _TableBlockState extends State<TableBlock> implements CellDrop {
     setState(() {});
   }
 
-  /// A hovered row's handle, left of the Table, and the row's menu (approved Table View
-  /// mockups, section 5).
+  /// A hovered row's handle, left of the Table, and the row's menu.
   late final _rowHandles = RowHandles(
     indexOf: (row) => _rows.indexWhere((shown) => shown.id == row),
     idAt: (index) async => (await _rows.load(index))?.id,
-    insert: (after) => _writeRows(
-      mutation(
-        BridgeMutationKind.addRow,
-        page: _page,
-        block: _block,
-        after: after,
-      ),
-    ),
+    insert: _insertRow,
     remove: (row) => _writeRows(
       mutation(
         BridgeMutationKind.removeRow,
@@ -470,6 +462,42 @@ class _TableBlockState extends State<TableBlock> implements CellDrop {
       ),
     ),
   )..addListener(_menusChanged);
+
+  /// Adds a row after `after`, or first; a refused write shows on the Page.
+  Future<void> _insertRow(String? after) async {
+    try {
+      final added = await widget.views.write(
+        mutation(
+          BridgeMutationKind.addRow,
+          page: _page,
+          block: _block,
+          after: after,
+        ),
+        const [],
+      );
+      await _takeFilterValue(added.row);
+    } on Object {
+      // The problem shows on the Page.
+    }
+  }
+
+  /// A new row takes the value the filter asks for, so it stays in view, as in Notion.
+  Future<void> _takeFilterValue(String? row) async {
+    if (_liveFilter case BridgeFilter(:final field, value: final value?)
+        when value.kind != BridgeCellKind.checkbox || value.checked) {
+      await widget.views.write(
+        mutation(
+          BridgeMutationKind.setCell,
+          page: _page,
+          block: _block,
+          row: row,
+          field: field,
+          cell: value,
+        ),
+        const [],
+      );
+    }
+  }
 
   /// Writes a change to rows; a refused one shows on the Page.
   Future<void> _writeRows(BridgeMutation change) =>
@@ -512,21 +540,7 @@ class _TableBlockState extends State<TableBlock> implements CellDrop {
         const [],
       );
       _rowAdded = true;
-      // It takes the value the filter asks for, so it stays in view, as in Notion.
-      if (_liveFilter case BridgeFilter(:final field, value: final value?)
-          when value.kind != BridgeCellKind.checkbox || value.checked) {
-        await widget.views.write(
-          mutation(
-            BridgeMutationKind.setCell,
-            page: _page,
-            block: _block,
-            row: added.row,
-            field: field,
-            cell: value,
-          ),
-          const [],
-        );
-      }
+      await _takeFilterValue(added.row);
     } on Object {
       // The problem shows on the Page.
     } finally {
@@ -543,7 +557,7 @@ class _TableBlockState extends State<TableBlock> implements CellDrop {
     _panel.show();
   }
 
-  /// A field's menu, under its header (approved Table View mockups, section 5).
+  /// A field's menu, under its header.
   late final _fieldMenus = FieldMenus(
     fieldOf: (id) =>
         _database?.fields.where((field) => field.id == id).firstOrNull,

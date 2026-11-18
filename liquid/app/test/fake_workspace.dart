@@ -708,7 +708,10 @@ class FakeWorkspace implements LiquidWorkspace {
       BridgeQueryKind.views => BridgeAnswer(
         areas: const [],
         pages: const [],
-        views: window(views[query.page] ?? const []),
+        views: [
+          for (final view in window(views[query.page] ?? const <BridgeView>[]))
+            _decoded(view),
+        ],
         count: views[query.page]?.length ?? 0,
         rows: const [],
       ),
@@ -782,6 +785,31 @@ class FakeWorkspace implements LiquidWorkspace {
     };
   }
 
+  /// `view` as a read decodes it: its filter's value holds a list of its own.
+  BridgeView _decoded(BridgeView view) {
+    final filter = view.filter;
+    final value = filter?.value;
+    if (filter == null || value == null) return view;
+    return BridgeView(
+      id: view.id,
+      block: view.block,
+      boundary: view.boundary,
+      kind: view.kind,
+      sort: view.sort,
+      filter: BridgeFilter(
+        field: filter.field,
+        matches: filter.matches,
+        value: BridgeCell(
+          kind: value.kind,
+          text: value.text,
+          number: value.number,
+          checked: value.checked,
+          files: [...value.files],
+        ),
+      ),
+    );
+  }
+
   /// `query`'s rows as the core filters and sorts them.
   List<BridgeRow> _shownRows(BridgeQuery query) {
     BridgeCell? cellOf(BridgeRow row, String field) =>
@@ -796,7 +824,11 @@ class FakeWorkspace implements LiquidWorkspace {
           cell?.text?.toLowerCase().contains(value!.text!.toLowerCase()) ??
               false,
         BridgeMatch.is_ =>
-          cell == value ||
+          (cell != null &&
+                  cell.kind == value!.kind &&
+                  cell.text == value.text &&
+                  cell.number == value.number &&
+                  cell.checked == value.checked) ||
               (cell == null &&
                   value!.kind == BridgeCellKind.checkbox &&
                   !value.checked),

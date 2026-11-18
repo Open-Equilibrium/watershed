@@ -1,13 +1,15 @@
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:liquid/src/rust/api/database.dart';
 import 'package:liquid/src/rust/api/workspace.dart';
+import 'package:liquid/src/workspace/table_block.dart';
 import 'package:liquid/src/workspace/workspace_state.dart';
 
 import 'page_kit.dart';
 
-/// Sort and filter, stored on the View (approved Table View mockups, section 6).
+/// Sort and filter, stored on the View (ADR-0244).
 void main() {
   final kit = PageKit();
 
@@ -37,7 +39,18 @@ void main() {
     return shown.keys.toList()..sort((a, b) => shown[a]!.compareTo(shown[b]!));
   }
 
-  BridgeView view() => kit.fake.views[kit.page]!.single;
+  BridgeView view() => kit.fake.views[kit.page]!.firstWhere(
+    (view) => view.kind == BridgeBlockKind.database,
+  );
+
+  Future<void> filterHome(WidgetTester tester) async {
+    await tap(tester, find.byKey(const Key('table filter')));
+    await tap(tester, find.byKey(const Key('filter field')));
+    await tap(tester, menuText('Category'));
+    await tap(tester, menuText('Home'));
+    await tester.tapAt(Offset.zero);
+    await tester.pumpAndSettle();
+  }
 
   testWidgets('a sort is kept on the View and orders the rows', (tester) async {
     await kit.show(tester, [TablePart(rows)]);
@@ -154,5 +167,75 @@ void main() {
     await tester.pumpAndSettle();
     await tap(tester, find.text('New'));
     expect(find.text('3 of 4 rows'), findsOneWidget);
+  });
+
+  testWidgets('a row inserted from its handle stays under the filter', (
+    tester,
+  ) async {
+    await kit.show(tester, [TablePart(rows)]);
+    await filterHome(tester);
+    final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    await mouse.addPointer(location: tester.getCenter(find.text('Rent')));
+    addTearDown(mouse.removePointer);
+    await tester.pumpAndSettle();
+    await tap(tester, find.byKey(const Key('insert row')));
+    expect(find.text('3 of 4 rows'), findsOneWidget);
+  });
+
+  testWidgets('a filtered Table keeps its place when the Page changes', (
+    tester,
+  ) async {
+    await kit.show(tester, [
+      const TextPart('October'),
+      TablePart([
+        for (var at = 0; at < 40; at++)
+          expenseRow('r$at', 'Row $at', '2026-11-01', 'home', 1, true),
+      ]),
+    ]);
+    await filterHome(tester);
+    final scroll = find.descendant(
+      of: find.byType(TableBlock),
+      matching: find.byWidgetPredicate(
+        (widget) =>
+            widget is Scrollable && widget.axisDirection == AxisDirection.down,
+      ),
+    );
+    final rowsScroll = tester.state<ScrollableState>(scroll.first).position;
+    rowsScroll.jumpTo(120);
+    await tester.pumpAndSettle();
+    await kit.workspace.apply(
+      mutation(BridgeMutationKind.addTextBlock, page: kit.page, text: 'Above'),
+    );
+    await tester.pumpAndSettle();
+    expect(rowsScroll.pixels, 120);
+  });
+
+  testWidgets('what is typed goes to the value as the menu opens', (
+    tester,
+  ) async {
+    await kit.show(tester, [TablePart(rows)]);
+    await tap(tester, find.byKey(const Key('table filter')));
+    final value = tester.widget<TextField>(
+      find.byKey(const Key('filter value')),
+    );
+    expect(value.focusNode!.hasFocus, isTrue);
+  });
+
+  testWidgets('an emptied value removes the filter and refuses nothing', (
+    tester,
+  ) async {
+    await kit.show(tester, [TablePart(rows)]);
+    await tap(tester, find.byKey(const Key('table filter')));
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await tester.pumpAndSettle();
+    expect(find.textContaining('This is not'), findsNothing);
+    await tester.enterText(find.byKey(const Key('filter value')), 'ren');
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await tester.pumpAndSettle();
+    expect(view().filter, isNotNull);
+    await tester.enterText(find.byKey(const Key('filter value')), '');
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await tester.pumpAndSettle();
+    expect(view().filter, isNull);
   });
 }

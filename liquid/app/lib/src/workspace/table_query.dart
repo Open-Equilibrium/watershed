@@ -16,7 +16,7 @@ const _menuWidth = 280.0;
 const _menuHeight = 360.0;
 const _itemHeight = 30.0;
 
-/// A button or chip with the menu it opens (approved Table View mockups, section 6). A
+/// A button or chip with the menu it opens. A
 /// click outside closes the menu.
 class QueryAnchor extends StatefulWidget {
   const QueryAnchor({super.key, required this.anchor, required this.menu});
@@ -131,6 +131,19 @@ class QueryChip extends StatelessWidget {
   }
 }
 
+/// Whether two filters ask the same; a read's cell holds a list of its own, which `==` tells
+/// apart.
+bool sameFilter(BridgeFilter? a, BridgeFilter? b) {
+  if (a == null || b == null) return a == b;
+  final (x, y) = (a.value, b.value);
+  return a.field == b.field &&
+      a.matches == b.matches &&
+      x?.kind == y?.kind &&
+      x?.text == y?.text &&
+      x?.number == y?.number &&
+      x?.checked == y?.checked;
+}
+
 /// How a filter reads on its chip; none once its field is gone.
 String? filterLabel(
   BridgeFilter filter,
@@ -161,12 +174,17 @@ String? filterLabel(
   };
 }
 
-/// A menu's box, which takes the keys, so esc closes it.
+/// A menu's box, which takes the keys, so esc closes it, unless its content takes them.
 class _Panel extends StatefulWidget {
-  const _Panel({required this.onEscape, required this.child});
+  const _Panel({
+    required this.onEscape,
+    required this.child,
+    this.takesKeys = true,
+  });
 
   final VoidCallback onEscape;
   final Widget child;
+  final bool takesKeys;
 
   @override
   State<_Panel> createState() => _PanelState();
@@ -179,7 +197,7 @@ class _PanelState extends State<_Panel> {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted && !_focus.hasFocus) _focus.requestFocus();
+      if (mounted && widget.takesKeys) _focus.requestFocus();
     });
   }
 
@@ -503,14 +521,16 @@ class _FilterMenuState extends State<FilterMenu> {
   void didUpdateWidget(FilterMenu old) {
     super.didUpdateWidget(old);
     final filter = widget.filter;
-    if (filter != old.filter && filter != _built() && filter != null) {
+    if (filter != null &&
+        !sameFilter(filter, old.filter) &&
+        !sameFilter(filter, _built())) {
       setState(_load);
     }
   }
 
   @override
   void dispose() {
-    if (_types && !_dropTyped && _typed.text.trim().isNotEmpty) _commit();
+    if (_types && !_dropTyped) _writeTyped();
     _typed.dispose();
     _typing.dispose();
     super.dispose();
@@ -571,13 +591,21 @@ class _FilterMenuState extends State<FilterMenu> {
 
   void _commit() {
     final built = _built();
-    if (built != null && built != widget.filter) widget.onSet(built);
+    if (built != null && !sameFilter(built, widget.filter)) {
+      widget.onSet(built);
+    }
+  }
+
+  /// Writes what is typed; emptying the value of this field's filter removes it.
+  void _writeTyped() {
+    if (_typed.text.trim().isNotEmpty) return _commit();
+    if (widget.filter?.field == _field.id) widget.onSet(null);
   }
 
   void _submit() {
-    final built = _built();
-    setState(() => _refused = built == null);
-    _commit();
+    final typed = _typed.text.trim().isNotEmpty;
+    setState(() => _refused = typed && _built() == null);
+    _writeTyped();
   }
 
   Widget _dropdown(Key key, String label, _Choosing choosing) {
@@ -704,6 +732,7 @@ class _FilterMenuState extends State<FilterMenu> {
     }
     final matches = _matchesOf(_field.kind);
     return _Panel(
+      takesKeys: !_types,
       onEscape: () {
         _dropTyped = true;
         widget.onClose();
