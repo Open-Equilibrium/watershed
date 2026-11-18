@@ -16,8 +16,8 @@ import 'media_block.dart';
 import 'paste.dart';
 import 'table_cells.dart';
 
-/// A Table's selected cell and its edit, as in a spreadsheet and in Notion (approved Table
-/// View mockups, sections 4 and 9): a click selects a cell, a second click or ⏎ edits a
+/// A Table's selected cell and its edit, as in a spreadsheet and in Notion:
+/// a click selects a cell, a second click or ⏎ edits a
 /// text or number cell, typing replaces it, and a checkbox ticks on a click or Space.
 class CellSelection extends ChangeNotifier {
   CellSelection({
@@ -659,7 +659,7 @@ class CellSelection extends ChangeNotifier {
     return KeyEventResult.handled;
   }
 
-  /// The keys on a selected cell (approved Table View mockups, section 9).
+  /// The keys on a selected cell.
   KeyEventResult _cellKey(FocusNode _, KeyEvent event) {
     if (event is KeyUpEvent) return KeyEventResult.ignored;
     if (picking) {

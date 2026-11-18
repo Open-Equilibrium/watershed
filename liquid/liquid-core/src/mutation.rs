@@ -194,6 +194,24 @@ pub enum Mutation {
         /// The View.
         view: ViewId,
     },
+    /// Sets how a Database Block's View sorts its rows, for everyone who sees it.
+    SetViewSort {
+        /// The Page.
+        page: PageId,
+        /// The View.
+        view: ViewId,
+        /// The sort; none shows the rows' own order.
+        sort: Option<crate::Sort>,
+    },
+    /// Sets which rows a Database Block's View keeps, for everyone who sees it.
+    SetViewFilter {
+        /// The Page.
+        page: PageId,
+        /// The View.
+        view: ViewId,
+        /// The filter; none keeps every row.
+        filter: Option<crate::Filter>,
+    },
     /// Ends a Text Block at `at`, as ⏎ does: its text from there moves to a new Text Block of
     /// `style`, shown right after `view`. At the very start, as in Notion, the text stays in
     /// its Block and the new, empty Text Block goes above it.

@@ -105,7 +105,7 @@ List<SlashCommand> slashCommandsFor(String query) => [
 ];
 
 /// The slash command menu that `/` opens in an empty Text Block, as in Notion and T3 Code
-/// (approved Table View mockups, section 2, and ADR-0302): the Text
+/// (ADR-0302): the Text
 /// Block styles, then the other Blocks, filtered by what follows `/`.
 class SlashCommands extends StatefulWidget {
   const SlashCommands({

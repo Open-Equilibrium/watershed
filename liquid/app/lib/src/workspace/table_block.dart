@@ -18,6 +18,7 @@ import 'media_block.dart';
 import 'row_menu.dart';
 import 'stored_name.dart';
 import 'table_cells.dart';
+import 'table_query.dart';
 import 'table_selection.dart';
 import 'follow.dart';
 import 'page_views.dart';
@@ -44,7 +45,7 @@ double _width(BridgeFieldKind kind) => switch (kind) {
   BridgeFieldKind.file => 180,
 };
 
-/// A Table on its Page, as the approved Table View mockups show it: its name, a header of
+/// A Table on its Page: its name, a header of
 /// its fields, its rows, read in windows and scrolling inside a fixed height, and their
 /// count. Fields wider than the reading column scroll sideways with the first field in
 /// view. It follows only its own Block (client architecture rule 6).
@@ -62,6 +63,7 @@ class _TableBlockState extends State<TableBlock> implements CellDrop {
   BridgeDatabase? _database;
   late final _rows = WindowedList<BridgeRow>(
     (start, limit) async {
+      final BridgeView(:sort, :filter) = widget.view;
       final answer = await _state.read(
         query(
           BridgeQueryKind.rows,
@@ -69,8 +71,22 @@ class _TableBlockState extends State<TableBlock> implements CellDrop {
           block: _block,
           start: start,
           limit: limit,
+          sort: sort,
+          filter: filter,
         ),
       );
+      if (start == 0) {
+        _allRows = filter == null
+            ? answer.count
+            : (await _state.read(
+                query(
+                  BridgeQueryKind.rows,
+                  page: _page,
+                  block: _block,
+                  limit: 0,
+                ),
+              )).count;
+      }
       return (answer.count, answer.rows);
     },
     _report,
@@ -78,6 +94,9 @@ class _TableBlockState extends State<TableBlock> implements CellDrop {
   );
   final _sideways = ScrollController();
   final _down = ScrollController();
+
+  /// How many rows the Table holds, whatever the View's filter keeps.
+  int? _allRows;
 
   /// The field panel + opens, under that +.
   final _panel = OverlayPortalController();
@@ -171,6 +190,15 @@ class _TableBlockState extends State<TableBlock> implements CellDrop {
   var _toLastField = false;
   StreamSubscription<BridgeChange>? _followed;
 
+  /// The footer: the rows there are or, under a filter, how many of them pass.
+  String _rowCount(NumberFormat format, int count, BridgeFilter? filter) {
+    final all = _allRows ?? count;
+    return filter == null
+        ? '${format.format(count)} ${count == 1 ? 'row' : 'rows'}'
+        : '${format.format(count)} of ${format.format(all)} '
+              '${all == 1 ? 'row' : 'rows'}';
+  }
+
   /// The name as typed; a name changed elsewhere shows unless the person is typing one.
   late final _name = StoredName(
     '',
@@ -234,6 +262,94 @@ class _TableBlockState extends State<TableBlock> implements CellDrop {
       ),
     ).listen((_) => unawaited(_read()), onError: _report);
   }
+
+  @override
+  void didUpdateWidget(TableBlock old) {
+    super.didUpdateWidget(old);
+    if (widget.view.sort == old.view.sort &&
+        sameFilter(widget.view.filter, old.view.filter)) {
+      return;
+    }
+    // The rows now start elsewhere.
+    if (_down.hasClients) {
+      _scrollingItself = true;
+      _down.jumpTo(0);
+      _scrollingItself = false;
+    }
+    unawaited(_rows.reread());
+  }
+
+  /// Writes the View's sort or filter; a refused one shows on the Page.
+  void _setQuery(BridgeMutation change) => unawaited(
+    widget.views.write(change, const []).then((_) {}, onError: (Object _) {}),
+  );
+
+  void _setSort(BridgeSort? sort) {
+    if (sort == widget.view.sort) return;
+    _setQuery(
+      mutation(
+        BridgeMutationKind.setViewSort,
+        page: _page,
+        view: widget.view.id,
+        sort: sort,
+      ),
+    );
+  }
+
+  void _setFilter(BridgeFilter? filter) {
+    if (sameFilter(filter, widget.view.filter)) return;
+    _setQuery(
+      mutation(
+        BridgeMutationKind.setViewFilter,
+        page: _page,
+        view: widget.view.id,
+        filter: filter,
+      ),
+    );
+  }
+
+  Widget _sortAnchor(
+    List<BridgeField> fields,
+    Widget Function(VoidCallback toggle, bool open) anchor,
+  ) => QueryAnchor(
+    anchor: anchor,
+    menu: (close) => SortMenu(
+      fields: fields,
+      sort: _liveSort,
+      onSet: _setSort,
+      onClose: close,
+    ),
+  );
+
+  Widget _filterAnchor(
+    List<BridgeField> fields,
+    NumberFormat numbers,
+    String days,
+    Widget Function(VoidCallback toggle, bool open) anchor,
+  ) => QueryAnchor(
+    anchor: anchor,
+    menu: (close) => FilterMenu(
+      fields: fields,
+      filter: _liveFilter,
+      numbers: numbers,
+      locale: days,
+      onSet: _setFilter,
+      onClose: close,
+    ),
+  );
+
+  bool _isField(String id) =>
+      _database?.fields.any((field) => field.id == id) ?? false;
+
+  /// The View's sort and filter, unless their field is gone, when they do nothing.
+  BridgeSort? get _liveSort => switch (widget.view.sort) {
+    final sort? when _isField(sort.field) => sort,
+    _ => null,
+  };
+  BridgeFilter? get _liveFilter => switch (widget.view.filter) {
+    final filter? when _isField(filter.field) => filter,
+    _ => null,
+  };
 
   /// The Page's scroll and the window's size, which move the Table and so close what
   /// hangs under it, as Flutter's menus close.
@@ -332,19 +448,11 @@ class _TableBlockState extends State<TableBlock> implements CellDrop {
     setState(() {});
   }
 
-  /// A hovered row's handle, left of the Table, and the row's menu (approved Table View
-  /// mockups, section 5).
+  /// A hovered row's handle, left of the Table, and the row's menu.
   late final _rowHandles = RowHandles(
     indexOf: (row) => _rows.indexWhere((shown) => shown.id == row),
     idAt: (index) async => (await _rows.load(index))?.id,
-    insert: (after) => _writeRows(
-      mutation(
-        BridgeMutationKind.addRow,
-        page: _page,
-        block: _block,
-        after: after,
-      ),
-    ),
+    insert: _insertRow,
     remove: (row) => _writeRows(
       mutation(
         BridgeMutationKind.removeRow,
@@ -354,6 +462,42 @@ class _TableBlockState extends State<TableBlock> implements CellDrop {
       ),
     ),
   )..addListener(_menusChanged);
+
+  /// Adds a row after `after`, or first; a refused write shows on the Page.
+  Future<void> _insertRow(String? after) async {
+    try {
+      final added = await widget.views.write(
+        mutation(
+          BridgeMutationKind.addRow,
+          page: _page,
+          block: _block,
+          after: after,
+        ),
+        const [],
+      );
+      await _takeFilterValue(added.row);
+    } on Object {
+      // The problem shows on the Page.
+    }
+  }
+
+  /// A new row takes the value the filter asks for, so it stays in view, as in Notion.
+  Future<void> _takeFilterValue(String? row) async {
+    if (_liveFilter case BridgeFilter(:final field, value: final value?)
+        when value.kind != BridgeCellKind.checkbox || value.checked) {
+      await widget.views.write(
+        mutation(
+          BridgeMutationKind.setCell,
+          page: _page,
+          block: _block,
+          row: row,
+          field: field,
+          cell: value,
+        ),
+        const [],
+      );
+    }
+  }
 
   /// Writes a change to rows; a refused one shows on the Page.
   Future<void> _writeRows(BridgeMutation change) =>
@@ -386,7 +530,7 @@ class _TableBlockState extends State<TableBlock> implements CellDrop {
   Future<void> _addRow() async {
     _rowsWriting++;
     try {
-      await widget.views.write(
+      final added = await widget.views.write(
         mutation(
           BridgeMutationKind.addRow,
           page: _page,
@@ -396,6 +540,7 @@ class _TableBlockState extends State<TableBlock> implements CellDrop {
         const [],
       );
       _rowAdded = true;
+      await _takeFilterValue(added.row);
     } on Object {
       // The problem shows on the Page.
     } finally {
@@ -412,7 +557,7 @@ class _TableBlockState extends State<TableBlock> implements CellDrop {
     _panel.show();
   }
 
-  /// A field's menu, under its header (approved Table View mockups, section 5).
+  /// A field's menu, under its header.
   late final _fieldMenus = FieldMenus(
     fieldOf: (id) =>
         _database?.fields.where((field) => field.id == id).firstOrNull,
@@ -435,7 +580,7 @@ class _TableBlockState extends State<TableBlock> implements CellDrop {
         field: field,
       ),
     ),
-    confirm: (field) => confirmDeleteField(context, field, _rows.count),
+    confirm: (field) => confirmDeleteField(context, field, _allRows),
   )..addListener(_menusChanged);
 
   /// Writes a change to a field and reads the Table again; a refused one shows on the
@@ -617,6 +762,9 @@ class _TableBlockState extends State<TableBlock> implements CellDrop {
     final days = intlLocale(locale, DateFormat.localeExists);
     _cells.days = days;
     final count = _rows.count ?? 0;
+    final numberFormat = NumberFormat.decimalPattern(numbers);
+    final sort = _liveSort;
+    final filter = _liveFilter;
     if (_toLastRow || _toLastField) {
       final (down, sideways) = (_toLastRow, _toLastField);
       _toLastRow = _toLastField = false;
@@ -675,9 +823,79 @@ class _TableBlockState extends State<TableBlock> implements CellDrop {
                           ),
                         ),
                       ),
+                      if (database != null && database.fields.isNotEmpty) ...[
+                        _sortAnchor(
+                          database.fields,
+                          (toggle, open) => QueryButton(
+                            key: const Key('table sort'),
+                            icon: LucideIcons.arrowDownUp,
+                            label: 'Sort',
+                            on: open || sort != null,
+                            onTap: toggle,
+                          ),
+                        ),
+                        const SizedBox(width: 2),
+                        _filterAnchor(
+                          database.fields,
+                          numberFormat,
+                          days,
+                          (toggle, open) => QueryButton(
+                            key: const Key('table filter'),
+                            icon: LucideIcons.filter,
+                            label: 'Filter',
+                            on: open || filter != null,
+                            onTap: toggle,
+                          ),
+                        ),
+                      ],
                     ],
                   ),
                 ),
+                if (database != null && (sort != null || filter != null))
+                  Padding(
+                    padding: const EdgeInsets.only(
+                      top: WsMetrics.space1,
+                      bottom: WsMetrics.space2,
+                    ),
+                    child: Wrap(
+                      spacing: WsMetrics.space2,
+                      runSpacing: WsMetrics.space1,
+                      children: [
+                        if (sort != null)
+                          _sortAnchor(
+                            database.fields,
+                            (toggle, _) => QueryChip(
+                              key: const Key('table sort chip'),
+                              icon: sort.descending
+                                  ? LucideIcons.arrowDown
+                                  : LucideIcons.arrowUp,
+                              label: database.fields
+                                  .firstWhere((field) => field.id == sort.field)
+                                  .name,
+                              onTap: toggle,
+                            ),
+                          ),
+                        if (filter != null)
+                          _filterAnchor(
+                            database.fields,
+                            numberFormat,
+                            days,
+                            (toggle, _) => QueryChip(
+                              key: const Key('table filter chip'),
+                              label:
+                                  filterLabel(
+                                    filter,
+                                    database.fields,
+                                    numberFormat,
+                                    shownDays(days),
+                                  ) ??
+                                  '',
+                              onTap: toggle,
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
                 if (database != null)
                   Focus(
                     focusNode: _cells.cellsFocus,
@@ -721,7 +939,7 @@ class _TableBlockState extends State<TableBlock> implements CellDrop {
                                 ),
                               ),
                             _NewRow(onTap: () => unawaited(_addRow())),
-                            if (count > 0)
+                            if (count > 0 || filter != null)
                               Container(
                                 height: _footerHeight,
                                 color: ws.subtle,
@@ -730,8 +948,7 @@ class _TableBlockState extends State<TableBlock> implements CellDrop {
                                 ),
                                 alignment: Alignment.centerLeft,
                                 child: Text(
-                                  '${NumberFormat.decimalPattern(numbers).format(count)} '
-                                  '${count == 1 ? 'row' : 'rows'}',
+                                  _rowCount(numberFormat, count, filter),
                                   style: TextStyle(
                                     fontSize: WsMetrics.fsCompact,
                                     color: ws.textFaint,

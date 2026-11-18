@@ -11,7 +11,7 @@ import '../theme/tokens.g.dart';
 /// it from the row.
 const rowHandleWidth = 46.0;
 
-/// A hovered row's handle (approved Table View mockups, section 5): + inserts a row below,
+/// A hovered row's handle: + inserts a row below,
 /// ⌥ and + one above, as in Notion, and ⋮⋮ opens the row's menu.
 class RowHandle extends StatelessWidget {
   const RowHandle({
@@ -89,7 +89,7 @@ class RowHandle extends StatelessWidget {
   }
 }
 
-/// A row's menu (approved Table View mockups, section 5): insert a row above or below, or
+/// A row's menu: insert a row above or below, or
 /// delete it without asking. ↑↓ choose, ⏎ takes, esc closes.
 class RowMenu extends StatefulWidget {
   const RowMenu({
@@ -248,8 +248,7 @@ class _HoverRegionState extends State<HoverRegion> {
   );
 }
 
-/// A Table's row handle and row menu and what they write (approved Table View mockups,
-/// section 5): the handle follows the row under the pointer unless the menu holds it, and
+/// A Table's row handle and row menu and what they write: the handle follows the row under the pointer unless the menu holds it, and
 /// the menu closes when its row moves elsewhere.
 class RowHandles extends ChangeNotifier {
   RowHandles({

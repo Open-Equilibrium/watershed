@@ -5,8 +5,8 @@ use std::collections::HashMap;
 
 use automerge::AutoCommit;
 
-use crate::model::{self, BLOCK, BLOCKS, BOUNDARY, KIND, VIEWS};
-use crate::{BlockId, BlockKind, Error, Place, View, ViewId};
+use crate::model::{self, BLOCK, BLOCKS, BOUNDARY, KIND, ROW_FILTER, ROW_SORT, VIEWS};
+use crate::{BlockId, BlockKind, Error, Filter, Place, Sort, View, ViewId};
 
 /// One live View with its sort key.
 struct Placed {
@@ -39,6 +39,9 @@ impl Order {
                         block: BlockId::stored(block),
                         boundary: entry.get(BOUNDARY) == Some("true"),
                         kind,
+                        // A setting this version cannot read counts as none.
+                        sort: stored(entry.get(ROW_SORT)),
+                        filter: stored(entry.get(ROW_FILTER)),
                     },
                 })
             })
@@ -102,6 +105,18 @@ impl Order {
         }
     }
 
+    pub(crate) fn set_sort(&mut self, view: &ViewId, sort: Option<Sort>) {
+        if let Some(index) = self.position(view) {
+            self.placed[index].view.sort = sort;
+        }
+    }
+
+    pub(crate) fn set_filter(&mut self, view: &ViewId, filter: Option<Filter>) {
+        if let Some(index) = self.position(view) {
+            self.placed[index].view.filter = filter;
+        }
+    }
+
     /// Every View of `block` shows it as `kind` now.
     pub(crate) fn set_kind(&mut self, block: &BlockId, kind: BlockKind) {
         for placed in &mut self.placed {
@@ -130,6 +145,10 @@ impl Order {
             .iter()
             .position(|placed| &placed.view.id == view)
     }
+}
+
+fn stored<T: serde::de::DeserializeOwned>(json: Option<&str>) -> Option<T> {
+    serde_json::from_str(json?).ok()
 }
 
 #[cfg(test)]

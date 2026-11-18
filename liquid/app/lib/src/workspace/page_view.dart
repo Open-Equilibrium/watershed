@@ -19,7 +19,7 @@ import 'whiteboard_block.dart';
 import 'workspace_state.dart';
 
 /// An open Page: its breadcrumb, then its title and its Blocks in the reading column, as the
-/// approved Pages and Table View mockups show it. A just-created Page takes the keys in its title; a
+/// approved Pages mockups show it. A just-created Page takes the keys in its title; a
 /// Page without Blocks offers a line to type in.
 class WorkspacePage extends StatefulWidget {
   const WorkspacePage({super.key, required this.state, required this.open});

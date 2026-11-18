@@ -11,7 +11,7 @@ use crate::api::database::{
 use crate::api::replica::LiquidWorkspace;
 use crate::api::workspace::{
     BridgeAnswer, BridgeBlockKind, BridgeMutation, BridgeMutationKind, BridgeQuery,
-    BridgeQueryKind, BridgeResource, BridgeResourceKind, MAX_WINDOW,
+    BridgeQueryKind, BridgeResource, BridgeResourceKind, BridgeView, MAX_WINDOW,
 };
 
 fn cell(kind: BridgeCellKind) -> BridgeCell {
@@ -487,4 +487,49 @@ fn a_rows_window_never_exceeds_its_cap() {
         .unwrap();
     assert_eq!(window.rows.len() as i64, MAX_WINDOW);
     assert_eq!(window.count, MAX_WINDOW + 11);
+}
+
+#[test]
+fn a_view_s_sort_and_filter_cross_the_bridge() {
+    let expenses = Expenses::new("database-view-query");
+    let view = |answer: BridgeAnswer| {
+        let table = |view: &BridgeView| view.kind == BridgeBlockKind::Database;
+        answer.views.into_iter().find(table).unwrap()
+    };
+    let read = || {
+        expenses
+            .workspace
+            .query(BridgeQuery {
+                page: Some(expenses.page.clone()),
+                ..query(BridgeQueryKind::Views)
+            })
+            .unwrap()
+    };
+    let id = view(read()).id;
+    let sort = BridgeSort {
+        field: expenses.name.clone(),
+        descending: true,
+    };
+    let filter = BridgeFilter {
+        field: expenses.name.clone(),
+        matches: BridgeMatch::Contains,
+        value: Some(text("rent")),
+    };
+    expenses
+        .apply(BridgeMutation {
+            view: Some(id.clone()),
+            sort: Some(sort.clone()),
+            ..mutation(BridgeMutationKind::SetViewSort)
+        })
+        .unwrap();
+    expenses
+        .apply(BridgeMutation {
+            view: Some(id),
+            filter: Some(filter.clone()),
+            ..mutation(BridgeMutationKind::SetViewFilter)
+        })
+        .unwrap();
+    let shown = view(read());
+    assert_eq!(shown.sort, Some(sort));
+    assert_eq!(shown.filter, Some(filter));
 }

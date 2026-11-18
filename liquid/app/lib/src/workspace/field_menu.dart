@@ -10,7 +10,7 @@ import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
 import 'field_panel.dart';
 
-/// The menu a click on a field's header opens (approved Table View mockups, section 5): its
+/// The menu a click on a field's header opens: its
 /// name to rename in place, its kind, which cannot change yet, and Delete field. ⏎ keeps
 /// the name and closes it, esc drops the name; ↑↓ choose Delete field, which ⏎ then takes.
 class FieldMenu extends StatefulWidget {
@@ -187,8 +187,7 @@ class _FieldMenuState extends State<FieldMenu> {
   }
 }
 
-/// Asks before a field and its values in all rows go (approved Table View mockups,
-/// section 5), counting the `rows` once read; answers whether to delete it.
+/// Asks before a field and its values in all rows go, counting the `rows` once read; answers whether to delete it.
 Future<bool> confirmDeleteField(
   BuildContext context,
   BridgeField field,
@@ -211,7 +210,7 @@ Future<bool> confirmDeleteField(
     ) ??
     false;
 
-/// A Table's field menu and what it writes (approved Table View mockups, section 5): it
+/// A Table's field menu and what it writes: it
 /// opens under a field's header, keeps a typed name however it closes but for esc, also
 /// when the Table goes or Liquid quits, and asks before Delete field.
 class FieldMenus extends ChangeNotifier {

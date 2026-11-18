@@ -281,6 +281,23 @@ class FakeWorkspace implements LiquidWorkspace {
           BridgeResource(kind: BridgeResourceKind.views, page: mutation.page),
         );
         return BridgeApplied(elements: const [], action: _id());
+      case BridgeMutationKind.setViewSort || BridgeMutationKind.setViewFilter:
+        final page = views[mutation.page]!;
+        final at = page.indexWhere((view) => view.id == mutation.view);
+        final shown = page[at];
+        final sorts = mutation.kind == BridgeMutationKind.setViewSort;
+        page[at] = BridgeView(
+          id: shown.id,
+          block: shown.block,
+          boundary: shown.boundary,
+          kind: shown.kind,
+          sort: sorts ? mutation.sort : shown.sort,
+          filter: sorts ? shown.filter : mutation.filter,
+        );
+        _changed(
+          BridgeResource(kind: BridgeResourceKind.views, page: mutation.page),
+        );
+        return BridgeApplied(elements: const [], action: _id());
       case BridgeMutationKind.removeView:
         views[mutation.page]!.removeWhere((view) => view.id == mutation.view);
         _changed(
@@ -691,7 +708,10 @@ class FakeWorkspace implements LiquidWorkspace {
       BridgeQueryKind.views => BridgeAnswer(
         areas: const [],
         pages: const [],
-        views: window(views[query.page] ?? const []),
+        views: [
+          for (final view in window(views[query.page] ?? const <BridgeView>[]))
+            _decoded(view),
+        ],
         count: views[query.page]?.length ?? 0,
         rows: const [],
       ),
@@ -752,14 +772,97 @@ class FakeWorkspace implements LiquidWorkspace {
         database: databases[query.block],
         rows: const [],
       ),
-      BridgeQueryKind.rows => BridgeAnswer(
-        areas: const [],
-        pages: const [],
-        views: const [],
-        count: rows[query.block]?.length ?? 0,
-        rows: window(rows[query.block] ?? const []),
-      ),
+      BridgeQueryKind.rows => () {
+        final shown = _shownRows(query);
+        return BridgeAnswer(
+          areas: const [],
+          pages: const [],
+          views: const [],
+          count: shown.length,
+          rows: window(shown),
+        );
+      }(),
     };
+  }
+
+  /// `view` as a read decodes it: its filter's value holds a list of its own.
+  BridgeView _decoded(BridgeView view) {
+    final filter = view.filter;
+    final value = filter?.value;
+    if (filter == null || value == null) return view;
+    return BridgeView(
+      id: view.id,
+      block: view.block,
+      boundary: view.boundary,
+      kind: view.kind,
+      sort: view.sort,
+      filter: BridgeFilter(
+        field: filter.field,
+        matches: filter.matches,
+        value: BridgeCell(
+          kind: value.kind,
+          text: value.text,
+          number: value.number,
+          checked: value.checked,
+          files: [...value.files],
+        ),
+      ),
+    );
+  }
+
+  /// `query`'s rows as the core filters and sorts them.
+  List<BridgeRow> _shownRows(BridgeQuery query) {
+    BridgeCell? cellOf(BridgeRow row, String field) =>
+        row.cells.where((cell) => cell.field == field).firstOrNull?.value;
+    bool passes(BridgeRow row, BridgeFilter filter) {
+      final cell = cellOf(row, filter.field);
+      final value = filter.value;
+      return switch (filter.matches) {
+        BridgeMatch.empty => cell == null,
+        BridgeMatch.notEmpty => cell != null,
+        BridgeMatch.contains =>
+          cell?.text?.toLowerCase().contains(value!.text!.toLowerCase()) ??
+              false,
+        BridgeMatch.is_ =>
+          (cell != null &&
+                  cell.kind == value!.kind &&
+                  cell.text == value.text &&
+                  cell.number == value.number &&
+                  cell.checked == value.checked) ||
+              (cell == null &&
+                  value!.kind == BridgeCellKind.checkbox &&
+                  !value.checked),
+      };
+    }
+
+    final shown = [
+      for (final row in rows[query.block] ?? const <BridgeRow>[])
+        if (query.filter == null || passes(row, query.filter!)) row,
+    ];
+    if (query.sort case final sort?) {
+      Comparable<Object?>? key(BridgeRow row) {
+        final cell = cellOf(row, sort.field);
+        return cell == null
+            ? null
+            : (cell.kind == BridgeCellKind.number
+                      ? cell.number
+                      : cell.text ?? '')
+                  as Comparable<Object?>;
+      }
+
+      final places = {for (final (at, row) in shown.indexed) row.id: at};
+      shown.sort((a, b) {
+        final order = switch ((key(a), key(b))) {
+          (null, null) => 0,
+          (null, _) => 1,
+          (_, null) => -1,
+          (final a?, final b?) =>
+            sort.descending ? b.compareTo(a) : a.compareTo(b),
+        };
+        return order != 0 ? order : places[a.id]!.compareTo(places[b.id]!);
+      });
+    }
+    return shown;
   }
 
   /// The name an attachment of `bytes` gets: its content, as the core names it by hash.

@@ -10,8 +10,8 @@ use automerge::{ActorId, AutoCommit, ObjType, ROOT, ReadDoc};
 use crate::history::Header;
 use crate::id::random_bytes;
 use crate::model::{
-    self, AREAS, BLOCK, BLOCKS, BOUNDARY, KIND, LANGUAGE, NAME, OWNER, PAGES, PARENT, SORT, STYLE,
-    TEXT, TITLE, VIEWS,
+    self, AREAS, BLOCK, BLOCKS, BOUNDARY, KIND, LANGUAGE, NAME, OWNER, PAGES, PARENT, ROW_FILTER,
+    ROW_SORT, SORT, STYLE, TEXT, TITLE, VIEWS,
 };
 use crate::order::Order;
 use crate::store::{Commit, Store, Write};
@@ -433,6 +433,12 @@ impl<S: Store> Workspace<S> {
                 value,
             } => self.write_set_cell(page, block, row, field, value),
             Mutation::RemoveView { page, view } => self.write_remove_view(page, view),
+            Mutation::SetViewSort { page, view, sort } => {
+                self.write_view_sort(page, view, sort.as_ref())
+            }
+            Mutation::SetViewFilter { page, view, filter } => {
+                self.write_view_filter(page, view, filter.as_ref())
+            }
         }
     }
 
@@ -879,6 +885,44 @@ impl<S: Store> Workspace<S> {
         Ok(written)
     }
 
+    fn write_view_sort(
+        &mut self,
+        page: &PageId,
+        view: &ViewId,
+        sort: Option<&database::Sort>,
+    ) -> Result<Written, Error> {
+        let (doc, order) = self.page(page)?;
+        let block = table_of(order, view)?;
+        if let Some(sort) = sort {
+            database::check_sort(doc, &block, sort)?;
+        }
+        put_setting(doc, view, ROW_SORT, sort)?;
+        order.set_sort(view, sort.cloned());
+        Ok(Written::new(
+            Document::Page(page.clone()),
+            Changed::Views(page.clone()),
+        ))
+    }
+
+    fn write_view_filter(
+        &mut self,
+        page: &PageId,
+        view: &ViewId,
+        filter: Option<&database::Filter>,
+    ) -> Result<Written, Error> {
+        let (doc, order) = self.page(page)?;
+        let block = table_of(order, view)?;
+        if let Some(filter) = filter {
+            database::check_filter(doc, &block, filter)?;
+        }
+        put_setting(doc, view, ROW_FILTER, filter)?;
+        order.set_filter(view, filter.cloned());
+        Ok(Written::new(
+            Document::Page(page.clone()),
+            Changed::Views(page.clone()),
+        ))
+    }
+
     /// Discards every uncommitted write, so a refused mutation leaves no trace.
     fn rollback(&mut self) {
         for loaded in self.docs.values_mut() {
@@ -977,6 +1021,34 @@ fn block_changed(page: &PageId, block: &BlockId, created: Option<Created>) -> Wr
     written
 }
 
+/// The Database Block `view` shows.
+fn table_of(order: &Order, view: &ViewId) -> Result<BlockId, Error> {
+    let shown = order.view(view).ok_or(Error::NotFound)?;
+    if shown.kind != BlockKind::Database {
+        return Err(Error::WrongKind);
+    }
+    Ok(shown.block.clone())
+}
+
+/// Stores a View's setting whole, so a merge keeps one device's and never mixes two.
+fn put_setting<T: serde::Serialize>(
+    doc: &mut AutoCommit,
+    view: &ViewId,
+    key: &str,
+    value: Option<&T>,
+) -> Result<(), Error> {
+    let entry = model::live(doc, VIEWS, view.as_str()).ok_or(Error::NotFound)?;
+    match value {
+        Some(value) => {
+            let json = serde_json::to_string(value).map_err(|_| Error::WrongKind)?;
+            doc.put(&entry, key, json)?;
+        }
+        None if doc.get(&entry, key)?.is_some() => doc.delete(&entry, key)?,
+        None => {}
+    }
+    Ok(())
+}
+
 /// Adds a View of `block` at the sort key `sort`.
 fn add_view(
     doc: &mut AutoCommit,
@@ -1004,6 +1076,8 @@ fn add_view(
         block: block.clone(),
         boundary: false,
         kind,
+        sort: None,
+        filter: None,
     };
     order.insert(sort, placed);
     Ok(view)

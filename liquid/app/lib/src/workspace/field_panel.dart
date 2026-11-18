@@ -28,7 +28,7 @@ IconData fieldKindIcon(BridgeFieldKind kind) => switch (kind) {
   BridgeFieldKind.file => LucideIcons.paperclip,
 };
 
-/// The panel + in a Table's header opens (approved Table View mockups, section 3): the
+/// The panel + in a Table's header opens: the
 /// field's name, then its kind. ↑↓ choose a kind, ⏎ or a click on a kind adds the field,
 /// esc closes the panel. A field without a name takes its kind's, as in Notion.
 class FieldPanel extends StatefulWidget {

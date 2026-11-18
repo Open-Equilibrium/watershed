@@ -5885,6 +5885,8 @@ impl SseDecode for crate::api::workspace::BridgeMutation {
             <Option<crate::api::database::BridgeFieldKind>>::sse_decode(deserializer);
         let mut var_color = <i64>::sse_decode(deserializer);
         let mut var_cell = <Option<crate::api::database::BridgeCell>>::sse_decode(deserializer);
+        let mut var_sort = <Option<crate::api::database::BridgeSort>>::sse_decode(deserializer);
+        let mut var_filter = <Option<crate::api::database::BridgeFilter>>::sse_decode(deserializer);
         let mut var_mediaType = <Option<String>>::sse_decode(deserializer);
         let mut var_attachment = <Option<String>>::sse_decode(deserializer);
         let mut var_drawingStyle =
@@ -5910,6 +5912,8 @@ impl SseDecode for crate::api::workspace::BridgeMutation {
             field_kind: var_fieldKind,
             color: var_color,
             cell: var_cell,
+            sort: var_sort,
+            filter: var_filter,
             media_type: var_mediaType,
             attachment: var_attachment,
             drawing_style: var_drawingStyle,
@@ -5929,26 +5933,28 @@ impl SseDecode for crate::api::workspace::BridgeMutationKind {
             3 => crate::api::workspace::BridgeMutationKind::AddTextBlock,
             4 => crate::api::workspace::BridgeMutationKind::EditText,
             5 => crate::api::workspace::BridgeMutationKind::RemoveView,
-            6 => crate::api::workspace::BridgeMutationKind::SplitTextBlock,
-            7 => crate::api::workspace::BridgeMutationKind::JoinTextBlock,
-            8 => crate::api::workspace::BridgeMutationKind::SetTextStyle,
-            9 => crate::api::workspace::BridgeMutationKind::SetSectionBoundary,
-            10 => crate::api::workspace::BridgeMutationKind::TurnIntoCode,
-            11 => crate::api::workspace::BridgeMutationKind::TurnIntoText,
-            12 => crate::api::workspace::BridgeMutationKind::SetCodeLanguage,
-            13 => crate::api::workspace::BridgeMutationKind::AddMediaBlock,
-            14 => crate::api::workspace::BridgeMutationKind::AddWhiteboardBlock,
-            15 => crate::api::workspace::BridgeMutationKind::SetDrawingStyle,
-            16 => crate::api::workspace::BridgeMutationKind::EditDrawing,
-            17 => crate::api::workspace::BridgeMutationKind::AddDatabaseBlock,
-            18 => crate::api::workspace::BridgeMutationKind::RenameDatabase,
-            19 => crate::api::workspace::BridgeMutationKind::AddField,
-            20 => crate::api::workspace::BridgeMutationKind::RenameField,
-            21 => crate::api::workspace::BridgeMutationKind::RemoveField,
-            22 => crate::api::workspace::BridgeMutationKind::AddOption,
-            23 => crate::api::workspace::BridgeMutationKind::AddRow,
-            24 => crate::api::workspace::BridgeMutationKind::RemoveRow,
-            25 => crate::api::workspace::BridgeMutationKind::SetCell,
+            6 => crate::api::workspace::BridgeMutationKind::SetViewSort,
+            7 => crate::api::workspace::BridgeMutationKind::SetViewFilter,
+            8 => crate::api::workspace::BridgeMutationKind::SplitTextBlock,
+            9 => crate::api::workspace::BridgeMutationKind::JoinTextBlock,
+            10 => crate::api::workspace::BridgeMutationKind::SetTextStyle,
+            11 => crate::api::workspace::BridgeMutationKind::SetSectionBoundary,
+            12 => crate::api::workspace::BridgeMutationKind::TurnIntoCode,
+            13 => crate::api::workspace::BridgeMutationKind::TurnIntoText,
+            14 => crate::api::workspace::BridgeMutationKind::SetCodeLanguage,
+            15 => crate::api::workspace::BridgeMutationKind::AddMediaBlock,
+            16 => crate::api::workspace::BridgeMutationKind::AddWhiteboardBlock,
+            17 => crate::api::workspace::BridgeMutationKind::SetDrawingStyle,
+            18 => crate::api::workspace::BridgeMutationKind::EditDrawing,
+            19 => crate::api::workspace::BridgeMutationKind::AddDatabaseBlock,
+            20 => crate::api::workspace::BridgeMutationKind::RenameDatabase,
+            21 => crate::api::workspace::BridgeMutationKind::AddField,
+            22 => crate::api::workspace::BridgeMutationKind::RenameField,
+            23 => crate::api::workspace::BridgeMutationKind::RemoveField,
+            24 => crate::api::workspace::BridgeMutationKind::AddOption,
+            25 => crate::api::workspace::BridgeMutationKind::AddRow,
+            26 => crate::api::workspace::BridgeMutationKind::RemoveRow,
+            27 => crate::api::workspace::BridgeMutationKind::SetCell,
             _ => unreachable!("Invalid variant for BridgeMutationKind: {}", inner),
         };
     }
@@ -6641,11 +6647,15 @@ impl SseDecode for crate::api::workspace::BridgeView {
         let mut var_block = <String>::sse_decode(deserializer);
         let mut var_boundary = <bool>::sse_decode(deserializer);
         let mut var_kind = <crate::api::workspace::BridgeBlockKind>::sse_decode(deserializer);
+        let mut var_sort = <Option<crate::api::database::BridgeSort>>::sse_decode(deserializer);
+        let mut var_filter = <Option<crate::api::database::BridgeFilter>>::sse_decode(deserializer);
         return crate::api::workspace::BridgeView {
             id: var_id,
             block: var_block,
             boundary: var_boundary,
             kind: var_kind,
+            sort: var_sort,
+            filter: var_filter,
         };
     }
 }
@@ -9049,6 +9059,8 @@ impl flutter_rust_bridge::IntoDart for crate::api::workspace::BridgeMutation {
             self.field_kind.into_into_dart().into_dart(),
             self.color.into_into_dart().into_dart(),
             self.cell.into_into_dart().into_dart(),
+            self.sort.into_into_dart().into_dart(),
+            self.filter.into_into_dart().into_dart(),
             self.media_type.into_into_dart().into_dart(),
             self.attachment.into_into_dart().into_dart(),
             self.drawing_style.into_into_dart().into_dart(),
@@ -9078,26 +9090,28 @@ impl flutter_rust_bridge::IntoDart for crate::api::workspace::BridgeMutationKind
             Self::AddTextBlock => 3.into_dart(),
             Self::EditText => 4.into_dart(),
             Self::RemoveView => 5.into_dart(),
-            Self::SplitTextBlock => 6.into_dart(),
-            Self::JoinTextBlock => 7.into_dart(),
-            Self::SetTextStyle => 8.into_dart(),
-            Self::SetSectionBoundary => 9.into_dart(),
-            Self::TurnIntoCode => 10.into_dart(),
-            Self::TurnIntoText => 11.into_dart(),
-            Self::SetCodeLanguage => 12.into_dart(),
-            Self::AddMediaBlock => 13.into_dart(),
-            Self::AddWhiteboardBlock => 14.into_dart(),
-            Self::SetDrawingStyle => 15.into_dart(),
-            Self::EditDrawing => 16.into_dart(),
-            Self::AddDatabaseBlock => 17.into_dart(),
-            Self::RenameDatabase => 18.into_dart(),
-            Self::AddField => 19.into_dart(),
-            Self::RenameField => 20.into_dart(),
-            Self::RemoveField => 21.into_dart(),
-            Self::AddOption => 22.into_dart(),
-            Self::AddRow => 23.into_dart(),
-            Self::RemoveRow => 24.into_dart(),
-            Self::SetCell => 25.into_dart(),
+            Self::SetViewSort => 6.into_dart(),
+            Self::SetViewFilter => 7.into_dart(),
+            Self::SplitTextBlock => 8.into_dart(),
+            Self::JoinTextBlock => 9.into_dart(),
+            Self::SetTextStyle => 10.into_dart(),
+            Self::SetSectionBoundary => 11.into_dart(),
+            Self::TurnIntoCode => 12.into_dart(),
+            Self::TurnIntoText => 13.into_dart(),
+            Self::SetCodeLanguage => 14.into_dart(),
+            Self::AddMediaBlock => 15.into_dart(),
+            Self::AddWhiteboardBlock => 16.into_dart(),
+            Self::SetDrawingStyle => 17.into_dart(),
+            Self::EditDrawing => 18.into_dart(),
+            Self::AddDatabaseBlock => 19.into_dart(),
+            Self::RenameDatabase => 20.into_dart(),
+            Self::AddField => 21.into_dart(),
+            Self::RenameField => 22.into_dart(),
+            Self::RemoveField => 23.into_dart(),
+            Self::AddOption => 24.into_dart(),
+            Self::AddRow => 25.into_dart(),
+            Self::RemoveRow => 26.into_dart(),
+            Self::SetCell => 27.into_dart(),
             _ => unreachable!(),
         }
     }
@@ -10065,6 +10079,8 @@ impl flutter_rust_bridge::IntoDart for crate::api::workspace::BridgeView {
             self.block.into_into_dart().into_dart(),
             self.boundary.into_into_dart().into_dart(),
             self.kind.into_into_dart().into_dart(),
+            self.sort.into_into_dart().into_dart(),
+            self.filter.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -10944,6 +10960,8 @@ impl SseEncode for crate::api::workspace::BridgeMutation {
         <Option<crate::api::database::BridgeFieldKind>>::sse_encode(self.field_kind, serializer);
         <i64>::sse_encode(self.color, serializer);
         <Option<crate::api::database::BridgeCell>>::sse_encode(self.cell, serializer);
+        <Option<crate::api::database::BridgeSort>>::sse_encode(self.sort, serializer);
+        <Option<crate::api::database::BridgeFilter>>::sse_encode(self.filter, serializer);
         <Option<String>>::sse_encode(self.media_type, serializer);
         <Option<String>>::sse_encode(self.attachment, serializer);
         <Option<crate::api::drawing::BridgeDrawingStyle>>::sse_encode(
@@ -10965,26 +10983,28 @@ impl SseEncode for crate::api::workspace::BridgeMutationKind {
                 crate::api::workspace::BridgeMutationKind::AddTextBlock => 3,
                 crate::api::workspace::BridgeMutationKind::EditText => 4,
                 crate::api::workspace::BridgeMutationKind::RemoveView => 5,
-                crate::api::workspace::BridgeMutationKind::SplitTextBlock => 6,
-                crate::api::workspace::BridgeMutationKind::JoinTextBlock => 7,
-                crate::api::workspace::BridgeMutationKind::SetTextStyle => 8,
-                crate::api::workspace::BridgeMutationKind::SetSectionBoundary => 9,
-                crate::api::workspace::BridgeMutationKind::TurnIntoCode => 10,
-                crate::api::workspace::BridgeMutationKind::TurnIntoText => 11,
-                crate::api::workspace::BridgeMutationKind::SetCodeLanguage => 12,
-                crate::api::workspace::BridgeMutationKind::AddMediaBlock => 13,
-                crate::api::workspace::BridgeMutationKind::AddWhiteboardBlock => 14,
-                crate::api::workspace::BridgeMutationKind::SetDrawingStyle => 15,
-                crate::api::workspace::BridgeMutationKind::EditDrawing => 16,
-                crate::api::workspace::BridgeMutationKind::AddDatabaseBlock => 17,
-                crate::api::workspace::BridgeMutationKind::RenameDatabase => 18,
-                crate::api::workspace::BridgeMutationKind::AddField => 19,
-                crate::api::workspace::BridgeMutationKind::RenameField => 20,
-                crate::api::workspace::BridgeMutationKind::RemoveField => 21,
-                crate::api::workspace::BridgeMutationKind::AddOption => 22,
-                crate::api::workspace::BridgeMutationKind::AddRow => 23,
-                crate::api::workspace::BridgeMutationKind::RemoveRow => 24,
-                crate::api::workspace::BridgeMutationKind::SetCell => 25,
+                crate::api::workspace::BridgeMutationKind::SetViewSort => 6,
+                crate::api::workspace::BridgeMutationKind::SetViewFilter => 7,
+                crate::api::workspace::BridgeMutationKind::SplitTextBlock => 8,
+                crate::api::workspace::BridgeMutationKind::JoinTextBlock => 9,
+                crate::api::workspace::BridgeMutationKind::SetTextStyle => 10,
+                crate::api::workspace::BridgeMutationKind::SetSectionBoundary => 11,
+                crate::api::workspace::BridgeMutationKind::TurnIntoCode => 12,
+                crate::api::workspace::BridgeMutationKind::TurnIntoText => 13,
+                crate::api::workspace::BridgeMutationKind::SetCodeLanguage => 14,
+                crate::api::workspace::BridgeMutationKind::AddMediaBlock => 15,
+                crate::api::workspace::BridgeMutationKind::AddWhiteboardBlock => 16,
+                crate::api::workspace::BridgeMutationKind::SetDrawingStyle => 17,
+                crate::api::workspace::BridgeMutationKind::EditDrawing => 18,
+                crate::api::workspace::BridgeMutationKind::AddDatabaseBlock => 19,
+                crate::api::workspace::BridgeMutationKind::RenameDatabase => 20,
+                crate::api::workspace::BridgeMutationKind::AddField => 21,
+                crate::api::workspace::BridgeMutationKind::RenameField => 22,
+                crate::api::workspace::BridgeMutationKind::RemoveField => 23,
+                crate::api::workspace::BridgeMutationKind::AddOption => 24,
+                crate::api::workspace::BridgeMutationKind::AddRow => 25,
+                crate::api::workspace::BridgeMutationKind::RemoveRow => 26,
+                crate::api::workspace::BridgeMutationKind::SetCell => 27,
                 _ => {
                     unimplemented!("");
                 }
@@ -11521,6 +11541,8 @@ impl SseEncode for crate::api::workspace::BridgeView {
         <String>::sse_encode(self.block, serializer);
         <bool>::sse_encode(self.boundary, serializer);
         <crate::api::workspace::BridgeBlockKind>::sse_encode(self.kind, serializer);
+        <Option<crate::api::database::BridgeSort>>::sse_encode(self.sort, serializer);
+        <Option<crate::api::database::BridgeFilter>>::sse_encode(self.filter, serializer);
     }
 }
 

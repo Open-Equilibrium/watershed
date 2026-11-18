@@ -9,7 +9,7 @@ import '../theme/tokens.g.dart';
 import 'table_cells.dart';
 
 /// The color a new option of `field` takes: the one after its last option's, wrapping
-/// after the ten tag colors (approved Table View mockups, section 8).
+/// after the ten tag colors.
 int nextColor(BridgeField field) =>
     ((field.options.lastOrNull?.color ?? -1) + 1) % 10;
 
@@ -20,7 +20,7 @@ List<BridgeOption> optionsFor(BridgeField field, String typed) => [
     if (option.name.toLowerCase().contains(typed.trim().toLowerCase())) option,
 ];
 
-/// A select cell's picker (approved Table View mockups, section 4): typing filters the
+/// A select cell's picker: typing filters the
 /// options, ↑↓ choose, ⏎ or a click picks one, or creates the typed name in the next color
 /// when no option holds it; esc closes it and keeps the value, ⇥ keeps it and goes on.
 class SelectPicker extends StatefulWidget {
@@ -299,7 +299,7 @@ DateTime? parseDay(String typed, String locale) {
   return null;
 }
 
-/// A date cell's picker (approved Table View mockups, section 4): its field holds the day
+/// A date cell's picker: its field holds the day
 /// as typed, a calendar below shows its month. ↑↓ choose the day after or before, ⏎, ⇥ and
 /// a click outside write what is typed, a click on a day writes it, and Clear empties the
 /// cell; esc closes it and keeps the value.

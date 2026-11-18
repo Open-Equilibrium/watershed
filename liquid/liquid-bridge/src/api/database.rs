@@ -169,6 +169,32 @@ pub struct BridgeFilter {
     pub value: Option<BridgeCell>,
 }
 
+impl BridgeSort {
+    pub(crate) fn of(sort: &Sort) -> Self {
+        Self {
+            field: sort.field.to_string(),
+            descending: sort.descending,
+        }
+    }
+}
+
+impl BridgeFilter {
+    pub(crate) fn of(filter: &Filter) -> Self {
+        let text = |text: &str| BridgeCell::of(&Cell::Text(text.to_string()));
+        let (matches, value) = match &filter.matches {
+            Match::Empty => (BridgeMatch::Empty, None),
+            Match::NotEmpty => (BridgeMatch::NotEmpty, None),
+            Match::Is(cell) => (BridgeMatch::Is, Some(BridgeCell::of(cell))),
+            Match::Contains(part) => (BridgeMatch::Contains, Some(text(part))),
+        };
+        Self {
+            field: filter.field.to_string(),
+            matches,
+            value,
+        }
+    }
+}
+
 /// A Database Block's name and fields.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BridgeDatabase {
