@@ -37,7 +37,8 @@ pub use database::{
 };
 pub use drawing::{
     Content, Drawing, DrawingStyle, Element, ElementChange, Frame, InkColor, MAX_BOARD_POINTS,
-    MAX_DOC_PAGES, MAX_ELEMENT_TEXT, MAX_ELEMENTS, MAX_POINTS, Pen, Shape,
+    MAX_DOC_PAGES, MAX_DRAWING_ELEMENTS, MAX_DRAWING_POINTS, MAX_ELEMENT_TEXT, MAX_ELEMENTS,
+    MAX_POINTS, Pen, Shape,
 };
 pub use history::{Action, Document, Operation, Permission};
 pub use id::{
