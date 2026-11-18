@@ -27,6 +27,8 @@ flowchart TD
 
 The package manifests are the executable dependency source of truth. Test-only dependencies are omitted. `flow-agent-executor` is the companion binary launched through the protocol, not a library dependency of Flow Agent core.
 
+Meta-Harness crates: `meta-harness-core` holds the service and its API, the client that `meta` and Liquid use, remote access and host links, the central configuration, the pinned T3 Code server and its client protocol, and the host, thread and Git model. `meta-harness-cli` is `meta`: the service, configuration, remote access, host links and the login service.
+
 ## Flow Agent runtime responsibilities
 
 These are major control/data paths, not an exhaustive Rust module dependency graph or public embedding API.

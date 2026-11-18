@@ -4,13 +4,7 @@ Watershed is an **AGPL/free-software AI-native work platform** for reusable, mea
 
 ## Project status
 
-Nothing is released yet; status is canonical in [PLAN.md](PLAN.md).
-
-- **Flow Agent:** [trusted Tools with Flow-owned write protection](SECURITY.md#flow-agent-security-contract) are implemented on Linux x86_64 and macOS ARM64; native acceptance, installation and closeout remain ([M1.2](PLAN.md#m12--flow-owned-write-protection)).
-- **Meta-Harness:** the `meta` command, its service on a pinned T3 Code server and the central configuration for Claude Code and Codex run on macOS and Linux, with remote access and host links over Tailscale (ADR-0299); host links through the Liquid account and the rest of [M2](PLAN.md#m2--meta-harness-mvp) remain.
-- **Liquid:** a macOS app in development with the agent surface on T3 Code through Meta-Harness, its Git integration and the local Workspace with Pages and Tables ([M3a](PLAN.md#m3a--local-workspace-foundation)).
-
-[PLATFORMS.md](PLATFORMS.md) defines each product's native release targets, current capabilities and required verification; compilation alone is not a support claim.
+Nothing is released yet. Milestones and open work: [PLAN.md](PLAN.md). Each product's release targets, current capabilities and required verification: [PLATFORMS.md](PLATFORMS.md); compilation alone is not a support claim.
 
 ## Repo layout
 
@@ -96,13 +90,7 @@ For productive execution, initialize the Global Flow home with `flow init`, conf
 
 Two logins exist, `openai-codex` (ChatGPT subscription) and `openai-compatible` (base URL and API key); [PROTOCOL.md](PROTOCOL.md#m11-openai-compatible-endpoint-provider) states what each relies on and which endpoints are listed as supported.
 
-The Global Flow home and its configuration authority are defined in [PROTOCOL.md](PROTOCOL.md#local-run-storage-and-m11-conversation-trees).
-
-The complete command, storage and Executor contract is in [`PROTOCOL.md`](PROTOCOL.md). Flow-owned write protection is not general filesystem, network or hostile-Tool containment.
-
-## Product boundaries
-
-Sequencing and the MVP project-code VCS boundary are canonical in [PLAN.md](PLAN.md). Surface details live in the [Flow Agent](docs/concept/V-Spec_FlowAgent.html), [Meta-Harness](docs/concept/V-Spec_MetaHarness.html), and [Liquid](docs/concept/V-Spec_Liquid.html) V-Specs; events are defined in [PROTOCOL.md](PROTOCOL.md).
+The Global Flow home, its configuration authority and the complete command, storage and Executor contract are in [`PROTOCOL.md`](PROTOCOL.md). Flow-owned write protection is not general filesystem, network or hostile-Tool containment.
 
 ## Topic index
 
@@ -123,6 +111,7 @@ Each topic's canonical home; other files link there.
 | Meta-Harness service, its API and `meta` | [Meta-Harness V-Spec](docs/concept/V-Spec_MetaHarness.html#surfaces); trust: [SECURITY.md](SECURITY.md#meta-harness-service-and-configuration) |
 | Installing Meta-Harness | [meta-harness/README.md](meta-harness/README.md#install) |
 | Remote access, pairing and host links | commands: [meta-harness/README.md](meta-harness/README.md#remote-access-and-host-links); mechanism: [Meta-Harness V-Spec](docs/concept/V-Spec_MetaHarness.html#orchestration); trust: [SECURITY.md](SECURITY.md#meta-harness-service-and-configuration) |
+| Moving a session to another host | mechanism: [Meta-Harness V-Spec](docs/concept/V-Spec_MetaHarness.html#host-move); trust: [SECURITY.md](SECURITY.md#meta-harness-service-and-configuration) |
 | Orchestration of agents | [Meta-Harness V-Spec](docs/concept/V-Spec_MetaHarness.html#orchestration) |
 | Durability | [Meta-Harness V-Spec](docs/concept/V-Spec_MetaHarness.html#durability) |
 | Session record export | [Meta-Harness V-Spec](docs/concept/V-Spec_MetaHarness.html#boundary) |
@@ -146,6 +135,6 @@ Each topic's canonical home; other files link there.
 
 ## License
 
-Watershed-authored files are free software, licensed under the GNU Affero General Public License, version 3 (SPDX-License-Identifier: `AGPL-3.0-only`) unless otherwise stated. The full license text is in [LICENSE](LICENSE). Vendored third-party material retains its own license and is listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). The project's posture is transparency, self-hostability and user freedom; there are no proprietary tiers or open-core commercialization claims in these docs.
+Watershed-authored files are free software, licensed under the GNU Affero General Public License, version 3 (SPDX-License-Identifier: `AGPL-3.0-only`) unless otherwise stated. The full license text is in [LICENSE](LICENSE). Vendored third-party material retains its own license and is listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). Contributions follow [CONTRIBUTING.md](CONTRIBUTING.md).
 
-Copyright (C) 2026 Open-Equilibrium. Project owner: **Open-Equilibrium**. Contributions are accepted under the **Developer Certificate of Origin** (DCO); no CLA is required. See [CONTRIBUTING.md](CONTRIBUTING.md).
+Copyright (C) 2026 Open-Equilibrium.

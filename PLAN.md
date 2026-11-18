@@ -4,13 +4,13 @@ Open implementation work per milestone, with deliverables and a Definition of Do
 
 ## MVP boundary
 
-The first MVP is **Flow Agent as a CLI-only harness**. It runs inside normal Git projects but does not own project history, auto-commit, branch management or any Watershed-specific **project-code** VCS engine. This is distinct from Liquid's internal **workspace** action history/VCS (over Liquid's own workspace data), which is in scope for the Liquid MVP (M3), and from the Git integration for agent projects, which T3 Code runs on Meta-Harness's host and Liquid presents, including its per-turn checkpoints (ADR-0282).
+The first MVP is **Flow Agent as a CLI-only harness**. It runs inside normal Git projects but does not own project history, auto-commit, branch management or any Watershed-specific **project-code** VCS engine. Liquid's workspace history (M3) and the Git integration for agent projects (ADR-0282) are not project-code VCS: see [SECURITY.md](SECURITY.md#mvp-vcs-boundary).
 
 ## Sequencing and adoption
 
 Build the shared substrate, then Flow Agent, Meta-Harness and Liquid. This dependency/order-of-risk sequence validates execution, then multi-agent orchestration, then the integrated workspace without letting the broadest surface block earlier validation. All three remain independently usable layers of one platform; integration is canonical in `VISION.md`.
 
-The initial adoption wedge is technical teams that need reusable, measurable, and reversible AI-agent workflows. Do not attempt separate adoption motions for all three layers before the Flow Agent and Meta-Harness wedges are validated. Long-term architecture must remain valid whether inference is local or remote: the provisioned core path is offline-capable, each Flow's model/runtime requirements resolve through a device-local Runtime binding, and cross-device continuation creates Conversation branches instead of transferring live host ownership. Canonical integration detail is in `VISION.md`.
+The initial adoption wedge is technical teams that need reusable, measurable, and reversible AI-agent workflows. Do not attempt separate adoption motions for all three layers before the Flow Agent and Meta-Harness wedges are validated.
 
 ## Milestones
 
@@ -30,6 +30,7 @@ M2 delivers Meta-Harness as a **self-contained, host-scoped headless control pla
 
 - Meta-Harness CLI run, session, schedule and metrics commands.
 - Host links through the Liquid account and an end-to-end relay (ADR-0285); Tailscale carries them until then (ADR-0299).
+- Moving a session whose host is offline, through the account's sync (ADR-0284, ADR-0289); until then a session moves only while both hosts answer (ADR-0308).
 - API/protocol surface for Liquid and BYOA: session registry, live event and transcript streams, artifact/log/handoff queries, config read/write proposals, agent schedule/trigger control, answers to a harness's own approvals and questions, revert.
 - Central configuration for Flow Agent, which receives only its global authority and explicit Flows rather than a project-local config layer; device-local Runtime bindings remain owned by the execution host. Liquid edits the configuration across devices after sync and approved mockups.
 - Control plane: session registry, routing, task state, attention state and agent schedule/trigger skeleton.
@@ -58,7 +59,6 @@ The macOS Liquid app runs its agent sessions on a pinned T3 Code server through 
 
 #### M3a — Local Workspace foundation
 
-- KPI review of the M3a Workspace (second round, 2026-11-16): no Blocker or Major left. Minors fixed where their code is touched: `Text("")` stored as a value, open failures reported as a wrong key, a failed commit reusing its writer's sequence, number separators parsed loosely, quick ticks matched by value, a false warning after typing during a join or after other writes that change nothing (a number typed as before, spaces in an empty cell, `---` twice), modified keys right after ⏎, a reread lost after a failed read, numbered-list style reads, quitting before a second write that follows an await, a crash-durability test after an unclean exit, `SECURITY.md` promising the macOS keychain refuses other programs (it asks the person), a failed delete of the old path-named key entry blocking every open, the key's hex copy left in memory, change counts kept for resources no one follows, the slash command menu adding only Tables, `FakeWorkspace` re-implementing the core with no Dart test against the real bridge ([D-110](docs/decisions/open-decisions.html#d-110)), bridge tests repeating core tests, the read window's size and the Page a mutation touches known outside the core, and `SplitTextBlock`'s bridge doc missing the start-of-Block rule.
 - Linux, Windows and Android follow with their clients, each keeping the database key in its operating system's keystore (ADR-0216); `liquid-core`'s CI, which runs Automerge on Linux and macOS, adds Windows and Android with them (ADR-0238).
 - Delivery order, one PR each: Views on several Pages ([D-112](docs/decisions/open-decisions.html#d-112)), with Board, Calendar, grouping, copy and the deletion cascade; Arrange mode; PowerBar, with its FTS5 index; Connections and formulas, with the Chart and Formula Blocks that depend on them; Automations; Roles and protection; History, revert and Restore version; Sources, Page icons, Markdown import and export, and Settings, History and Automations as dialogs.
 - Input-to-presented-frame latency while typing in a long Page ([PERFORMANCE.md](PERFORMANCE.md#liquid)) is measured in the app with the History slice, which groups keystrokes.
@@ -74,12 +74,10 @@ The macOS Liquid app runs its agent sessions on a pinned T3 Code server through 
 - Date cells hold days only (ADR-0242); the Inbox and tasks slice decides how a time is stored, as the wall clock or as an instant with its zone, as Notion does.
 - The app's structure (ADR-0239, ADR-0241): rail, tabs with splits, Chats as Blocks, the Inbox and Templates; mockups for implementation and their place in this order follow. Calls and meetings come after the core works.
 - Flutter clients over the Rust core follow the [client architecture](docs/concept/liquid-client-architecture.md) invariants (ADR-0182).
-- Pages, Blocks, Views, Sources, Connections, Automations, Roles, History and settings.
-- Explorer with Pages and Sources as peer navigation entries; Page templates create use-case compositions rather than new Page Types.
+- Sources as peer Explorer entries; Page templates create use-case compositions rather than new Page Types.
 - PowerBar for finding Workspace objects, creating Blocks and invoking permitted Workspace actions.
-- Blank Page and deterministic first-action creation: typing creates a Text Block, `/` opens slash commands, paste/drop/drawing select matching Blocks, and text shortcuts format inside Text Blocks.
 - Content-first flow followed by explicit responsive Arrange mode. Mobile retains every Block; complex Views open focused surfaces. Safe compact OS widgets remain post-MVP.
-- Built-in Text, Database, Chart, Code, Formula, Media/Embed and Whiteboard Blocks.
+- Chart, Formula, Whiteboard and Embed Blocks.
 - Synchronized multi-Page Views over one canonical Block. Duplicate creates a new Block; deleting the last View deletes the Block, its Connections and owned Automations in one reversible Action, while independent dependent Automations are disabled for repair.
 - Connections/formulas for direct logic and Workspace Automations for when/if/then logic.
 - Allow-only Roles with default-denied unlisted access; explicit deny rules are post-MVP.

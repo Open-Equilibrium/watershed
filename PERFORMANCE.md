@@ -47,8 +47,7 @@ The [M1.1 limits matrix](flow-agent/benchmarks/M1_1_BUDGETS.md) owns every fixed
 
 ### M1.2 Executor evidence
 
-The [M1.2 startup evidence](flow-agent/benchmarks/M1_2_STARTUP_EVIDENCE.md) owns the fixed one-noop workload, measured interval and report contract. Native Linux and macOS hosts retain separate, unadjusted `executor_elapsed_ns` distributions through preparation, readiness, the one-shot Executor/Tool lifecycle and exact result/receipt validation, with mandatory Flow-owned write protection under the [accepted security contract](SECURITY.md#flow-agent-security-contract). Never pool their observations or substitute one host's evidence for the other. Review avoidable probe, request, descriptor and process-start work without weakening readiness or protection; Custom Executor performance is administrator-owned. Bounded waiting does not prove hostile-descendant cleanup.
-
+The [M1.2 startup evidence](flow-agent/benchmarks/M1_2_STARTUP_EVIDENCE.md) owns the fixed one-noop workload, measured interval and report contract. Native Linux and macOS hosts retain separate, unadjusted `executor_elapsed_ns` distributions through preparation, readiness, the one-shot Executor/Tool lifecycle and exact result/receipt validation, with mandatory Flow-owned write protection under the [accepted security contract](SECURITY.md#flow-agent-security-contract). Never pool their observations or substitute one host's evidence for the other. Review avoidable probe, request, descriptor and process-start work without weakening readiness or protection; Custom Executor performance is administrator-owned.
 ## Meta-Harness
 
 Control and monitoring should feel immediate when they are not waiting on a model, Tool or network. Keep configuration resolution incremental, event normalization bounded and AgentPulse ingestion proportional to active sessions. Add fixed observational workloads with each implemented surface that introduces a meaningful cost center.
