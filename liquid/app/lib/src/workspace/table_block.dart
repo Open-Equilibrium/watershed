@@ -580,7 +580,7 @@ class _TableBlockState extends State<TableBlock> implements CellDrop {
         field: field,
       ),
     ),
-    confirm: (field) => confirmDeleteField(context, field, _rows.count),
+    confirm: (field) => confirmDeleteField(context, field, _allRows),
   )..addListener(_menusChanged);
 
   /// Writes a change to a field and reads the Table again; a refused one shows on the

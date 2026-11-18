@@ -238,4 +238,38 @@ void main() {
     await tester.pumpAndSettle();
     expect(view().filter, isNull);
   });
+
+  testWidgets('deleting a field counts every row, not those shown', (
+    tester,
+  ) async {
+    await kit.show(tester, [TablePart(rows)]);
+    await filterHome(tester);
+    await tap(tester, kit.inTable(find.text('Amount')));
+    await tap(tester, find.text('Delete field'));
+    expect(find.textContaining('all 3 rows'), findsOneWidget);
+  });
+
+  testWidgets('leaving a change unfinished keeps the filter', (tester) async {
+    await kit.show(tester, [TablePart(rows)]);
+    await tap(tester, find.byKey(const Key('table filter')));
+    await tap(tester, find.byKey(const Key('filter match')));
+    await tap(tester, menuText('is empty'));
+    final saved = view().filter;
+    expect(saved?.matches, BridgeMatch.empty);
+    await tap(tester, find.byKey(const Key('filter match')));
+    await tap(tester, menuText('contains'));
+    await tester.tapAt(Offset.zero);
+    await tester.pumpAndSettle();
+    expect(view().filter?.matches, BridgeMatch.empty);
+  });
+
+  testWidgets('esc closes the menu after its value field went', (tester) async {
+    await kit.show(tester, [TablePart(rows)]);
+    await tap(tester, find.byKey(const Key('table filter')));
+    await tap(tester, find.byKey(const Key('filter field')));
+    await tap(tester, menuText('Category'));
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('table query menu')), findsNothing);
+  });
 }

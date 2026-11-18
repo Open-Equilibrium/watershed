@@ -196,10 +196,18 @@ class _PanelState extends State<_Panel> {
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted && widget.takesKeys) _focus.requestFocus();
-    });
+    _takeKeys();
   }
+
+  @override
+  void didUpdateWidget(_Panel old) {
+    super.didUpdateWidget(old);
+    if (!old.takesKeys) _takeKeys();
+  }
+
+  void _takeKeys() => WidgetsBinding.instance.addPostFrameCallback((_) {
+    if (mounted && widget.takesKeys) _focus.requestFocus();
+  });
 
   @override
   void dispose() {
@@ -596,10 +604,17 @@ class _FilterMenuState extends State<FilterMenu> {
     }
   }
 
-  /// Writes what is typed; emptying the value of this field's filter removes it.
+  /// Writes what is typed; emptying the value the filter held removes it, and an
+  /// unfinished choice leaves it alone.
   void _writeTyped() {
     if (_typed.text.trim().isNotEmpty) return _commit();
-    if (widget.filter?.field == _field.id) widget.onSet(null);
+    final saved = widget.filter;
+    if (saved != null &&
+        saved.value != null &&
+        saved.field == _field.id &&
+        saved.matches == _match) {
+      widget.onSet(null);
+    }
   }
 
   void _submit() {
