@@ -628,9 +628,12 @@ class _FilterMenuState extends State<FilterMenu> {
     return GestureDetector(
       key: key,
       behavior: HitTestBehavior.opaque,
-      onTap: () => setState(
-        () => _choosing = _choosing == choosing ? _Choosing.value : choosing,
-      ),
+      onTap: () {
+        setState(
+          () => _choosing = _choosing == choosing ? _Choosing.value : choosing,
+        );
+        _focusValue();
+      },
       child: Container(
         height: 26,
         padding: const EdgeInsets.symmetric(horizontal: WsMetrics.space2),
@@ -747,7 +750,7 @@ class _FilterMenuState extends State<FilterMenu> {
     }
     final matches = _matchesOf(_field.kind);
     return _Panel(
-      takesKeys: !_types,
+      takesKeys: !_types || _choosing != _Choosing.value,
       onEscape: () {
         _dropTyped = true;
         widget.onClose();

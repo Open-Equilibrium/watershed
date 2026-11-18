@@ -272,4 +272,26 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('table query menu')), findsNothing);
   });
+
+  testWidgets('esc closes the menu while a choice is open', (tester) async {
+    await kit.show(tester, [TablePart(rows)]);
+    await tap(tester, find.byKey(const Key('table filter')));
+    await tap(tester, find.byKey(const Key('filter field')));
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('table query menu')), findsNothing);
+  });
+
+  testWidgets('closing a choice gives the keys back to the value', (
+    tester,
+  ) async {
+    await kit.show(tester, [TablePart(rows)]);
+    await tap(tester, find.byKey(const Key('table filter')));
+    await tap(tester, find.byKey(const Key('filter match')));
+    await tap(tester, find.byKey(const Key('filter match')));
+    final value = tester.widget<TextField>(
+      find.byKey(const Key('filter value')),
+    );
+    expect(value.focusNode!.hasFocus, isTrue);
+  });
 }
