@@ -17,6 +17,11 @@ import 'fake_backend.dart';
 
 const info = SessionInfo(project: 'acme-api');
 
+Future<void> tap(WidgetTester tester, Finder finder) async {
+  await tester.tap(finder);
+  await tester.pumpAndSettle();
+}
+
 void main() {
   test('appearance follows the system at the default size until chosen', () {
     const fresh = Appearance();
@@ -53,20 +58,41 @@ void main() {
     );
   });
 
+  Future<void> pumpApp(
+    WidgetTester tester, {
+    SessionState? state,
+    AppearanceController? appearance,
+    DiffSettingsController? diff,
+    SessionCardSettingsController? cards,
+  }) async {
+    await tester.binding.setSurfaceSize(const Size(1600, 900));
+    await tester.pumpWidget(
+      LiquidApp(
+        launch: ValueNotifier(
+          Launch.session(state ?? SessionState(FakeProject()), info),
+        ),
+        appearance: appearance ?? AppearanceController(),
+        diffSettings: diff,
+        cardSettings: cards,
+      ),
+    );
+    await tester.pumpAndSettle();
+  }
+
+  Future<void> openSettings(
+    WidgetTester tester,
+    AppearanceController appearance, [
+    DiffSettingsController? diff,
+  ]) async {
+    await pumpApp(tester, appearance: appearance, diff: diff);
+    await tap(tester, find.byTooltip('Settings'));
+  }
+
   testWidgets(
     'the sidebar\'s gear opens Settings, where theme and text size apply at once',
     (tester) async {
-      await tester.binding.setSurfaceSize(const Size(1600, 900));
       final appearance = AppearanceController();
-      await tester.pumpWidget(
-        LiquidApp(
-          launch: ValueNotifier(
-            Launch.session(SessionState(FakeProject()), info),
-          ),
-          appearance: appearance,
-        ),
-      );
-      await tester.pumpAndSettle();
+      await pumpApp(tester, appearance: appearance);
       double sidebar() => tester.getRect(find.byType(Sidebar)).width;
       expect(sidebar(), WsMetrics.widthSide, reason: 'the default size');
       expect(
@@ -75,17 +101,14 @@ void main() {
         reason: 'sidebar rows at the default size',
       );
 
-      await tester.tap(find.byTooltip('Settings'));
-      await tester.pumpAndSettle();
+      await tap(tester, find.byTooltip('Settings'));
       expect(find.text('Appearance'), findsWidgets);
-      await tester.tap(find.text('Dark'));
-      await tester.pumpAndSettle();
+      await tap(tester, find.text('Dark'));
       expect(
         Theme.of(tester.element(find.byType(Sidebar))).brightness,
         Brightness.dark,
       );
-      await tester.tap(find.text('Large'));
-      await tester.pumpAndSettle();
+      await tap(tester, find.text('Large'));
       expect(
         sidebar(),
         closeTo(WsMetrics.widthSide * 16 / 14, 1),
@@ -98,20 +121,9 @@ void main() {
   testWidgets(
     'Settings → Appearance sets the thread details rows the card menu sets',
     (tester) async {
-      await tester.binding.setSurfaceSize(const Size(1600, 900));
       final cards = SessionCardSettingsController();
-      await tester.pumpWidget(
-        LiquidApp(
-          launch: ValueNotifier(
-            Launch.session(SessionState(FakeProject()), info),
-          ),
-          appearance: AppearanceController(),
-          cardSettings: cards,
-        ),
-      );
-      await tester.pumpAndSettle();
-      await tester.tap(find.byTooltip('Settings'));
-      await tester.pumpAndSettle();
+      await pumpApp(tester, cards: cards);
+      await tap(tester, find.byTooltip('Settings'));
 
       expect(find.text('Thread details'), findsOneWidget);
       expect(
@@ -124,11 +136,12 @@ void main() {
         find.bySemanticsLabel('Thread details: 9 of 11 on'),
         findsOneWidget,
       );
-      await tester.tap(find.text('9 of 11 on'));
-      await tester.pumpAndSettle();
+      await tap(tester, find.text('9 of 11 on'));
       expect(find.text('Show in thread details'), findsOneWidget);
-      await tester.tap(find.widgetWithText(CheckboxMenuButton, 'Usage limits'));
-      await tester.pumpAndSettle();
+      await tap(
+        tester,
+        find.widgetWithText(CheckboxMenuButton, 'Usage limits'),
+      );
 
       expect(cards.value.shows(CardItem.usage), isTrue);
       expect(find.text('10 of 11 on'), findsOneWidget);
@@ -164,18 +177,10 @@ void main() {
   testWidgets('says in the status bar when settings could not be saved', (
     tester,
   ) async {
-    await tester.binding.setSurfaceSize(const Size(1600, 900));
     final appearance = AppearanceController(const Appearance(), _Disk());
     final diff = DiffSettingsController(const DiffSettings(), _Disk());
     final state = SessionState(FakeProject());
-    await tester.pumpWidget(
-      LiquidApp(
-        launch: ValueNotifier(Launch.session(state, info)),
-        appearance: appearance,
-        diffSettings: diff,
-      ),
-    );
-    await tester.pumpAndSettle();
+    await pumpApp(tester, state: state, appearance: appearance, diff: diff);
     await appearance.change(const Appearance(theme: ThemeChoice.dark));
     await diff.change(const DiffSettings(layout: DiffLayout.split));
     await tester.pumpAndSettle();
@@ -188,27 +193,6 @@ void main() {
     );
     expect(appearance.value.theme, ThemeChoice.dark, reason: 'still applies');
   });
-
-  /// Opens Settings in a session with `appearance` and `diff` kept as they are.
-  Future<void> openSettings(
-    WidgetTester tester,
-    AppearanceController appearance, [
-    DiffSettingsController? diff,
-  ]) async {
-    await tester.binding.setSurfaceSize(const Size(1600, 900));
-    await tester.pumpWidget(
-      LiquidApp(
-        launch: ValueNotifier(
-          Launch.session(SessionState(FakeProject()), info),
-        ),
-        appearance: appearance,
-        diffSettings: diff,
-      ),
-    );
-    await tester.pumpAndSettle();
-    await tester.tap(find.byTooltip('Settings'));
-    await tester.pumpAndSettle();
-  }
 
   testWidgets(
     'a failed save is still shown after another agent host is shown',
@@ -225,10 +209,8 @@ void main() {
       surface.value = Launch.session(SessionState(FakeProject()), info);
       await tester.pumpAndSettle();
 
-      await tester.tap(find.byTooltip('Settings'));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('Dark'));
-      await tester.pumpAndSettle();
+      await tap(tester, find.byTooltip('Settings'));
+      await tap(tester, find.text('Dark'));
 
       expect(
         find.text('Could not save the appearance: disk full'),
@@ -242,18 +224,15 @@ void main() {
   ) async {
     final appearance = AppearanceController(const Appearance(), _Disk());
     await openSettings(tester, appearance);
-    await tester.tap(find.text('Dark'));
-    await tester.pumpAndSettle();
+    await tap(tester, find.text('Dark'));
 
     final notice = find.text('Could not save the appearance: disk full');
     expect(notice, findsOneWidget);
     expect(appearance.value.theme, ThemeChoice.dark, reason: 'still applies');
-    await tester.tap(find.text('Shortcuts'));
-    await tester.pumpAndSettle();
+    await tap(tester, find.text('Shortcuts'));
     expect(notice, findsOneWidget, reason: 'whichever section is open');
 
-    await tester.tap(find.byTooltip('Dismiss'));
-    await tester.pumpAndSettle();
+    await tap(tester, find.byTooltip('Dismiss'));
     expect(notice, findsNothing);
   });
 
@@ -262,8 +241,7 @@ void main() {
   ) async {
     final appearance = AppearanceController(const Appearance(), _Disk());
     await openSettings(tester, appearance);
-    await tester.tap(find.text('Dark'));
-    await tester.pumpAndSettle();
+    await tap(tester, find.text('Dark'));
 
     await tester.sendKeyEvent(LogicalKeyboardKey.escape);
     await tester.pumpAndSettle();
@@ -281,8 +259,7 @@ void main() {
       _Disk(failing: false),
     );
     await openSettings(tester, appearance, diff);
-    await tester.tap(find.text('Dark'));
-    await tester.pumpAndSettle();
+    await tap(tester, find.text('Dark'));
 
     final notice = find.text('Could not save the appearance: disk full');
     await diff.change(const DiffSettings(layout: DiffLayout.split));
@@ -290,13 +267,11 @@ void main() {
     expect(notice, findsOneWidget, reason: 'another settings saved');
 
     disk.failing = false;
-    await tester.tap(find.text('Light'));
-    await tester.pumpAndSettle();
+    await tap(tester, find.text('Light'));
     expect(notice, findsNothing);
   });
 }
 
-/// A settings file on a full disk, which saves again once `failing` is cleared.
 class _Disk extends SettingsFile {
   _Disk({this.failing = true}) : super(File('unused'));
 

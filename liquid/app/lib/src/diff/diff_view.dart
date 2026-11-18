@@ -16,16 +16,11 @@ import 'revert_dialog.dart';
 import 'turn_header.dart';
 import 'turn_scope.dart';
 
-/// Keys of the Diff panel, for the status bar.
 String diffKeys() =>
     '${Fixed.turnMenu.display} turn · ${Fixed.previousOrNextFile.display} file · '
     '${Fixed.foldFolder.display} folder · ${Fixed.previousOrNextHunk.display} hunk · '
     '${Fixed.unifiedOrSplit.display} unified/split · ${Fixed.hideWhitespace.display} whitespace';
 
-/// What a turn changed between its checkpoints, or all turns, or the uncommitted changes: a
-/// folder tree of changed files and the selected file's diff, unified or split. Up and Down
-/// select files, Left and Right fold and unfold the selected file's folders, ⌥Up and ⌥Down move
-/// between the file's changes, T chooses the turn.
 class DiffView extends StatefulWidget {
   const DiffView({
     super.key,
@@ -36,7 +31,6 @@ class DiffView extends StatefulWidget {
 
   final SessionState state;
 
-  /// How the panel shows the changes, kept across restarts.
   final DiffSettingsController settings;
 
   final PatchParser parse;
@@ -51,10 +45,8 @@ class _DiffViewState extends State<DiffView> {
   BridgeFileChange? _selected;
   List<DiffLine> _lines = const [];
 
-  /// The shown lines likely widest, which set how far the lines scroll sideways.
   List<String> _widest = const [];
 
-  /// Why the selected file shows no lines, if it shows none.
   String? _note;
   String? _shownPath;
   String? _shownComparison;
@@ -64,16 +56,12 @@ class _DiffViewState extends State<DiffView> {
   bool _loaded = false;
   final _focus = FocusNode(debugLabel: 'diff');
 
-  /// The folded folders, by path.
   final _folded = <String>{};
 
-  /// Whether a patch is loading; a selection made meanwhile loads after it.
   bool _loading = false;
 
-  /// Scrolls the selected file's lines.
   final _scroll = ScrollController();
 
-  /// Opens the scope menu from the keyboard.
   final _turnMenu = GlobalKey<PopupMenuButtonState<DiffScope>>();
 
   @override
@@ -82,9 +70,7 @@ class _DiffViewState extends State<DiffView> {
     widget.state.changed.addListener(_show);
     widget.state.shown.addListener(_rebuild);
     widget.state.shownScope.addListener(_rebuild);
-    // Opening the panel reads the turns again, so it shows the latest one.
     unawaited(widget.state.readChanges());
-    // It also shows the last list at once and moves the keyboard to it.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       _focus.requestFocus();
@@ -102,7 +88,6 @@ class _DiffViewState extends State<DiffView> {
     super.dispose();
   }
 
-  /// Another turn shows its name, also when it changed the same files.
   void _rebuild() => setState(() {});
 
   void _show() {
@@ -121,7 +106,6 @@ class _DiffViewState extends State<DiffView> {
   }
 
   Future<void> _select(BridgeFileChange? change) async {
-    // The selection moves at once, so quick arrow presses each move on from it.
     setState(() {
       _selected = change;
       if (change?.path != _shownPath || _comparison != _shownComparison) {
@@ -133,13 +117,10 @@ class _DiffViewState extends State<DiffView> {
     if (_loading) return;
     _loading = true;
     try {
-      // Selections passed while a patch loaded are never read.
       while (mounted) {
         final wanted = _selected;
         final comparison = _comparison;
         if (wanted == null) return;
-        // Why the file shows no lines: a diff that could not be read, such as one over Git's
-        // output limit, or a change without text.
         String? note;
         var lines = const <DiffLine>[];
         try {
@@ -148,7 +129,6 @@ class _DiffViewState extends State<DiffView> {
         } on Object catch (error) {
           note = 'Could not show the changes: $error';
         }
-        // A newer selection or comparison reads again.
         if (!mounted || _selected != wanted || _comparison != comparison) {
           continue;
         }
@@ -161,7 +141,6 @@ class _DiffViewState extends State<DiffView> {
           _widest = widestLines(lines);
           _note = note;
         });
-        // Another file starts at its top.
         if (!keepPosition && _scroll.hasClients) _scroll.jumpTo(0);
         return;
       }
@@ -170,23 +149,18 @@ class _DiffViewState extends State<DiffView> {
     }
   }
 
-  /// What the shown patch compares: the turns or the uncommitted changes, and whether whitespace
-  /// is hidden.
   String get _comparison {
     final shown = widget.state.shown.value;
     return '${widget.state.shownScope.value.runtimeType} ${shown?.from.number}..'
         '${shown?.to.number} ${widget.state.hideWhitespace.value}';
   }
 
-  /// Whether a folded folder hides `row`.
   bool _hidden(FileRow row) => _folded.any(
     (folder) =>
         row.folder.startsWith('$folder/') ||
         (row.change != null && row.folder == folder),
   );
 
-  /// Selects the next file in `step`'s direction from the selected one, passing files a
-  /// folded folder hides.
   void _move(int step) {
     final files = [
       for (final row in _rows)
@@ -208,7 +182,6 @@ class _DiffViewState extends State<DiffView> {
     if (!_folded.remove(folder)) _folded.add(folder);
   });
 
-  /// The folder that holds the selected file; empty at the top.
   String get _selectedFolder =>
       _rows
           .where((row) => row.change?.path == _selected?.path)
@@ -222,7 +195,6 @@ class _DiffViewState extends State<DiffView> {
     }
   }
 
-  /// Unfolds every folder around the selected file, so it shows again.
   void _unfold() {
     final folder = _selectedFolder;
     setState(
@@ -234,7 +206,6 @@ class _DiffViewState extends State<DiffView> {
 
   DiffLayout get _layout => widget.settings.value.layout;
 
-  /// The rows each hunk starts at, in the shown layout.
   List<int> get _hunks => _layout == DiffLayout.split
       ? [
           for (final (index, row) in splitRows(_lines).indexed)
@@ -245,7 +216,6 @@ class _DiffViewState extends State<DiffView> {
             if (line.kind == DiffKind.hunk) index,
         ];
 
-  /// Scrolls to the previous or next change in the selected file.
   void _jump(int step) {
     if (!_scroll.hasClients) return;
     final position = _scroll.position;
@@ -261,7 +231,6 @@ class _DiffViewState extends State<DiffView> {
     );
   }
 
-  /// Uses `settings` at once and keeps them for the next start.
   void _change(DiffSettings settings) {
     unawaited(widget.settings.change(settings));
     setState(() {});
@@ -274,7 +243,6 @@ class _DiffViewState extends State<DiffView> {
     _layout == DiffLayout.unified ? DiffLayout.split : DiffLayout.unified,
   );
 
-  /// Leaves out or brings back the changes that are only whitespace.
   void _switchWhitespace() => _change(
     widget.settings.value.copyWith(
       hideWhitespace: !widget.settings.value.hideWhitespace,
@@ -312,7 +280,6 @@ class _DiffViewState extends State<DiffView> {
     ),
   );
 
-  /// The scope menu and what the shown turns are, once a turn ended or in a repository.
   Widget? _header(bool repository) {
     final shown = widget.state.shown.value;
     final scope = widget.state.shownScope.value;
@@ -322,7 +289,6 @@ class _DiffViewState extends State<DiffView> {
       menuKey: _turnMenu,
       turns: widget.state.turns.value,
       scope: scope,
-      // What all turns changed is known once they were read.
       allLines:
           scope is AllTurns &&
               files != null &&
@@ -334,7 +300,6 @@ class _DiffViewState extends State<DiffView> {
           : null,
       repository: repository,
       onSelect: (scope) => unawaited(widget.state.showTurns(scope)),
-      // Reverting applies to the turn shown, not to all turns.
       onRevert: switch ((scope, shown)) {
         (OneTurn() || LatestTurn(), final shown?) => () => unawaited(
           confirmRevert(context, widget.state, shown.to.number),
@@ -344,7 +309,6 @@ class _DiffViewState extends State<DiffView> {
     );
   }
 
-  /// Says why nothing is shown, below the scope menu when there is one.
   Widget _empty(
     BuildContext context,
     bool repository,
@@ -424,7 +388,6 @@ class _DiffViewState extends State<DiffView> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        // The file list sits above the patch, across the Diff panel; a long list scrolls.
         Container(
           constraints: const BoxConstraints(maxHeight: 200),
           decoration: BoxDecoration(

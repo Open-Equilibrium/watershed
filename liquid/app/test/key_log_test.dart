@@ -3,13 +3,26 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:liquid/src/shortcuts/key_log.dart';
 import 'package:liquid/src/shortcuts/keymap.dart';
 
+KeyDownEvent down(
+  PhysicalKeyboardKey physical,
+  LogicalKeyboardKey logical, [
+  String? character,
+]) => KeyDownEvent(
+  physicalKey: physical,
+  logicalKey: logical,
+  character: character,
+  timeStamp: Duration.zero,
+);
+
+KeyUpEvent release(PhysicalKeyboardKey physical, LogicalKeyboardKey logical) =>
+    KeyUpEvent(
+      physicalKey: physical,
+      logicalKey: logical,
+      timeStamp: Duration.zero,
+    );
+
 void main() {
-  const keyL = KeyDownEvent(
-    physicalKey: PhysicalKeyboardKey.keyL,
-    logicalKey: LogicalKeyboardKey.keyL,
-    character: 'l',
-    timeStamp: Duration.zero,
-  );
+  final keyL = down(PhysicalKeyboardKey.keyL, LogicalKeyboardKey.keyL, 'l');
 
   test(
     'describes a key event with what was held, to diagnose the Liquid key',
@@ -27,27 +40,10 @@ void main() {
   );
 
   test('a typed key stays out of the log when a modifier is held after it', () {
-    const keyA = KeyDownEvent(
-      physicalKey: PhysicalKeyboardKey.keyA,
-      logicalKey: LogicalKeyboardKey.keyA,
-      character: 'a',
-      timeStamp: Duration.zero,
-    );
-    const ctrl = KeyDownEvent(
-      physicalKey: PhysicalKeyboardKey.controlLeft,
-      logicalKey: LogicalKeyboardKey.controlLeft,
-      timeStamp: Duration.zero,
-    );
-    const aRepeat = KeyRepeatEvent(
-      physicalKey: PhysicalKeyboardKey.keyA,
-      logicalKey: LogicalKeyboardKey.keyA,
-      character: 'a',
-      timeStamp: Duration.zero,
-    );
-    const aUp = KeyUpEvent(
-      physicalKey: PhysicalKeyboardKey.keyA,
-      logicalKey: LogicalKeyboardKey.keyA,
-      timeStamp: Duration.zero,
+    final keyA = down(PhysicalKeyboardKey.keyA, LogicalKeyboardKey.keyA, 'a');
+    final ctrl = down(
+      PhysicalKeyboardKey.controlLeft,
+      LogicalKeyboardKey.controlLeft,
     );
     final log = KeyLog();
     expect(
@@ -68,7 +64,12 @@ void main() {
     );
     expect(
       log.line(
-        aRepeat,
+        const KeyRepeatEvent(
+          physicalKey: PhysicalKeyboardKey.keyA,
+          logicalKey: LogicalKeyboardKey.keyA,
+          character: 'a',
+          timeStamp: Duration.zero,
+        ),
         pressed: {LogicalKeyboardKey.keyA, LogicalKeyboardKey.controlLeft},
         focus: null,
       ),
@@ -76,29 +77,31 @@ void main() {
       reason: 'a repeat follows its key-down',
     );
     expect(
-      log.line(aUp, pressed: {LogicalKeyboardKey.controlLeft}, focus: null),
+      log.line(
+        release(PhysicalKeyboardKey.keyA, LogicalKeyboardKey.keyA),
+        pressed: {LogicalKeyboardKey.controlLeft},
+        focus: null,
+      ),
       isNull,
       reason: 'releasing A while Ctrl is held logs nothing',
     );
   });
 
   test('a logged key keeps its repeats and key-up in the log', () {
-    const keyA = KeyDownEvent(
-      physicalKey: PhysicalKeyboardKey.keyA,
-      logicalKey: LogicalKeyboardKey.keyA,
-      character: '\u0001',
-      timeStamp: Duration.zero,
-    );
-    const aUp = KeyUpEvent(
-      physicalKey: PhysicalKeyboardKey.keyA,
-      logicalKey: LogicalKeyboardKey.keyA,
-      timeStamp: Duration.zero,
+    final keyA = down(
+      PhysicalKeyboardKey.keyA,
+      LogicalKeyboardKey.keyA,
+      '\u0001',
     );
     final log = KeyLog();
     final pressed = {LogicalKeyboardKey.controlLeft, LogicalKeyboardKey.keyA};
     expect(log.line(keyA, pressed: pressed, focus: null), isNotNull);
     expect(
-      log.line(aUp, pressed: {LogicalKeyboardKey.controlLeft}, focus: null),
+      log.line(
+        release(PhysicalKeyboardKey.keyA, LogicalKeyboardKey.keyA),
+        pressed: {LogicalKeyboardKey.controlLeft},
+        focus: null,
+      ),
       isNotNull,
       reason: 'the key-up of a logged key is logged',
     );
@@ -115,12 +118,7 @@ void main() {
       logsKey(keyL, {LogicalKeyboardKey.metaLeft, LogicalKeyboardKey.keyL}),
       isTrue,
     );
-    const at = KeyDownEvent(
-      physicalKey: PhysicalKeyboardKey.keyL,
-      logicalKey: LogicalKeyboardKey.keyL,
-      character: '@',
-      timeStamp: Duration.zero,
-    );
+    final at = down(PhysicalKeyboardKey.keyL, LogicalKeyboardKey.keyL, '@');
     expect(
       logsKey(at, {LogicalKeyboardKey.altLeft, LogicalKeyboardKey.keyL}),
       isFalse,

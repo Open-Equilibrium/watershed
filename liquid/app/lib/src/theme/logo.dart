@@ -1,6 +1,5 @@
 import 'package:flutter/widgets.dart';
 
-/// Liquid's logo mark, drawn as `docs/design/liquid-logo.svg` draws it on its 100 × 100 grid.
 class LiquidMark extends StatelessWidget {
   const LiquidMark({super.key, this.size = 18});
 

@@ -9,7 +9,6 @@ import 'package:liquid/src/workspace/paste.dart';
 
 import 'page_kit.dart';
 
-/// Pasting into a Text Block (ADR-0305).
 void main() {
   final kit = PageKit();
   var clipboard = const Pasted();
@@ -168,7 +167,6 @@ void main() {
     await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
     await key(tester, LogicalKeyboardKey.keyV);
     await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
-    // The text gets shorter while the clipboard is read.
     tester.testTextInput.updateEditingValue(
       const TextEditingValue(
         text: 'Five days',

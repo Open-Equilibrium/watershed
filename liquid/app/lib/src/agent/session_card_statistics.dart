@@ -11,11 +11,8 @@ import 'fill_bar.dart';
 import 'segment_bar.dart';
 import 'statistics_chart.dart';
 
-/// The width of a statistics row's value column.
 const _valueWidth = 110.0;
 
-/// A statistics row of the session card: label, hairline and value, as T3 Code's usage rows read.
-/// The row turns its background on hover, and its tooltip gives the exact parts (ADR-0279).
 class StatisticsRow extends StatefulWidget {
   const StatisticsRow({
     super.key,
@@ -29,13 +26,10 @@ class StatisticsRow extends StatefulWidget {
   final String label;
   final Widget value;
 
-  /// The hairline between the label and the value; the value takes the row's width without one.
   final Widget? bar;
 
-  /// The tooltip's lines, the first in bold; the row has no tooltip without them.
   final List<String>? tip;
 
-  /// Whether the row reads as not recorded, with its label and value in faint text.
   final bool faint;
 
   @override
@@ -47,8 +41,6 @@ class _StatisticsRowState extends State<StatisticsRow> {
   bool _focused = false;
   final _tip = GlobalKey<TooltipState>();
 
-  /// Explains the row while the keyboard has it, as the pointer does, and hides the explanation
-  /// when the keyboard leaves.
   void _focusChanged(bool focused) {
     if (!mounted) return;
     setState(() => _focused = focused);
@@ -106,7 +98,6 @@ class _StatisticsRowState extends State<StatisticsRow> {
               Expanded(child: bar)
             else
               const Spacer(),
-            // The value keeps its own column, so the hairline takes the rest of the row.
             SizedBox(
               width: _valueWidth,
               child: Align(alignment: Alignment.centerRight, child: value),
@@ -145,9 +136,6 @@ class _StatisticsRowState extends State<StatisticsRow> {
   }
 }
 
-/// The Context row: the share of the window the next request fills, with a tick where the agent
-/// compacts. It warns from 80 % used and is an error from 90 %, as T3 Code's row does. Its value is
-/// a dash while the tokens are not known.
 class ContextRow extends StatelessWidget {
   const ContextRow({super.key, required this.window});
 
@@ -195,12 +183,9 @@ class ContextRow extends StatelessWidget {
   }
 }
 
-/// Whether a turn runs, which counts the open tool calls as running rather than cancelled.
 bool turnRuns(SessionState state) =>
     state.turns.value.any((turn) => turn.status == BridgeTurnStatus.running);
 
-/// The session's statistics rows, in the card's order: tokens, cost, times and tool calls. Each row
-/// says what its parts are when hovered; T3 reports no cost and no model time (ADR-0293).
 List<Widget> sessionStatisticsRows(
   BuildContext context,
   SessionStatistics statistics,
@@ -274,8 +259,6 @@ List<Widget> sessionStatisticsRows(
   ];
 }
 
-/// The working time row, the tool time row, and the model time row, which shows a dash: T3 times
-/// no single model request (ADR-0293).
 List<Widget> _timeRows(SessionStatistics statistics) {
   final working = formatDuration(statistics.workingMs);
   final tool = statistics.toolMs;
@@ -310,7 +293,6 @@ String _outcomes(SessionStatistics statistics) {
   ].join(' · ');
 }
 
-/// The tools with failed calls, the most failed first, as a tooltip line.
 String? _failingTools(SessionStatistics statistics) {
   final failing = [
     for (final tool in statistics.tools)

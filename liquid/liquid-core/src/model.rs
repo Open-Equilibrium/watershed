@@ -1,17 +1,3 @@
-//! The document schema: where each object lives and how it is read.
-//!
-//! ```text
-//! Workspace document  { owner, areas: { <area>: { name, sort, deleted } } }
-//! area document       { pages: { <page>: { title, parent?, sort, deleted } } }
-//! Page document       { blocks: { <block>: { kind, text, style?, language?, deleted } },
-//!                       (a Media Block's entry: { kind, name, type, attachment, size, deleted,
-//!                        style?, elements? })
-//!                       (a Database Block's entry is in `database.rs`, a Whiteboard's and
-//!                        a Media Block's drawing in `drawing.rs`)
-//!                       views: { <view>: { block, sort, boundary, deleted,
-//!                                          row-sort?, row-filter? } } }
-//! ```
-
 use std::collections::HashMap;
 
 use automerge::transaction::Transactable;
@@ -44,62 +30,40 @@ pub(crate) const TYPE: &str = "type";
 pub(crate) const ATTACHMENT: &str = "attachment";
 pub(crate) const SIZE: &str = "size";
 
-/// An area as the Explorer lists it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Area {
-    /// Its identity.
     pub id: AreaId,
-    /// Its name.
     pub name: String,
 }
 
-/// A Page in an area's tree.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PageEntry {
-    /// Its identity.
     pub id: PageId,
-    /// The Page it nests under.
     pub parent: Option<PageId>,
-    /// Its title.
     pub title: String,
 }
 
-/// A View on a Page.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct View {
-    /// Its identity.
     pub id: ViewId,
-    /// The Block it shows.
     pub block: BlockId,
-    /// Whether a Section starts here.
     pub boundary: bool,
-    /// The kind of Block it shows.
     pub kind: BlockKind,
-    /// How it sorts a Database Block's rows.
     pub sort: Option<crate::Sort>,
-    /// Which of a Database Block's rows it keeps.
     pub filter: Option<crate::Filter>,
 }
 
-/// The kind of a Block.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BlockKind {
-    /// A Text Block.
     Text,
-    /// A Database Block.
     Database,
-    /// A Code Block.
     Code,
-    /// A Media Block, which shows an attachment (ADR-0305).
     Media,
-    /// A Whiteboard Block of strokes, shapes and text (ADR-0306).
     Whiteboard,
-    /// A Block of a kind a later version adds, which shows as a placeholder (ADR-0245).
     Unknown,
 }
 
 impl BlockKind {
-    /// The kind a Block's entry names.
     pub(crate) fn of(name: Option<&str>) -> Self {
         match name {
             Some("text") => Self::Text,
@@ -112,28 +76,21 @@ impl BlockKind {
     }
 }
 
-/// A Code Block's content.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Code {
-    /// Its code.
     pub text: String,
-    /// Its language's name, as Markdown names it after ```; empty for plain text.
     pub language: String,
 }
 
-/// A new document for this device. Text positions count UTF-16 code units, also when
-/// [`load`] reads it back.
 pub(crate) fn document(device: &ActorId) -> AutoCommit {
     AutoCommit::new_with_encoding(TextEncoding::Utf16CodeUnit).with_actor(device.clone())
 }
 
-/// A stored document, loaded for this device.
 pub(crate) fn load(bytes: &[u8], device: &ActorId) -> Result<AutoCommit, Error> {
     let options = LoadOptions::new().text_encoding(TextEncoding::Utf16CodeUnit);
     Ok(AutoCommit::load_with_options(bytes, options)?.with_actor(device.clone()))
 }
 
-/// Creates the empty top-level maps of a new document.
 pub(crate) fn create_maps(doc: &mut AutoCommit, keys: &[&str]) -> Result<(), Error> {
     for key in keys {
         doc.put_object(ROOT, *key, ObjType::Map)?;
@@ -141,7 +98,6 @@ pub(crate) fn create_maps(doc: &mut AutoCommit, keys: &[&str]) -> Result<(), Err
     Ok(())
 }
 
-/// Adds `id` to the top-level map `map` as a live object.
 pub(crate) fn insert(
     doc: &mut AutoCommit,
     map: &str,
@@ -152,7 +108,6 @@ pub(crate) fn insert(
     insert_in(doc, &map, id, fields)
 }
 
-/// Adds `id` to the map `map` as a live object.
 pub(crate) fn insert_in(
     doc: &mut AutoCommit,
     map: &ObjId,
@@ -195,19 +150,15 @@ pub(crate) fn deleted(doc: &AutoCommit, obj: &ObjId) -> bool {
     )
 }
 
-/// The live object `id` in the top-level map `map`.
 pub(crate) fn live(doc: &AutoCommit, map: &str, id: &str) -> Option<ObjId> {
     live_in(doc, &child(doc, &ROOT, map)?, id)
 }
 
-/// The live object `id` in the map `map`.
 pub(crate) fn live_in(doc: &AutoCommit, map: &ObjId, id: &str) -> Option<ObjId> {
     let obj = child(doc, map, id)?;
     (!deleted(doc, &obj)).then_some(obj)
 }
 
-/// A live object of a top-level map with its text fields, read in one pass: Automerge reads
-/// a whole map faster than it looks up its keys one by one.
 pub(crate) struct Entry {
     pub id: String,
     fields: Vec<(String, String)>,
@@ -221,13 +172,11 @@ impl Entry {
             .map(|(_, value)| value.as_str())
     }
 
-    /// Its sort key, if usable (ADR-0304).
     pub(crate) fn sort(&self) -> Option<&str> {
         crate::sort_key::usable(self.get(SORT))
     }
 }
 
-/// The live objects in the top-level map `map`, ordered by sort key, then identity.
 pub(crate) fn sorted(doc: &AutoCommit, map: &str) -> Vec<Entry> {
     match child(doc, &ROOT, map) {
         Some(top) => sorted_in(doc, &top),
@@ -235,7 +184,6 @@ pub(crate) fn sorted(doc: &AutoCommit, map: &str) -> Vec<Entry> {
     }
 }
 
-/// The live objects in the map `map`, ordered by sort key, then identity.
 pub(crate) fn sorted_in(doc: &AutoCommit, map: &ObjId) -> Vec<Entry> {
     let mut entries: Vec<Entry> = doc
         .map_range(map, ..)
@@ -272,12 +220,10 @@ pub(crate) fn mark_deleted(doc: &mut AutoCommit, obj: &ObjId) -> Result<(), Erro
     Ok(doc.put(obj, DELETED, true)?)
 }
 
-/// The sort key for an object placed after `after` among `siblings`, or first.
 pub(crate) fn sort_after(siblings: &[Entry], after: Option<&str>) -> Result<String, Error> {
     sort_at(siblings, after.map_or(Place::First, Place::After))
 }
 
-/// The sort key for an entry placed at `place` among `siblings`.
 pub(crate) fn sort_at(siblings: &[Entry], place: Place<&str>) -> Result<String, Error> {
     crate::sort_key::at(siblings, place, |entry| entry.id.as_str(), Entry::sort)
 }
@@ -292,8 +238,6 @@ pub(crate) fn areas(doc: &AutoCommit) -> Vec<Area> {
         .collect()
 }
 
-/// An area's live Pages, each followed by its descendants. A Page under a removed Page is
-/// hidden with it.
 pub(crate) fn pages(doc: &AutoCommit) -> Vec<PageEntry> {
     let mut children: HashMap<Option<String>, Vec<PageEntry>> = HashMap::new();
     for entry in sorted(doc, PAGES) {
@@ -317,13 +261,11 @@ pub(crate) fn pages(doc: &AutoCommit) -> Vec<PageEntry> {
     tree
 }
 
-/// A live Text Block's text; none for a Block of another kind.
 pub(crate) fn text(doc: &AutoCommit, block: &str) -> Option<String> {
     let entry = of_kind(doc, block, BlockKind::Text)?;
     doc.text(&child(doc, &entry, TEXT)?).ok()
 }
 
-/// A live Code Block's code and language; none for a Block of another kind.
 pub(crate) fn code(doc: &AutoCommit, block: &str) -> Option<Code> {
     let entry = of_kind(doc, block, BlockKind::Code)?;
     Some(Code {
@@ -332,12 +274,10 @@ pub(crate) fn code(doc: &AutoCommit, block: &str) -> Option<Code> {
     })
 }
 
-/// A live Media Block's file and attachment; none for a Block of another kind.
 pub(crate) fn media(doc: &AutoCommit, block: &str) -> Option<Media> {
     file(doc, &of_kind(doc, block, BlockKind::Media)?)
 }
 
-/// The file a map holds, as a Media Block's entry and each file of a file cell do.
 pub(crate) fn file(doc: &AutoCommit, obj: &ObjId) -> Option<Media> {
     let size = match doc.get(obj, SIZE).ok()? {
         Some((Value::Scalar(value), _)) => match value.as_ref() {
@@ -354,7 +294,6 @@ pub(crate) fn file(doc: &AutoCommit, obj: &ObjId) -> Option<Media> {
     })
 }
 
-/// Writes a file into a map.
 pub(crate) fn put_file(doc: &mut AutoCommit, obj: &ObjId, file: &Media) -> Result<(), Error> {
     doc.put(obj, NAME, file.name.as_str())?;
     doc.put(obj, TYPE, file.media_type.as_str())?;
@@ -363,22 +302,18 @@ pub(crate) fn put_file(doc: &mut AutoCommit, obj: &ObjId, file: &Media) -> Resul
     Ok(())
 }
 
-/// A live Block's entry if it is of `kind`.
 pub(crate) fn of_kind(doc: &AutoCommit, block: &str, kind: BlockKind) -> Option<ObjId> {
     let entry = live(doc, BLOCKS, block)?;
     (BlockKind::of(string(doc, &entry, KIND).as_deref()) == kind && kind != BlockKind::Unknown)
         .then_some(entry)
 }
 
-/// Whether `at` lies at an end of `text` or between two of its characters, in UTF-16
-/// units: inside a character both neighboring units belong to the same element.
 pub(crate) fn on_boundary(doc: &AutoCommit, text: &ObjId, at: usize) -> bool {
     let element = |unit: usize| doc.get(text, unit).ok().flatten().map(|(_, id)| id);
     let length = doc.length(text);
     at == 0 || at == length || (at < length && element(at - 1) != element(at))
 }
 
-/// A style as a Text Block stores it.
 pub(crate) fn style_name(style: TextStyle) -> Result<String, Error> {
     Ok(match style {
         TextStyle::Paragraph => "paragraph".into(),
@@ -392,8 +327,6 @@ pub(crate) fn style_name(style: TextStyle) -> Result<String, Error> {
     })
 }
 
-/// A stored style; a Text Block without one, or with one this version does not know, reads
-/// as a paragraph.
 pub(crate) fn style(name: Option<&str>) -> TextStyle {
     match name {
         Some("heading1") => TextStyle::Heading(1),

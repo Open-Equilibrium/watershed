@@ -13,6 +13,13 @@ void main() {
   late Directory temp;
   late File file;
 
+  final denied = PlatformException(code: 'approval', message: 'denied');
+
+  ShortcutSettings liquidDiff() => ShortcutSettings.liquidKey().change(
+    Command.diff,
+    const Keys(LogicalKeyboardKey.keyD, liquid: true),
+  );
+
   setUp(() {
     temp = Directory.systemTemp.createTempSync('shortcuts');
     file = File('${temp.path}/settings/shortcuts.json');
@@ -51,42 +58,33 @@ void main() {
     );
   });
 
-  test(
-    'the store keeps settings as JSON and reads nothing it cannot trust',
-    () async {
-      final store = ShortcutStore(file);
-      expect(await store.load(), isNull);
+  test('the store keeps JSON settings and rejects bad data', () async {
+    final store = ShortcutStore(file);
+    expect(await store.load(), isNull);
 
-      final settings = ShortcutSettings.liquidKey().change(
-        Command.diff,
-        const Keys(LogicalKeyboardKey.keyD, liquid: true),
-      );
-      await store.save(settings);
-      expect(await store.load(), settings);
-      expect(jsonDecode(file.readAsStringSync()), settings.toJson());
+    final settings = liquidDiff();
+    await store.save(settings);
+    expect(await store.load(), settings);
+    expect(jsonDecode(file.readAsStringSync()), settings.toJson());
 
-      file.writeAsStringSync('{not json');
-      expect(await store.load(), isNull);
-      file.writeAsStringSync(' ' * (64 * 1024) + jsonEncode(settings.toJson()));
-      expect(await store.load(), isNull);
-    },
-  );
+    file.writeAsStringSync('{not json');
+    expect(await store.load(), isNull);
+    file.writeAsStringSync(' ' * (64 * 1024) + jsonEncode(settings.toJson()));
+    expect(await store.load(), isNull);
+  });
 
-  test(
-    'the first start asks for a profile only where the Liquid key exists',
-    () async {
-      final store = ShortcutStore(file);
-      final mac = await ShortcutController.load(store, FakeHost());
-      expect(mac.firstStart, isTrue);
-      expect(mac.value, ShortcutSettings.standard());
+  test('the first start asks for a profile if the key exists', () async {
+    final store = ShortcutStore(file);
+    final mac = await ShortcutController.load(store, FakeHost());
+    expect(mac.firstStart, isTrue);
+    expect(mac.value, ShortcutSettings.standard());
 
-      final other = await ShortcutController.load(
-        store,
-        FakeHost(available: false),
-      );
-      expect(other.firstStart, isFalse);
-    },
-  );
+    final other = await ShortcutController.load(
+      store,
+      FakeHost(available: false),
+    );
+    expect(other.firstStart, isFalse);
+  });
 
   test('choosing the Liquid key saves it and turns it on once', () async {
     final host = FakeHost();
@@ -94,12 +92,7 @@ void main() {
     final shortcuts = await ShortcutController.load(store, host);
 
     await shortcuts.change(ShortcutSettings.liquidKey());
-    await shortcuts.change(
-      ShortcutSettings.liquidKey().change(
-        Command.diff,
-        const Keys(LogicalKeyboardKey.keyD, liquid: true),
-      ),
-    );
+    await shortcuts.change(liquidDiff());
     expect(shortcuts.firstStart, isFalse);
     expect(host.calls, [true]);
     expect(await store.load(), shortcuts.value);
@@ -121,8 +114,7 @@ void main() {
   });
 
   test('a Liquid key that cannot be turned on is reported and leaves the profile as it was', () async {
-    final host = FakeHost()
-      ..failure = PlatformException(code: 'approval', message: 'denied');
+    final host = FakeHost()..failure = denied;
     final store = ShortcutStore(file);
     final shortcuts = await ShortcutController.load(store, host);
     final reported = <String>[];
@@ -138,39 +130,32 @@ void main() {
     ], reason: 'every failure is reported');
   });
 
-  test(
-    'a stored Liquid key stays off where the Liquid key does not exist',
-    () async {
-      final store = ShortcutStore(file);
-      await store.save(ShortcutSettings.liquidKey());
-      final host = FakeHost(available: false);
+  test('a stored Liquid key stays off where it is unavailable', () async {
+    final store = ShortcutStore(file);
+    await store.save(ShortcutSettings.liquidKey());
+    final host = FakeHost(available: false);
 
-      final shortcuts = await ShortcutController.load(store, host);
-      expect(shortcuts.value.liquidKey, isFalse);
-      expect(shortcuts.value.label(Command.newSession), '⌘N');
-      expect(host.calls, isEmpty);
-    },
-  );
+    final shortcuts = await ShortcutController.load(store, host);
+    expect(shortcuts.value.liquidKey, isFalse);
+    expect(shortcuts.value.profile, Profile.standard);
+    expect(shortcuts.value.label(Command.newSession), '⌘N');
+    expect(host.calls, isEmpty);
+  });
 
-  test(
-    'a kept Custom Liquid key stays off where the Liquid key does not exist',
-    () async {
-      final store = ShortcutStore(file);
-      await store.save(
-        ShortcutSettings.standard()
-            .withLiquidKey(true)
-            .choose(Profile.standard),
-      );
-      final host = FakeHost(available: false);
-      final shortcuts = await ShortcutController.load(store, host);
+  test('a kept Custom Liquid key stays off where unavailable', () async {
+    final store = ShortcutStore(file);
+    await store.save(
+      ShortcutSettings.standard().withLiquidKey(true).choose(Profile.standard),
+    );
+    final host = FakeHost(available: false);
+    final shortcuts = await ShortcutController.load(store, host);
 
-      await shortcuts.change(shortcuts.value.choose(Profile.custom));
-      expect(shortcuts.value.liquidKey, isFalse);
-      expect(shortcuts.value.label(Command.newSession), '⌘N');
-      expect((await store.load())!.liquidKey, isFalse);
-      expect(host.calls, isEmpty);
-    },
-  );
+    await shortcuts.change(shortcuts.value.choose(Profile.custom));
+    expect(shortcuts.value.liquidKey, isFalse);
+    expect(shortcuts.value.label(Command.newSession), '⌘N');
+    expect((await store.load())!.liquidKey, isFalse);
+    expect(host.calls, isEmpty);
+  });
 
   test(
     'choosing the Liquid key profile keeps the previous profile when it fails',
@@ -181,8 +166,7 @@ void main() {
       );
       final store = ShortcutStore(file);
       await store.save(custom);
-      final host = FakeHost()
-        ..failure = PlatformException(code: 'approval', message: 'denied');
+      final host = FakeHost()..failure = denied;
       final shortcuts = await ShortcutController.load(store, host);
 
       await shortcuts.change(custom.choose(Profile.liquidKey));
@@ -191,76 +175,55 @@ void main() {
     },
   );
 
-  test(
-    'a change queued behind a failing Liquid key leaves the key off',
-    () async {
-      final host = FakeHost()
-        ..failure = PlatformException(code: 'approval', message: 'denied')
-        ..gate = Completer();
-      final store = ShortcutStore(file);
-      final shortcuts = await ShortcutController.load(store, host);
+  test('a queued change leaves a failed Liquid key off', () async {
+    final host = FakeHost()
+      ..failure = denied
+      ..gate = Completer();
+    final store = ShortcutStore(file);
+    final shortcuts = await ShortcutController.load(store, host);
 
-      final first = shortcuts.change(ShortcutSettings.liquidKey());
-      final second = shortcuts.change(
-        ShortcutSettings.liquidKey().change(
-          Command.diff,
-          const Keys(LogicalKeyboardKey.keyE, liquid: true),
-        ),
-      );
-      host.gate!.complete();
-      await Future.wait([first, second]);
-      expect(shortcuts.value.liquidKey, isFalse);
-      expect((await store.load())!.liquidKey, isFalse);
-      expect(
-        shortcuts.value.changed(Command.diff),
-        isTrue,
-        reason: 'the change itself stays',
-      );
-    },
-  );
+    final first = shortcuts.change(ShortcutSettings.liquidKey());
+    final second = shortcuts.change(
+      ShortcutSettings.liquidKey().change(
+        Command.diff,
+        const Keys(LogicalKeyboardKey.keyE, liquid: true),
+      ),
+    );
+    host.gate!.complete();
+    await Future.wait([first, second]);
+    expect(shortcuts.value.liquidKey, isFalse);
+    expect((await store.load())!.liquidKey, isFalse);
+    expect(
+      shortcuts.value.changed(Command.diff),
+      isTrue,
+      reason: 'the change itself stays',
+    );
+  });
 
-  test(
-    'a Liquid key that cannot be turned off stays on in the profile',
-    () async {
-      final host = FakeHost();
-      final store = ShortcutStore(file);
-      final shortcuts = await ShortcutController.load(store, host);
-      final reported = <String>[];
-      shortcuts.report = reported.add;
-      await shortcuts.change(ShortcutSettings.liquidKey());
+  test('a Liquid key that cannot turn off stays on', () async {
+    final host = FakeHost();
+    final store = ShortcutStore(file);
+    final shortcuts = await ShortcutController.load(store, host);
+    final reported = <String>[];
+    shortcuts.report = reported.add;
+    await shortcuts.change(ShortcutSettings.liquidKey());
 
-      host.failure = PlatformException(code: 'disable', message: 'refused');
-      await shortcuts.change(ShortcutSettings.standard());
-      expect(shortcuts.value, ShortcutSettings.liquidKey());
-      expect(await store.load(), ShortcutSettings.liquidKey());
-      expect(reported, ['Could not turn the Liquid key off: refused']);
-      expect(
-        shortcuts.liquidKeyProblem.value,
-        reported.single,
-        reason: 'Settings say why the choice did not hold',
-      );
+    host.failure = PlatformException(code: 'disable', message: 'refused');
+    await shortcuts.change(ShortcutSettings.standard());
+    expect(shortcuts.value, ShortcutSettings.liquidKey());
+    expect(await store.load(), ShortcutSettings.liquidKey());
+    expect(reported, ['Could not turn the Liquid key off: refused']);
+    expect(
+      shortcuts.liquidKeyProblem.value,
+      reported.single,
+      reason: 'Settings say why the choice did not hold',
+    );
 
-      host.failure = null;
-      await shortcuts.change(ShortcutSettings.standard());
-      expect(host.calls, [true, false, false], reason: 'it tries again');
-      expect(shortcuts.value, ShortcutSettings.standard());
-    },
-  );
-
-  test(
-    'a stored Liquid key stays off where the Liquid key does not exist',
-    () async {
-      final store = ShortcutStore(file);
-      await store.save(ShortcutSettings.liquidKey());
-
-      final shortcuts = await ShortcutController.load(
-        store,
-        FakeHost(available: false),
-      );
-      expect(shortcuts.value.liquidKey, isFalse);
-      expect(shortcuts.value.profile, Profile.standard);
-    },
-  );
+    host.failure = null;
+    await shortcuts.change(ShortcutSettings.standard());
+    expect(host.calls, [true, false, false], reason: 'it tries again');
+    expect(shortcuts.value, ShortcutSettings.standard());
+  });
 
   test('a Standard chosen while the Liquid key turns on keeps it on when turning it off fails', () async {
     final enable = Completer<void>();
@@ -270,13 +233,12 @@ void main() {
 
     final on = shortcuts.change(ShortcutSettings.liquidKey());
     await pumpEventQueue();
-    // The disable waits on a gate of its own, so the test can fail it after the enable.
     final disable = Completer<void>();
     host.gate = disable;
     final off = shortcuts.change(ShortcutSettings.standard());
     enable.complete();
     await pumpEventQueue();
-    host.failure = PlatformException(code: 'approval', message: 'denied');
+    host.failure = denied;
     disable.complete();
     await Future.wait([on, off]);
 
@@ -296,13 +258,9 @@ void main() {
     host.gate = disable;
     final off = shortcuts.change(ShortcutSettings.standard());
     await pumpEventQueue();
-    // While the host turns the key off, the user keeps it on and gives Diff a key.
-    final diff = ShortcutSettings.liquidKey().change(
-      Command.diff,
-      const Keys(LogicalKeyboardKey.keyD, liquid: true),
-    );
+    final diff = liquidDiff();
     final kept = shortcuts.change(diff);
-    host.failure = PlatformException(code: 'approval', message: 'denied');
+    host.failure = denied;
     disable.complete();
     await Future.wait([off, kept]);
 
@@ -310,34 +268,30 @@ void main() {
     expect(await store.load(), diff);
   });
 
-  test(
-    'two changes queued behind failing Liquid key turn-offs keep the key on',
-    () async {
-      final host = FakeHost();
-      final store = ShortcutStore(file);
-      final shortcuts = await ShortcutController.load(store, host);
-      await shortcuts.change(ShortcutSettings.liquidKey());
+  test('two changes queued behind failed turn-offs keep it on', () async {
+    final host = FakeHost();
+    final store = ShortcutStore(file);
+    final shortcuts = await ShortcutController.load(store, host);
+    await shortcuts.change(ShortcutSettings.liquidKey());
 
-      final disable = Completer<void>();
-      host.gate = disable;
-      host.failure = PlatformException(code: 'approval', message: 'denied');
-      final first = shortcuts.change(ShortcutSettings.standard());
-      await pumpEventQueue();
-      // A second turn-off, with different settings, is queued while the first waits on the host.
-      final second = shortcuts.change(
-        ShortcutSettings.standard().change(
-          Command.diff,
-          const Keys(LogicalKeyboardKey.keyD, meta: true),
-        ),
-      );
-      disable.complete();
-      await Future.wait([first, second]);
+    final disable = Completer<void>();
+    host.gate = disable;
+    host.failure = denied;
+    final first = shortcuts.change(ShortcutSettings.standard());
+    await pumpEventQueue();
+    final second = shortcuts.change(
+      ShortcutSettings.standard().change(
+        Command.diff,
+        const Keys(LogicalKeyboardKey.keyD, meta: true),
+      ),
+    );
+    disable.complete();
+    await Future.wait([first, second]);
 
-      expect(host.calls, [true, false, false], reason: 'both turn-offs failed');
-      expect(shortcuts.value, ShortcutSettings.liquidKey());
-      expect(await store.load(), ShortcutSettings.liquidKey());
-    },
-  );
+    expect(host.calls, [true, false, false], reason: 'both turn-offs failed');
+    expect(shortcuts.value, ShortcutSettings.liquidKey());
+    expect(await store.load(), ShortcutSettings.liquidKey());
+  });
 
   test('the first frame does not wait for the Liquid key', () async {
     final store = ShortcutStore(file);
@@ -357,8 +311,7 @@ void main() {
   test('a problem at start is reported once someone listens', () async {
     final store = ShortcutStore(file);
     await store.save(ShortcutSettings.liquidKey());
-    final host = FakeHost()
-      ..failure = PlatformException(code: 'approval', message: 'denied');
+    final host = FakeHost()..failure = denied;
 
     final shortcuts = await ShortcutController.load(store, host);
     await pumpEventQueue();
@@ -370,7 +323,6 @@ void main() {
       ShortcutSettings.standard(),
       reason: 'hints stay visible without the Liquid key',
     );
-    // The file is written in the background, outside the event queue.
     var saved = await store.load();
     for (
       var tries = 0;

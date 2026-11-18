@@ -11,21 +11,11 @@ import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 // These functions are ignored because they are not marked as `pub`: `of`, `of`, `of`, `of`, `of`, `of`, `row_query`, `to_core`, `to_core`
 // These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
 
-/// One cell's value.
 class BridgeCell {
-  /// What it holds.
   final BridgeCellKind kind;
-
-  /// A text, an option's identity or a day.
   final String? text;
-
-  /// A number.
   final double number;
-
-  /// Whether a checkbox is ticked.
   final bool checked;
-
-  /// Files in their order; the core reads each one's size from its attachment.
   final List<BridgeMedia> files;
 
   const BridgeCell({
@@ -56,36 +46,10 @@ class BridgeCell {
           files == other.files;
 }
 
-/// What a [`BridgeCell`] holds; each kind names the part it fills.
-enum BridgeCellKind {
-  /// Nothing.
-  empty,
+enum BridgeCellKind { empty, text, number, select, date, checkbox, files }
 
-  /// `text`.
-  text,
-
-  /// `number`.
-  number,
-
-  /// The option `text`.
-  select,
-
-  /// The day `text`, `YYYY-MM-DD`.
-  date,
-
-  /// `checked`.
-  checkbox,
-
-  /// `files`.
-  files,
-}
-
-/// A Database Block's name and fields.
 class BridgeDatabase {
-  /// Its name.
   final String name;
-
-  /// Its fields, in order.
   final List<BridgeField> fields;
 
   const BridgeDatabase({required this.name, required this.fields});
@@ -102,18 +66,10 @@ class BridgeDatabase {
           fields == other.fields;
 }
 
-/// A Database field.
 class BridgeField {
-  /// Its identity.
   final String id;
-
-  /// Its name.
   final String name;
-
-  /// Its kind.
   final BridgeFieldKind kind;
-
-  /// A select field's options, in order.
   final List<BridgeOption> options;
 
   const BridgeField({
@@ -138,12 +94,8 @@ class BridgeField {
           options == other.options;
 }
 
-/// A row's cell of one field.
 class BridgeFieldCell {
-  /// The field.
   final String field;
-
-  /// Its value.
   final BridgeCell value;
 
   const BridgeFieldCell({required this.field, required this.value});
@@ -160,36 +112,11 @@ class BridgeFieldCell {
           value == other.value;
 }
 
-/// The kind of a Database field.
-enum BridgeFieldKind {
-  /// Plain text.
-  text,
+enum BridgeFieldKind { text, number, select, date, checkbox, file }
 
-  /// A finite number.
-  number,
-
-  /// One of the field's options.
-  select,
-
-  /// A day.
-  date,
-
-  /// Ticked or not.
-  checkbox,
-
-  /// Files, each a finished attachment.
-  file,
-}
-
-/// Keeping a row window's rows whose cell of `field` matches.
 class BridgeFilter {
-  /// The field.
   final String field;
-
-  /// What its cell must be.
   final BridgeMatch matches;
-
-  /// The value `Is` and `Contains` compare with.
   final BridgeCell? value;
 
   const BridgeFilter({required this.field, required this.matches, this.value});
@@ -207,30 +134,11 @@ class BridgeFilter {
           value == other.value;
 }
 
-/// What a cell must be to pass a [`BridgeFilter`].
-enum BridgeMatch {
-  /// Empty.
-  empty,
+enum BridgeMatch { empty, notEmpty, is_, contains }
 
-  /// Not empty.
-  notEmpty,
-
-  /// Exactly `value`.
-  is_,
-
-  /// Text containing `value`'s text, ignoring case.
-  contains,
-}
-
-/// One option of a select field.
 class BridgeOption {
-  /// Its identity.
   final String id;
-
-  /// Its name.
   final String name;
-
-  /// Its color, an index into the tag colors.
   final PlatformInt64 color;
 
   const BridgeOption({
@@ -252,12 +160,8 @@ class BridgeOption {
           color == other.color;
 }
 
-/// One row with its cells that hold a value.
 class BridgeRow {
-  /// Its identity.
   final String id;
-
-  /// Its cells that hold a value.
   final List<BridgeFieldCell> cells;
 
   const BridgeRow({required this.id, required this.cells});
@@ -274,12 +178,8 @@ class BridgeRow {
           cells == other.cells;
 }
 
-/// Sorting a row window by one field; empty cells come last either way.
 class BridgeSort {
-  /// The field.
   final String field;
-
-  /// Largest, latest or last in the alphabet first.
   final bool descending;
 
   const BridgeSort({required this.field, required this.descending});

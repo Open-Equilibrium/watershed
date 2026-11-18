@@ -11,19 +11,15 @@ import '../shortcuts/keymap.dart';
 import '../theme/icons.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
+import 'moving_notice.dart';
 import 'question_card.dart';
 import 'start_page.dart';
 
-/// Height of the input area; it never changes, so nothing above it moves (guidelines, patterns).
 const double actionAreaHeight = 150;
 
-/// Whether `request` asks questions, which take the input area's place; an approval sits in the
-/// Chat instead, beside the composer.
 bool _asksQuestions(BridgeRequest? request) =>
     request != null && request.approval == null;
 
-/// The input area at the bottom of every tab: the composer, or in its place the agent's
-/// questions. Once they are answered, the keys go back to the composer.
 class ActionArea extends StatefulWidget {
   const ActionArea({
     super.key,
@@ -37,7 +33,6 @@ class ActionArea extends StatefulWidget {
   final TextEditingController composer;
   final FocusNode? composerFocus;
 
-  /// Runs when the composer's text is sent, which clears it.
   final VoidCallback onSent;
 
   @override
@@ -45,7 +40,6 @@ class ActionArea extends StatefulWidget {
 }
 
 class _ActionAreaState extends State<ActionArea> {
-  /// Whether questions were waiting when the request last changed.
   bool _questioning = false;
 
   @override
@@ -74,31 +68,105 @@ class _ActionAreaState extends State<ActionArea> {
   @override
   Widget build(BuildContext context) {
     final state = widget.state;
-    return SizedBox(
-      height: actionAreaHeight,
-      child: ValueListenableBuilder(
-        valueListenable: state.request,
-        builder: (context, request, _) =>
-            request != null && request.approval == null
-            ? QuestionCard(
-                key: ValueKey(request.id),
-                request: request,
-                state: state,
-              )
-            : Composer(
-                state: state,
-                controller: widget.composer,
-                focusNode: widget.composerFocus,
-                onSent: widget.onSent,
-              ),
-      ),
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _HostReconnecting(state: state),
+        SizedBox(
+          height: actionAreaHeight,
+          child: ListenableBuilder(
+            listenable: Listenable.merge([
+              state.request,
+              state.moving,
+              state.moveWaits,
+            ]),
+            builder: (context, _) {
+              final move = state.moving.value;
+              if (move != null) return MovingNotice(state: state, move: move);
+              final request = state.request.value;
+              return request != null && request.approval == null
+                  ? QuestionCard(
+                      key: ValueKey(request.id),
+                      request: request,
+                      state: state,
+                    )
+                  : Composer(
+                      state: state,
+                      controller: widget.composer,
+                      focusNode: widget.composerFocus,
+                      onSent: widget.onSent,
+                    );
+            },
+          ),
+        ),
+      ],
     );
   }
 }
 
-/// Text entry for prompts and steering, as T3's composer: ⏎ submits, which steers a running
-/// agent, the queue key queues a follow-up and esc stops the run. Queued messages sit above the
-/// field.
+const reconnectWarningGrace = Duration(seconds: 2);
+
+class _HostReconnecting extends StatefulWidget {
+  const _HostReconnecting({required this.state});
+
+  final SessionState state;
+
+  @override
+  State<_HostReconnecting> createState() => _HostReconnectingState();
+}
+
+class _HostReconnectingState extends State<_HostReconnecting> {
+  Timer? _grace;
+  bool _elapsed = false;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.state.sessionProblem.addListener(_changed);
+    _changed();
+  }
+
+  @override
+  void dispose() {
+    widget.state.sessionProblem.removeListener(_changed);
+    _grace?.cancel();
+    super.dispose();
+  }
+
+  void _changed() {
+    if (widget.state.sessionProblem.value == null) {
+      _grace?.cancel();
+      _grace = null;
+      if (_elapsed) setState(() => _elapsed = false);
+    } else if (_grace == null && !_elapsed) {
+      _grace = Timer(reconnectWarningGrace, () {
+        _grace = null;
+        setState(() => _elapsed = true);
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => _elapsed
+      ? ListenableBuilder(
+          listenable: Listenable.merge([
+            widget.state.sessionProblem,
+            widget.state.hostName,
+          ]),
+          builder: (context, _) {
+            final problem = widget.state.sessionProblem.value;
+            if (problem == null) return const SizedBox.shrink();
+            final label = widget.state.hostName.value ?? 'The agent host';
+            return Padding(
+              padding: const EdgeInsets.only(bottom: WsMetrics.space3),
+              child: WarningNotice('$label is reconnecting. $problem'),
+            );
+          },
+        )
+      : const SizedBox.shrink();
+}
+
 class Composer extends StatefulWidget {
   const Composer({
     super.key,
@@ -118,10 +186,8 @@ class Composer extends StatefulWidget {
 }
 
 class _ComposerState extends State<Composer> {
-  /// The queued message the composer holds for editing, if any.
   BridgeTurn? _editing;
 
-  /// Sends the composer's text: `steer` steers a running agent, else the text queues behind it.
   void _send({required bool steer}) {
     final text = widget.controller.text.trim();
     if (text.isEmpty) return;
@@ -176,9 +242,7 @@ class _ComposerState extends State<Composer> {
           final editing = queued
               .where((turn) => turn.number == _editing?.number)
               .firstOrNull;
-          // Without a conversation yet, the input area starts a new session.
           final starting = state.items.value.isEmpty;
-          // As in T3, a running agent with nothing to send shows only Stop.
           final stopOnly = busy && !sendable && editing == null;
           return Column(
             children: [
@@ -200,7 +264,6 @@ class _ComposerState extends State<Composer> {
                     Command.queue: () => _send(steer: false),
                     if (busy) Command.stop: state.stop,
                   }),
-                  // A held key acts once; its repeats type no new lines either.
                   child: Focus(
                     canRequestFocus: false,
                     skipTraversal: true,
@@ -238,7 +301,6 @@ class _ComposerState extends State<Composer> {
               ),
               Row(
                 children: [
-                  // The setup chips shorten long names, so the buttons stay in view.
                   Expanded(
                     child: Row(
                       children: [
@@ -280,7 +342,6 @@ class _ComposerState extends State<Composer> {
   }
 }
 
-/// The messages waiting behind the running turn, each with where it stands and what it does.
 class _Queue extends StatelessWidget {
   const _Queue({
     required this.state,
@@ -293,7 +354,6 @@ class _Queue extends StatelessWidget {
   final SessionState state;
   final List<BridgeTurn> turns;
 
-  /// The queued message the composer holds for editing, if any.
   final BridgeTurn? editing;
   final ValueChanged<BridgeTurn> onEdit;
   final VoidCallback onCancelEdit;

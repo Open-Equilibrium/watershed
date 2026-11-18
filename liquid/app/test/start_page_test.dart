@@ -2,7 +2,6 @@ import 'dart:io';
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:liquid/src/agent/session_menus.dart';
 import 'package:liquid/src/agent/shell.dart';
@@ -13,26 +12,26 @@ import 'package:liquid/src/session/session_state.dart';
 import 'package:liquid/src/settings_page.dart';
 import 'package:liquid/src/theme/theme.dart';
 
+import 'card_harness.dart';
 import 'fake_backend.dart';
 
 final info = SessionInfo(project: 'acme-api', path: '/work/acme-api');
 
+Future<void> tap(
+  WidgetTester tester,
+  Finder finder, {
+  int buttons = kPrimaryButton,
+}) async {
+  await tester.tap(finder, buttons: buttons);
+  await tester.pumpAndSettle();
+}
+
 void main() {
   late FakeProject project;
   late SessionState state;
-  // What the system's opener was asked to show, instead of starting Finder.
-  final opened = <String>[];
-  setUp(() {
-    opened.clear();
-    runOpener = (program, arguments) async {
-      opened.add(arguments.single);
-      return ProcessResult(0, 0, '', '');
-    };
-  });
-  tearDown(() => runOpener = Process.run);
+  late List<String> opened;
+  setUp(() => opened = recordOpens());
 
-  /// Shows the start page of a project with `providers`, its branches `main` and `develop`, and
-  /// its `threads`.
   Future<void> show(
     WidgetTester tester, {
     List<BridgeProvider>? providers,
@@ -64,12 +63,10 @@ void main() {
     await tester.pumpAndSettle();
   }
 
-  /// Types `text` into the composer and sends it with the start page's button.
   Future<void> sendFirst(WidgetTester tester, String text) async {
     await tester.enterText(find.byKey(const Key('composer')), text);
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Submit message'));
-    await tester.pumpAndSettle();
+    await tap(tester, find.text('Submit message'));
   }
 
   testWidgets('the start page greets with the project and its setup chips', (
@@ -77,32 +74,24 @@ void main() {
   ) async {
     await show(tester);
     expect(find.text('What should we build in acme-api?'), findsOneWidget);
-    final chips = find.byType(StartChips);
+    Finder chip(String label) => find.descendant(
+      of: find.byType(StartChips),
+      matching: find.text(label),
+    );
     expect(
-      find.descendant(of: chips, matching: find.text('New worktree')),
+      chip('New worktree'),
       findsOneWidget,
       reason: 'a new session starts in a new worktree, as T3 Code does',
     );
-    expect(
-      find.descendant(of: chips, matching: find.text('From main')),
-      findsOneWidget,
-    );
-    expect(
-      find.descendant(of: chips, matching: find.text('Claude Opus 5.5')),
-      findsOneWidget,
-    );
-    expect(
-      find.descendant(of: chips, matching: find.text('Full access')),
-      findsOneWidget,
-    );
+    expect(chip('From main'), findsOneWidget);
+    expect(chip('Claude Opus 5.5'), findsOneWidget);
+    expect(chip('Full access'), findsOneWidget);
   });
 
   testWidgets('a new worktree starts from the branch picked', (tester) async {
     await show(tester);
-    await tester.tap(find.text('From main'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('develop'));
-    await tester.pumpAndSettle();
+    await tap(tester, find.text('From main'));
+    await tap(tester, find.text('develop'));
     expect(find.text('From develop'), findsOneWidget);
 
     await sendFirst(tester, 'Fix login');
@@ -116,10 +105,8 @@ void main() {
     tester,
   ) async {
     await show(tester);
-    await tester.tap(find.text('New worktree'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Current checkout'));
-    await tester.pumpAndSettle();
+    await tap(tester, find.text('New worktree'));
+    await tap(tester, find.text('Current checkout'));
     expect(find.text('From main'), findsNothing);
 
     await sendFirst(tester, 'Fix login');
@@ -133,10 +120,8 @@ void main() {
     tester,
   ) async {
     await show(tester);
-    await tester.tap(find.byTooltip('Model'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Claude Sonnet 5.5'));
-    await tester.pumpAndSettle();
+    await tap(tester, find.byTooltip('Model'));
+    await tap(tester, find.text('Claude Sonnet 5.5'));
     expect(state.model.value?.model, 'claude-sonnet-5-5');
 
     await sendFirst(tester, 'Fix login');
@@ -150,8 +135,7 @@ void main() {
     tester,
   ) async {
     await show(tester);
-    await tester.tap(find.text('Full access'));
-    await tester.pumpAndSettle();
+    await tap(tester, find.text('Full access'));
     for (final (name, detail) in [
       ('Supervised', 'Ask before commands and file changes.'),
       ('Auto-accept edits', 'Auto-approve edits, ask before other actions.'),
@@ -167,8 +151,7 @@ void main() {
       );
       expect(find.text(detail), findsOneWidget);
     }
-    await tester.tap(find.text('Auto-accept edits'));
-    await tester.pumpAndSettle();
+    await tap(tester, find.text('Auto-accept edits'));
     expect(find.text('Auto-accept edits'), findsOneWidget);
 
     await sendFirst(tester, 'Fix login');
@@ -200,10 +183,8 @@ void main() {
         ),
       ],
     );
-    await tester.tap(find.text('High'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Low'));
-    await tester.pumpAndSettle();
+    await tap(tester, find.text('High'));
+    await tap(tester, find.text('Low'));
     expect(find.text('Low'), findsOneWidget);
     expect(state.model.value?.values, ['low']);
   });
@@ -232,8 +213,7 @@ void main() {
       tester,
       threads: [threadOf('thread-2', title: 'Rate limit for /login')],
     );
-    await tester.tap(find.text('Rate limit for /login'));
-    await tester.pumpAndSettle();
+    await tap(tester, find.text('Rate limit for /login'));
     expect(project.calls, contains('open thread-2'));
   });
 
@@ -247,28 +227,21 @@ void main() {
         threadOf('thread-3', title: 'Run tests', running: true),
       ],
     );
-    await tester.tap(find.text('Fix login'), buttons: kSecondaryButton);
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Archive thread'));
-    await tester.pumpAndSettle();
+    await tap(tester, find.text('Fix login'), buttons: kSecondaryButton);
+    await tap(tester, find.text('Archive thread'));
     expect(project.calls, contains('archive thread-2 true'));
 
-    await tester.tap(find.text('Run tests'), buttons: kSecondaryButton);
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Archive thread'));
-    await tester.pumpAndSettle();
+    await tap(tester, find.text('Run tests'), buttons: kSecondaryButton);
+    await tap(tester, find.text('Archive thread'));
     expect(project.calls, isNot(contains('archive thread-3 true')));
   });
 
   testWidgets('cancelling a delete deletes nothing', (tester) async {
     await show(tester, threads: [threadOf('thread-2', title: 'Fix login')]);
-    await tester.tap(find.text('Fix login'), buttons: kSecondaryButton);
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Delete'));
-    await tester.pumpAndSettle();
+    await tap(tester, find.text('Fix login'), buttons: kSecondaryButton);
+    await tap(tester, find.text('Delete'));
     expect(find.text('Delete thread "Fix login"?'), findsOneWidget);
-    await tester.tap(find.text('Cancel'));
-    await tester.pumpAndSettle();
+    await tap(tester, find.text('Cancel'));
     expect(project.calls.where((call) => call.startsWith('delete')), isEmpty);
   });
 
@@ -282,12 +255,9 @@ void main() {
         ],
       );
       project.onlyInWorktree = true;
-      await tester.tap(find.text('Fix login'), buttons: kSecondaryButton);
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('Delete'));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('Confirm'));
-      await tester.pumpAndSettle();
+      await tap(tester, find.text('Fix login'), buttons: kSecondaryButton);
+      await tap(tester, find.text('Delete'));
+      await tap(tester, find.text('Confirm'));
       expect(find.text('Delete the worktree too?'), findsOneWidget);
       expect(
         find.text(
@@ -296,8 +266,7 @@ void main() {
         findsOneWidget,
       );
 
-      await tester.tap(find.text('Cancel'));
-      await tester.pumpAndSettle();
+      await tap(tester, find.text('Cancel'));
       expect(
         project.calls,
         contains('delete thread-2 worktree=false'),
@@ -316,14 +285,10 @@ void main() {
       ],
     );
     project.onlyInWorktree = true;
-    await tester.tap(find.text('Fix login'), buttons: kSecondaryButton);
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Delete'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Confirm'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Confirm'));
-    await tester.pumpAndSettle();
+    await tap(tester, find.text('Fix login'), buttons: kSecondaryButton);
+    await tap(tester, find.text('Delete'));
+    await tap(tester, find.text('Confirm'));
+    await tap(tester, find.text('Confirm'));
     expect(project.calls, contains('delete thread-2 worktree=true'));
   });
 
@@ -337,12 +302,9 @@ void main() {
       ],
     );
     project.onlyInWorktreeError = 'the worktree is locked';
-    await tester.tap(find.text('Fix login'), buttons: kSecondaryButton);
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Delete'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Confirm'));
-    await tester.pumpAndSettle();
+    await tap(tester, find.text('Fix login'), buttons: kSecondaryButton);
+    await tap(tester, find.text('Delete'));
+    await tap(tester, find.text('Confirm'));
     expect(
       state.notice.value?.text,
       'Could not delete the session: the worktree is locked',
@@ -356,10 +318,8 @@ void main() {
       await show(tester, threads: [threadOf('thread-1', title: 'Fix login')]);
       await state.open('thread-1');
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Fix login'), buttons: kSecondaryButton);
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('Export record'));
-      await tester.pumpAndSettle();
+      await tap(tester, find.text('Fix login'), buttons: kSecondaryButton);
+      await tap(tester, find.text('Export record'));
       expect(project.session.calls.single, startsWith('export '));
       expect(opened.single, startsWith('/Downloads/'));
     },
@@ -369,43 +329,22 @@ void main() {
     tester,
   ) async {
     await show(tester);
-    await tester.tap(find.byTooltip('Settings'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Writer model'));
-    await tester.pumpAndSettle();
+    await tap(tester, find.byTooltip('Settings'));
+    await tap(tester, find.text('Writer model'));
     expect(find.byType(WriterModelPane), findsOneWidget);
 
-    await tester.tap(find.text('Choose model'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Claude Sonnet 5.5'));
-    await tester.pumpAndSettle();
+    await tap(tester, find.text('Choose model'));
+    await tap(tester, find.text('Claude Sonnet 5.5'));
     expect(project.calls, contains('writer claude-sonnet-5-5'));
     expect(find.text('Claude Sonnet 5.5'), findsOneWidget);
   });
 
   testWidgets('the project menu copies the folder path', (tester) async {
-    String? copied;
-    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
-      SystemChannels.platform,
-      (call) async {
-        if (call.method == 'Clipboard.setData') {
-          copied = (call.arguments as Map)['text'] as String?;
-        }
-        return null;
-      },
-    );
-    addTearDown(
-      () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
-        SystemChannels.platform,
-        null,
-      ),
-    );
+    final copied = recordClipboard(tester);
     await show(tester);
-    await tester.tap(find.text('acme-api').first, buttons: kSecondaryButton);
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Copy path'));
-    await tester.pumpAndSettle();
-    expect(copied, '/work/acme-api');
+    await tap(tester, find.text('acme-api').first, buttons: kSecondaryButton);
+    await tap(tester, find.text('Copy path'));
+    expect(copied(), '/work/acme-api');
   });
 
   testWidgets(
@@ -423,6 +362,8 @@ void main() {
                 .millisecondsSinceEpoch,
             running: false,
             archived: false,
+            movable: true,
+            harnessKnown: true,
           ),
         ],
       );
@@ -459,10 +400,8 @@ void main() {
     await state.open('thread-1');
     await tester.pumpAndSettle();
     Future<void> exportRecord() async {
-      await tester.tap(find.text('Fix login'), buttons: kSecondaryButton);
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('Export record'));
-      await tester.pumpAndSettle();
+      await tap(tester, find.text('Fix login'), buttons: kSecondaryButton);
+      await tap(tester, find.text('Export record'));
     }
 
     runOpener = (program, arguments) async =>

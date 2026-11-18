@@ -22,10 +22,6 @@ import 'session_card_rows.dart';
 import 'session_card_settings.dart';
 import 'session_card_statistics.dart';
 
-/// The session card's sections, in T3 Code's order, shrunk to the space they have: the environment,
-/// the Version Control rows, the servers, automations, lineage and side chats, then the statistics,
-/// the usage limits and the context window. A section is left out when it has nothing to show, and
-/// a section below another draws its rule only when that one has content, as T3 Code's does.
 class SessionCard extends StatefulWidget {
   const SessionCard({
     super.key,
@@ -39,13 +35,10 @@ class SessionCard extends StatefulWidget {
   final SessionState state;
   final SessionCardSettingsController settings;
 
-  /// Opens the Diff panel with the scope the Changes row names.
   final ValueChanged<DiffScope> onChanges;
 
-  /// Whether the card sits beside the chat rather than over it as a popover.
   final bool beside;
 
-  /// Closes the card when it is a popover and a press lands outside it.
   final VoidCallback onOutsidePress;
 
   @override
@@ -55,11 +48,8 @@ class SessionCard extends StatefulWidget {
 class _SessionCardState extends State<SessionCard> {
   final _contentKey = GlobalKey(debugLabel: 'session card content');
 
-  /// The rows menu, which a right-click or the choose row opens.
   final _menu = MenuController();
 
-  /// The menu's first row, which takes focus when the menu opens, so Escape and the arrow keys
-  /// work in it.
   final _menuFirst = FocusNode(debugLabel: 'rows menu');
 
   @override
@@ -68,7 +58,6 @@ class _SessionCardState extends State<SessionCard> {
     super.dispose();
   }
 
-  /// The content's height at each density, measured for the rows named by `_measuredFor`.
   Map<CardDensity, double> _heights = const {};
   String? _measuredFor;
 
@@ -76,8 +65,6 @@ class _SessionCardState extends State<SessionCard> {
   Widget build(BuildContext context) {
     final ws = context.ws;
     final route = ModalRoute.of(context);
-    // A popover closes when a press or the focus leaves it, as T3 Code's does. The rows menu and
-    // a dialog the card opened take their own presses and focus.
     void leave() {
       final coveredByRoute = route != null && !route.isCurrent;
       if (!widget.beside && !_menu.isOpen && !coveredByRoute) {
@@ -153,7 +140,6 @@ class _SessionCardState extends State<SessionCard> {
         shown.shows(CardItem.branch) && (status != null || problem != null);
     final hasPull = shown.shows(CardItem.branch) && status != null;
     final hasGit = shown.shows(CardItem.gitActions) && status != null;
-    // As in T3, a repository shows its Changes row even with none.
     final hasChanges =
         shown.shows(CardItem.changes) && (status?.repository ?? false);
     final servers = shown.shows(CardItem.servers)
@@ -177,7 +163,6 @@ class _SessionCardState extends State<SessionCard> {
     final window = shown.shows(CardItem.context)
         ? state.contextWindow.value
         : null;
-    // Measurements hold only while the same rows show.
     final signature = [
       hasWorkspace,
       hasBranch,
@@ -201,8 +186,6 @@ class _SessionCardState extends State<SessionCard> {
       compact: measured[CardDensity.compact] ?? 0,
     );
     _measure(density, signature);
-    // T3 Code shows the environment, servers, automations, lineage and side chats only in the full
-    // card, and keeps the Git action row out of a compact one unless an action runs.
     final full = density == CardDensity.full;
     final showGit = hasGit && (full || git.running.value != null);
     final versionControl = [
@@ -211,7 +194,6 @@ class _SessionCardState extends State<SessionCard> {
       if (showGit) GitActionsControl(state: state),
       if (hasChanges) ChangesRow(state: state, onOpen: widget.onChanges),
     ];
-    // A card with no row left to show keeps one row that opens the rows menu, to refill it.
     final anyRow =
         hasWorkspace ||
         hasBranch ||
@@ -323,8 +305,6 @@ class _SessionCardState extends State<SessionCard> {
     );
   }
 
-  /// Measures the content at `density` after the frame, so the next build knows whether it fits.
-  /// The essential rows are not measured: nothing is left to drop below them.
   void _measure(CardDensity density, String signature) {
     if (density == CardDensity.essential) return;
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -341,7 +321,6 @@ class _SessionCardState extends State<SessionCard> {
     });
   }
 
-  /// Opens the rows menu at `position`, in the card's coordinates, and moves focus into it.
   void _openMenu(Offset position) {
     _menu.open(position: position);
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -349,7 +328,6 @@ class _SessionCardState extends State<SessionCard> {
     });
   }
 
-  /// Opens the rows menu below the row `row` is in.
   void _openMenuFrom(BuildContext row) {
     final box = row.findRenderObject()! as RenderBox;
     final card = context.findRenderObject()! as RenderBox;
@@ -359,7 +337,6 @@ class _SessionCardState extends State<SessionCard> {
   }
 }
 
-/// The row that opens the rows menu when no row is left to show, so the card can be refilled.
 class _ChooseRow extends StatelessWidget {
   const _ChooseRow({required this.onOpen});
 
@@ -382,8 +359,6 @@ class _ChooseRow extends StatelessWidget {
   );
 }
 
-/// Fades the edge the card's rows scroll past, as T3 Code's card does: the top once the rows are
-/// scrolled down, the bottom while more lie below. Rows that fit draw without a fade.
 class _ScrollFade extends StatefulWidget {
   const _ScrollFade({required this.child});
 
@@ -394,7 +369,6 @@ class _ScrollFade extends StatefulWidget {
 }
 
 class _ScrollFadeState extends State<_ScrollFade> {
-  /// The fade's depth, as T3 Code's card has it: 1.5 rem.
   static const _depth = 24.0;
 
   bool _above = false;
@@ -445,8 +419,6 @@ class _ScrollFadeState extends State<_ScrollFade> {
   }
 }
 
-/// The session statistics rows, with the Statistics row that opens the panel. The rows wait for the
-/// first read of the statistics.
 class _StatisticsSection extends StatelessWidget {
   const _StatisticsSection({required this.state, required this.divided});
 
@@ -467,7 +439,6 @@ class _StatisticsSection extends StatelessWidget {
               context,
               SessionStatistics(stored, running: turnRuns(state)),
             ),
-          // The Statistics row opens the panel, and names the key that opens it.
           CardRow(
             onTap: () => state.statisticsOpen.value = true,
             children: [

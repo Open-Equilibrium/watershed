@@ -2,7 +2,6 @@ import 'dart:math' show max, min, sqrt;
 import 'dart:typed_data';
 import 'dart:ui' show Offset;
 
-/// One sampled point of a pen stroke; pressure is 0 to 1 (0.5 for a mouse).
 class InkPoint {
   const InkPoint(this.x, this.y, [this.pressure = 0.5]);
 
@@ -23,7 +22,6 @@ class InkPoint {
 
 const _pointBytes = 12;
 
-/// Packs points as little-endian float32 x, y, pressure (12 bytes a point).
 Uint8List packPoints(List<InkPoint> points) {
   final bytes = Uint8List(points.length * _pointBytes);
   final data = ByteData.sublistView(bytes);
@@ -38,7 +36,6 @@ Uint8List packPoints(List<InkPoint> points) {
   return bytes;
 }
 
-/// The reverse of [packPoints]; throws [FormatException] on a partial point.
 List<InkPoint> unpackPoints(Uint8List bytes) {
   if (bytes.lengthInBytes % _pointBytes != 0) {
     throw FormatException(
@@ -56,7 +53,6 @@ List<InkPoint> unpackPoints(Uint8List bytes) {
   ];
 }
 
-/// The distance from [p] to the segment [a]–[b].
 double distanceToSegment(Offset p, Offset a, Offset b) {
   final d = b - a;
   final length2 = _dot(d, d);
@@ -64,7 +60,6 @@ double distanceToSegment(Offset p, Offset a, Offset b) {
   return (p - (a + d * t)).distance;
 }
 
-/// Whether a stroke [halfWidth] wide touches the circle at [center].
 bool strokeTouches(
   List<InkPoint> points,
   Offset center,
@@ -75,9 +70,6 @@ bool strokeTouches(
       distanceToSegment(center, s.$1.offset, s.$2.offset) <= radius + halfWidth,
 );
 
-/// GoodNotes' standard eraser: the pieces of [points] left outside the circle
-/// at [center], which is widened by [halfWidth]. Pieces shorter than
-/// [minLength] are dropped.
 List<List<InkPoint>> eraseInside(
   List<InkPoint> points,
   Offset center,
@@ -96,8 +88,6 @@ List<List<InkPoint>> eraseInside(
   }
 
   for (final (a, b) in _segments(points)) {
-    // Split each segment at its crossings with the circle; each part is either
-    // wholly inside or wholly outside, decided by its midpoint.
     final ts = [0.0, ..._cutTimes(a.offset, b.offset, center, reach), 1.0];
     for (var k = 0; k + 1 < ts.length; k++) {
       final mid = _at(a, b, (ts[k] + ts[k + 1]) / 2);
@@ -114,7 +104,6 @@ List<List<InkPoint>> eraseInside(
   return pieces;
 }
 
-/// Whether the closed [loop] encloses [p], by the even-odd rule.
 bool lassoEncloses(List<Offset> loop, Offset p) {
   var inside = false;
   var previous = loop.length - 1;
@@ -130,7 +119,6 @@ bool lassoEncloses(List<Offset> loop, Offset p) {
   return inside;
 }
 
-/// Whether more than half of [samples] lie inside the lasso [loop].
 bool lassoSelects(List<Offset> loop, List<Offset> samples) {
   final inside = samples.where((s) => lassoEncloses(loop, s)).length;
   return inside * 2 > samples.length;
@@ -138,7 +126,6 @@ bool lassoSelects(List<Offset> loop, List<Offset> samples) {
 
 double _dot(Offset u, Offset v) => u.dx * v.dx + u.dy * v.dy;
 
-/// A stroke's segments; a dot is a zero-length segment from its point to itself.
 Iterable<(InkPoint, InkPoint)> _segments(List<InkPoint> points) sync* {
   if (points.length == 1) yield (points[0], points[0]);
   for (var i = 0; i + 1 < points.length; i++) {
@@ -146,7 +133,6 @@ Iterable<(InkPoint, InkPoint)> _segments(List<InkPoint> points) sync* {
   }
 }
 
-/// The fractions in (0, 1) at which the segment [a]–[b] crosses the circle.
 List<double> _cutTimes(Offset a, Offset b, Offset center, double radius) {
   final d = b - a;
   final f = a - center;
@@ -163,7 +149,6 @@ List<double> _cutTimes(Offset a, Offset b, Offset center, double radius) {
   ].where((t) => t > 0 && t < 1).toList();
 }
 
-/// The point at fraction [t] from [a] to [b]; the ends are returned unchanged.
 InkPoint _at(InkPoint a, InkPoint b, double t) {
   if (t == 0) return a;
   if (t == 1) return b;
@@ -174,7 +159,6 @@ InkPoint _at(InkPoint a, InkPoint b, double t) {
   );
 }
 
-/// The polyline length of a piece; a single point has none.
 double _length(List<InkPoint> piece) {
   var total = 0.0;
   for (var i = 0; i + 1 < piece.length; i++) {

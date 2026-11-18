@@ -13,8 +13,6 @@ import 'package:liquid/src/theme/tokens.g.dart';
 
 import 'fake_backend.dart';
 
-/// Opens thread-1 on `session`, in `worktree`, and pumps the session card beside the chat, `height`
-/// high, as the card's tests and the sections' tests see it.
 Future<SessionState> pumpCard(
   WidgetTester tester, {
   required FakeSession session,
@@ -23,10 +21,11 @@ Future<SessionState> pumpCard(
   bool beside = true,
   ValueChanged<DiffScope>? onChanges,
   VoidCallback? onOutsidePress,
-  String? worktree = '/repo/.worktrees/fix-login',
 }) async {
   final project = FakeProject(session: session)
-    ..threadList = [threadOf('thread-1', worktree: worktree)];
+    ..threadList = [
+      threadOf('thread-1', worktree: '/repo/.worktrees/fix-login'),
+    ];
   final state = SessionState(project);
   addTearDown(state.dispose);
   await state.open('thread-1');
@@ -56,7 +55,6 @@ Future<SessionState> pumpCard(
   return state;
 }
 
-/// Records what the app copies to the clipboard; the getter returns the last copy.
 String? Function() recordClipboard(WidgetTester tester) {
   String? copied;
   tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
@@ -77,7 +75,6 @@ String? Function() recordClipboard(WidgetTester tester) {
   return () => copied;
 }
 
-/// Records what the browser opener is asked to open, instead of opening it.
 List<String> recordOpens() {
   final opened = <String>[];
   final original = runOpener;
@@ -89,6 +86,5 @@ List<String> recordOpens() {
   return opened;
 }
 
-/// A colour of the light theme's palette, picked by `pick`.
 Color toneOf(Color Function(WsPalette palette) pick) =>
     pick(liquidTheme(Brightness.light).extension<WsTheme>()!.palette);

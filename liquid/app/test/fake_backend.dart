@@ -3,19 +3,21 @@ import 'dart:async';
 import 'package:liquid/src/rust/api/details.dart';
 import 'package:liquid/src/rust/api/events.dart';
 import 'package:liquid/src/rust/api/git.dart';
+import 'package:liquid/src/rust/api/moves.dart';
 import 'package:liquid/src/rust/api/session.dart';
 import 'package:liquid/src/rust/api/thread.dart';
 import 'package:liquid/src/session/backend.dart';
 
-/// A project on a fake agent host. It records what Liquid asks in [calls]; tests set what it
-/// answers and subclass it for anything else.
+const fakeEnvironment = 'env-fake';
+
 class FakeProject implements ProjectBackend {
   FakeProject({FakeSession? session, FakeGit? git})
     : session = session ?? FakeSession(),
       gitBackend = git ?? FakeGit();
 
-  /// The session that [start] and [open] return.
   FakeSession session;
+  String environment = fakeEnvironment;
+  String? moveOutEnvironment;
   FakeGit gitBackend;
   final calls = <String>[];
 
@@ -24,14 +26,38 @@ class FakeProject implements ProjectBackend {
   BridgeModelChoice? writer;
   bool onlyInWorktree = false;
 
-  /// What [start] and [open] fail with.
   Object? openError;
 
-  /// Holds what [start] and [open] return until it completes, so a later call can return first.
   Completer<void>? hold;
 
-  /// What [onlySessionInWorktree] fails with.
   Object? onlyInWorktreeError;
+
+  @override
+  String root = '/work/acme-api';
+
+  BridgeMoveCheck moveCheckAnswer = moveCheckOf();
+  Object? moveCheckError;
+  Map<String, BridgeLanding> landings = {};
+
+  @override
+  Future<BridgeLanding> preflight(String root, String branch) async {
+    calls.add('preflight $root $branch');
+    return landings[root] ??
+        const BridgeLanding(kind: BridgeLandingKind.newWorktree);
+  }
+
+  Object? moveOutError;
+  Object? cloneError;
+  Object? moveInError;
+  String? clonedRoot;
+  List<BridgeHostProject> projectList = [];
+  Object? hostProjectsError;
+  bool movesSupported = true;
+  BridgeMoveRecord? moveRecordAnswer;
+  List<BridgeConfigChange> configChanges = [];
+
+  BridgeHostProject? addedProject;
+  Object? addProjectError;
 
   @override
   Future<List<BridgeThreadSummary>> threads() async => threadList;
@@ -75,6 +101,163 @@ class FakeProject implements ProjectBackend {
       calls.add('delete $id worktree=$worktree');
 
   @override
+  Future<BridgeMoveCheck> moveCheck(String id) async {
+    calls.add('move check $id');
+    if (moveCheckError case final error?) throw error;
+    return moveCheckWith(
+      moveCheckAnswer,
+      moved: moveCheckAnswer.moved || _sealed,
+      moving: moving,
+    );
+  }
+
+  bool moveOutLostAfterHandover = false;
+  BridgeMoving? moving;
+  bool _sealed = false;
+
+  @override
+  Future<String> environmentId() async => environment;
+
+  @override
+  Future<CarriedMove> moveOut(
+    String id, {
+    required String transfer,
+    required String targetAddress,
+    required String targetName,
+    required String targetEnvironment,
+    required bool commit,
+  }) async {
+    moveOutEnvironment = targetEnvironment;
+    calls.add('move out $id commit=$commit');
+    if (moveOutLostAfterHandover) {
+      moving = _movingOf(transfer, targetName, targetEnvironment);
+      throw moveOutError ??
+          'Meta-Harness closed the connection before it answered.';
+    }
+    if (moveOutError case final error?) throw error;
+    moving = _movingOf(transfer, targetName, targetEnvironment);
+    return FakeCarriedMove(transfer);
+  }
+
+  @override
+  Future<void> moveFinish(String id, String transfer, String? toHost) async {
+    calls.add('move finish $id $transfer ${toHost ?? 'null'}');
+    if (toHost != null) _sealed = true;
+    moving = null;
+    threadList = [
+      for (final thread in threadList)
+        thread.moving == null
+            ? thread
+            : threadOf(thread.id, title: thread.title),
+    ];
+  }
+
+  @override
+  Future<BridgeArrival> moveAbort(String transfer) async {
+    calls.add('move abort $transfer');
+    final landed = landedThread;
+    if (landed != null && undelivered) {
+      return const BridgeArrival(kind: BridgeArrivalKind.starting);
+    }
+    if (landed != null) {
+      return BridgeArrival(kind: BridgeArrivalKind.landed, thread: landed);
+    }
+    return const BridgeArrival(kind: BridgeArrivalKind.refused);
+  }
+
+  @override
+  Future<BridgeMoveRecord?> moveRecord(String id) async => moveRecordAnswer;
+
+  @override
+  Future<bool> supportsMoves() async => movesSupported;
+
+  @override
+  Future<List<BridgeHostProject>> hostProjects() async {
+    if (hostProjectsError case final error?) throw error;
+    return projectList;
+  }
+
+  @override
+  Future<BridgeHostProject> addProject(String root) async {
+    calls.add('add project $root');
+    if (addProjectError case final error?) throw error;
+    return addedProject ??
+        BridgeHostProject(
+          root: root,
+          title: root,
+          remoteUrl: 'git@github.com:acme/api.git',
+        );
+  }
+
+  @override
+  Future<BridgeHostProject> cloneProject(String remoteUrl, String path) async {
+    calls.add('clone $remoteUrl $path');
+    if (cloneError case final error?) throw error;
+    return BridgeHostProject(
+      root: clonedRoot ?? path,
+      title: path,
+      remoteUrl: remoteUrl,
+    );
+  }
+
+  @override
+  Future<SessionBackend> moveIn(
+    CarriedMove move, {
+    required String root,
+  }) async {
+    calls.add('move in $root');
+    if (moveInError case final error?) throw error;
+    if (moveInLostReplies > 0) {
+      moveInLostReplies--;
+      if (lostRepliesLanded) landedThread = session.id;
+      throw MoveConnectionLost(
+        'Meta-Harness closed the connection before it answered.',
+      );
+    }
+    landedThread = session.id;
+    return session;
+  }
+
+  int moveInLostReplies = 0;
+  bool lostRepliesLanded = false;
+  String? landedThread;
+
+  @override
+  Future<BridgeArrival> moveStatus(String transfer) async {
+    calls.add('move status $transfer');
+    final landed = landedThread;
+    if (landed != null && undelivered) {
+      return const BridgeArrival(kind: BridgeArrivalKind.starting);
+    }
+    if (landed != null) {
+      return BridgeArrival(kind: BridgeArrivalKind.landed, thread: landed);
+    }
+    if (startingThread) {
+      return const BridgeArrival(kind: BridgeArrivalKind.starting);
+    }
+    return const BridgeArrival(kind: BridgeArrivalKind.unknown);
+  }
+
+  bool startingThread = false;
+  bool undelivered = false;
+
+  @override
+  Future<ConfigurationChanges> configurationChanges(
+    ProjectBackend from,
+  ) async => FakeConfigurationChanges(configChanges);
+
+  ConfigurationChanges? broughtChanges;
+
+  @override
+  Future<void> bringConfiguration(
+    ProjectBackend from,
+    ConfigurationChanges shown,
+  ) async {
+    broughtChanges = shown;
+    calls.add('bring configuration');
+  }
+
+  @override
   Future<void> archive(String id, {required bool archived}) async =>
       calls.add('archive $id $archived');
 
@@ -98,20 +281,21 @@ class FakeProject implements ProjectBackend {
   @override
   Future<String> environmentName() async => hostName;
 
-  /// Whether Liquid released the project.
   bool closed = false;
 
-  /// What [close] fails with.
-  Object? closeError;
+  @override
+  void close() => closed = true;
 
   @override
-  void close() {
-    if (closeError case final error?) throw error;
-    closed = true;
-  }
+  Future<String> environmentMachine() async => 'server';
 }
 
-/// One session on the fake host: [emit] streams events; everything else is recorded in [calls].
+class UnreachableProject extends FakeProject {
+  @override
+  Future<List<BridgeThreadSummary>> threads() =>
+      Future.error('the host is down');
+}
+
 class FakeSession implements SessionBackend {
   FakeSession({this.id = 'thread-1'});
 
@@ -120,7 +304,6 @@ class FakeSession implements SessionBackend {
   final calls = <String>[];
   final _events = StreamController<BridgeEvent>.broadcast();
 
-  /// What [subscribe] and [snapshot] return.
   BridgeSnapshot current = snapshotOf();
   List<BridgeTurn> turnList = [];
   List<BridgeFileChange> changes = [];
@@ -129,28 +312,21 @@ class FakeSession implements SessionBackend {
   BridgeContext? contextWindow;
   BridgeModelChoice? chosen;
   String sessionTitle = 'Session';
-  String? worktreePath;
   FakeGit gitBackend = FakeGit();
 
-  /// The prompt [revert] returns.
   String revertedPrompt = '';
 
-  /// What [send] fails with.
   Object? sendError;
 
-  /// What [setPermissions] and [setModel] fail with.
   Object? permissionsError;
   Object? modelError;
 
-  /// The applied counts Liquid confirmed, in order.
   final confirmed = <int>[];
 
   void emit(BridgeEvent event) => _events.add(event);
 
-  /// Fails the event stream, as the bridge's stream can.
   void fail(Object error) => _events.addError(error);
 
-  /// Whether Liquid released the session.
   bool closed = false;
 
   @override
@@ -160,8 +336,6 @@ class FakeSession implements SessionBackend {
   Future<BridgeSubscription> subscribe() async =>
       BridgeSubscription(id: 1, snapshot: current);
 
-  /// Like the bridge's stream, its cancel completes in the caller's zone, so widget tests that
-  /// leave a session finish.
   @override
   Stream<BridgeEvent> events(int subscription) {
     late final StreamSubscription<BridgeEvent> source;
@@ -263,7 +437,7 @@ class FakeSession implements SessionBackend {
   @override
   Future<String> title() async => sessionTitle;
   @override
-  Future<String?> worktree() async => worktreePath;
+  Future<String?> worktree() async => null;
   @override
   GitBackend git() => gitBackend;
   @override
@@ -279,9 +453,6 @@ class FakeSession implements SessionBackend {
     return '/Downloads/$day';
   }
 
-  /// What the card's live sections show; [serverUpdates], [automationUpdates] and
-  /// [lineageUpdates] stream their changes. As the bridge does, a section's changes fail
-  /// unless its first read ran first.
   final _firstRead = <String>{};
   List<BridgeLocalServer> serverList = [];
   final serverUpdates = StreamController<List<BridgeLocalServer>>.broadcast();
@@ -345,7 +516,6 @@ class FakeSession implements SessionBackend {
   Future<BridgeUsageLimits?> usageLimits() async => limits;
 }
 
-/// Git for a fake checkout: [statuses] streams status changes; actions are recorded in [calls].
 class FakeGit implements GitBackend {
   FakeGit({BridgeGitStatus? status}) : current = status ?? gitStatusOf();
 
@@ -356,28 +526,29 @@ class FakeGit implements GitBackend {
   List<BridgeFileChange> changes = [];
   Map<String, String> patches = {};
 
-  /// The steps [run] streams.
   List<BridgeGitProgress> steps = [
     progressOf(BridgeGitProgressKind.finished, 'Done'),
   ];
 
-  /// What [refs], [switchTo] and [createBranch] fail with.
   Object? refError;
 
-  /// Whether Liquid released the checkout.
+  Object? statusError;
+
   bool closed = false;
 
   @override
   void close() => closed = true;
 
-  /// Changes the status, as T3's status stream reports it.
   void change(BridgeGitStatus next) {
     current = next;
     statuses.add(next);
   }
 
   @override
-  Future<BridgeGitStatus> status() async => current;
+  Future<BridgeGitStatus> status() async {
+    if (statusError case final error?) throw error;
+    return current;
+  }
 
   @override
   Stream<BridgeGitStatus> watch() async* {
@@ -504,13 +675,9 @@ class FakeGit implements GitBackend {
   }
 }
 
-BridgeProvider providerOf({
-  String instance = 'claudeAgent',
-  String name = 'Claude',
-  List<BridgeModel>? models,
-}) => BridgeProvider(
-  instance: instance,
-  name: name,
+BridgeProvider providerOf({List<BridgeModel>? models}) => BridgeProvider(
+  instance: 'claudeAgent',
+  name: 'Claude',
   available: true,
   models: models ?? [modelOf('claude-opus-5-5', 'Claude Opus 5.5')],
 );
@@ -521,26 +688,97 @@ BridgeModel modelOf(
   List<BridgeModelOption>? options,
 }) => BridgeModel(id: id, name: name, options: options ?? const []);
 
-BridgeModelChoice choiceOf(String model, {String instance = 'claudeAgent'}) =>
-    BridgeModelChoice(
-      instance: instance,
-      model: model,
-      optionIds: const [],
-      values: const [],
-    );
+BridgeModelChoice choiceOf(String model) => BridgeModelChoice(
+  instance: 'claudeAgent',
+  model: model,
+  optionIds: const [],
+  values: const [],
+);
+
+BridgeMoveCheck moveCheckOf({
+  int uncommittedFiles = 0,
+  String? blocked,
+  String? remoteUrl = 'git@github.com:acme/api.git',
+  bool moved = false,
+  BridgeMoving? moving,
+}) => BridgeMoveCheck(
+  moving: moving,
+  title: 'Fix the flaky port test',
+  movable: true,
+  harness: 'Codex',
+  model: 'gpt-6.1',
+  running: false,
+  uncommittedFiles: uncommittedFiles,
+  branch: 'fix/ports',
+  remoteUrl: remoteUrl,
+  blocked: blocked,
+  moved: moved,
+);
+
+class FakeConfigurationChanges implements ConfigurationChanges {
+  FakeConfigurationChanges(this.changes);
+
+  @override
+  final List<BridgeConfigChange> changes;
+}
+
+BridgeMoving _movingOf(
+  String transfer,
+  String targetName,
+  String targetEnvironment,
+) => BridgeMoving(
+  transfer: transfer,
+  phase: BridgeMovePhase.handed,
+  targetAddress: '',
+  targetName: targetName,
+  targetEnvironment: targetEnvironment,
+  sinceMs: 0,
+);
+
+BridgeMoveCheck moveCheckWith(
+  BridgeMoveCheck check, {
+  required bool moved,
+  BridgeMoving? moving,
+}) => BridgeMoveCheck(
+  title: check.title,
+  movable: check.movable,
+  harness: check.harness,
+  model: check.model,
+  running: check.running,
+  uncommittedFiles: check.uncommittedFiles,
+  branch: check.branch,
+  remoteUrl: check.remoteUrl,
+  blocked: check.blocked,
+  moved: moved,
+  moving: moving,
+);
+
+class FakeCarriedMove implements CarriedMove {
+  FakeCarriedMove(this.transfer);
+
+  @override
+  final String transfer;
+}
 
 BridgeThreadSummary threadOf(
   String id, {
   String? title,
   String? worktree,
   bool running = false,
-  bool archived = false,
+  int? updatedMs,
+  bool movable = true,
+  bool harnessKnown = true,
+  BridgeMoving? moving,
 }) => BridgeThreadSummary(
   id: id,
   title: title ?? id,
   worktree: worktree,
   running: running,
-  archived: archived,
+  archived: false,
+  updatedMs: updatedMs,
+  movable: movable,
+  harnessKnown: harnessKnown,
+  moving: moving,
 );
 
 BridgeSnapshot snapshotOf({
@@ -624,29 +862,24 @@ BridgeTurn turnOf(
 
 BridgeRequest approvalOf(
   String id, {
-  int turn = 1,
   String kind = 'command',
   String prompt = 'rm -rf build',
   List<BridgeApprovalOption> options = const [],
 }) => BridgeRequest(
   id: id,
-  turn: turn,
+  turn: 1,
   approval: BridgeApproval(kind: kind, prompt: prompt, options: options),
   questions: const [],
 );
 
-BridgeRequest questionsOf(
-  String id,
-  List<BridgeQuestion> questions, {
-  int turn = 1,
-}) => BridgeRequest(id: id, turn: turn, questions: questions);
+BridgeRequest questionsOf(String id, List<BridgeQuestion> questions) =>
+    BridgeRequest(id: id, turn: 1, questions: questions);
 
 BridgeQuestion questionOf(
   String id,
   String question, {
   List<String> options = const [],
   bool multiSelect = false,
-  bool custom = true,
 }) => BridgeQuestion(
   id: id,
   header: id,
@@ -654,7 +887,7 @@ BridgeQuestion questionOf(
   options: options,
   descriptions: [for (final _ in options) ''],
   multiSelect: multiSelect,
-  custom: custom,
+  custom: true,
 );
 
 BridgeStatistics statisticsOf({List<BridgeTurnStatistics> turns = const []}) =>
@@ -709,15 +942,11 @@ BridgeGitStatus gitStatusOf({
   pullRequest: pullRequest,
 );
 
-BridgeBranchPullRequest pullRequestOf({
-  int number = 7,
-  String title = 'Add a feature',
-  String state = 'open',
-}) => BridgeBranchPullRequest(
-  number: number,
-  title: title,
-  url: 'https://github.com/o/r/pull/$number',
-  state: state,
+BridgeBranchPullRequest pullRequestOf() => BridgeBranchPullRequest(
+  number: 7,
+  title: 'Add a feature',
+  url: 'https://github.com/o/r/pull/7',
+  state: 'open',
   draft: false,
   base: 'main',
 );
@@ -759,28 +988,24 @@ BridgeLineage lineageOf({List<BridgeLineageRow> rows = const []}) =>
       canMerge: false,
     );
 
-BridgePullRequestDetail pullRequestDetailOf({
-  int number = 7,
-  String state = 'open',
-  bool draft = false,
-  String? action,
-}) => BridgePullRequestDetail(
-  number: number,
-  title: 'Add a feature',
-  url: 'https://github.com/o/r/pull/$number',
-  state: state,
-  draft: draft,
-  base: 'main',
-  head: 'feature',
-  conflicting: false,
-  files: 1,
-  added: 1,
-  removed: 0,
-  checks: const [],
-  checksState: 'none',
-  checksSummary: '',
-  action: action,
-  mergeMethod: 'squash',
-  fixPrompt: 'Fix the checks',
-  resolvePrompt: 'Resolve the conflicts',
-);
+BridgePullRequestDetail pullRequestDetailOf({int number = 7}) =>
+    BridgePullRequestDetail(
+      number: number,
+      title: 'Add a feature',
+      url: 'https://github.com/o/r/pull/$number',
+      state: 'open',
+      draft: false,
+      base: 'main',
+      head: 'feature',
+      conflicting: false,
+      files: 1,
+      added: 1,
+      removed: 0,
+      checks: const [],
+      checksState: 'none',
+      checksSummary: '',
+      action: null,
+      mergeMethod: 'squash',
+      fixPrompt: 'Fix the checks',
+      resolvePrompt: 'Resolve the conflicts',
+    );

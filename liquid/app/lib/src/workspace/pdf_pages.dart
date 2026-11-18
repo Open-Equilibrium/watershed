@@ -3,33 +3,24 @@ import 'dart:ui' as ui;
 
 import 'package:flutter/services.dart';
 
-/// A PDF the system's renderer opened (PDFKit on macOS, ADR-0307): its pages' sizes in
-/// points, and each page drawn on demand at a width in device pixels.
 class PdfPages {
-  /// The sizes, then the render and close callbacks; tests fake documents with them.
   PdfPages(this.sizes, this._renderPage, this._closeDocument);
 
-  /// Opens `bytes`; throws [PdfUnreadable] for data the renderer cannot read.
   static Future<PdfPages> open(Uint8List bytes) => opener(bytes);
 
-  /// Replaced by tests and by platforms without a renderer.
   static Future<PdfPages> Function(Uint8List bytes) opener =
       _openThroughChannel;
 
-  /// Each page's size in points, as displayed: crop box and rotation applied.
   final List<ui.Size> sizes;
 
   final Future<ui.Image> Function(int index, int width) _renderPage;
   final Future<void> Function() _closeDocument;
 
-  /// Page `index` drawn `width` pixels wide, as an image; the renderer caps the width.
   Future<ui.Image> render(int index, int width) => _renderPage(index, width);
 
-  /// Drops the document in the renderer.
   Future<void> close() => _closeDocument();
 }
 
-/// Data the renderer cannot read, or a locked PDF, or no renderer on this platform.
 class PdfUnreadable implements Exception {
   const PdfUnreadable();
 
@@ -39,7 +30,6 @@ class PdfUnreadable implements Exception {
 
 const _pdfChannel = MethodChannel('liquid/pdf');
 
-/// The map a method answers with; no answer is an empty map.
 Future<Map<String, Object?>> _ask(
   String method,
   Map<String, Object?> arguments,
@@ -68,7 +58,6 @@ Future<PdfPages> _openThroughChannel(Uint8List bytes) async {
   );
 }
 
-/// Page `index` as the renderer answers it: RGBA, 8 bits, row-major, without padding.
 Future<ui.Image> _renderThroughChannel(int id, int index, int width) async {
   final answer = await _ask('render', {
     'id': id,

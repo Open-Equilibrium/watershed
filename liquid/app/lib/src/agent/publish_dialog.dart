@@ -8,8 +8,6 @@ import '../theme/icons.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
 
-/// T3 Code's "Publish repository" dialog: creates a GitHub repository for the project folder and
-/// pushes to it. GitHub is the only provider the bridge publishes to.
 Future<void> showPublishDialog(BuildContext context, SessionState state) =>
     showDialog<void>(
       context: context,
@@ -44,7 +42,6 @@ class _PublishDialogState extends State<_PublishDialog> {
     super.dispose();
   }
 
-  /// Whether the text names an owner and a repository, as `owner/name`.
   bool get _named {
     final parts = _repository.text.trim().split('/');
     return parts.length >= 2 &&

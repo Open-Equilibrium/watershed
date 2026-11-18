@@ -9,18 +9,10 @@ import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
 // These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
 
-/// An action the agent asks to run.
 class BridgeApproval {
-  /// T3's kind, such as `command`, `file_change` or `file_read`.
   final String kind;
-
-  /// The command, path or other detail.
   final String prompt;
-
-  /// Why the agent asks.
   final String? reason;
-
-  /// The choices, in T3's order.
   final List<BridgeApprovalOption> options;
 
   const BridgeApproval({
@@ -45,15 +37,9 @@ class BridgeApproval {
           options == other.options;
 }
 
-/// One choice of an approval.
 class BridgeApprovalOption {
-  /// The decision sent back.
   final String decision;
-
-  /// The label.
   final String label;
-
-  /// A warning shown with it.
   final String? warning;
 
   const BridgeApprovalOption({
@@ -75,45 +61,16 @@ class BridgeApprovalOption {
           warning == other.warning;
 }
 
-/// What a changed file's change is.
-enum BridgeChangeStatus {
-  /// Added.
-  added,
+enum BridgeChangeStatus { added, modified, deleted, renamed }
 
-  /// Changed.
-  modified,
-
-  /// Deleted.
-  deleted,
-
-  /// Renamed.
-  renamed,
-}
-
-/// One event, in the thread's stream order.
 class BridgeEvent {
-  /// What happened.
   final BridgeEventKind kind;
-
-  /// T3's sequence number; a snapshot at this sequence or later already contains the event.
   final PlatformInt64 sequence;
-
-  /// The turn, for turn and item events.
   final PlatformInt64? turn;
-
-  /// The item, for item events.
   final BridgeItem? item;
-
-  /// Appended or complete text.
   final String? text;
-
-  /// A finished model request's usage.
   final BridgeUsage? usage;
-
-  /// An opened request.
   final BridgeRequest? request;
-
-  /// A resolved request's id.
   final String? requestId;
 
   const BridgeEvent({
@@ -153,61 +110,26 @@ class BridgeEvent {
           requestId == other.requestId;
 }
 
-/// What happened.
 enum BridgeEventKind {
-  /// A turn started.
   turnStarted,
-
-  /// A turn ended normally.
   turnCompleted,
-
-  /// A turn was stopped or failed.
   turnAborted,
-
-  /// A turn was queued, removed from the queue, or its changed files became known.
   turnsChanged,
-
-  /// Turns were reverted; Liquid reloads the Chat from a snapshot.
   rolledBack,
-
-  /// An item started.
   itemStarted,
-
-  /// Text was appended to an item.
   contentDelta,
-
-  /// An item ended with its whole text.
   itemCompleted,
-
-  /// A model request finished with its usage.
   modelRequestCompleted,
-
-  /// The agent asks the person something.
   requestOpened,
-
-  /// A request was answered or withdrawn.
   requestResolved,
-
-  /// Liquid fell behind the stream; it reloads the Chat from a snapshot and ignores the events
-  /// up to its sequence (ADR-0290).
   fellBehind,
 }
 
-/// One changed file and its line counts.
 class BridgeFileChange {
-  /// The path, relative to the checkout.
   final String path;
-
-  /// The path as Liquid shows it, with hiding characters written out.
   final String shown;
-
-  /// What changed.
   final BridgeChangeStatus status;
-
-  /// Added lines.
   final PlatformInt64 added;
-
-  /// Removed lines.
   final PlatformInt64 removed;
 
   const BridgeFileChange({
@@ -238,27 +160,13 @@ class BridgeFileChange {
           removed == other.removed;
 }
 
-/// One Chat item.
 class BridgeItem {
-  /// The item's id within the session.
   final PlatformInt64 id;
-
-  /// What it is.
   final BridgeItemKind kind;
-
-  /// The tool, for a tool call.
   final String? tool;
-
-  /// What the tool works on, on one line.
   final String? target;
-
-  /// Whether it ended, for a finished item.
   final bool ended;
-
-  /// Whether it failed.
   final bool failed;
-
-  /// How long a tool ran.
   final PlatformInt64? durationMs;
 
   const BridgeItem({
@@ -295,51 +203,23 @@ class BridgeItem {
           durationMs == other.durationMs;
 }
 
-/// What an item is.
 enum BridgeItemKind {
-  /// The person's prompt.
   userMessage,
-
-  /// The agent's answer.
   assistantMessage,
-
-  /// The model's reasoning.
   reasoning,
-
-  /// A shell command.
   commandExecution,
-
-  /// A file edit.
   fileChange,
-
-  /// Another tool call.
   dynamicToolCall,
-
-  /// An error T3 or the provider reported.
   error,
 }
 
-/// One question.
 class BridgeQuestion {
-  /// The id its answer is sent under.
   final String id;
-
-  /// A short header.
   final String header;
-
-  /// The question, in Markdown.
   final String question;
-
-  /// The option labels.
   final List<String> options;
-
-  /// The option descriptions, matching `options`.
   final List<String> descriptions;
-
-  /// Whether several options may be chosen.
   final bool multiSelect;
-
-  /// Whether a typed answer is allowed.
   final bool custom;
 
   const BridgeQuestion({
@@ -376,18 +256,10 @@ class BridgeQuestion {
           custom == other.custom;
 }
 
-/// A request the agent waits on: an approval or questions.
 class BridgeRequest {
-  /// The request.
   final String id;
-
-  /// The turn that asks.
   final PlatformInt64 turn;
-
-  /// An approval, or `None` for questions.
   final BridgeApproval? approval;
-
-  /// The questions, empty for an approval.
   final List<BridgeQuestion> questions;
 
   const BridgeRequest({
@@ -412,21 +284,11 @@ class BridgeRequest {
           questions == other.questions;
 }
 
-/// Tokens of a model request, or of a model over a session. T3 reports no cost (ADR-0293).
 class BridgeUsage {
-  /// Input tokens, without cache reads and writes.
   final PlatformInt64 input;
-
-  /// Output tokens, including reasoning.
   final PlatformInt64 output;
-
-  /// Input tokens read from the cache.
   final PlatformInt64 cacheRead;
-
-  /// Input tokens written to the cache.
   final PlatformInt64 cacheWrite;
-
-  /// Reasoning tokens, already in `output`.
   final PlatformInt64 reasoning;
 
   const BridgeUsage({

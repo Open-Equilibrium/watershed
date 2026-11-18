@@ -1,21 +1,9 @@
-//! Liquid's local replica: the Workspace [`Store`] in one SQLite database, encrypted with
-//! SQLCipher and in write-ahead-log mode (ADR-0237). SQL stays inside this crate (client
-//! architecture rule 15).
-//!
-//! The database holds each document's chunks, Automerge changes and snapshots, every
-//! recorded Action, and the attachments' parts (ADR-0305). A commit is one transaction that reaches the storage medium, so an
-//! acknowledged write survives the app being killed and a power loss.
-
-#![deny(missing_docs)]
-
 use std::fmt::Write as _;
 use std::path::Path;
 
 use liquid_core::{Action, ActionId, AttachmentId, Commit, Document, Error, Store, Write};
 use rusqlite::{Connection, ErrorCode, OptionalExtension, params};
 
-/// The schema version this crate writes; [`Sqlite::open`] creates it in a new database and
-/// refuses a newer one.
 const VERSION: i64 = 2;
 
 const SCHEMA: &str = "
@@ -32,8 +20,6 @@ const SCHEMA: &str = "
     );
 ";
 
-/// What schema version 2 adds: attachments, each one upload's parts under the SHA-256 of
-/// its bytes. Parts of an upload no attachment names are unfinished.
 const ATTACHMENTS: &str = "
     CREATE TABLE parts (
         seq INTEGER PRIMARY KEY,
@@ -49,7 +35,6 @@ const ATTACHMENTS: &str = "
     );
 ";
 
-/// A Workspace store in an encrypted SQLite database.
 pub struct Sqlite {
     connection: Connection,
 }
@@ -63,10 +48,6 @@ fn held() -> Error {
 }
 
 impl Sqlite {
-    /// Opens the database at `path`, creating it if it does not exist, with the 256-bit
-    /// `key` that the operating system's keystore holds. A wrong key is refused, and so is
-    /// a database another session holds: each session keeps its documents in memory, so
-    /// one session at a time owns the replica until it is dropped.
     pub fn open(path: &Path, key: &[u8; 32]) -> Result<Self, Error> {
         let connection = Connection::open(path).map_err(failed)?;
         let mut hex = String::with_capacity(64);
@@ -84,7 +65,6 @@ impl Sqlite {
                 Some(ErrorCode::DatabaseBusy) => held(),
                 _ => Error::Storage("wrong key, or not a Liquid database".into()),
             })?;
-        // The first write takes the exclusive lock, which the connection keeps.
         connection
             .execute_batch("BEGIN EXCLUSIVE; COMMIT;")
             .map_err(|error| match error.sqlite_error_code() {
@@ -97,8 +77,6 @@ impl Sqlite {
         if mode != "wal" {
             return Err(Error::Storage(format!("journal mode {mode}, not WAL")));
         }
-        // Full synchronization, and on Apple systems F_FULLFSYNC, so a commit reaches the
-        // storage medium rather than the drive's cache and survives a power loss.
         connection
             .execute_batch(
                 "PRAGMA synchronous = FULL; PRAGMA fullfsync = ON; PRAGMA checkpoint_fullfsync = ON;",
@@ -114,7 +92,6 @@ impl Sqlite {
                 )));
             }
         };
-        // An upload the last session never finished is dropped.
         connection
             .execute_batch(&format!(
                 "BEGIN; {create} PRAGMA user_version = {VERSION}; \
@@ -197,7 +174,6 @@ impl Store for Sqlite {
     }
 
     fn put_part(&mut self, upload: &str, index: u64, bytes: &[u8]) -> Result<(), Error> {
-        // SQLite keeps i64; a larger index would wrap into a negative one.
         let index = i64::try_from(index).map_err(failed)?;
         self.connection
             .prepare_cached("INSERT INTO parts (upload, idx, bytes) VALUES (?1, ?2, ?3)")
@@ -215,8 +191,6 @@ impl Store for Sqlite {
     ) -> Result<(), Error> {
         let size = i64::try_from(size).map_err(failed)?;
         let transaction = self.connection.transaction().map_err(failed)?;
-        // Parts run from 0 without a gap: the lowest index 0 and the highest one less
-        // than their count.
         let (kept, first, last): (i64, Option<i64>, Option<i64>) = transaction
             .query_row(
                 "SELECT count(*), min(idx), max(idx) FROM parts WHERE upload = ?1",
@@ -236,7 +210,6 @@ impl Store for Sqlite {
                 params![attachment.as_str(), upload, size],
             )
             .map_err(failed)?;
-        // A copy of a kept attachment goes, unless it is the upload the attachment names.
         if added == 0 {
             transaction
                 .execute(
@@ -252,7 +225,6 @@ impl Store for Sqlite {
     fn discard_upload(&mut self, upload: &str) -> Result<(), Error> {
         self.connection
             .execute(
-                // A finished attachment's parts stay whatever is asked.
                 "DELETE FROM parts WHERE upload = ?1 \
                  AND NOT EXISTS (SELECT 1 FROM attachments WHERE upload = ?1)",
                 [upload],
@@ -349,7 +321,6 @@ mod tests {
             "parts must run from 0 without a gap"
         );
         store.discard_upload("gap").unwrap();
-        // An index past i64 is refused, so it never wraps into a negative one.
         assert!(store.put_part("wrap", u64::MAX, b"z").is_err());
         store.put_part("unfinished", 0, b"castle").unwrap();
         store.put_part("discarded", 0, b"river").unwrap();

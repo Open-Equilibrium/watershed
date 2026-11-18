@@ -1,6 +1,3 @@
-//! The mutation pipeline as its callers see it: every write is checked, applied and
-//! recorded as one Action, and a refused write changes nothing.
-
 #![allow(clippy::unwrap_used)]
 
 use liquid_core::{
@@ -14,7 +11,6 @@ fn workspace() -> Workspace {
     Workspace::create(PersonId::new("benni"), MemoryStore::default()).unwrap()
 }
 
-/// Every recorded Action, oldest first.
 fn history(workspace: &mut Workspace) -> Vec<Action> {
     let mut actions = workspace.history(None, usize::MAX).unwrap();
     actions.reverse();
@@ -25,14 +21,16 @@ fn owner() -> Actor {
     Actor::Person(PersonId::new("benni"))
 }
 
+fn edit(workspace: &mut Workspace, mutation: Mutation) -> Result<Applied, Error> {
+    workspace.apply(Request {
+        actor: owner(),
+        origin: Origin::Ui,
+        mutation,
+    })
+}
+
 fn apply(workspace: &mut Workspace, mutation: Mutation) -> Applied {
-    workspace
-        .apply(Request {
-            actor: owner(),
-            origin: Origin::Ui,
-            mutation,
-        })
-        .expect("the owner may apply it")
+    edit(workspace, mutation).expect("the owner may apply it")
 }
 
 fn area(workspace: &mut Workspace, name: &str) -> AreaId {
@@ -94,11 +92,15 @@ fn texts(workspace: &mut Workspace, page: &PageId) -> Vec<String> {
     let views = workspace.views(page, 0, usize::MAX).unwrap();
     views
         .iter()
-        .map(|view| {
-            workspace
-                .text(page, &view.block)
-                .unwrap()
-                .expect("a live Block")
+        .map(|view| match workspace.text(page, &view.block).unwrap() {
+            Some(text) => text,
+            None => {
+                workspace
+                    .code(page, &view.block)
+                    .unwrap()
+                    .expect("a live Block")
+                    .text
+            }
         })
         .collect()
 }
@@ -139,14 +141,13 @@ fn the_explorer_lists_areas_and_nested_pages_in_creation_order() {
     assert_eq!(titles(&mut workspace, &trips)[0].0, "Lisbon in May");
 
     let recorded = history(&mut workspace).len();
-    let unchanged = workspace.apply(Request {
-        actor: owner(),
-        origin: Origin::Ui,
-        mutation: Mutation::RenamePage {
+    let unchanged = edit(
+        &mut workspace,
+        Mutation::RenamePage {
             page: lisbon,
             title: "Lisbon in May".into(),
         },
-    });
+    );
     assert_eq!(unchanged.unwrap_err(), Error::NoChange);
     assert_eq!(history(&mut workspace).len(), recorded);
 }
@@ -165,7 +166,6 @@ fn text_blocks_keep_their_order_and_edit_in_utf16_units() {
         ["Five days", "Sintra 🌄", "Tram 28", "Pastéis"]
     );
 
-    // "🌄" is two UTF-16 units, as Dart and JavaScript count text.
     let sintra = workspace.views(&lisbon, 0, usize::MAX).unwrap()[1]
         .block
         .clone();
@@ -195,17 +195,16 @@ fn text_blocks_keep_their_order_and_edit_in_utf16_units() {
     );
 
     for (at, delete) in [(8, 0), (7, 1), (10, 1)] {
-        let refused = workspace.apply(Request {
-            actor: owner(),
-            origin: Origin::Ui,
-            mutation: Mutation::EditText {
+        let refused = edit(
+            &mut workspace,
+            Mutation::EditText {
                 page: lisbon.clone(),
                 block: sintra.clone(),
                 at,
                 delete,
                 insert: "x".into(),
             },
-        });
+        );
         assert_eq!(
             refused.unwrap_err(),
             Error::OutOfRange,
@@ -252,12 +251,7 @@ fn removing_the_last_view_removes_its_block() {
             insert: "Our ".into(),
         },
     ] {
-        let refused = workspace.apply(Request {
-            actor: owner(),
-            origin: Origin::Ui,
-            mutation,
-        });
-        assert_eq!(refused.unwrap_err(), Error::NotFound);
+        assert_eq!(edit(&mut workspace, mutation).unwrap_err(), Error::NotFound);
     }
 }
 
@@ -280,15 +274,14 @@ fn a_refused_request_changes_nothing_and_records_no_action() {
     });
     assert_eq!(stranger.unwrap_err(), Error::NotAllowed);
 
-    let other_area_parent = workspace.apply(Request {
-        actor: owner(),
-        origin: Origin::Ui,
-        mutation: Mutation::CreatePage {
+    let other_area_parent = edit(
+        &mut workspace,
+        Mutation::CreatePage {
             area: trips.clone(),
             parent: Some(budget),
             title: "Misplaced".into(),
         },
-    });
+    );
     assert_eq!(other_area_parent.unwrap_err(), Error::NotFound);
 
     assert!(workspace.pages(&trips).unwrap().is_empty());
@@ -375,14 +368,6 @@ fn identities_read_back_from_text_and_reject_anything_else() {
     ] {
         assert_eq!(AreaId::parse(text), None, "{text}");
     }
-}
-
-fn edit(workspace: &mut Workspace, mutation: Mutation) -> Result<Applied, Error> {
-    workspace.apply(Request {
-        actor: owner(),
-        origin: Origin::Ui,
-        mutation,
-    })
 }
 
 #[test]
@@ -717,12 +702,10 @@ fn a_code_block_neither_splits_joins_nor_takes_text_block_writes() {
             at: 2,
             style: TextStyle::Paragraph,
         },
-        // ⌫ at the start of the Text Block below joins nothing into the code.
         Mutation::JoinTextBlock {
             page: api.clone(),
             view: below_view,
         },
-        // Nor does the code join the Text Block above.
         Mutation::JoinTextBlock {
             page: api.clone(),
             view: code_view,
@@ -756,18 +739,7 @@ fn a_code_block_neither_splits_joins_nor_takes_text_block_writes() {
     }
     assert_eq!(history(&mut workspace).len(), before);
     assert_eq!(
-        texts_or_code(&mut workspace, &api),
+        texts(&mut workspace, &api),
         ["Shares round:", "share()", "Reports"]
     );
-}
-
-fn texts_or_code(workspace: &mut Workspace, page: &PageId) -> Vec<String> {
-    let views = workspace.views(page, 0, usize::MAX).unwrap();
-    views
-        .iter()
-        .map(|view| match workspace.text(page, &view.block).unwrap() {
-            Some(text) => text,
-            None => workspace.code(page, &view.block).unwrap().unwrap().text,
-        })
-        .collect()
 }

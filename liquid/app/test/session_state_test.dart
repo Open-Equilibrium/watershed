@@ -6,14 +6,15 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:liquid/src/diff/turn_scope.dart';
 import 'package:liquid/src/rust/api/details.dart';
 import 'package:liquid/src/rust/api/events.dart';
+import 'package:liquid/src/format.dart';
 import 'package:liquid/src/rust/api/git.dart';
+import 'package:liquid/src/rust/api/moves.dart';
 import 'package:liquid/src/rust/api/session.dart';
 import 'package:liquid/src/rust/api/thread.dart';
 import 'package:liquid/src/session/session_state.dart';
 
 import 'fake_backend.dart';
 
-/// Holds its confirmations until `gate` completes, so one can be in flight when the session changes.
 class GatedSession extends FakeSession {
   Completer<void>? gate;
 
@@ -24,13 +25,14 @@ class GatedSession extends FakeSession {
   }
 }
 
-/// A session whose statistics or context read fails with the given error.
 class FailingReads extends FakeSession {
+  Completer<void>? statisticsGate;
   Object? statisticsError;
   Object? contextError;
 
   @override
   Future<BridgeStatistics> statistics() async {
+    await statisticsGate?.future;
     if (statisticsError case final error?) throw error;
     return super.statistics();
   }
@@ -42,7 +44,6 @@ class FailingReads extends FakeSession {
   }
 }
 
-/// A session whose checkout becomes `moved` once its branch is changed.
 class MovingSession extends FakeSession {
   final moved = FakeGit();
 
@@ -53,13 +54,6 @@ class MovingSession extends FakeSession {
   }
 }
 
-class UnreachableProject extends FakeProject {
-  @override
-  Future<List<BridgeThreadSummary>> threads() =>
-      Future.error('the host is down');
-}
-
-/// A session whose title read waits for `gate`, so a switch can happen while it is in flight.
 class GatedTitle extends FakeSession {
   Completer<void>? gate;
 
@@ -70,8 +64,6 @@ class GatedTitle extends FakeSession {
   }
 }
 
-/// A session whose branch change and merge back wait for `gate`, so a switch can happen while one
-/// is in flight.
 class GatedActions extends FakeSession {
   Completer<void>? gate;
 
@@ -88,14 +80,11 @@ class GatedActions extends FakeSession {
   }
 }
 
-/// A session whose stream cannot be subscribed to.
 class UnsubscribableSession extends FakeSession {
   @override
   Future<BridgeSubscription> subscribe() => Future.error('the stream is gone');
 }
 
-/// A session whose turn changes for `from` wait for `holds[from]`, so an older read can finish last
-/// or fail.
 class HeldChanges extends FakeSession {
   final holds = <int, Completer<void>>{};
 
@@ -111,8 +100,6 @@ class HeldChanges extends FakeSession {
   }
 }
 
-/// A session whose event stream takes until `cancelGate` completes to cancel, so a switch can happen
-/// while the session it leaves is still being released.
 class SlowCancel extends FakeSession {
   SlowCancel({super.id});
 
@@ -148,6 +135,47 @@ void main() {
     await pumpEventQueue();
   }
 
+  Future<void> switchTo(FakeSession next) async {
+    project.session = next;
+    await state.open(next.id);
+    await pumpEventQueue();
+  }
+
+  BridgeEvent textDelta(int sequence, String text) => event(
+    BridgeEventKind.contentDelta,
+    sequence,
+    item: item(1, BridgeItemKind.assistantMessage),
+    text: text,
+  );
+
+  BridgeEvent startItem(int sequence, int turn, BridgeItem started) =>
+      event(BridgeEventKind.itemStarted, sequence, turn: turn, item: started);
+
+  BridgeAutomation automationOf(String id) => BridgeAutomation(
+    id: id,
+    title: 'Check',
+    schedule: BridgeSchedule(
+      kind: BridgeScheduleKind.webhook,
+      weekdays: Int64List(0),
+    ),
+    enabled: true,
+    lastRun: BridgeRunStatus.never,
+  );
+
+  BridgeLineage mergeTargetLineage() => lineageOf(
+    rows: [
+      BridgeLineageRow(
+        threadId: 'thread-parent',
+        relation: BridgeLineageRelation.fork,
+        group: BridgeLineageGroup.related,
+        title: 'Parent',
+        statusLabel: 'Idle',
+        failed: false,
+        mergeTarget: true,
+      ),
+    ],
+  );
+
   group('the start page', () {
     test('loadStart reads the sessions, the first available model and the default branch', () async {
       project.threadList = [threadOf('t1', title: 'Fix login')];
@@ -172,7 +200,9 @@ void main() {
 
       await state.loadStart();
 
-      expect(state.recent.value.map((thread) => thread.title), ['Fix login']);
+      expect(state.recent.value.map((listed) => listed.thread.title), [
+        'Fix login',
+      ]);
       expect(state.model.value, choiceOf('claude-opus-5-5'));
       expect(state.base.value, 'main');
     });
@@ -190,21 +220,18 @@ void main() {
       expect(state.session, same(session));
     });
 
-    test(
-      'a checked-out pull request starts its session in its worktree',
-      () async {
-        await state.loadStart();
-        await state.draftFor(
-          BridgeCheckedOut(branch: 'feature', worktree: '/worktrees/feature'),
-        );
+    test('a checked-out pull request starts in its worktree', () async {
+      await state.loadStart();
+      await state.draftFor(
+        BridgeCheckedOut(branch: 'feature', worktree: '/worktrees/feature'),
+      );
 
-        await state.send('Review it');
+      await state.send('Review it');
 
-        expect(project.calls, [
-          'start Review it claude-opus-5-5 base=null worktree=/worktrees/feature fullAccess',
-        ]);
-      },
-    );
+      expect(project.calls, [
+        'start Review it claude-opus-5-5 base=null worktree=/worktrees/feature fullAccess',
+      ]);
+    });
 
     test('sending with no model is an error and starts nothing', () async {
       await state.send('Hello');
@@ -216,27 +243,14 @@ void main() {
   });
 
   group('a session', () {
-    test(
-      'send and steer reach the open session, and stop interrupts it',
-      () async {
-        await open();
-
-        await state.send('Say hi');
-        await state.send('Shorter', steer: true);
-        await state.stop();
-
-        expect(session.calls, ['send Say hi', 'steer Shorter', 'stop']);
-      },
-    );
-
-    test('opening a session shows its title and the model it uses', () async {
-      session.sessionTitle = 'Fix login';
-      session.chosen = choiceOf('claude-haiku');
-
+    test('send, steer and stop reach the open session', () async {
       await open();
 
-      expect(state.sessionTitle.value, 'Fix login');
-      expect(state.model.value, choiceOf('claude-haiku'));
+      await state.send('Say hi');
+      await state.send('Shorter', steer: true);
+      await state.stop();
+
+      expect(session.calls, ['send Say hi', 'steer Shorter', 'stop']);
     });
 
     test('a switch while the title is read keeps the title and model of the session it left out', () async {
@@ -248,11 +262,11 @@ void main() {
       unawaited(state.open('thread-1'));
       await pumpEventQueue();
 
-      project.session = FakeSession(id: 'thread-2')
-        ..sessionTitle = 'New title'
-        ..chosen = choiceOf('new-model');
-      await state.open('thread-2');
-      await pumpEventQueue();
+      await switchTo(
+        FakeSession(id: 'thread-2')
+          ..sessionTitle = 'New title'
+          ..chosen = choiceOf('new-model'),
+      );
       gate.complete();
       await pumpEventQueue();
 
@@ -261,17 +275,11 @@ void main() {
     });
 
     test('a switch releases the session it left and its Git, so their T3 follows end', () async {
-      final first = FakeSession();
-      project.session = first;
-      await state.open('thread-1');
-      await pumpEventQueue();
+      await open();
+      await switchTo(FakeSession(id: 'thread-2'));
 
-      project.session = FakeSession(id: 'thread-2');
-      await state.open('thread-2');
-      await pumpEventQueue();
-
-      expect(first.closed, isTrue);
-      expect(first.gitBackend.closed, isTrue);
+      expect(session.closed, isTrue);
+      expect(session.gitBackend.closed, isTrue);
       expect(project.session.closed, isFalse);
     });
 
@@ -295,46 +303,40 @@ void main() {
       expect(newer.closed, isFalse);
     });
 
-    test(
-      'an open that returns after the user went to the start page is closed',
-      () async {
-        final older = FakeSession(id: 'thread-1');
-        final gate = Completer<void>();
-        project.session = older;
-        project.hold = gate;
-        unawaited(state.open('thread-1'));
-        await pumpEventQueue();
+    test('an open returning after the start page is closed', () async {
+      final older = FakeSession(id: 'thread-1');
+      final gate = Completer<void>();
+      project.session = older;
+      project.hold = gate;
+      unawaited(state.open('thread-1'));
+      await pumpEventQueue();
 
-        await state.newSession();
-        gate.complete();
-        await pumpEventQueue();
+      await state.newSession();
+      gate.complete();
+      await pumpEventQueue();
 
-        expect(state.session, isNull);
-        expect(older.closed, isTrue);
-      },
-    );
+      expect(state.session, isNull);
+      expect(older.closed, isTrue);
+    });
 
-    test(
-      'a start that returns after the user opened another session is closed',
-      () async {
-        await state.loadStart();
-        final started = FakeSession(id: 'thread-3');
-        final gate = Completer<void>();
-        project.session = started;
-        project.hold = gate;
-        unawaited(state.send('Fix it'));
-        await pumpEventQueue();
+    test('a start returning after another open is closed', () async {
+      await state.loadStart();
+      final started = FakeSession(id: 'thread-3');
+      final gate = Completer<void>();
+      project.session = started;
+      project.hold = gate;
+      unawaited(state.send('Fix it'));
+      await pumpEventQueue();
 
-        project.hold = null;
-        project.session = session;
-        await state.open('thread-1');
-        gate.complete();
-        await pumpEventQueue();
+      project.hold = null;
+      project.session = session;
+      await state.open('thread-1');
+      gate.complete();
+      await pumpEventQueue();
 
-        expect(state.session, same(session));
-        expect(started.closed, isTrue);
-      },
-    );
+      expect(state.session, same(session));
+      expect(started.closed, isTrue);
+    });
 
     test('a switch that returns while the session it replaces is still releasing is not installed', () async {
       final slow = SlowCancel(id: 'thread-1');
@@ -380,22 +382,8 @@ void main() {
         ),
       );
 
-      await emit(
-        event(
-          BridgeEventKind.contentDelta,
-          5,
-          item: item(1, BridgeItemKind.assistantMessage),
-          text: ' (held)',
-        ),
-      );
-      await emit(
-        event(
-          BridgeEventKind.contentDelta,
-          6,
-          item: item(1, BridgeItemKind.assistantMessage),
-          text: ' there',
-        ),
-      );
+      await emit(textDelta(5, ' (held)'));
+      await emit(textDelta(6, ' there'));
 
       final reply = state.items.value.single;
       expect(
@@ -427,59 +415,26 @@ void main() {
       }
     });
 
-    test(
-      'each event is confirmed once applied, skipped ones included (ADR-0272)',
-      () async {
-        await open(snapshotOf(sequence: 5));
+    test('every event, skipped ones too, is confirmed (ADR-0272)', () async {
+      await open(snapshotOf(sequence: 5));
 
-        await emit(
-          event(
-            BridgeEventKind.contentDelta,
-            4,
-            item: item(1, BridgeItemKind.assistantMessage),
-            text: 'held',
-          ),
-        );
-        await emit(
-          event(
-            BridgeEventKind.contentDelta,
-            6,
-            item: item(1, BridgeItemKind.assistantMessage),
-            text: 'new',
-          ),
-        );
+      await emit(textDelta(4, 'held'));
+      await emit(textDelta(6, 'new'));
 
-        expect(session.confirmed, [1, 2]);
-      },
-    );
+      expect(session.confirmed, [1, 2]);
+    });
 
     test('a confirmation in flight when the session changes does not hold back the next session (ADR-0272)', () async {
       final gate = Completer<void>();
       final first = GatedSession()..gate = gate;
       project.session = first;
       await open();
-      first.emit(
-        event(
-          BridgeEventKind.contentDelta,
-          1,
-          item: item(1, BridgeItemKind.assistantMessage),
-          text: 'x',
-        ),
-      );
+      first.emit(textDelta(1, 'x'));
       await pumpEventQueue();
 
       final second = FakeSession(id: 'thread-2');
-      project.session = second;
-      await state.open('thread-2');
-      await pumpEventQueue();
-      second.emit(
-        event(
-          BridgeEventKind.contentDelta,
-          1,
-          item: item(1, BridgeItemKind.assistantMessage),
-          text: 'y',
-        ),
-      );
+      await switchTo(second);
+      second.emit(textDelta(1, 'y'));
       await pumpEventQueue();
       gate.complete();
       await pumpEventQueue();
@@ -489,40 +444,14 @@ void main() {
 
     test('an item streams its text in place and takes its outcome when it completes', () async {
       await open();
-      await emit(
-        event(
-          BridgeEventKind.itemStarted,
-          1,
-          turn: 1,
-          item: item(1, BridgeItemKind.assistantMessage),
-        ),
-      );
+      await emit(startItem(1, 1, item(1, BridgeItemKind.assistantMessage)));
       final reply = state.items.value.single;
-      await emit(
-        event(
-          BridgeEventKind.contentDelta,
-          2,
-          item: item(1, BridgeItemKind.assistantMessage),
-          text: 'Hi',
-        ),
-      );
-      await emit(
-        event(
-          BridgeEventKind.contentDelta,
-          3,
-          item: item(1, BridgeItemKind.assistantMessage),
-          text: ' there',
-        ),
-      );
+      await emit(textDelta(2, 'Hi'));
+      await emit(textDelta(3, ' there'));
       expect(reply.text.value, 'Hi there');
 
       await emit(
-        event(
-          BridgeEventKind.itemStarted,
-          4,
-          turn: 1,
-          item: item(2, BridgeItemKind.commandExecution, tool: 'bash'),
-        ),
+        startItem(4, 1, item(2, BridgeItemKind.commandExecution, tool: 'bash')),
       );
       await emit(
         event(
@@ -566,76 +495,56 @@ void main() {
       expect((state.totals.value.input, state.totals.value.output), (135, 20));
     });
 
-    test(
-      'a turn ends with a row of its changes once its checkpoint is ready',
-      () async {
-        await open();
-        session.turnList = [
-          turnOf(1, added: 3, removed: 1, files: 2),
-          turnOf(2, status: BridgeTurnStatus.running, checkpoint: false),
-        ];
+    test('a turn ends with its changes once checkpointed', () async {
+      await open();
+      session.turnList = [
+        turnOf(1, added: 3, removed: 1, files: 2),
+        turnOf(2, status: BridgeTurnStatus.running, checkpoint: false),
+      ];
 
-        await emit(
-          event(
-            BridgeEventKind.itemStarted,
-            1,
-            turn: 1,
-            item: item(1, BridgeItemKind.assistantMessage),
-          ),
-        );
-        await emit(event(BridgeEventKind.turnCompleted, 2, turn: 1));
-        await emit(
-          event(
-            BridgeEventKind.itemStarted,
-            3,
-            turn: 2,
-            item: item(2, BridgeItemKind.assistantMessage),
-          ),
-        );
+      await emit(startItem(1, 1, item(1, BridgeItemKind.assistantMessage)));
+      await emit(event(BridgeEventKind.turnCompleted, 2, turn: 1));
+      await emit(startItem(3, 2, item(2, BridgeItemKind.assistantMessage)));
 
-        expect(
-          [for (final row in state.items.value) row.turnEnd?.added],
-          [null, 3, null],
-          reason: 'only turn 1 has a checkpoint, so only it gets a row',
-        );
-      },
-    );
+      expect(
+        [for (final row in state.items.value) row.turnEnd?.added],
+        [null, 3, null],
+        reason: 'only turn 1 has a checkpoint, so only it gets a row',
+      );
+    });
 
-    test(
-      'requests queue oldest first, and answering one moves on to the next',
-      () async {
-        session.turnList = [
-          turnOf(1, status: BridgeTurnStatus.running, checkpoint: false),
-        ];
-        await open();
-        await emit(event(BridgeEventKind.turnStarted, 1, turn: 1));
-        final approval = approvalOf('a1');
-        final question = questionsOf('q1', [
-          questionOf('q1', 'Which?', options: ['A', 'B']),
-        ]);
+    test('requests queue oldest first and answering moves on', () async {
+      session.turnList = [
+        turnOf(1, status: BridgeTurnStatus.running, checkpoint: false),
+      ];
+      await open();
+      await emit(event(BridgeEventKind.turnStarted, 1, turn: 1));
+      final approval = approvalOf('a1');
+      final question = questionsOf('q1', [
+        questionOf('q1', 'Which?', options: ['A', 'B']),
+      ]);
 
-        await emit(event(BridgeEventKind.requestOpened, 2, request: approval));
-        await emit(event(BridgeEventKind.requestOpened, 3, request: question));
-        expect(
-          (state.request.value?.id, state.status.value),
-          ('a1', RunStatus.waitingForYou),
-        );
+      await emit(event(BridgeEventKind.requestOpened, 2, request: approval));
+      await emit(event(BridgeEventKind.requestOpened, 3, request: question));
+      expect(
+        (state.request.value?.id, state.status.value),
+        ('a1', RunStatus.waitingForYou),
+      );
 
-        await state.respond(approval, 'approve');
-        await emit(event(BridgeEventKind.requestResolved, 4, requestId: 'a1'));
-        expect(state.request.value?.id, 'q1');
+      await state.respond(approval, 'approve');
+      await emit(event(BridgeEventKind.requestResolved, 4, requestId: 'a1'));
+      expect(state.request.value?.id, 'q1');
 
-        await state.answer(question, [
-          BridgeQuestionAnswer(question: 'Which?', values: ['B'], typed: false),
-        ]);
-        await emit(event(BridgeEventKind.requestResolved, 5, requestId: 'q1'));
-        expect(
-          (state.request.value, state.status.value),
-          (null, RunStatus.running),
-        );
-        expect(session.calls, ['respond a1 approve', 'answer q1 Which?=B']);
-      },
-    );
+      await state.answer(question, [
+        BridgeQuestionAnswer(question: 'Which?', values: ['B'], typed: false),
+      ]);
+      await emit(event(BridgeEventKind.requestResolved, 5, requestId: 'q1'));
+      expect(
+        (state.request.value, state.status.value),
+        (null, RunStatus.running),
+      );
+      expect(session.calls, ['respond a1 approve', 'answer q1 Which?=B']);
+    });
 
     test('queued turns wait in the queue, and each can be sent now, edited or cancelled', () async {
       session.turnList = [
@@ -732,25 +641,20 @@ void main() {
       expect(state.git.value.backend, same(moving.moved));
     });
 
-    test(
-      'a switch during setBranch keeps Git on the session the user chose',
-      () async {
-        final gate = Completer<void>();
-        project.session = GatedActions()..gate = gate;
-        await open();
-        unawaited(state.setBranch('feature'));
-        await pumpEventQueue();
+    test('a switch during setBranch keeps Git on its session', () async {
+      final gate = Completer<void>();
+      project.session = GatedActions()..gate = gate;
+      await open();
+      unawaited(state.setBranch('feature'));
+      await pumpEventQueue();
 
-        final next = FakeSession(id: 'thread-2');
-        project.session = next;
-        await state.open('thread-2');
-        await pumpEventQueue();
-        gate.complete();
-        await pumpEventQueue();
+      final next = FakeSession(id: 'thread-2');
+      await switchTo(next);
+      gate.complete();
+      await pumpEventQueue();
 
-        expect(state.git.value.backend, same(next.gitBackend));
-      },
-    );
+      expect(state.git.value.backend, same(next.gitBackend));
+    });
   });
 
   group('the Diff panel', () {
@@ -808,8 +712,6 @@ void main() {
       expect(await state.patch('a.dart'), '+uncommitted');
     });
 
-    /// Opens a session with two finished turns, starts an AllTurns read that waits, then selects
-    /// OneTurn(2), which completes. Returns the older read's hold.
     Future<Completer<void>> selectOverSlowerRead() async {
       final held = HeldChanges()..turnList = [turnOf(1), turnOf(2)];
       project.session = held;
@@ -824,21 +726,16 @@ void main() {
       return older;
     }
 
-    test(
-      'a slower read of an earlier scope cannot replace the newer selection',
-      () async {
-        final older = await selectOverSlowerRead();
+    test('a slower earlier read cannot replace the newer selection', () async {
+      final older = await selectOverSlowerRead();
 
-        older.complete();
-        await pumpEventQueue();
+      older.complete();
+      await pumpEventQueue();
 
-        expect(state.shownScope.value, const OneTurn(2));
-        expect(state.shown.value?.from.number, 2);
-        expect(state.changed.value?.map((file) => file.path), [
-          'turn-2-2.dart',
-        ]);
-      },
-    );
+      expect(state.shownScope.value, const OneTurn(2));
+      expect(state.shown.value?.from.number, 2);
+      expect(state.changed.value?.map((file) => file.path), ['turn-2-2.dart']);
+    });
 
     test('a failed slower read of an earlier scope shows no error over the newer selection', () async {
       final older = await selectOverSlowerRead();
@@ -852,18 +749,21 @@ void main() {
   });
 
   group('statistics and the context window', () {
+    BridgeStatistics sonnet(int input, int output, int responses) =>
+        BridgeStatistics(
+          models: [
+            BridgeModelUsage(
+              model: 'anthropic/claude-sonnet',
+              usage: usage(input, output),
+              responses: responses,
+            ),
+          ],
+          tools: const [],
+          turns: const [],
+        );
+
     test('opening reads the statistics and the context window', () async {
-      session.stats = BridgeStatistics(
-        models: [
-          BridgeModelUsage(
-            model: 'anthropic/claude-sonnet',
-            usage: usage(212000, 18300),
-            responses: 41,
-          ),
-        ],
-        tools: const [],
-        turns: const [],
-      );
+      session.stats = sonnet(212000, 18300, 41);
       session.contextWindow = const BridgeContext(
         tokens: 68200,
         window: 200000,
@@ -878,17 +778,7 @@ void main() {
 
     test('a model response or a turn ending re-reads the statistics', () async {
       await open();
-      session.stats = BridgeStatistics(
-        models: [
-          BridgeModelUsage(
-            model: 'anthropic/claude-sonnet',
-            usage: usage(10, 1),
-            responses: 1,
-          ),
-        ],
-        tools: const [],
-        turns: const [],
-      );
+      session.stats = sonnet(10, 1, 1);
       await emit(
         event(BridgeEventKind.modelRequestCompleted, 1, usage: usage(10, 1)),
       );
@@ -908,26 +798,26 @@ void main() {
       expect(state.statistics.value, session.stats);
     });
 
-    test(
-      'a failed statistics read is a warning, and the statistics stay unknown',
-      () async {
-        final failing = FailingReads()
-          ..statisticsError = 'the session file is unreadable';
-        project.session = failing;
+    test('a failed statistics read warns and leaves stats unknown', () async {
+      final failing = FailingReads()
+        ..statisticsError = 'the session file is unreadable';
+      project.session = failing;
 
-        await open();
+      await open();
 
-        expect(state.statistics.value, isNull);
-        expect(state.notice.value?.level, NoticeLevel.warning);
-        expect(
-          state.notice.value?.text,
-          'Could not read the statistics: the session file is unreadable',
-        );
-      },
-    );
+      expect(state.statistics.value, isNull);
+      expect(state.notice.value?.level, NoticeLevel.warning);
+      expect(
+        state.notice.value?.text,
+        'Could not read the statistics: the session file is unreadable',
+      );
+    });
 
     test('a late statistics failure of the session left is not shown on the one open', () async {
-      final late = LateStatistics();
+      final gate = Completer<void>();
+      final late = FailingReads()
+        ..statisticsGate = gate
+        ..statisticsError = 'the session file is unreadable';
       project.session = late;
       await state.open('thread-1');
       await pumpEventQueue();
@@ -935,7 +825,7 @@ void main() {
       await state.open('thread-2');
       await pumpEventQueue();
 
-      late.gate.complete();
+      gate.complete();
       await pumpEventQueue();
 
       expect(state.statisticsProblem.value, isNull);
@@ -959,21 +849,15 @@ void main() {
   });
 
   group('notices', () {
-    test(
-      'a failed Chat stream is an error notice, not an unhandled error',
-      () async {
-        await open();
+    test('a failed Chat stream names the session\'s host, and is no notice as T3 keeps the thread open', () async {
+      await open();
 
-        session.fail('the stream broke');
-        await pumpEventQueue();
+      session.fail('the stream broke');
+      await pumpEventQueue();
 
-        expect(state.notice.value?.level, NoticeLevel.error);
-        expect(
-          state.notice.value?.text,
-          'Could not follow the session: the stream broke',
-        );
-      },
-    );
+      expect(state.notice.value, isNull);
+      expect(state.sessionProblem.value, 'the stream broke.');
+    });
 
     test('a failed send or open is a notice that names the action', () async {
       await open();
@@ -992,47 +876,39 @@ void main() {
       );
     });
 
-    test(
-      'a session that cannot subscribe is a notice, not an unhandled error',
-      () async {
-        project.session = UnsubscribableSession();
+    test('a session that cannot subscribe is a notice', () async {
+      project.session = UnsubscribableSession();
 
-        await state.open('thread-1');
-        await pumpEventQueue();
+      await state.open('thread-1');
+      await pumpEventQueue();
 
-        expect(
-          state.notice.value?.text,
-          'Could not open the session: the stream is gone',
-        );
-      },
-    );
+      expect(
+        state.notice.value?.text,
+        'Could not open the session: the stream is gone',
+      );
+    });
 
-    test('a session list that cannot be read is a notice', () async {
+    test('a session list that cannot be read names its host and is no notice, as T3 reports it', () async {
       state = SessionState(UnreachableProject());
 
       await state.loadStart();
 
-      expect(
-        state.notice.value?.text,
-        'Could not read the sessions: the host is down',
-      );
+      expect(state.notice.value, isNull);
+      expect(state.hostProblems.value[null], 'the host is down.');
     });
 
-    test(
-      'notices keep the last $noticeLimit, and dismissing the status bar notice keeps the list',
-      () async {
-        for (var index = 0; index <= noticeLimit; index++) {
-          state.notify(NoticeLevel.info, 'Notice $index');
-        }
-        expect(state.notices.value, hasLength(noticeLimit));
-        expect(state.notices.value.first.text, 'Notice 1');
+    test('notices keep the last $noticeLimit through dismissal', () async {
+      for (var index = 0; index <= noticeLimit; index++) {
+        state.notify(NoticeLevel.info, 'Notice $index');
+      }
+      expect(state.notices.value, hasLength(noticeLimit));
+      expect(state.notices.value.first.text, 'Notice 1');
 
-        state.dismissNotice();
+      state.dismissNotice();
 
-        expect(state.notice.value, isNull);
-        expect(state.notices.value, hasLength(noticeLimit));
-      },
-    );
+      expect(state.notice.value, isNull);
+      expect(state.notices.value, hasLength(noticeLimit));
+    });
   });
 
   group('the card sections', () {
@@ -1047,18 +923,7 @@ void main() {
     test('the servers, scheduled tasks, related threads, usage limits and host name follow the open session', () async {
       session
         ..serverList = [server(3000)]
-        ..automationList = [
-          BridgeAutomation(
-            id: 'a1',
-            title: 'Check',
-            schedule: BridgeSchedule(
-              kind: BridgeScheduleKind.webhook,
-              weekdays: Int64List(0),
-            ),
-            enabled: true,
-            lastRun: BridgeRunStatus.never,
-          ),
-        ]
+        ..automationList = [automationOf('a1')]
         ..family = lineageOf()
         ..limits = BridgeUsageLimits(
           windows: [BridgeUsageWindow(label: '5-hour', remainingPercent: 42)],
@@ -1069,47 +934,30 @@ void main() {
       expect(state.lineage.value?.rows, isEmpty);
       expect(state.limits.value?.windows.single.label, '5-hour');
       expect(state.hostName.value, 'Mac mini');
-
-      session.serverUpdates.add([server(3000), server(4000)]);
-      await pumpEventQueue();
-      expect(state.servers.value, hasLength(2));
     });
 
-    test(
-      'each live section follows its changes once its first read has run',
-      () async {
-        BridgeAutomation automation(String id) => BridgeAutomation(
-          id: id,
-          title: 'Check',
-          schedule: BridgeSchedule(
-            kind: BridgeScheduleKind.webhook,
-            weekdays: Int64List(0),
+    test('each live section follows its changes after a read', () async {
+      await open();
+
+      session
+        ..serverUpdates.add([server(3000)])
+        ..automationUpdates.add([automationOf('a2')])
+        ..lineageUpdates.add(
+          BridgeLineage(
+            rows: const [],
+            running: 1,
+            sideChatsRunning: 0,
+            canDisconnect: false,
+            mergeReady: false,
+            canMerge: false,
           ),
-          enabled: true,
-          lastRun: BridgeRunStatus.never,
         );
-        await open();
+      await pumpEventQueue();
 
-        session
-          ..serverUpdates.add([server(3000)])
-          ..automationUpdates.add([automation('a2')])
-          ..lineageUpdates.add(
-            BridgeLineage(
-              rows: const [],
-              running: 1,
-              sideChatsRunning: 0,
-              canDisconnect: false,
-              mergeReady: false,
-              canMerge: false,
-            ),
-          );
-        await pumpEventQueue();
-
-        expect(state.servers.value.single.port, 3000);
-        expect(state.automations.value.single.id, 'a2');
-        expect(state.lineage.value?.running, 1);
-      },
-    );
+      expect(state.servers.value.single.port, 3000);
+      expect(state.automations.value.single.id, 'a2');
+      expect(state.lineage.value?.running, 1);
+    });
 
     test('a failed live stream is a warning that names its section', () async {
       await open();
@@ -1126,10 +974,7 @@ void main() {
 
     test('a switch stops following the session it left', () async {
       await open();
-      final other = FakeSession(id: 'thread-2');
-      project.session = other;
-      await state.open('thread-2');
-      await pumpEventQueue();
+      await switchTo(FakeSession(id: 'thread-2'));
 
       session.serverUpdates.add([server(3000)]);
       await pumpEventQueue();
@@ -1137,19 +982,7 @@ void main() {
     });
 
     test('merging back opens the thread it merged into, as T3 does', () async {
-      session.family = lineageOf(
-        rows: [
-          BridgeLineageRow(
-            threadId: 'thread-parent',
-            relation: BridgeLineageRelation.fork,
-            group: BridgeLineageGroup.related,
-            title: 'Parent',
-            statusLabel: 'Idle',
-            failed: false,
-            mergeTarget: true,
-          ),
-        ],
-      );
+      session.family = mergeTargetLineage();
       await open();
       project.session = FakeSession(id: 'thread-parent');
 
@@ -1163,29 +996,14 @@ void main() {
 
     test('a switch during a merge back keeps the session the user chose, not the merge target', () async {
       final gate = Completer<void>();
-      final merging = GatedActions()
+      project.session = GatedActions()
         ..gate = gate
-        ..family = lineageOf(
-          rows: [
-            BridgeLineageRow(
-              threadId: 'thread-parent',
-              relation: BridgeLineageRelation.fork,
-              group: BridgeLineageGroup.related,
-              title: 'Parent',
-              statusLabel: 'Idle',
-              failed: false,
-              mergeTarget: true,
-            ),
-          ],
-        );
-      project.session = merging;
+        ..family = mergeTargetLineage();
       await open();
       unawaited(state.mergeBack());
       await pumpEventQueue();
 
-      project.session = FakeSession(id: 'thread-2');
-      await state.open('thread-2');
-      await pumpEventQueue();
+      await switchTo(FakeSession(id: 'thread-2'));
       gate.complete();
       await pumpEventQueue();
 
@@ -1229,21 +1047,267 @@ void main() {
     await state.dispose();
     expect(project.closed, isTrue);
   });
+
+  group('agent hosts (ADR-0295)', () {
+    const studioAddress = 'ws://studio.local:3774';
+    FakeProject listing(String id) =>
+        FakeProject()..threadList = [threadOf(id)];
+
+    test('lists the sessions of every connected agent host, newest first, with the machine kind its host reports', () async {
+      final state = SessionState(
+        FakeProject()
+          ..threadList = [threadOf('local', title: 'Local', updatedMs: 100)],
+      );
+      await state.addHost(
+        studioAddress,
+        FakeProject()
+          ..threadList = [threadOf('studio', title: 'Studio', updatedMs: 200)],
+        machine: 'mac-mini',
+      );
+
+      expect(
+        [
+          for (final listed in state.recent.value)
+            (listed.address, listed.thread.title, listed.machine),
+        ],
+        [(studioAddress, 'Studio', 'mac-mini'), (null, 'Local', null)],
+        reason: 'This Mac shows no machine icon',
+      );
+    });
+
+    test('opens a session on the agent host it runs on', () async {
+      final local = FakeProject();
+      final studio = listing('studio');
+      final state = SessionState(local);
+      await state.addHost(studioAddress, studio);
+
+      await state.open('studio', address: studioAddress);
+      await pumpEventQueue();
+
+      expect(studio.calls, ['open studio']);
+      expect(local.calls, isEmpty);
+      expect(state.sessionAddress, studioAddress);
+    });
+
+    test('a new session starts on the chosen agent host', () async {
+      final local = FakeProject();
+      final studio = FakeProject();
+      final state = SessionState(local);
+      await state.addHost(studioAddress, studio);
+
+      await state.startOn(studioAddress);
+      await state.send('Fix the login');
+      await pumpEventQueue();
+
+      expect(studio.calls.single, startsWith('start Fix the login'));
+      expect(local.calls, isEmpty);
+    });
+
+    test('names a host that does not answer, and lists none of its sessions', () async {
+      final state = SessionState(listing('local'));
+
+      state.failHost(
+        studioAddress,
+        'Liquid could not connect to the agent host $studioAddress: no answer.',
+      );
+      await state.loadStart();
+
+      expect(state.answers(studioAddress), isFalse);
+      expect(
+        state.hostProblems.value[studioAddress],
+        'Liquid could not connect to the agent host $studioAddress: no answer.',
+      );
+      expect(
+        [for (final listed in state.recent.value) listed.thread.id],
+        ['local'],
+      );
+    });
+
+    test('a host that stops answering is named, and its sessions leave the list', () async {
+      final state = SessionState(listing('local'));
+      await state.addHost(studioAddress, listing('studio'));
+
+      await state.addHost(studioAddress, UnreachableProject());
+
+      expect(
+        state.hostProblems.value[studioAddress],
+        'Liquid could not connect to the agent host $studioAddress: the host is down.',
+      );
+      expect(
+        [for (final listed in state.recent.value) listed.thread.id],
+        ['local'],
+      );
+    });
+
+    test('an open session whose agent host stops answering stays open, and is reopened once it answers', () async {
+      final session = FakeSession(id: 'studio');
+      final studio = FakeProject(session: session)
+        ..threadList = [threadOf('studio')];
+      final state = SessionState(FakeProject());
+      await state.addHost(studioAddress, studio);
+      await state.open('studio', address: studioAddress);
+      await pumpEventQueue();
+
+      session.fail('the host is down');
+      await pumpEventQueue();
+
+      expect(state.session, same(session), reason: 'the Chat stays open');
+      expect(
+        state.sessionProblem.value,
+        'Liquid could not connect to the agent host $studioAddress: the host is down.',
+      );
+
+      final back = FakeProject(session: session);
+      await state.addHost(studioAddress, back);
+      await pumpEventQueue();
+
+      expect(back.calls, ['open studio']);
+      expect(state.sessionProblem.value, isNull);
+    });
+
+    test('a listing that a later one overtakes does not hide the later one\'s hosts', () async {
+      final gate = Completer<void>();
+      final state = SessionState(
+        LateFirstListing(gate.future)..threadList = [threadOf('local')],
+      );
+
+      final earlier = state.loadStart();
+      await state.addHost(studioAddress, listing('studio'));
+      gate.complete();
+      await earlier;
+
+      expect([
+        for (final listed in state.recent.value) listed.thread.id,
+      ], unorderedEquals(['local', 'studio']));
+    });
+
+    test('removing a host drops its sessions and releases it', () async {
+      final studio = listing('studio');
+      final state = SessionState(listing('local'));
+      await state.addHost(studioAddress, studio);
+
+      await state.removeHost(studioAddress);
+
+      expect(
+        [for (final listed in state.recent.value) listed.thread.id],
+        ['local'],
+      );
+      expect(studio.closed, isTrue);
+      expect(state.answers(studioAddress), isFalse);
+    });
+
+    group('moves (ADR-0308)', () {
+      BridgeTranscriptItem entry(int id, BridgeItemKind kind, String text) =>
+          BridgeTranscriptItem(
+            item: BridgeItem(id: id, kind: kind, ended: true, failed: false),
+            turn: 1,
+            text: text,
+          );
+
+      test('a moved session shows its earlier transcript above the marker, and not the handoff it starts from', () async {
+        final session = FakeSession(id: 'moved')
+          ..current = snapshotOf(
+            transcript: [
+              entry(1, BridgeItemKind.userMessage, 'The handoff'),
+              entry(2, BridgeItemKind.assistantMessage, 'Continuing'),
+            ],
+          );
+        final target = FakeProject(session: session)
+          ..moveRecordAnswer = BridgeMoveRecord(
+            fromHost: 'This Mac',
+            toHost: 'studio',
+            atMs: 1700000000000,
+            transcript: [
+              entry(10, BridgeItemKind.userMessage, 'Fix the flaky test.'),
+              entry(
+                11,
+                BridgeItemKind.assistantMessage,
+                'It retries the port.',
+              ),
+            ],
+          );
+        final state = SessionState(FakeProject());
+        await state.addHost(studioAddress, target);
+
+        await state.open('moved', address: studioAddress);
+        await pumpEventQueue();
+
+        expect(
+          [for (final row in state.items.value) row.marker ?? row.text.value],
+          [
+            'Fix the flaky test.',
+            'It retries the port.',
+            'Moved from This Mac to studio · ${formatClockMs(1700000000000)}',
+            'Continuing',
+          ],
+        );
+      });
+
+      test('the marker names each host the way Liquid does: This Mac, and a paired host by its Settings name', () async {
+        final session = FakeSession(id: 'moved')
+          ..current = snapshotOf(
+            transcript: [
+              entry(1, BridgeItemKind.assistantMessage, 'Continuing'),
+            ],
+          );
+        final target = FakeProject(session: session)
+          ..hostName = 'studio-box'
+          ..moveRecordAnswer = BridgeMoveRecord(
+            fromHost: 'Mac mini',
+            toHost: 'studio-box',
+            atMs: 1700000000000,
+            transcript: const [],
+          );
+        final state = SessionState(FakeProject())
+          ..hostLabel = (address) =>
+              address == null ? 'This Mac' : 'Studio mini';
+        await state.addHost(studioAddress, target);
+
+        await state.open('moved', address: studioAddress);
+        await pumpEventQueue();
+
+        expect(
+          [for (final row in state.items.value) row.marker ?? row.text.value],
+          [
+            'Moved from This Mac to Studio mini · ${formatClockMs(1700000000000)}',
+            'Continuing',
+          ],
+        );
+      });
+
+      test('a session without a move record shows its Chat as it is', () async {
+        final session = FakeSession(id: 'plain')
+          ..current = snapshotOf(
+            transcript: [entry(1, BridgeItemKind.userMessage, 'The question')],
+          );
+        final state = SessionState(FakeProject(session: session));
+
+        await state.open('plain');
+        await pumpEventQueue();
+
+        expect(
+          [for (final row in state.items.value) row.marker ?? row.text.value],
+          ['The question'],
+        );
+      });
+    });
+  });
 }
 
-/// A session that refuses to merge back.
 class RefusedActions extends FakeSession {
   @override
   Future<void> mergeBack() => Future.error('not ready');
 }
 
-/// A session whose statistics read fails once `gate` completes.
-class LateStatistics extends FakeSession {
-  final gate = Completer<void>();
+class LateFirstListing extends FakeProject {
+  LateFirstListing(this.gate);
+
+  final Future<void> gate;
+  int _listings = 0;
 
   @override
-  Future<BridgeStatistics> statistics() async {
-    await gate.future;
-    throw 'the session file is unreadable';
+  Future<List<BridgeThreadSummary>> threads() async {
+    if (_listings++ == 0) await gate;
+    return threadList;
   }
 }

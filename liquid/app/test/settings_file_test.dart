@@ -7,7 +7,6 @@ void main() {
   test('a failed save leaves no temporary file', () async {
     final dir = Directory.systemTemp.createTempSync('settings-file');
     addTearDown(() => dir.deleteSync(recursive: true));
-    // A directory where the settings file belongs makes the rename fail after the write.
     final path = '${dir.path}/appearance.json';
     Directory(path).createSync();
     final settings = SettingsFile(File(path));

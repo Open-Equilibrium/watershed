@@ -17,8 +17,6 @@ import 'page_editor.dart';
 import 'page_views.dart';
 import 'workspace_state.dart';
 
-/// The languages the picker offers: the name a Code Block stores, as Markdown names it
-/// after ```, and the label it shows. The empty name is plain text.
 const codeLanguages = [
   ('', 'Plain text'),
   ('bash', 'Bash'),
@@ -43,22 +41,17 @@ const codeLanguages = [
   ('yaml', 'YAML'),
 ];
 
-/// The label of a stored language; one the list does not know, as another device may
-/// store, shows as stored.
 String languageLabel(String language) =>
     codeLanguages.where((known) => known.$1 == language).firstOrNull?.$2 ??
     language;
 
-/// How many lines a Code Block shows before its code scrolls inside (ADR-0302).
 const codeLines = 24;
 
-/// What one indentation step inserts.
 const _indent = '  ';
 
 int _lineStart(String text, int at) =>
     at == 0 ? 0 : text.lastIndexOf('\n', at - 1) + 1;
 
-/// ⏎ in code: the selection becomes a new line that keeps the current line's indentation.
 TextEditingValue newLine(TextEditingValue value) {
   final TextEditingValue(:text, :selection) = value;
   final start = _lineStart(text, selection.start);
@@ -71,8 +64,6 @@ TextEditingValue newLine(TextEditingValue value) {
   );
 }
 
-/// ⇥ or ⇧⇥ in code: every line the selection touches gains or loses up to one indentation
-/// step at its start; a selection that ends at a line's start leaves that line out.
 TextEditingValue indentLines(TextEditingValue value, {required bool out}) {
   var TextEditingValue(:text, :selection) = value;
   var (start, end) = (selection.start, selection.end);
@@ -88,7 +79,6 @@ TextEditingValue indentLines(TextEditingValue value, {required bool out}) {
   int moved(int at, int line, int by) => by > 0
       ? (at >= line ? at + by : at)
       : (at > line ? at - math.min(-by, at - line) : at);
-  // From the last line up, so the starts above stay where they are.
   for (final line in starts.reversed) {
     var by = _indent.length;
     if (out) {
@@ -111,7 +101,6 @@ TextEditingValue indentLines(TextEditingValue value, {required bool out}) {
   );
 }
 
-/// A code field's controller, which shows its code with Liquid's syntax colors.
 class _CodeText extends TextEditingController {
   _CodeText.fromValue(super.value) : super.fromValue();
 
@@ -121,7 +110,6 @@ class _CodeText extends TextEditingController {
     TextStyle? style,
     required bool withComposing,
   }) {
-    // A composition in progress shows as the input method draws it.
     if (withComposing && !value.composing.isCollapsed) {
       return super.buildTextSpan(
         context: context,
@@ -133,11 +121,6 @@ class _CodeText extends TextEditingController {
   }
 }
 
-/// One Code Block on its Page (ADR-0302): its code in the monospace font
-/// with syntax colors, and on hover or focus a quiet header with the language and Copy. It
-/// follows only its own Block (client architecture rule 6); typing shows at once and
-/// reaches the core afterwards (rule 7). Lines do not wrap, and past [codeLines] the code
-/// scrolls inside.
 class CodeBlock extends StatefulWidget {
   const CodeBlock({
     super.key,
@@ -149,7 +132,6 @@ class CodeBlock extends StatefulWidget {
   final PageViews views;
   final BridgeView view;
 
-  /// Its position on the Page.
   final int index;
 
   @override
@@ -163,15 +145,11 @@ class _CodeBlockState extends State<CodeBlock> {
     onKeyEvent: (_, event) => _key(event),
   );
 
-  /// The code and language the core holds as far as this Block knows, its own writes
-  /// included.
   String? _stored;
   String _language = '';
 
-  /// While the code changes from the core or a key, not from typing.
   bool _quiet = false;
 
-  /// Whether Liquid replaced the code since the field last took its controller.
   bool _replaced = false;
   int _reads = 0;
   var _edits = EditChain();
@@ -182,7 +160,6 @@ class _CodeBlockState extends State<CodeBlock> {
   bool _copied = false;
   Timer? _copiedFor;
 
-  /// The language picker, its search and the language ⏎ takes.
   final _picker = OverlayPortalController();
   final _search = TextEditingController();
   late final _searchFocus = FocusNode(
@@ -218,7 +195,6 @@ class _CodeBlockState extends State<CodeBlock> {
 
   @override
   void dispose() {
-    // Anything typed and not yet sent is written as it stands.
     if (_stored != null && _text.text != _stored) _send(_text.text);
     _state.finishing.remove(_typed);
     widget.views.caret.removeListener(_takeCaret);
@@ -243,11 +219,9 @@ class _CodeBlockState extends State<CodeBlock> {
 
   bool get _composing => !_text.value.composing.isCollapsed;
 
-  /// Shows the stored code and language, unless a write to this Block is on its way.
   Future<void> _read() async {
     final read = ++_reads;
     final views = widget.views;
-    // A read asked while a write is on its way may miss it, whenever it answers.
     final clean = views.pending(_block) == 0;
     final sent = views.sent(_block);
     final BridgeAnswer answer;
@@ -260,7 +234,6 @@ class _CodeBlockState extends State<CodeBlock> {
       return;
     }
     final text = answer.text;
-    // No Code Block any more: the Page builds what it became.
     if (!mounted || read != _reads || text == null) return;
     if (!clean || views.pending(_block) > 0 || sent != views.sent(_block)) {
       return;
@@ -282,7 +255,6 @@ class _CodeBlockState extends State<CodeBlock> {
     if (first) _takeCaret();
   }
 
-  /// Shows `value` as code Liquid assigned to the field.
   void _set(TextEditingValue value) {
     _quiet = true;
     final changed = writeText(_text, value);
@@ -290,8 +262,6 @@ class _CodeBlockState extends State<CodeBlock> {
     if (changed && mounted) setState(() => _replaced = true);
   }
 
-  /// Puts `value`, which a key made, into the field and sends it; the field's own undo
-  /// history keeps it.
   void _edit(TextEditingValue value) {
     _quiet = true;
     _text.value = value;
@@ -301,13 +271,10 @@ class _CodeBlockState extends State<CodeBlock> {
 
   void _typed() {
     if (_quiet || _stored == null) return;
-    // On quitting, a composition still open is written as it stands.
     if (_composing && !_state.quitting) return;
     _send(_text.text);
   }
 
-  /// Sends the change from the stored code to `text` as one edit; after a refused one, none
-  /// until the stored code is read again.
   void _send(String text) {
     final stored = _stored!;
     if (_edits.refused != null) {
@@ -319,7 +286,6 @@ class _CodeBlockState extends State<CodeBlock> {
     _write(textEdit(_page, _block, stored, text), chain: _edits);
   }
 
-  /// Writes `change` after earlier ones; a refusal shows the stored code again (rule 7).
   void _write(BridgeMutation change, {EditChain? chain}) => unawaited(
     widget.views
         .write(change, [_block], chain: chain)
@@ -354,10 +320,8 @@ class _CodeBlockState extends State<CodeBlock> {
     if (event is KeyUpEvent || _composing || _stored == null) {
       return KeyEventResult.ignored;
     }
-    // Until the Page's earlier queue is done, the field takes no keys at all.
     if (!widget.views.ready.value) return KeyEventResult.handled;
     final keys = HardwareKeyboard.instance;
-    // A key with the Liquid key held is a Liquid shortcut's, never the plain key's.
     if (keys.isMetaPressed ||
         keys.isControlPressed ||
         keys.isAltPressed ||
@@ -372,7 +336,6 @@ class _CodeBlockState extends State<CodeBlock> {
       _edit(indentLines(value, out: keys.isShiftPressed));
       return KeyEventResult.handled;
     }
-    // ⇧ with the arrows selects, as in any text.
     if (keys.isShiftPressed) return KeyEventResult.ignored;
     final text = value.text;
     final at = selection.baseOffset;
@@ -401,10 +364,7 @@ class _CodeBlockState extends State<CodeBlock> {
     return KeyEventResult.handled;
   }
 
-  /// Puts the caret into the neighbouring Text or Code Block: at the end above, at the
-  /// start below.
   bool _move(int by) {
-    // The caret is the input queue's to place while the structure changes.
     if (widget.views.editor.busy) return false;
     final neighbour = widget.views.caretFrom(widget.index + by, by);
     if (neighbour == null) return false;
@@ -416,7 +376,6 @@ class _CodeBlockState extends State<CodeBlock> {
     return true;
   }
 
-  /// esc leaves the code for the start of the Text Block below, as from a table.
   void _leave() {
     final below = widget.views.textFrom(widget.index + 1, 1);
     if (below == null) {
@@ -675,7 +634,6 @@ class _CodeBlockState extends State<CodeBlock> {
       ),
     );
     final mono = monoStyle(context);
-    // Lines never wrap: the field is as wide as the longest line, measured as it is typed.
     final code = ListenableBuilder(
       listenable: _text,
       builder: (context, _) => LayoutBuilder(

@@ -1,9 +1,5 @@
-//! Writes a session's record into a new folder in the Downloads folder (ADR-0257). Nothing is
-//! overwritten, and a failed export leaves no folder behind.
-
 use std::path::{Path, PathBuf};
 
-/// The text of `README.txt`: what the record covers and leaves out.
 pub(crate) const README: &str = "Session record
 
 thread.json     T3 Code's record of the thread as Meta-Harness held it when exported: the
@@ -20,15 +16,10 @@ such as commands, network requests or other programs; anything done outside Meta
 Nothing here is signed or proven complete.
 ";
 
-/// The name of T3's thread record inside a record.
 pub(crate) const THREAD_FILE: &str = "thread.json";
 
-/// Longest title kept in a folder name, in bytes. With ` – record <day>` (22 bytes), a numbered
-/// suffix and the temporary folder's `.` and `.partial`, every name stays within 255 bytes.
 const TITLE_BYTES: usize = 200;
 
-/// The Downloads folder: the one the Linux desktop names in `user-dirs.dirs`, else `~/Downloads`
-/// (macOS has no such file).
 pub(crate) fn download_dir() -> Option<PathBuf> {
     let home = PathBuf::from(std::env::var_os("HOME")?);
     let user_dirs = std::env::var_os("XDG_CONFIG_HOME")
@@ -41,10 +32,8 @@ pub(crate) fn download_dir() -> Option<PathBuf> {
     Some(download_dir_in(&home, text.as_deref()))
 }
 
-/// The Downloads folder for a home folder and the text of `user-dirs.dirs`, if any.
 pub(crate) fn download_dir_in(home: &Path, user_dirs: Option<&str>) -> PathBuf {
     user_dirs
-        // The shell reads the file in order, so the last assignment is the one in effect.
         .and_then(|text| {
             text.lines()
                 .rev()
@@ -55,7 +44,6 @@ pub(crate) fn download_dir_in(home: &Path, user_dirs: Option<&str>) -> PathBuf {
                 .strip_prefix('"')
                 .and_then(|rest| rest.strip_suffix('"'))
                 .unwrap_or(value);
-            // `$HOME` expands only where it is not escaped, so it is matched before unescaping.
             match quoted.strip_prefix("$HOME") {
                 Some(rest) => Some(home.join(unescape(rest).trim_start_matches('/'))),
                 None => {
@@ -67,9 +55,6 @@ pub(crate) fn download_dir_in(home: &Path, user_dirs: Option<&str>) -> PathBuf {
         .unwrap_or_else(|| home.join("Downloads"))
 }
 
-/// The text of a double-quoted `user-dirs.dirs` value with its backslash escapes (`\"`, `\\`,
-/// `\$` and `` \` ``) read as the characters they stand for. The shell is not evaluated; other
-/// backslashes stay.
 fn unescape(text: &str) -> String {
     let mut unescaped = String::with_capacity(text.len());
     let mut chars = text.chars().peekable();
@@ -85,8 +70,6 @@ fn unescape(text: &str) -> String {
     unescaped
 }
 
-/// The folder name of a record: the session's title without characters a file name cannot hold,
-/// then the day it was exported, as `<title> – record <day>`.
 pub(crate) fn record_name(title: &str, day: &str) -> String {
     let mut bytes = 0;
     let kept: String = title
@@ -108,10 +91,6 @@ pub(crate) fn record_name(title: &str, day: &str) -> String {
     format!("{title} – record {day}")
 }
 
-/// Creates a folder named `name` in `downloads`, or `name 2`, `name 3`… when it exists, and fills
-/// it with `write` in a temporary sibling that is renamed into place only once it succeeded. The
-/// folder is claimed by creating it first, so no other export takes its name; a failure removes
-/// both. Returns the folder's path.
 pub(crate) fn write_folder(
     downloads: &Path,
     name: &str,
@@ -135,7 +114,6 @@ pub(crate) fn write_folder(
         ".{}.partial",
         folder.file_name().unwrap_or_default().to_string_lossy()
     ));
-    // Only a folder this call created is removed: an existing one may belong to someone else.
     if let Err(error) = std::fs::create_dir(&temporary) {
         let _ = std::fs::remove_dir(&folder);
         return Err(format!("could not create {}: {error}", temporary.display()));

@@ -6,11 +6,8 @@ import 'shortcuts/shortcut_reveal.dart';
 import 'theme/theme.dart';
 import 'theme/tokens.g.dart';
 
-/// Width of the reading column in the chat and the input area.
 const double readingWidth = WsMetrics.widthReading;
 
-/// A contextual shortcut hint, shown only while the reveal key is held. It takes no space, so
-/// nothing moves when it appears.
 class Hint extends StatelessWidget {
   const Hint(this.text, {super.key});
 
@@ -32,7 +29,6 @@ class Hint extends StatelessWidget {
   }
 }
 
-/// The look of a shortcut hint: small, dark and above what it labels.
 class KeyBadge extends StatelessWidget {
   const KeyBadge(this.text, {super.key});
 
@@ -61,7 +57,6 @@ class KeyBadge extends StatelessWidget {
   }
 }
 
-/// A one-character status badge.
 class StatusBadge extends StatelessWidget {
   const StatusBadge({
     super.key,
@@ -110,19 +105,15 @@ class _Button extends StatelessWidget {
   final String label;
   final String? shortcut;
 
-  /// What the button is announced as, in place of its visible label.
   final String? semanticsLabel;
 
-  /// None shows the button disabled.
   final VoidCallback? onPressed;
   final Color foreground;
   final Color background;
   final Color? outline;
 
-  /// A Lucide icon before the label.
   final IconData? icon;
 
-  /// Makes the button take the keyboard focus; others leave it where it is.
   final FocusNode? focusNode;
 
   @override
@@ -147,14 +138,12 @@ class _Button extends StatelessWidget {
             padding: const EdgeInsets.symmetric(horizontal: _buttonPadding),
             child: Row(
               mainAxisSize: MainAxisSize.min,
-              // Centered when a layout stretches the button.
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 if (icon case final icon?) ...[
                   Icon(icon, size: 16, color: foreground),
                   const SizedBox(width: WsMetrics.space2),
                 ],
-                // Cut short only where a layout leaves the button too little room.
                 Flexible(
                   child: ExcludeSemantics(
                     excluding: semanticsLabel != null,
@@ -177,9 +166,6 @@ class _Button extends StatelessWidget {
     if (hint == null || hint.isEmpty || !ShortcutReveal.shown(context)) {
       return button;
     }
-    // The hint sits on the button's corner, so the button keeps its size and the taps under the
-    // hint still press it. The stack passes the layout's constraints to the button, so a stretched
-    // button stays stretched.
     return Stack(
       clipBehavior: Clip.none,
       fit: StackFit.passthrough,
@@ -213,7 +199,6 @@ class PrimaryButton extends StatelessWidget {
   final String label;
   final String? shortcut;
 
-  /// None shows the button disabled.
   final VoidCallback? onPressed;
   final FocusNode? focusNode;
 
@@ -228,7 +213,6 @@ class PrimaryButton extends StatelessWidget {
   );
 }
 
-/// The primary action when it cannot be undone from Liquid, such as reverting files.
 class DangerButton extends StatelessWidget {
   const DangerButton({
     super.key,
@@ -240,7 +224,6 @@ class DangerButton extends StatelessWidget {
   final String label;
   final String? shortcut;
 
-  /// None shows the button disabled.
   final VoidCallback? onPressed;
 
   @override
@@ -253,9 +236,6 @@ class DangerButton extends StatelessWidget {
   );
 }
 
-/// Asks before an action Liquid cannot undo: ⏎ confirms while
-/// it is allowed and esc cancels; it closes with `true` when confirmed. Without `action` it
-/// only says why nothing can be done.
 class DangerDialog extends StatelessWidget {
   const DangerDialog({
     super.key,
@@ -270,7 +250,6 @@ class DangerDialog extends StatelessWidget {
   final String? action;
   final bool allowed;
 
-  /// The style of a dialog's text.
   static TextStyle text(BuildContext context) => TextStyle(
     color: context.ws.textMuted,
     fontSize: WsMetrics.fsCompact,
@@ -300,8 +279,6 @@ class DangerDialog extends StatelessWidget {
   }
 }
 
-/// A dialog with a title, its text, its actions and Cancel, which esc also takes, closing
-/// with `cancelled`; without actions Cancel is Close.
 class ActionDialog extends StatelessWidget {
   const ActionDialog({
     super.key,
@@ -320,11 +297,8 @@ class ActionDialog extends StatelessWidget {
   final Map<ShortcutActivator, VoidCallback> bindings;
   final Object? cancelled;
 
-  /// The label of the button esc takes, if not Cancel or, without actions, Close.
   final String? dismiss;
 
-  /// Whether esc, the dismiss button and a click beside the dialog close it; off while
-  /// something it started must finish first.
   final bool dismissible;
 
   @override
@@ -368,9 +342,6 @@ class ActionDialog extends StatelessWidget {
                       ),
                     ),
                   ),
-                  // Cancel left and the main action, listed first, right, as macOS and
-                  // Material place them; long labels wrap below each other, the main
-                  // action on top, rather than overflow.
                   OverflowBar(
                     alignment: MainAxisAlignment.end,
                     spacing: WsMetrics.space3,
@@ -398,7 +369,6 @@ class ActionDialog extends StatelessWidget {
   );
 }
 
-/// A warning inside a dialog or menu, such as which agent holds an action up.
 class WarningNotice extends StatelessWidget {
   const WarningNotice(
     this.text, {
@@ -409,10 +379,8 @@ class WarningNotice extends StatelessWidget {
 
   final String text;
 
-  /// Something failed rather than needs attention.
   final bool danger;
 
-  /// Something to know, not to act on.
   final bool info;
 
   @override
@@ -480,8 +448,6 @@ class SecondaryButton extends StatelessWidget {
   );
 }
 
-/// A quiet button without a frame, for view options beside the main actions; in the accent
-/// while the option it opens is `on`.
 class GhostButton extends StatelessWidget {
   const GhostButton({
     super.key,
@@ -516,7 +482,6 @@ class GhostButton extends StatelessWidget {
   }
 }
 
-/// The input area's card; controls in it show focus and hover above its background.
 class InputCard extends StatelessWidget {
   const InputCard({
     super.key,
@@ -544,10 +509,6 @@ class InputCard extends StatelessWidget {
   );
 }
 
-/// Shows `value` in a field's controller as text Liquid assigned to it, and returns whether the
-/// text changed. The field keeps this controller until it builds again, so typing and reads agree
-/// at once; a changed text then gets a fresh controller (see [adoptController]), because ⌘Z would
-/// otherwise bring back the text this replaced. Unchanged text only moves the selection.
 bool writeText(TextEditingController controller, TextEditingValue value) {
   if (controller.text != value.text) {
     controller.value = value;
@@ -557,10 +518,6 @@ bool writeText(TextEditingController controller, TextEditingValue value) {
   return false;
 }
 
-/// Gives a field its fresh controller when it builds after [writeText], holding what the old one
-/// holds then, so keys typed since the write are kept. `listener` moves to the fresh controller,
-/// which `create` makes when the field needs its own kind. The old one is disposed after that
-/// frame.
 TextEditingController adoptController(
   TextEditingController previous, {
   VoidCallback? listener,
@@ -573,8 +530,6 @@ TextEditingController adoptController(
   return fresh;
 }
 
-/// The size `text` takes in `style` at the text scale `scaler`; the measuring painter is released
-/// at once.
 Size measureText(String text, TextStyle style, TextScaler scaler) {
   final painter = TextPainter(
     text: TextSpan(text: text, style: style),
@@ -586,8 +541,6 @@ Size measureText(String text, TextStyle style, TextScaler scaler) {
   return size;
 }
 
-/// Wraps a text field so that, while an input method composes in `controller`, its keys go to the
-/// input method and not to the shortcuts above: ⏎ commits the text, arrows pick its candidates.
 Widget composingField(TextEditingController controller, Widget field) => Focus(
   canRequestFocus: false,
   skipTraversal: true,
@@ -597,13 +550,11 @@ Widget composingField(TextEditingController controller, Widget field) => Focus(
   child: field,
 );
 
-/// ⏎ and Space activate the focused control, before a view's own keys take them.
 const activateKeys = <ShortcutActivator, Intent>{
   SingleActivator(LogicalKeyboardKey.enter): ActivateIntent(),
   SingleActivator(LogicalKeyboardKey.space): ActivateIntent(),
 };
 
-/// A choice of one among a few, as the segments of one control.
 class Segments<T> extends StatelessWidget {
   const Segments({
     super.key,
@@ -613,12 +564,10 @@ class Segments<T> extends StatelessWidget {
     this.dense = false,
   });
 
-  /// Each option with its label, in order.
   final List<(T, String)> options;
   final T selected;
   final ValueChanged<T> onSelect;
 
-  /// Smaller, for a table header.
   final bool dense;
 
   @override
@@ -631,7 +580,6 @@ class Segments<T> extends StatelessWidget {
         border: Border.all(color: ws.borderStrong),
         borderRadius: BorderRadius.circular(WsMetrics.radiusMd + 1),
       ),
-      // Focus shows above the group's background.
       child: Material(
         type: MaterialType.transparency,
         child: Row(
@@ -667,8 +615,6 @@ class _Segment extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final ws = context.ws;
-    // Which segment is chosen is told to assistive technology, not only drawn; return and space
-    // press the focused segment before a view's own keys take them.
     return Semantics(
       selected: selected,
       inMutuallyExclusiveGroup: true,
@@ -677,7 +623,6 @@ class _Segment extends StatelessWidget {
         child: InkWell(
           onTap: onTap,
           borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
-          // Ink, so the focus highlight shows above the selected segment.
           child: Ink(
             height: dense ? 20 : 24,
             padding: EdgeInsets.symmetric(

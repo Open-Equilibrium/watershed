@@ -14,6 +14,7 @@ import 'package:liquid/src/launch.dart';
 import 'package:liquid/src/workspace/workspace_state.dart';
 import 'package:liquid/src/rust/api/hosts.dart';
 import 'package:liquid/src/session/session_state.dart';
+import 'package:liquid/src/theme/machine_icon.dart';
 import 'package:liquid/src/shortcuts/keymap.dart';
 import 'package:liquid/src/shortcuts/shortcut_store.dart';
 import 'package:liquid/src/theme/theme.dart';
@@ -30,8 +31,13 @@ const mini = SavedAgentHost(
   address: remote,
   client: client,
 );
+const miniActive = SavedAgentHost(
+  name: 'Studio mini',
+  address: remote,
+  client: client,
+  active: true,
+);
 
-/// The bridge's agent hosts in memory: checks answer from `reaches`, and an unlisted host is offline.
 class FakeAgentHosts implements AgentHostBridge {
   final reaches = <String?, BridgeReach>{};
   final calls = <String>[];
@@ -61,6 +67,28 @@ class FakeAgentHosts implements AgentHostBridge {
   }
 }
 
+class FakeLinks implements AgentHostLinks {
+  FakeLinks(this.started, {this.startFailure, this.starting});
+
+  final List<String?> started;
+  final String? startFailure;
+
+  final Future<String?> Function(String? address)? starting;
+
+  @override
+  Future<void> connect(String? address) async {}
+
+  @override
+  void disconnect(String address) {}
+
+  @override
+  Future<String?> startOn(String? address) async {
+    started.add(address);
+    if (starting case final starting?) return starting(address);
+    return startFailure;
+  }
+}
+
 void main() {
   late FakeAgentHosts bridge;
   late List<AgentHostsSettings> saved;
@@ -69,14 +97,13 @@ void main() {
   AgentHostsController controller({
     AgentHostsSettings settings = const AgentHostsSettings(),
     String? switchFailure,
+    Future<String?> Function(String? address)? starting,
+    Future<void> Function(AgentHostsSettings next)? save,
   }) => AgentHostsController(
     settings: settings,
     bridge: bridge,
-    save: (next) async => saved.add(next),
-    switchTo: (address, _) async {
-      switched.add(address);
-      return switchFailure;
-    },
+    save: save ?? (next) async => saved.add(next),
+    links: FakeLinks(switched, startFailure: switchFailure, starting: starting),
   );
 
   setUp(() {
@@ -87,7 +114,6 @@ void main() {
     switched = [];
   });
 
-  /// Opens Settings → Agent hosts with ⌘, and the section.
   Future<void> openAgentHosts(WidgetTester tester) async {
     await tester.sendKeyDownEvent(
       LogicalKeyboardKey.metaLeft,
@@ -100,7 +126,6 @@ void main() {
     await tester.pumpAndSettle();
   }
 
-  /// Opens Settings → Agent hosts over the agent surface, as ⌘, and the section do.
   Future<void> show(WidgetTester tester, AgentHostsController hosts) async {
     await tester.binding.setSurfaceSize(const Size(1600, 1000));
     final shortcuts = await ShortcutController.load(
@@ -124,7 +149,14 @@ void main() {
     await openAgentHosts(tester);
   }
 
-  /// Opens the row menu of the host at `address` (null: This Mac) and chooses `item`.
+  Future<void> pumpSessions(WidgetTester tester, SessionState state) async {
+    await tester.binding.setSurfaceSize(const Size(1400, 900));
+    await tester.pumpWidget(
+      LiquidApp(launch: ValueNotifier(Launch.session(state, info))),
+    );
+    await tester.pumpAndSettle();
+  }
+
   Future<void> chooseInRow(
     WidgetTester tester,
     String? address,
@@ -140,6 +172,11 @@ void main() {
     await tester.tap(find.text(item));
     await tester.pumpAndSettle();
   }
+
+  Finder usedFor(String? address) => find.descendant(
+    of: find.byKey(ValueKey<String?>(address)),
+    matching: find.text('Used for sessions'),
+  );
 
   test(
     'keeps the saved hosts, one active at most, and reads back what it wrote',
@@ -164,7 +201,6 @@ void main() {
       );
       expect(lab.activeAddress, 'ws://lab:3774');
       expect(lab.hosts.where((host) => host.active), hasLength(1));
-      // This Mac is used when no host is active.
       expect(settings.withActive(null).activeAddress, isNull);
       expect(settings.without(remote).activeAddress, isNull);
       expect(
@@ -188,16 +224,7 @@ void main() {
       bridge.reaches[remote] = BridgeReach.offline;
       await show(
         tester,
-        controller(
-          settings: const AgentHostsSettings([
-            SavedAgentHost(
-              name: 'Studio mini',
-              address: remote,
-              client: client,
-              active: true,
-            ),
-          ]),
-        ),
+        controller(settings: const AgentHostsSettings([miniActive])),
       );
 
       expect(find.text('This Mac'), findsOneWidget);
@@ -260,8 +287,6 @@ void main() {
       await tester.tap(find.widgetWithText(GhostButton, 'Add agent host'));
       await tester.pumpAndSettle();
 
-      // Each field is named by its label, which its hint follows while the field is empty; the Host
-      // field has the keys first.
       expect(
         tester.getSemantics(find.bySemanticsLabel(RegExp('^Host'))),
         matchesSemantics(
@@ -322,7 +347,6 @@ void main() {
   testWidgets(
     'the Add dialog shows the ws:// address refusal from the bridge',
     (tester) async {
-      // The bridge pairs through the core, which refuses an address that is not ws:// before it connects.
       bridge.pairError = AnyhowException(
         'Enter the address as ws://HOST:PORT, as meta invite prints it.',
       );
@@ -361,20 +385,14 @@ void main() {
     tester,
   ) async {
     await tester.binding.setSurfaceSize(const Size(1600, 1000));
-    final surface = ValueNotifier(
-      Launch.session(SessionState(FakeProject()), info),
+    await tester.pumpWidget(
+      LiquidApp(
+        launch: ValueNotifier(
+          Launch.session(SessionState(FakeProject()), info),
+        ),
+        agentHosts: controller(settings: AgentHostsSettings([mini])),
+      ),
     );
-    final hosts = AgentHostsController(
-      settings: AgentHostsSettings([mini]),
-      bridge: bridge,
-      save: (next) async => saved.add(next),
-      switchTo: (address, _) async {
-        // The agent area now shows the chosen host's session, which replaces the one shown.
-        surface.value = Launch.session(SessionState(FakeProject()), info);
-        return null;
-      },
-    );
-    await tester.pumpWidget(LiquidApp(launch: surface, agentHosts: hosts));
     await tester.pumpAndSettle();
     await openAgentHosts(tester);
 
@@ -389,21 +407,17 @@ void main() {
     expect(find.text('Used for sessions'), findsOneWidget);
   });
 
-  testWidgets('a second choice waits while the agent area opens', (
+  testWidgets('a second choice waits while the host for sessions connects', (
     tester,
   ) async {
     final opening = Completer<String?>();
-    await tester.binding.setSurfaceSize(const Size(1600, 1000));
-    final hosts = AgentHostsController(
-      settings: AgentHostsSettings([mini]),
-      bridge: bridge,
-      save: (next) async => saved.add(next),
-      switchTo: (address, _) async {
-        switched.add(address);
-        return opening.future;
-      },
+    await show(
+      tester,
+      controller(
+        settings: AgentHostsSettings([mini]),
+        starting: (_) => opening.future,
+      ),
     );
-    await show(tester, hosts);
 
     await chooseInRow(tester, remote, 'Use for sessions');
     await chooseInRow(tester, null, 'Use for sessions');
@@ -418,17 +432,13 @@ void main() {
     tester,
   ) async {
     final opening = Completer<String?>();
-    await tester.binding.setSurfaceSize(const Size(1600, 1000));
-    final hosts = AgentHostsController(
-      settings: AgentHostsSettings([mini]),
-      bridge: bridge,
-      save: (next) async => saved.add(next),
-      switchTo: (address, _) async {
-        switched.add(address);
-        return opening.future;
-      },
+    await show(
+      tester,
+      controller(
+        settings: AgentHostsSettings([mini]),
+        starting: (_) => opening.future,
+      ),
     );
-    await show(tester, hosts);
     await chooseInRow(tester, remote, 'Use for sessions');
 
     await tester.sendKeyEvent(LogicalKeyboardKey.escape);
@@ -444,7 +454,7 @@ void main() {
   });
 
   testWidgets(
-    'a host whose agent area cannot open is not used, and the saved choice goes back',
+    'a host that cannot start sessions is not used, and the saved choice goes back',
     (tester) async {
       await show(
         tester,
@@ -467,29 +477,101 @@ void main() {
     },
   );
 
-  testWidgets('switching the agent host shows its sessions at once', (
-    tester,
-  ) async {
-    await tester.binding.setSurfaceSize(const Size(1400, 900));
-    final before = SessionState(
-      FakeProject()..threadList = [threadOf('old', title: 'Old host session')],
-    );
-    final after = SessionState(
-      FakeProject()..threadList = [threadOf('new', title: 'New host session')],
-    );
-    await before.loadStart();
-    await after.loadStart();
-    final surface = ValueNotifier(Launch.session(before, info));
-    await tester.pumpWidget(LiquidApp(launch: surface));
-    await tester.pumpAndSettle();
-    expect(find.text('Old host session'), findsOneWidget);
+  testWidgets(
+    'the sidebar lists every agent host’s sessions, marks a remote one with its machine, and opens it on its host',
+    (tester) async {
+      final state = SessionState(
+        FakeProject()..threadList = [threadOf('local', title: 'Local session')],
+      );
+      final studio = FakeProject()
+        ..hostName = 'Studio mini'
+        ..threadList = [threadOf('studio', title: 'Studio session')];
+      await state.addHost(remote, studio, machine: 'mac-mini');
+      await pumpSessions(tester, state);
 
-    surface.value = Launch.session(after, info);
-    await tester.pumpAndSettle();
+      expect(find.text('Local session'), findsOneWidget);
+      expect(find.text('Studio session'), findsOneWidget);
+      expect(
+        find.descendant(
+          of: find.byKey(const Key('session-studio')),
+          matching: find.byTooltip('Studio mini'),
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(
+          of: find.byKey(const Key('session-local')),
+          matching: find.byType(MachineIcon),
+        ),
+        findsNothing,
+      );
 
-    expect(find.text('New host session'), findsOneWidget);
-    expect(find.text('Old host session'), findsNothing);
-  });
+      await tester.tap(find.byKey(const Key('session-studio')));
+      await tester.pumpAndSettle();
+
+      expect(studio.calls, ['open studio']);
+      expect(state.sessionAddress, remote);
+    },
+  );
+
+  testWidgets(
+    'an open session whose agent host stops answering says so in the composer after 2 s, until it answers',
+    (tester) async {
+      final session = FakeSession(id: 'studio');
+      final studio = FakeProject(session: session)
+        ..hostName = 'Studio mini'
+        ..threadList = [threadOf('studio', title: 'Studio session')];
+      final state = SessionState(FakeProject());
+      await state.addHost(remote, studio);
+      await state.open('studio', address: remote);
+      await pumpSessions(tester, state);
+
+      session.fail('the host is down');
+      await tester.pump(const Duration(seconds: 1));
+      expect(
+        find.textContaining('is reconnecting'),
+        findsNothing,
+        reason: 'T3 waits 2 s before it says so',
+      );
+      await tester.pump(const Duration(seconds: 1));
+      expect(
+        find.text(
+          'Studio mini is reconnecting. Liquid could not connect to the agent host $remote: the host is down.',
+        ),
+        findsOneWidget,
+      );
+      expect(state.session, same(session), reason: 'the Chat stays open');
+
+      await state.addHost(remote, FakeProject(session: session));
+      await tester.pump();
+      expect(find.textContaining('is reconnecting'), findsNothing);
+    },
+  );
+
+  testWidgets(
+    'an agent host that stops answering is named in the sidebar, and its sessions go',
+    (tester) async {
+      final state = SessionState(
+        FakeProject()..threadList = [threadOf('local', title: 'Local session')],
+      );
+      await state.addHost(
+        remote,
+        FakeProject()
+          ..threadList = [threadOf('studio', title: 'Studio session')],
+      );
+      await state.addHost(remote, UnreachableProject());
+      await pumpSessions(tester, state);
+
+      expect(find.text('Local session'), findsOneWidget);
+      expect(find.text('Studio session'), findsNothing);
+      expect(
+        find.text(
+          'Liquid could not connect to the agent host $remote: the host is down.',
+        ),
+        findsOneWidget,
+      );
+    },
+  );
 
   testWidgets(
     'a failing agent host at start leaves Settings to choose This Mac',
@@ -508,14 +590,7 @@ void main() {
           ),
           shortcuts: shortcuts,
           agentHosts: controller(
-            settings: const AgentHostsSettings([
-              SavedAgentHost(
-                name: 'Studio mini',
-                address: remote,
-                client: client,
-                active: true,
-              ),
-            ]),
+            settings: const AgentHostsSettings([miniActive]),
           ),
         ),
       );
@@ -525,13 +600,7 @@ void main() {
       await chooseInRow(tester, null, 'Use for sessions');
 
       expect(switched, [null]);
-      expect(
-        find.descendant(
-          of: find.byKey(const ValueKey<String?>(null)),
-          matching: find.text('Used for sessions'),
-        ),
-        findsOneWidget,
-      );
+      expect(usedFor(null), findsOneWidget);
     },
   );
 
@@ -591,16 +660,7 @@ void main() {
   ) async {
     await show(
       tester,
-      controller(
-        settings: const AgentHostsSettings([
-          SavedAgentHost(
-            name: 'Studio mini',
-            address: remote,
-            client: client,
-            active: true,
-          ),
-        ]),
-      ),
+      controller(settings: const AgentHostsSettings([miniActive])),
     );
 
     await chooseInRow(tester, remote, 'Remove from this device…');
@@ -610,13 +670,7 @@ void main() {
     expect(switched, [null]);
     expect(saved.last.activeAddress, isNull);
     expect(find.text('Studio mini'), findsNothing);
-    expect(
-      find.descendant(
-        of: find.byKey(const ValueKey<String?>(null)),
-        matching: find.text('Used for sessions'),
-      ),
-      findsOneWidget,
-    );
+    expect(usedFor(null), findsOneWidget);
   });
 
   testWidgets(
@@ -624,25 +678,13 @@ void main() {
     (tester) async {
       await show(
         tester,
-        AgentHostsController(
-          settings: const AgentHostsSettings([
-            SavedAgentHost(
-              name: 'Studio mini',
-              address: remote,
-              client: client,
-              active: true,
-            ),
-          ]),
-          bridge: bridge,
+        controller(
+          settings: const AgentHostsSettings([miniActive]),
           save: (next) async {
             if (next.hosts.isEmpty) {
               throw const FileSystemException('disk full');
             }
             saved.add(next);
-          },
-          switchTo: (address, _) async {
-            switched.add(address);
-            return null;
           },
         ),
       );
@@ -661,80 +703,35 @@ void main() {
     },
   );
 
-  test('a result of a choice that a later one superseded is dropped', () async {
-    final opening = Completer<String?>();
-    final hosts = AgentHostsController(
-      settings: AgentHostsSettings([mini]),
-      bridge: bridge,
-      save: (next) async => saved.add(next),
-      switchTo: (address, _) =>
-          address == remote ? opening.future : Future.value(null),
-    );
-
-    final first = hosts.use(remote);
-    await hosts.use(null);
-    opening.complete('no answer');
-    await first;
-
-    expect(hosts.value.activeAddress, isNull);
-    expect(saved.last.activeAddress, isNull);
-  });
-
-  test(
-    'a host chosen first that connects last does not replace the later choice',
-    () async {
-      const info = SessionInfo(project: 'acme-api');
-      final thisMac = SessionState(FakeProject());
-      final studioProject = FakeProject();
-      final studio = SessionState(studioProject);
-      final connecting = Completer<Launch>();
-      final surface = ValueNotifier(
-        Launch.session(SessionState(FakeProject()), info),
-      );
-      final hosts = AgentHostsController(
+  test('a superseded choice never replaces the later one, whether it connects or fails', () async {
+    for (final failure in <String?>[null, 'no answer']) {
+      final opening = Completer<String?>();
+      final hosts = controller(
         settings: AgentHostsSettings([mini]),
-        bridge: bridge,
-        save: (next) async => saved.add(next),
-        switchTo: (address, isCurrent) => showAgentHost(
-          surface,
-          (address) async {
-            if (address == null) return Launch.session(thisMac, info);
-            return connecting.future;
-          },
-          address,
-          isCurrent: isCurrent,
-        ),
+        starting: (address) =>
+            address == remote ? opening.future : Future.value(null),
       );
 
-      final slow = hosts.use(remote);
+      final first = hosts.use(remote);
       await hosts.use(null);
-      expect(surface.value.state, same(thisMac));
-
-      connecting.complete(Launch.session(studio, info));
-      await slow;
+      opening.complete(failure);
+      await first;
       await pumpEventQueue();
 
       expect(
-        surface.value.state,
-        same(thisMac),
-        reason: 'the later choice stays shown',
+        hosts.value.activeAddress,
+        isNull,
+        reason: 'the later choice stays',
       );
-      expect(hosts.value.activeAddress, isNull);
-      expect(
-        studioProject.closed,
-        isTrue,
-        reason: 'the host that was not shown is released',
-      );
-    },
-  );
+      expect(saved.last.activeAddress, isNull);
+    }
+  });
 
   test('a failed switch keeps a host paired while it was running', () async {
     final opening = Completer<String?>();
-    final hosts = AgentHostsController(
+    final hosts = controller(
       settings: AgentHostsSettings([mini]),
-      bridge: bridge,
-      save: (next) async => saved.add(next),
-      switchTo: (address, _) => opening.future,
+      starting: (_) => opening.future,
     );
     const lab = 'ws://lab:3774';
 
@@ -750,11 +747,8 @@ void main() {
   });
 
   test('a host whose list cannot be saved is forgotten again, and a failed forget is said', () async {
-    final hosts = AgentHostsController(
-      settings: const AgentHostsSettings(),
-      bridge: bridge,
+    final hosts = controller(
       save: (_) async => throw const FileSystemException('disk full'),
-      switchTo: (_, _) async => null,
     );
 
     await expectLater(

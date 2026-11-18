@@ -11,7 +11,6 @@ import 'package:liquid/src/workspace/workspace_state.dart';
 
 import 'page_kit.dart';
 
-/// Media Blocks (ADR-0305).
 void main() {
   final kit = PageKit();
   final picked = <MediaSource>[];
@@ -33,7 +32,6 @@ void main() {
       if (view.kind == BridgeBlockKind.media) kit.fake.media[view.block]!.name,
   ];
 
-  /// A file of `size` bytes at `path`, as the dialog or a drop hands it over.
   MediaSource file(String path, int size) {
     kit.fake.files[path] = Uint8List(size);
     return MediaSource.file(path.split('/').last, path, size);
@@ -277,7 +275,6 @@ void main() {
       await tester.pump();
     }
 
-    // Over the second line's upper half: the files go between the two lines.
     final second = tester.getRect(block(1));
     final at = [second.center.dx, second.top + 4];
     await native('entered', at);

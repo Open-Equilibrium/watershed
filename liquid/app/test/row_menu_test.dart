@@ -28,12 +28,17 @@ void main() {
     await tester.pumpAndSettle();
   }
 
-  Future<void> show(WidgetTester tester, [int more = 0]) async {
+  Future<void> show(
+    WidgetTester tester, [
+    int more = 0,
+    List<Part> after = const [],
+  ]) async {
     await kit.show(tester, [
       TablePart([
         ...expenses,
         for (var number = 3; number < 3 + more; number++) namedRow(number),
       ]),
+      ...after,
     ]);
     mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
     await mouse.addPointer(location: const Offset(1300, 850));
@@ -47,12 +52,16 @@ void main() {
     await tester.pumpAndSettle();
   }
 
+  Future<void> pick(WidgetTester tester, Finder finder) async {
+    await tester.tap(finder);
+    await tester.pumpAndSettle();
+  }
+
   Future<void> openMenu(WidgetTester tester, String row) async {
     await hover(tester, tester.getCenter(cell(row, 'name')));
     await click(tester, grip);
   }
 
-  /// The rows added, as where they go: after a row, or first.
   List<String?> added() => [
     for (final add in kit.applied(BridgeMutationKind.addRow))
       add.last ? 'last' : add.after,
@@ -108,12 +117,10 @@ void main() {
   testWidgets('Insert above and below go next to the row', (tester) async {
     await show(tester);
     await openMenu(tester, 'r2');
-    await tester.tap(inMenu('Insert above'));
-    await tester.pumpAndSettle();
+    await pick(tester, inMenu('Insert above'));
     expect(menu, findsNothing);
     await openMenu(tester, 'r2');
-    await tester.tap(inMenu('Insert below'));
-    await tester.pumpAndSettle();
+    await pick(tester, inMenu('Insert below'));
     expect(added(), ['r1', 'r2']);
     expect(order().length, 4);
   });
@@ -121,8 +128,7 @@ void main() {
   testWidgets('Delete row deletes it without asking', (tester) async {
     await show(tester);
     await openMenu(tester, 'r1');
-    await tester.tap(inMenu('Delete row'));
-    await tester.pumpAndSettle();
+    await pick(tester, inMenu('Delete row'));
     expect(menu, findsNothing);
     expect(find.byType(Dialog), findsNothing);
     expect(kit.applied(BridgeMutationKind.removeRow).single.row, 'r1');
@@ -137,7 +143,6 @@ void main() {
     await tester.pumpAndSettle();
     expect(menu, findsNothing);
     await openMenu(tester, 'r1');
-    // Insert above, Insert below, Delete row.
     for (var step = 0; step < 3; step++) {
       await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
     }
@@ -164,27 +169,10 @@ void main() {
     expect(kit.applied(BridgeMutationKind.addRow), isEmpty);
   });
 
-  testWidgets('a row removed elsewhere takes its menu along', (tester) async {
-    await show(tester);
-    final table = kit.fake.views[kit.page]!.single.block;
-    await openMenu(tester, 'r1');
-    await kit.workspace.apply(
-      mutation(
-        BridgeMutationKind.removeRow,
-        page: kit.page,
-        block: table,
-        row: 'r1',
-      ),
-    );
-    await tester.pumpAndSettle();
-    expect(menu, findsNothing);
-  });
-
   testWidgets('after rows move under a still pointer, leaving the Table hides '
       'the handle', (tester) async {
     await show(tester, 4);
     await openMenu(tester, 'r1');
-    // The delete lands once the pointer rests on the row under the closed menu.
     final gate = kit.fake.gate = Completer<void>();
     kit.fake.gatedKinds = {BridgeMutationKind.removeRow};
     await click(tester, inMenu('Delete row'));
@@ -218,7 +206,6 @@ void main() {
       'handles', (tester) async {
     await show(tester, 2);
     await openMenu(tester, 'r1');
-    // The pointer stays on ⋮⋮ while ↑ ⏎ deletes the row.
     await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     await tester.pumpAndSettle();
@@ -239,17 +226,27 @@ void main() {
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     await tester.pumpAndSettle();
     expect(kit.applied(BridgeMutationKind.removeRow).single.row, 'r1');
-    // r2 moved up; the pointer now rests below the rows.
     expect(handle, findsNothing);
   });
 
-  testWidgets('a row moved by a change elsewhere closes its menu', (
+  testWidgets('a row removed or added elsewhere closes its menu', (
     tester,
   ) async {
     await show(tester);
     final table = kit.fake.views[kit.page]!.single.block;
+    await openMenu(tester, 'r1');
+    await kit.workspace.apply(
+      mutation(
+        BridgeMutationKind.removeRow,
+        page: kit.page,
+        block: table,
+        row: 'r1',
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(menu, findsNothing);
+
     await openMenu(tester, 'r2');
-    // Another device adds a row first.
     await kit.workspace.apply(
       mutation(BridgeMutationKind.addRow, page: kit.page, block: table),
     );
@@ -263,7 +260,6 @@ void main() {
     final table = kit.fake.views[kit.page]!.single.block;
     await openMenu(tester, 'r2');
     await hover(tester, tester.getCenter(cell('r1', 'date')));
-    // Another device adds a row between them.
     await kit.workspace.apply(
       mutation(
         BridgeMutationKind.addRow,
@@ -291,7 +287,6 @@ void main() {
     await tester.pumpAndSettle();
     await hover(tester, tester.getCenter(cell('r20', 'date')));
     expect(handle, findsOneWidget);
-    // Another device removes a row above; the rows' end keeps r20 under the pointer.
     await kit.workspace.apply(
       mutation(
         BridgeMutationKind.removeRow,
@@ -310,13 +305,9 @@ void main() {
   testWidgets('scrolling the Page or resizing the window closes the menu', (
     tester,
   ) async {
-    await kit.show(tester, [
-      TablePart(expenses),
+    await show(tester, 0, [
       for (var number = 0; number < 40; number++) TextPart('Line $number'),
     ]);
-    mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
-    await mouse.addPointer(location: const Offset(1300, 850));
-    addTearDown(mouse.removePointer);
     await openMenu(tester, 'r1');
     tester
         .state<ScrollableState>(

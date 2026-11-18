@@ -17,8 +17,6 @@ import 'input_lane.dart';
 import 'sidebar.dart';
 import 'start_page.dart';
 
-/// The chat timeline of the session. It builds only visible items, and each item rebuilds alone
-/// while its text streams (client architecture rules 5 and 6).
 class ChatView extends StatefulWidget {
   const ChatView({
     super.key,
@@ -30,13 +28,10 @@ class ChatView extends StatefulWidget {
 
   final SessionState state;
 
-  /// Shows the Diff panel with a turn's changes, by the turn's number.
   final ValueChanged<int>? onOpenDiff;
 
-  /// The session's project, harness and device, as the start page greets with them.
   final SessionInfo info;
 
-  /// The input area, floating at the bottom.
   final Widget? input;
 
   @override
@@ -44,12 +39,10 @@ class ChatView extends StatefulWidget {
 }
 
 class _ChatViewState extends State<ChatView> {
-  /// Jumps a scroll makes at most to build the item it brings into view.
   static const _revealJumps = 6;
 
   final _scroll = ScrollController();
 
-  /// The widget of each item by its id, so a scroll finds the item it brings into view.
   final _itemKeys = <int, GlobalKey>{};
 
   @override
@@ -67,7 +60,6 @@ class _ChatViewState extends State<ChatView> {
     super.dispose();
   }
 
-  /// Forgets the keys of the items that a reload of the chat dropped.
   void _pruneItemKeys() {
     final ids = {for (final item in widget.state.items.value) item.id};
     _itemKeys.removeWhere((id, _) => !ids.contains(id));
@@ -80,9 +72,6 @@ class _ChatViewState extends State<ChatView> {
     unawaited(_scrollTo(turn));
   }
 
-  /// Brings the first item of `turn` into view. A list builds only the items near its view, so
-  /// the scroll first jumps near the item, where it builds, and repeats the jump if the estimate
-  /// missed.
   Future<void> _scrollTo(int turn) async {
     for (var jump = 0; jump < _revealJumps; jump++) {
       final index = widget.state.items.value.indexWhere(
@@ -100,9 +89,6 @@ class _ChatViewState extends State<ChatView> {
     }
   }
 
-  /// Jumps so the item at `index` of `count` lies near the middle of the view. The list is
-  /// reversed, so offset 0 is the newest item and the estimate counts the items newer than it,
-  /// at the average height of the items the list has measured.
   void _jumpNear(int index, int count) {
     if (!_scroll.hasClients) return;
     final position = _scroll.position;
@@ -123,16 +109,12 @@ class _ChatViewState extends State<ChatView> {
       input: widget.input,
       child: ListenableBuilder(
         listenable: Listenable.merge([state.items, state.request]),
-        // A session without a conversation shows the start page.
         builder: (context, _) {
           final items = state.items.value;
           if (items.isEmpty) return StartPage(state: state, info: widget.info);
-          // A pending approval sits under the last item, where the agent waits for it.
           final request = state.request.value;
           final approval = request?.approval;
           final offset = approval == null ? 0 : 1;
-          // Messages start at the top and flow down; a long chat still keeps its newest message
-          // above the input.
           return Align(
             alignment: Alignment.topCenter,
             child: ListView.builder(
@@ -172,17 +154,20 @@ class _ChatViewState extends State<ChatView> {
                     child: Padding(
                       padding: const EdgeInsets.only(bottom: WsMetrics.space4),
                       child: RepaintBoundary(
-                        child: switch (item.turnEnd) {
-                          final turn? => TurnChanges(
-                            turn: turn,
-                            onOpenDiff: widget.onOpenDiff == null
-                                ? null
-                                : () => widget.onOpenDiff!(turn.number),
-                            onRevert: () => unawaited(
-                              confirmRevert(context, state, turn.number),
+                        child: switch (item.marker) {
+                          final text? => MoveMarker(text),
+                          null => switch (item.turnEnd) {
+                            final turn? => TurnChanges(
+                              turn: turn,
+                              onOpenDiff: widget.onOpenDiff == null
+                                  ? null
+                                  : () => widget.onOpenDiff!(turn.number),
+                              onRevert: () => unawaited(
+                                confirmRevert(context, state, turn.number),
+                              ),
                             ),
-                          ),
-                          null => ItemTile(item: item, state: state),
+                            null => ItemTile(item: item, state: state),
+                          },
                         },
                       ),
                     ),
@@ -197,7 +182,6 @@ class _ChatViewState extends State<ChatView> {
   }
 }
 
-/// What a turn changed, below its last item.
 class TurnChanges extends StatelessWidget {
   const TurnChanges({
     super.key,
@@ -209,7 +193,6 @@ class TurnChanges extends StatelessWidget {
   final BridgeTurn turn;
   final VoidCallback? onOpenDiff;
 
-  /// Asks to revert the files to before the turn.
   final VoidCallback? onRevert;
 
   @override
@@ -230,7 +213,6 @@ class TurnChanges extends StatelessWidget {
         ],
         if (onRevert case final revert?) ...[
           const SizedBox(width: WsMetrics.space1),
-          // A narrow window shortens its label rather than the counts.
           Flexible(
             child: GhostButton(
               label: 'Revert files to before this turn…',
@@ -244,8 +226,6 @@ class TurnChanges extends StatelessWidget {
   }
 }
 
-/// T3's pending approval, in the Chat under the last item: what the agent asks to run, why, and
-/// its answers. Decline and Approve show; the other options sit under More.
 class ApprovalRow extends StatelessWidget {
   const ApprovalRow({
     super.key,
@@ -343,7 +323,6 @@ class ApprovalRow extends StatelessWidget {
   }
 }
 
-/// The options of an approval the agent sent without any, in T3's order.
 const _defaultOptions = [
   BridgeApprovalOption(decision: 'cancel', label: 'Cancel'),
   BridgeApprovalOption(decision: 'decline', label: 'Decline'),
@@ -354,7 +333,6 @@ const _defaultOptions = [
   BridgeApprovalOption(decision: 'accept', label: 'Approve'),
 ];
 
-/// The title of an approval of T3's `kind`.
 String _approvalTitle(String kind) => switch (kind) {
   'command' => 'Command approval',
   'file_change' || 'file-change' => 'File change approval',
@@ -364,8 +342,6 @@ String _approvalTitle(String kind) => switch (kind) {
   _ => 'Approval',
 };
 
-/// One timeline entry: a user message, model prose, a line for reasoning, an error or a tool
-/// row. Messages show their actions while the pointer is over them, as T3 does.
 class ItemTile extends StatelessWidget {
   const ItemTile({super.key, required this.item, required this.state});
 
@@ -439,7 +415,6 @@ class ItemTile extends StatelessWidget {
   }
 }
 
-/// A message with its actions, which show while the pointer is over the message.
 class _HoverActions extends StatefulWidget {
   const _HoverActions({
     required this.end,
@@ -447,7 +422,6 @@ class _HoverActions extends StatefulWidget {
     required this.actions,
   });
 
-  /// Whether the message sits at the end of the row, as a user message does.
   final bool end;
   final Widget message;
   final List<Widget> actions;
@@ -469,7 +443,6 @@ class _HoverActionsState extends State<_HoverActions> {
           : CrossAxisAlignment.start,
       children: [
         widget.message,
-        // Kept in place when hidden, so the message does not move when they show.
         Opacity(
           opacity: _hovered ? 1 : 0,
           child: IgnorePointer(
@@ -485,7 +458,6 @@ class _HoverActionsState extends State<_HoverActions> {
   );
 }
 
-/// An error the agent or its provider reported; a JSON error payload shows its message.
 class _ErrorRow extends StatelessWidget {
   const _ErrorRow({required this.text});
 
@@ -525,14 +497,11 @@ class _ErrorRow extends StatelessWidget {
           when message.trim().isNotEmpty) {
         return message;
       }
-    } on FormatException {
-      // Plain text, shown as it is.
-    }
+    } on FormatException catch (_) {}
     return text;
   }
 }
 
-/// A tool call: its state, tool and target, and how long it ran.
 class ToolRow extends StatelessWidget {
   const ToolRow({super.key, required this.item});
 
@@ -561,7 +530,6 @@ class ToolRow extends StatelessWidget {
             children: [
               Icon(mark, size: 14, color: markColor),
               const SizedBox(width: WsMetrics.space3),
-              // One line, so a long tool name shortens with its target.
               Expanded(
                 child: Text.rich(
                   TextSpan(
@@ -598,6 +566,31 @@ class ToolRow extends StatelessWidget {
           ),
         );
       },
+    );
+  }
+}
+
+class MoveMarker extends StatelessWidget {
+  const MoveMarker(this.text, {super.key});
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    final ws = context.ws;
+    final rule = Expanded(child: Divider(height: 1, color: ws.border));
+    return Row(
+      children: [
+        rule,
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: WsMetrics.space3),
+          child: Text(
+            text,
+            style: TextStyle(color: ws.textFaint, fontSize: WsMetrics.fsSmall),
+          ),
+        ),
+        rule,
+      ],
     );
   }
 }

@@ -9,7 +9,6 @@ import 'package:liquid/src/workspace/workspace_state.dart';
 
 import 'page_kit.dart';
 
-/// Sort and filter, stored on the View (ADR-0244).
 void main() {
   final kit = PageKit();
 
@@ -29,7 +28,6 @@ void main() {
     matching: find.text(text),
   );
 
-  /// The names in the Table, top to bottom.
   List<String> names(WidgetTester tester) {
     final shown = {
       for (final name in ['Groceries', 'Electricity', 'Rent'])

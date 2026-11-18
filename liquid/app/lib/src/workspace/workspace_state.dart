@@ -8,10 +8,8 @@ import '../rust/api/drawing.dart';
 import '../rust/api/workspace.dart';
 import 'follow.dart';
 
-/// The most a query returns at once (client architecture rule 3).
 const window = 500;
 
-/// A mutation with the parts its kind does not use left at their defaults.
 BridgeMutation mutation(
   BridgeMutationKind kind, {
   String? area,
@@ -64,7 +62,6 @@ BridgeMutation mutation(
   drawing: drawing,
 );
 
-/// A query with the parts its kind does not use left out.
 BridgeQuery query(
   BridgeQueryKind kind, {
   String? area,
@@ -85,14 +82,10 @@ BridgeQuery query(
   filter: filter,
 );
 
-/// Edits that each assume the one before, such as a Text Block's: once one is refused, the
-/// later ones are refused unapplied, as their offsets assumed it.
 class EditChain {
-  /// Why the chain broke, or none.
   Object? refused;
 }
 
-/// The Page the window shows.
 @immutable
 class OpenPage {
   const OpenPage(this.area, this.page, {this.fresh = false});
@@ -100,11 +93,9 @@ class OpenPage {
   final String area;
   final String page;
 
-  /// Just created, so its title takes the keys.
   final bool fresh;
 }
 
-/// Reads again after each change, one read at a time, so the last change is always read.
 class _Reread {
   _Reread(this._read);
 
@@ -112,7 +103,6 @@ class _Reread {
   Future<void>? _reading;
   bool _again = false;
 
-  /// Reads, or once more after the read running now; done once that read is.
   Future<void> call() {
     if (_reading case final reading?) {
       _again = true;
@@ -133,25 +123,17 @@ class _Reread {
   }
 }
 
-/// The Workspace the window shows: its areas with their Page trees, kept current, and the
-/// open Page. It owns every subscription it follows (client architecture rule 14).
 class WorkspaceState {
   WorkspaceState(this.workspace);
 
   final LiquidWorkspace workspace;
 
-  /// The areas in the Workspace's order.
   final areas = ValueNotifier<List<BridgeArea>>(const []);
 
-  /// The open Page, or none while the agent session shows.
   final open = ValueNotifier<OpenPage?>(null);
 
-  /// What failed, as a plain sentence and then the core's message: a change Liquid did not
-  /// keep shows until the next change succeeds, a failed read until the next change or read
-  /// succeeds, and both show while both last.
   final problem = ValueNotifier<String?>(null);
 
-  /// The change and the read that failed last and still show.
   String? _changeFailed;
   String? _readFailed;
 
@@ -161,25 +143,19 @@ class WorkspaceState {
   Future<void> _applied = Future.value();
   bool _disposed = false;
 
-  /// `area`'s Pages in their tree's order, each after its parent's earlier siblings.
   ValueListenable<List<BridgePage>> pages(String area) =>
       _trees.putIfAbsent(area, () => ValueNotifier(const []));
 
-  /// Shows `problem`, a plain sentence on something not kept, until the next change succeeds,
-  /// unless the window closed.
   void report(String problem) => _show(change: problem, read: _readFailed);
 
-  /// Shows that a read failed, until the next change or read succeeds.
   void readFailed(Object error) => _show(
     change: _changeFailed,
     read:
         'Liquid could not read the Workspace, so what shows may be out of date: $error',
   );
 
-  /// Takes a failed read's problem away once a read succeeded.
   void readSucceeded() => _show(change: _changeFailed, read: null);
 
-  /// Reads `asked` for a Page's Blocks; a failed read's problem goes once one succeeds.
   Future<BridgeAnswer> read(BridgeQuery asked) async {
     final answer = await workspace.query(query: asked);
     readSucceeded();
@@ -194,11 +170,8 @@ class WorkspaceState {
     problem.value = shown.isEmpty ? null : shown.join('\n');
   }
 
-  /// Completes once every mutation asked for so far is applied or refused.
   Future<void> get settled => _applied;
 
-  /// Applies mutations in the order asked: the bridge may run two calls at once. A change in
-  /// a `chain` an earlier change broke is refused unapplied.
   Future<BridgeApplied> apply(BridgeMutation change, {EditChain? chain}) {
     final shown = _applied
         .then((_) => _applyIn(chain, change))
@@ -215,8 +188,6 @@ class WorkspaceState {
             throw error;
           },
         );
-    // Settled once the problem shown follows the change, so a problem reported after it
-    // stays.
     _applied = shown.then<void>((_) {}, onError: (_) {});
     return shown;
   }
@@ -229,14 +200,11 @@ class WorkspaceState {
     try {
       return await workspace.apply(mutation: change);
     } on Object catch (error) {
-      // Before the next change's turn, so it sees the chain broken.
       chain?.refused = error;
       rethrow;
     }
   }
 
-  /// Follows the areas and their Page trees. A new Workspace gets the area "Private" with
-  /// one blank Page, as Notion starts. With `show`, that Page or else the first one opens.
   Future<void> start({bool show = true}) async {
     final areas = _Reread(_readAreas);
     _listen(const BridgeResource(kind: BridgeResourceKind.areas), areas);
@@ -258,8 +226,6 @@ class WorkspaceState {
     }
   }
 
-  /// Creates a blank Page in `area`, below `parent` if given, and opens it unless `show` is
-  /// false.
   Future<void> newPage(String area, {String? parent, bool show = true}) async {
     final created = await apply(
       mutation(
@@ -275,8 +241,6 @@ class WorkspaceState {
   Future<void> rename(String page, String title) =>
       apply(mutation(BridgeMutationKind.renamePage, page: page, text: title));
 
-  /// Reads the followed `area`'s Page tree again; done once a read started after this call
-  /// is.
   Future<void> readPages(String area) =>
       _treeReads[area]?.call() ?? Future.value();
 
@@ -308,7 +272,6 @@ class WorkspaceState {
       if (answer.areas.isEmpty) break;
       read.addAll(answer.areas);
     } while (read.length < count);
-    // A read still running when the window closed changes nothing.
     if (_disposed) return;
     for (final area in read) {
       if (_treeReads.containsKey(area.id)) continue;
@@ -335,24 +298,17 @@ class WorkspaceState {
     if (!_disposed) _trees[area]!.value = read;
   }
 
-  /// What to tell open fields and input queues when Liquid quits, so a composition still
-  /// open is written as it stands and none waits for it.
   final finishing = <VoidCallback>{};
 
-  /// Set once Liquid quits.
   bool get quitting => _quitting;
   bool _quitting = false;
 
-  /// Work that will ask for writes, such as a Page's input queue (ADR-0240).
   final _tracked = <Future<void>>{};
 
   final _pages = <String, Future<void>>{};
 
-  /// A Page's input queue still writing, also after the Page closed, or none.
   Future<void>? pageWork(String page) => _pages[page];
 
-  /// Counts `work` on `page` until it is done, so that the Page reopened meanwhile waits
-  /// for it before taking keys.
   void trackPage(String page, Future<void> work) {
     _pages[page] = work;
     track(work);
@@ -363,14 +319,11 @@ class WorkspaceState {
     );
   }
 
-  /// Counts `work` until it is done, so that draining waits for its writes too.
   void track(Future<void> work) {
     _tracked.add(work);
     unawaited(work.whenComplete(() => _tracked.remove(work)));
   }
 
-  /// Waits for every write asked for so far, and for those asked meanwhile, so that closing
-  /// the window loses none.
   Future<void> drain() async {
     _quitting = true;
     for (final finish in [...finishing]) {

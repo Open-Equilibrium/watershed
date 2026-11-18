@@ -1,36 +1,20 @@
-//! Where the replica's database key lives: the operating system's keychain, through the
-//! `keyring` crate (ADR-0237). The keychain files each key under a random name kept in a small
-//! file in the replica's folder, so the key follows a moved folder (ADR-0275). On macOS the item
-//! belongs to the app that created it, so the key is released only to Liquid; on Linux and
-//! Windows any program of the user may read it (ADR-0254).
-
 use std::io::{Read, Write};
 use std::path::Path;
 
-/// A place that holds replica keys, each filed under a name.
 pub(crate) trait Keys {
-    /// The key filed under `name`, or none if none was ever stored there.
     fn read(&self, name: &str) -> Result<Option<[u8; 32]>, String>;
-    /// Files `key` under `name`.
     fn write(&self, name: &str, key: &[u8; 32]) -> Result<(), String>;
-    /// Removes the key filed under `name`; removing none is not an error.
     fn delete(&self, name: &str) -> Result<(), String>;
 }
 
-/// The operating system's keychain.
 pub(crate) struct Keychain;
 
-/// The keychain service Liquid files its replica keys under.
 const SERVICE: &str = "Liquid replica key";
 
-/// The keychain service Liquid files each agent host's device token under, by the host's address.
 const TOKEN_SERVICE: &str = "Liquid agent host token";
 
-/// The file in a replica's folder that holds the name its key is filed under (ADR-0275).
 pub(crate) const KEY_NAME_FILE: &str = "replica.keyname";
 
-/// The name a replica's key was filed under before key names: its folder's canonical path. The
-/// name must spell the folder exactly, or two folders could share one key.
 pub(crate) fn path_name(folder: &Path) -> Result<String, String> {
     let folder = std::fs::canonicalize(folder).unwrap_or_else(|_| folder.to_path_buf());
     folder
@@ -39,11 +23,6 @@ pub(crate) fn path_name(folder: &Path) -> Result<String, String> {
         .ok_or_else(|| "the replica's folder path is not UTF-8".into())
 }
 
-/// The replica's key, found through the key name file in `dir`. A folder without that file, or
-/// whose key is still filed under its path, takes its key under a new name once: the name file
-/// is synced before the key is stored, and the path entry is deleted only after that. Without a
-/// key, a replica whose database exists is refused (ADR-0237). The caller holds the replica's lock,
-/// which keeps a second session from making a key of its own meanwhile.
 pub(crate) fn replica_key(
     dir: &Path,
     keys: &dyn Keys,
@@ -55,8 +34,6 @@ pub(crate) fn replica_key(
         Some(name) => keys.read(name)?,
         None => None,
     };
-    // Once the named key is found, the path entry is only cleanup, so a failed lookup of it must
-    // not block the key.
     let filed = match stored {
         Some(_) => keys.read(&path).unwrap_or(None),
         None => keys.read(&path)?,
@@ -83,23 +60,18 @@ pub(crate) fn replica_key(
         };
         keys.write(&name, &key)?;
     }
-    // Only the entry holding the key in use goes: a path entry of another key belongs to a
-    // replica that moved away and may still need it.
     if filed == Some(key) {
         keys.delete(&path)?;
     }
     Ok(key)
 }
 
-/// The key name in `dir`'s key name file, or none if the folder has no such file. The file must be
-/// a plain file, and at most 64 bytes of it are read.
 fn read_key_name(dir: &Path) -> Result<Option<String>, String> {
     let path = dir.join(KEY_NAME_FILE);
     let failed =
         |error: std::io::Error| format!("the replica's key name {}: {error}", path.display());
     let mut options = std::fs::OpenOptions::new();
     options.read(true);
-    // Non-blocking, so a pipe in the file's place is refused instead of waited for.
     #[cfg(unix)]
     std::os::unix::fs::OpenOptionsExt::custom_flags(
         &mut options,
@@ -132,13 +104,9 @@ fn read_key_name(dir: &Path) -> Result<Option<String>, String> {
     Ok(Some(name.to_owned()))
 }
 
-/// Replaces `dir`'s key name file with `name`. The new file is synced under a temporary name and
-/// renamed over the old one, and the folder is synced after, so a crash leaves the old file or
-/// the new one whole.
 fn write_key_name(dir: &Path, name: &str) -> Result<(), String> {
     let path = dir.join(KEY_NAME_FILE);
     let temporary = dir.join(format!("{KEY_NAME_FILE}.tmp"));
-    // Removed first, so a link left in its place is replaced rather than written through.
     let _ = std::fs::remove_file(&temporary);
     let failed =
         |error: std::io::Error| format!("the replica's key name {}: {error}", path.display());
@@ -151,7 +119,6 @@ fn write_key_name(dir: &Path, name: &str) -> Result<(), String> {
     file.sync_all().map_err(failed)?;
     drop(file);
     std::fs::rename(&temporary, &path).map_err(failed)?;
-    // std cannot sync a folder on Windows, so the rename is forced to disk on unix only.
     #[cfg(unix)]
     std::fs::File::open(dir)
         .and_then(|folder| folder.sync_all())
@@ -159,20 +126,15 @@ fn write_key_name(dir: &Path, name: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// 128 random bits as 32 lowercase hex digits.
 pub(crate) fn random_hex() -> Result<String, String> {
     let mut bytes = [0u8; 16];
     getrandom::fill(&mut bytes).map_err(|error| error.to_string())?;
     Ok(bytes.iter().map(|byte| format!("{byte:02x}")).collect())
 }
 
-/// A place that holds agent hosts' device tokens, each filed under the host's address (ADR-0299).
 pub(crate) trait Tokens {
-    /// The token filed under `address`, or none if none was ever stored there.
     fn read(&self, address: &str) -> Result<Option<String>, String>;
-    /// Files `token` under `address`.
     fn write(&self, address: &str, token: &str) -> Result<(), String>;
-    /// Removes the token filed under `address`; removing none is not an error.
     fn delete(&self, address: &str) -> Result<(), String>;
 }
 
@@ -208,9 +170,6 @@ impl Keys for Keychain {
     }
 }
 
-/// The device tokens of agent hosts, filed in the keychain under each host's address (ADR-0299).
-/// It is a braced struct, which the bridge's Dart binding generator can read, unlike the unit
-/// [`Keychain`] of the replica keys.
 pub(crate) struct DeviceTokens {}
 
 impl Tokens for DeviceTokens {

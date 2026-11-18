@@ -1,6 +1,3 @@
-//! Media Blocks through the bridge (ADR-0305): a file's bytes go in from its path or from the
-//! clipboard, show in a Media Block, and come out again unchanged.
-
 use crate::api::media::{BridgeMedia, BridgeUpload};
 use crate::api::replica::LiquidWorkspace;
 use crate::api::workspace::{
@@ -9,7 +6,6 @@ use crate::api::workspace::{
 
 use super::workspace::{Folder, Memory, lisbon, mutation, query};
 
-/// Bytes that differ from part to part, so a misplaced part shows.
 fn bytes(len: usize) -> Vec<u8> {
     (0..len).map(|at| (at % 253) as u8).collect()
 }
@@ -80,7 +76,6 @@ fn a_file_goes_in_from_its_path_shows_in_a_media_block_and_saves_out_unchanged()
     );
 
     let saved = folder.0.join("saved.pdf");
-    // Another file that happens to have a name Liquid could stage under stays as it is.
     let neighbor = folder.0.join(".saved.pdf.liquid-saving");
     std::fs::write(&neighbor, b"not Liquid's").unwrap();
     workspace
@@ -99,7 +94,6 @@ fn a_file_goes_in_from_its_path_shows_in_a_media_block_and_saves_out_unchanged()
             .all(|name| !name.to_string_lossy().starts_with(".liquid-saving-")),
         "no partial copy stays beside it: {names:?}"
     );
-    // A name as long as the file system allows saves too.
     let long = folder.0.join(format!("{}.pdf", "b".repeat(251)));
     workspace
         .save_attachment(attachment.clone(), long.to_string_lossy().into())

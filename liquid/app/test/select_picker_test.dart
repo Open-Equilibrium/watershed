@@ -21,21 +21,29 @@ void main() {
     await tester.pumpAndSettle();
   }
 
-  /// The options written into cells, by row.
   List<(String, String?)> chosen() => [
     for (final set in kit.applied(BridgeMutationKind.setCell))
       (set.row!, set.cell!.text),
   ];
 
-  Future<void> open(WidgetTester tester, String row) async {
-    await tester.tap(cell(row, 'category'));
+  Future<void> clickCell(WidgetTester tester, String row, String field) async {
+    await tester.tap(cell(row, field));
     await tester.pumpAndSettle();
+  }
+
+  List<BridgeRow> namedRows(int from, int to) => [
+    for (var number = from; number <= to; number++) namedRow(number),
+  ];
+
+  ScrollController rowsOf(WidgetTester tester) =>
+      tester.widget<ListView>(find.byKey(const Key('table rows'))).controller!;
+
+  Future<void> open(WidgetTester tester, String row) async {
+    await clickCell(tester, row, 'category');
     await key(tester, LogicalKeyboardKey.enter);
   }
 
-  testWidgets('⏎ on a select cell opens its options; ↓ ⏎ picks one', (
-    tester,
-  ) async {
+  testWidgets('⏎ opens a select cell; ↓ ⏎ picks an option', (tester) async {
     await kit.show(tester, [TablePart(expenses)]);
     await open(tester, 'r1');
     expect(picker, findsOneWidget);
@@ -63,23 +71,17 @@ void main() {
     },
   );
 
-  testWidgets(
-    'typing on a select cell filters its options, ⏎ picks the first',
-    (tester) async {
-      await kit.show(tester, [TablePart(expenses)]);
-      await tester.tap(cell('r2', 'category'));
-      await tester.pumpAndSettle();
-      await key(tester, LogicalKeyboardKey.keyF);
-      expect(inPicker(find.text('Food')), findsOneWidget);
-      expect(inPicker(find.text('Home')), findsNothing);
-      await key(tester, LogicalKeyboardKey.enter);
-      expect(chosen(), [('r2', 'food')]);
-    },
-  );
+  testWidgets('typing filters options, ⏎ picks the first', (tester) async {
+    await kit.show(tester, [TablePart(expenses)]);
+    await clickCell(tester, 'r2', 'category');
+    await key(tester, LogicalKeyboardKey.keyF);
+    expect(inPicker(find.text('Food')), findsOneWidget);
+    expect(inPicker(find.text('Home')), findsNothing);
+    await key(tester, LogicalKeyboardKey.enter);
+    expect(chosen(), [('r2', 'food')]);
+  });
 
-  testWidgets('⏎ on a name no option has creates it in the next color', (
-    tester,
-  ) async {
+  testWidgets('⏎ on a new name creates it in the next color', (tester) async {
     await kit.show(tester, [TablePart(expenses)]);
     await open(tester, 'r1');
     await tester.enterText(inPicker(find.byType(TextField)), 'Travel');
@@ -99,9 +101,7 @@ void main() {
     expect(kit.inTable(find.text('Travel')), findsOneWidget);
   });
 
-  testWidgets('a click picks an option, esc closes and keeps the value', (
-    tester,
-  ) async {
+  testWidgets('a click picks an option; esc keeps the value', (tester) async {
     await kit.show(tester, [TablePart(expenses)]);
     await open(tester, 'r1');
     await key(tester, LogicalKeyboardKey.escape);
@@ -123,12 +123,9 @@ void main() {
     expect(chosen(), isEmpty);
   });
 
-  testWidgets('keys typed before the options take them still filter', (
-    tester,
-  ) async {
+  testWidgets('keys typed before the options still filter', (tester) async {
     await kit.show(tester, [TablePart(expenses)]);
-    await tester.tap(cell('r1', 'category'));
-    await tester.pumpAndSettle();
+    await clickCell(tester, 'r1', 'category');
     await tester.sendKeyEvent(LogicalKeyboardKey.keyH);
     await tester.sendKeyEvent(LogicalKeyboardKey.keyO);
     await tester.pumpAndSettle();
@@ -158,16 +155,11 @@ void main() {
 
   testWidgets('scrolling the Table closes the options', (tester) async {
     await kit.show(tester, [
-      TablePart([
-        ...expenses,
-        for (var number = 3; number <= 30; number++) namedRow(number),
-      ]),
+      TablePart([...expenses, ...namedRows(3, 30)]),
     ]);
     await open(tester, 'r1');
     expect(picker, findsOneWidget);
-    final rows = tester
-        .widget<ListView>(find.byKey(const Key('table rows')))
-        .controller!;
+    final rows = rowsOf(tester);
     rows.jumpTo(rows.position.maxScrollExtent);
     await tester.pumpAndSettle();
     expect(picker, findsNothing);
@@ -251,26 +243,21 @@ void main() {
     },
   );
 
-  testWidgets(
-    'a select cell near the window bottom opens its options above it',
-    (tester) async {
-      await kit.show(tester, [TablePart(expenses)]);
-      final bottom = tester.getRect(cell('r1', 'category')).bottom;
-      await tester.binding.setSurfaceSize(Size(1400, bottom + 40));
-      await tester.pumpAndSettle();
-      await open(tester, 'r1');
-      final rect = tester.getRect(picker);
-      expect(
-        rect.bottom,
-        lessThanOrEqualTo(tester.getRect(cell('r1', 'category')).top),
-      );
-      expect(rect.top, greaterThanOrEqualTo(0));
-    },
-  );
+  testWidgets('a select cell near the bottom opens above', (tester) async {
+    await kit.show(tester, [TablePart(expenses)]);
+    final bottom = tester.getRect(cell('r1', 'category')).bottom;
+    await tester.binding.setSurfaceSize(Size(1400, bottom + 40));
+    await tester.pumpAndSettle();
+    await open(tester, 'r1');
+    final rect = tester.getRect(picker);
+    expect(
+      rect.bottom,
+      lessThanOrEqualTo(tester.getRect(cell('r1', 'category')).top),
+    );
+    expect(rect.top, greaterThanOrEqualTo(0));
+  });
 
-  testWidgets('resizing the window closes a select cell\'s options', (
-    tester,
-  ) async {
+  testWidgets('resizing the window closes the options', (tester) async {
     await kit.show(tester, [TablePart(expenses)]);
     await open(tester, 'r1');
     tester.view.physicalSize = tester.view.physicalSize / 2;
@@ -284,17 +271,10 @@ void main() {
     'a select cell the Table scrolls into view to open hangs its options under it',
     (tester) async {
       await kit.show(tester, [
-        TablePart([
-          ...expenses,
-          for (var number = 3; number <= 30; number++) namedRow(number),
-        ]),
+        TablePart([...expenses, ...namedRows(3, 30)]),
       ]);
-      await tester.tap(cell('r1', 'category'));
-      await tester.pumpAndSettle();
-      final rows = tester
-          .widget<ListView>(find.byKey(const Key('table rows')))
-          .controller!;
-      // The cell, partly scrolled out of view, is still there.
+      await clickCell(tester, 'r1', 'category');
+      final rows = rowsOf(tester);
       rows.jumpTo(20);
       await tester.pumpAndSettle();
       await key(tester, LogicalKeyboardKey.keyF);
@@ -306,34 +286,24 @@ void main() {
     },
   );
 
-  testWidgets(
-    'the options choose their side where the Table scrolls their cell to',
-    (tester) async {
-      await kit.show(tester, [
-        TablePart([
-          ...expenses,
-          for (var number = 3; number <= 30; number++) namedRow(number),
-        ]),
-      ]);
-      await tester.tap(cell('r1', 'category'));
-      await tester.pumpAndSettle();
-      // Under the cell where it is shown, the options' 132 do not fit; 20 higher they would.
-      final bottom = tester.getRect(cell('r1', 'category')).bottom;
-      await tester.binding.setSurfaceSize(Size(1400, bottom + 130));
-      await tester.pumpAndSettle();
-      final rows = tester
-          .widget<ListView>(find.byKey(const Key('table rows')))
-          .controller!;
-      rows.jumpTo(20);
-      await tester.pumpAndSettle();
-      await key(tester, LogicalKeyboardKey.enter);
-      expect(rows.offset, 0);
-      expect(
-        tester.getRect(picker).bottom,
-        lessThanOrEqualTo(tester.getRect(cell('r1', 'category')).top),
-      );
-    },
-  );
+  testWidgets('the options choose their side after a scroll', (tester) async {
+    await kit.show(tester, [
+      TablePart([...expenses, ...namedRows(3, 30)]),
+    ]);
+    await clickCell(tester, 'r1', 'category');
+    final bottom = tester.getRect(cell('r1', 'category')).bottom;
+    await tester.binding.setSurfaceSize(Size(1400, bottom + 130));
+    await tester.pumpAndSettle();
+    final rows = rowsOf(tester);
+    rows.jumpTo(20);
+    await tester.pumpAndSettle();
+    await key(tester, LogicalKeyboardKey.enter);
+    expect(rows.offset, 0);
+    expect(
+      tester.getRect(picker).bottom,
+      lessThanOrEqualTo(tester.getRect(cell('r1', 'category')).top),
+    );
+  });
 
   testWidgets(
     'rows added elsewhere that move the cell out of the built rows close its options',
@@ -342,9 +312,8 @@ void main() {
       final table = kit.fake.views[kit.page]!.single.block;
       await open(tester, 'r1');
       expect(picker, findsOneWidget);
-      // Another device adds rows above it.
       kit.fake.putRows(kit.page, table, [
-        for (var number = 3; number <= 80; number++) namedRow(number),
+        ...namedRows(3, 80),
         ...kit.fake.rows[table]!,
       ]);
       await tester.pumpAndSettle();
@@ -353,69 +322,53 @@ void main() {
     },
   );
 
-  testWidgets(
-    'a select cell scrolled far out of view opens its options once revealed',
-    (tester) async {
-      await kit.show(tester, [
-        TablePart([
-          ...expenses,
-          for (var number = 3; number <= 90; number++) namedRow(number),
-        ]),
-      ]);
-      await tester.tap(cell('r1', 'category'));
-      await tester.pumpAndSettle();
-      final rows = tester
-          .widget<ListView>(find.byKey(const Key('table rows')))
-          .controller!;
-      rows.jumpTo(rows.position.maxScrollExtent);
-      await tester.pumpAndSettle();
-      expect(cell('r1', 'category'), findsNothing);
-      await key(tester, LogicalKeyboardKey.enter);
-      expect(rows.offset, 0);
-      expect(picker, findsOneWidget);
-      expect(
-        tester.getRect(picker).top,
-        moreOrLessEquals(tester.getRect(cell('r1', 'category')).bottom + 4),
-      );
-      await key(tester, LogicalKeyboardKey.arrowDown);
-      await key(tester, LogicalKeyboardKey.enter);
-      expect(chosen(), [('r1', 'home')]);
-    },
-  );
+  testWidgets('a far-scrolled cell opens options once shown', (tester) async {
+    await kit.show(tester, [
+      TablePart([...expenses, ...namedRows(3, 90)]),
+    ]);
+    await clickCell(tester, 'r1', 'category');
+    final rows = rowsOf(tester);
+    rows.jumpTo(rows.position.maxScrollExtent);
+    await tester.pumpAndSettle();
+    expect(cell('r1', 'category'), findsNothing);
+    await key(tester, LogicalKeyboardKey.enter);
+    expect(rows.offset, 0);
+    expect(picker, findsOneWidget);
+    expect(
+      tester.getRect(picker).top,
+      moreOrLessEquals(tester.getRect(cell('r1', 'category')).bottom + 4),
+    );
+    await key(tester, LogicalKeyboardKey.arrowDown);
+    await key(tester, LogicalKeyboardKey.enter);
+    expect(chosen(), [('r1', 'home')]);
+  });
 
-  testWidgets(
-    'a select cell below the window brings itself into view to open',
-    (tester) async {
-      await kit.show(tester, [
-        TablePart(expenses),
-        for (var number = 0; number < 40; number++) TextPart('Line $number'),
-      ]);
-      final bottom = tester.getRect(cell('r1', 'category')).bottom;
-      await tester.binding.setSurfaceSize(Size(1400, bottom + 10));
-      await tester.pumpAndSettle();
-      await tester.tap(cell('r1', 'category'));
-      await tester.pumpAndSettle();
-      await key(tester, LogicalKeyboardKey.arrowDown);
-      await key(tester, LogicalKeyboardKey.enter);
-      final window = Offset.zero & tester.binding.renderViews.first.size;
-      expect(
-        window.contains(tester.getRect(cell('r2', 'category')).center),
-        isTrue,
-      );
-      expect(window.contains(tester.getRect(picker).center), isTrue);
-      await key(tester, LogicalKeyboardKey.enter);
-      expect(chosen(), [('r2', 'food')]);
-    },
-  );
+  testWidgets('a cell below the window scrolls into view', (tester) async {
+    await kit.show(tester, [
+      TablePart(expenses),
+      for (var number = 0; number < 40; number++) TextPart('Line $number'),
+    ]);
+    final bottom = tester.getRect(cell('r1', 'category')).bottom;
+    await tester.binding.setSurfaceSize(Size(1400, bottom + 10));
+    await tester.pumpAndSettle();
+    await clickCell(tester, 'r1', 'category');
+    await key(tester, LogicalKeyboardKey.arrowDown);
+    await key(tester, LogicalKeyboardKey.enter);
+    final window = Offset.zero & tester.binding.renderViews.first.size;
+    expect(
+      window.contains(tester.getRect(cell('r2', 'category')).center),
+      isTrue,
+    );
+    expect(window.contains(tester.getRect(picker).center), isTrue);
+    await key(tester, LogicalKeyboardKey.enter);
+    expect(chosen(), [('r2', 'food')]);
+  });
 
-  testWidgets('⇥ in the options keeps the value and selects the next cell', (
-    tester,
-  ) async {
+  testWidgets('⇥ in the options keeps the value, selects next', (tester) async {
     await kit.show(tester, [TablePart(expenses)]);
     await open(tester, 'r1');
     await key(tester, LogicalKeyboardKey.tab);
     expect(picker, findsNothing);
-    // The next cell, Amount, takes the keys.
     await key(tester, LogicalKeyboardKey.enter);
     await tester.enterText(
       kit.inTable(

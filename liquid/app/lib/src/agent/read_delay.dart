@@ -3,28 +3,20 @@ import 'dart:async';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 
-/// A card that decides something for the agent takes keys and clicks only once it could be read:
-/// 0.5 s after its first frame is drawn or Liquid comes back in front, so a slow first frame
-/// counts nothing toward the wait.
 mixin ReadDelay<T extends StatefulWidget> on State<T> {
   bool _armed = false;
   Timer? _arming;
 
-  /// Starts the wait again whenever Liquid comes back in front, since the card may have
-  /// appeared while the user worked elsewhere.
   late final AppLifecycleListener _front;
 
-  /// Keys held when the card appeared; until released, their repeats reach nothing in it.
   final Set<PhysicalKeyboardKey> _held = {
     ...HardwareKeyboard.instance.physicalKeysPressed,
   };
 
-  /// Runs `decision` only once the card could be read.
   void decided(VoidCallback decision) {
     if (_armed) decision();
   }
 
-  /// Keeps the repeats and the release of a key held from before the card appeared from it.
   KeyEventResult skipHeld(FocusNode node, KeyEvent event) {
     if (!_held.contains(event.physicalKey)) return KeyEventResult.ignored;
     if (event is KeyUpEvent) _held.remove(event.physicalKey);
@@ -40,7 +32,6 @@ mixin ReadDelay<T extends StatefulWidget> on State<T> {
     });
   }
 
-  /// Takes keys and clicks 0.5 s after Liquid is in front with the card.
   void _arm() {
     _armed = false;
     _arming?.cancel();

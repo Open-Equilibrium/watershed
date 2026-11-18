@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
@@ -19,9 +20,6 @@ import 'src/shortcuts/shortcut_store.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   logKeysIfAsked(Platform.environment);
-  // Only the bridge inside the app bundle: by default flutter_rust_bridge first tries a library
-  // relative to the working directory or in a folder an environment variable names, and a
-  // relative framework path would still be looked up in the working directory first.
   final stem = RustLib.kDefaultExternalLibraryLoaderConfig.stem;
   await RustLib.init(
     externalLibrary: ExternalLibrary.open(
@@ -34,21 +32,23 @@ Future<void> main() async {
     Platform.environment,
     defaultTargetPlatform,
   );
-  // Liquid's agent hosts: which host sessions run on, read before the session connects to it.
   final agentHostsFile = SettingsFile(File('$settings/agent_hosts.json'));
   final agentHosts = await AgentHostsSettings.load(agentHostsFile);
-  final launch = await launchFromEnvironment(
+  final launch = launchFromEnvironment(
     Platform.environment,
-    activeAddress: agentHosts.activeAddress,
+    startAddress: agentHosts.activeAddress,
   );
-  // Without a session the Workspace still opens; the reason stays in the terminal.
   if (launch.problem case final problem?) stderr.writeln('Liquid: $problem');
-  // Beside the settings, in Liquid's data folder.
+  final links = RustAgentHostLinks(launch, Platform.environment);
+  unawaited(links.connect(null));
+  for (final host in agentHosts.hosts) {
+    unawaited(links.connect(host.address));
+  }
+  AppLifecycleListener(onResume: links.retryAll);
   final (workspace, workspaceProblem) = await openWorkspace(
     '$settings/Workspace',
     show: launch.state == null,
   );
-  // The agent area Liquid shows; choosing another agent host replaces it at once (ADR-0295).
   final surface = ValueNotifier(launch);
   runApp(
     LiquidApp(
@@ -74,15 +74,7 @@ Future<void> main() async {
           home: Platform.environment['META_HARNESS_HOME'],
         ),
         save: (next) => agentHostsFile.save(next.toJson()),
-        switchTo: (address, isCurrent) => showAgentHost(
-          surface,
-          (address) => launchFromEnvironment(
-            Platform.environment,
-            activeAddress: address,
-          ),
-          address,
-          isCurrent: isCurrent,
-        ),
+        links: links,
       ),
     ),
   );

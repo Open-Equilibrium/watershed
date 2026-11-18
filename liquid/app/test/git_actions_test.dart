@@ -18,7 +18,6 @@ import 'package:liquid/src/theme/theme.dart';
 
 import 'fake_backend.dart';
 
-/// Git whose run streams from the test, so the test decides when each report arrives.
 class _GatedGit extends FakeGit {
   _GatedGit({super.status});
 
@@ -33,7 +32,6 @@ class _GatedGit extends FakeGit {
   }) => progress.stream;
 }
 
-/// Git whose pull request and publish calls fail with the errors given.
 class _FailingGit extends FakeGit {
   _FailingGit({
     super.status,
@@ -72,7 +70,6 @@ class _FailingGit extends FakeGit {
   }
 }
 
-/// A checkout on the feature branch, which is not the default branch.
 BridgeGitStatus featureOf({
   List<BridgeFileChange> changes = const [],
   int ahead = 0,
@@ -89,7 +86,6 @@ BridgeGitStatus featureOf({
   remote: remote,
 );
 
-/// A pull request of the checkout's branch.
 BridgeBranchPullRequest prOf({
   String state = 'open',
   bool draft = false,
@@ -103,7 +99,6 @@ BridgeBranchPullRequest prOf({
   base: 'main',
 );
 
-/// Git that counts the pull request reads.
 class _CountingGit extends FakeGit {
   _CountingGit({super.status});
 
@@ -116,7 +111,6 @@ class _CountingGit extends FakeGit {
   }
 }
 
-/// Git whose host refuses every pull request action.
 class _RefusingGit extends FakeGit {
   _RefusingGit({super.status});
 
@@ -128,8 +122,6 @@ class _RefusingGit extends FakeGit {
   }) async => throw Exception('host refused');
 }
 
-/// A pull request's detail as the host reports it: its checks, the action its row offers and
-/// whether it conflicts with its base.
 BridgePullRequestDetail detailOf({
   String state = 'open',
   bool draft = false,
@@ -162,13 +154,11 @@ BridgePullRequestDetail detailOf({
 BridgePullRequestCheck checkOf(String name, String status, {String? url}) =>
     BridgePullRequestCheck(name: name, status: status, url: url);
 
-/// The tooltip with a line that reads `line`; a tooltip's lines are separated by newlines.
 Finder tooltipLine(String line) => find.byWidgetPredicate(
   (widget) =>
       widget is Tooltip && (widget.message ?? '').split('\n').contains(line),
 );
 
-/// Records what the browser opener is asked to open, instead of opening it.
 List<String> recordOpens() {
   final opened = <String>[];
   final original = runOpener;
@@ -182,7 +172,6 @@ List<String> recordOpens() {
   return opened;
 }
 
-/// Pumps the Git action row and the pull request row over `git`.
 Future<SessionState> pumpGit(WidgetTester tester, FakeGit git) async {
   final state = SessionState(FakeProject(git: git));
   addTearDown(state.dispose);
@@ -203,7 +192,6 @@ Future<SessionState> pumpGit(WidgetTester tester, FakeGit git) async {
   return state;
 }
 
-/// Opens the checkout dialog from a button, as the ref picker does.
 Future<SessionState> pumpCheckout(
   WidgetTester tester,
   FakeGit git, {

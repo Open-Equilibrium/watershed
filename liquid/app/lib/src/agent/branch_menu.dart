@@ -16,9 +16,6 @@ import 'session_card_rows.dart';
 
 const _stopFirst = 'Stop the current turn to switch worktrees.';
 
-/// The checkout's branch, as the first row of the session card. Its name and its chevron are two
-/// targets that both open the ref picker, split by a hairline that shows while the row is hovered,
-/// as in T3 Code. A right-click on the name offers to copy it.
 class BranchRow extends StatefulWidget {
   const BranchRow({super.key, required this.state});
 
@@ -104,7 +101,6 @@ class _BranchRowState extends State<BranchRow> {
                 ),
                 InkWell(
                   key: const Key('branch-chevron'),
-                  // One stop in the keyboard order, as the row is one control in T3 Code.
                   canRequestFocus: false,
                   hoverColor: ws.hover,
                   borderRadius: BorderRadius.circular(WsMetrics.radiusSm),
@@ -124,7 +120,6 @@ class _BranchRowState extends State<BranchRow> {
   );
 }
 
-/// Offers to copy `name` where the pointer right-clicked, as T3 Code's branch menu does.
 Future<void> _copyName(
   BuildContext context,
   SessionState state,
@@ -144,7 +139,6 @@ Future<void> _copyName(
   );
 }
 
-/// Copies `name` and says so, as T3 Code's toast does.
 Future<void> _copy(SessionState state, String name) async {
   try {
     await Clipboard.setData(ClipboardData(text: name));
@@ -154,31 +148,26 @@ Future<void> _copy(SessionState state, String name) async {
   }
 }
 
-/// What the ref picker was closed with.
 sealed class _Pick {}
 
-/// Switch to a ref.
 final class _Switch extends _Pick {
   _Switch(this.ref);
 
   final BridgeRef ref;
 }
 
-/// Create a ref with this name here and check it out.
 final class _Create extends _Pick {
   _Create(this.name);
 
   final String name;
 }
 
-/// Check out a pull request, given as the reference the picker's search named.
 final class _Checkout extends _Pick {
   _Checkout(this.reference);
 
   final String reference;
 }
 
-/// Opens T3 Code's ref picker, then does what was picked.
 Future<void> showBranchMenu(BuildContext context, SessionState state) async {
   final status = state.git.value.status.value;
   if (status == null) return;
@@ -207,7 +196,6 @@ Future<void> showBranchMenu(BuildContext context, SessionState state) async {
   }
 }
 
-/// Switches to `ref`. A ref checked out in another worktree opens that worktree in the session.
 Future<void> _switchTo(
   BuildContext context,
   SessionState state,
@@ -218,7 +206,6 @@ Future<void> _switchTo(
       await state.setBranch(ref.name, worktree: worktree);
       return;
     }
-    // A remote ref's local branch has the name after its remote.
     final branch = ref.remote == null
         ? ref.name
         : ref.name.substring(ref.name.indexOf('/') + 1);
@@ -246,8 +233,6 @@ Future<void> _create(
   }
 }
 
-/// Asks before a switch with uncommitted changes, which then carry over or block it; true when
-/// the switch may go on.
 Future<bool> _carryChanges(
   BuildContext context,
   SessionState state,
@@ -275,8 +260,6 @@ Future<bool> _carryChanges(
   return confirmed ?? false;
 }
 
-/// T3 Code's ref picker: a search over the checkout's refs, with the ways to check out a pull
-/// request or to create a ref the search names.
 class _BranchPicker extends StatefulWidget {
   const _BranchPicker({required this.state, required this.status});
 
@@ -291,7 +274,6 @@ class _BranchPickerState extends State<_BranchPicker> {
   final _query = TextEditingController();
   BridgeRefs? _refs;
 
-  /// Counts the searches, so an answer to an earlier one never lands.
   int _attempt = 0;
 
   @override
@@ -321,7 +303,6 @@ class _BranchPickerState extends State<_BranchPicker> {
     }
   }
 
-  /// The name the search would create: its spaces made dashes, unless a ref already has it.
   String? _newName() {
     final name = _query.text.trim().replaceAll(RegExp(r'[ \t\n\r\f\v]+'), '-');
     final refs = _refs;
@@ -333,7 +314,6 @@ class _BranchPickerState extends State<_BranchPicker> {
     return name;
   }
 
-  /// Enter picks the first item, as T3 Code's picker highlights it.
   void _submit() {
     if (widget.state.status.value != RunStatus.idle) return;
     final checkout = pullRequestReference(_query.text);
@@ -450,7 +430,6 @@ class _BranchPickerState extends State<_BranchPicker> {
     );
   }
 
-  /// A ref with its badge; right-click copies its name.
   Widget _ref(BridgeRef ref, bool running) {
     final ws = context.ws;
     return GestureDetector(
@@ -478,8 +457,6 @@ class _BranchPickerState extends State<_BranchPicker> {
   }
 }
 
-/// A row of the ref picker: a leading mark, the name and an optional detail, tappable unless
-/// disabled.
 class _MenuRow extends StatelessWidget {
   const _MenuRow({
     required this.leading,

@@ -6,7 +6,6 @@ import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
 import 'page_editor.dart' show codeShortcut, markdownShortcuts;
 
-/// A slash command: a Text Block style, or a Block of another kind without one.
 @immutable
 class SlashCommand {
   const SlashCommand(
@@ -21,13 +20,10 @@ class SlashCommand {
   final IconData icon;
   final BridgeTextStyle? style;
 
-  /// The kind of Block it adds, for a command without a style.
   final BridgeBlockKind? block;
 
-  /// What it holds, under its label.
   final String? description;
 
-  /// The Markdown shortcut that does the same.
   String? get shortcut => block == BridgeBlockKind.code
       ? codeShortcut
       : markdownShortcuts.entries
@@ -37,7 +33,6 @@ class SlashCommand {
             .trimRight();
 }
 
-/// The slash commands in order: the Text Block styles, then the other Blocks.
 const slashCommands = [
   SlashCommand('Text', LucideIcons.text, style: BridgeTextStyle.paragraph),
   SlashCommand(
@@ -71,7 +66,6 @@ const slashCommands = [
     style: BridgeTextStyle.todo,
   ),
   SlashCommand('Quote', LucideIcons.textQuote, style: BridgeTextStyle.quote),
-  // The Blocks, in alphabetical order (ADR-0305).
   SlashCommand(
     'Code',
     LucideIcons.code,
@@ -98,15 +92,11 @@ const slashCommands = [
   ),
 ];
 
-/// The choices whose label holds `query`, ignoring case.
 List<SlashCommand> slashCommandsFor(String query) => [
   for (final choice in slashCommands)
     if (choice.label.toLowerCase().contains(query.toLowerCase())) choice,
 ];
 
-/// The slash command menu that `/` opens in an empty Text Block, as in Notion and T3 Code
-/// (ADR-0302): the Text
-/// Block styles, then the other Blocks, filtered by what follows `/`.
 class SlashCommands extends StatefulWidget {
   const SlashCommands({
     super.key,
@@ -118,7 +108,6 @@ class SlashCommands extends StatefulWidget {
 
   final List<SlashCommand> choices;
 
-  /// The choice ⏎ takes.
   final int chosen;
   final ValueChanged<SlashCommand> onChoose;
   final ValueChanged<int> onHover;
@@ -126,11 +115,9 @@ class SlashCommands extends StatefulWidget {
   static const _labelHeight = 26.0;
   static const _footerHeight = 26.0;
 
-  /// A command's height, taller with a description below its label.
   static double _itemHeight(SlashCommand choice) =>
       choice.description == null ? 36 : 40;
 
-  /// The height the menu takes with `choices`.
   static double heightFor(List<SlashCommand> choices) =>
       2 * WsMetrics.space2 +
       {for (final choice in choices) choice.style == null}.length *
@@ -164,8 +151,6 @@ class _SlashCommandsState extends State<SlashCommands> {
     super.dispose();
   }
 
-  /// Scrolls the commands to keep the chosen one in view, with its group's label when it
-  /// is the group's first.
   void _reveal() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted || !_list.hasClients) return;
@@ -288,7 +273,6 @@ class _SlashCommandsState extends State<SlashCommands> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            // The commands scroll in the height the menu has.
             Flexible(
               child: SingleChildScrollView(
                 controller: _list,

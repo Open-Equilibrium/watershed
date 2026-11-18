@@ -1,5 +1,3 @@
-//! The synchronous bridge calls, which a Rust consumer may make from inside any Tokio runtime.
-
 use crate::api::session::run;
 
 #[test]

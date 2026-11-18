@@ -20,9 +20,13 @@ void main() {
     await tester.pumpAndSettle();
   }
 
-  Future<void> open(WidgetTester tester, String name) async {
-    await tester.tap(header(name));
+  Future<void> tap(WidgetTester tester, Finder finder) async {
+    await tester.tap(finder);
     await tester.pumpAndSettle();
+  }
+
+  Future<void> open(WidgetTester tester, String name) async {
+    await tap(tester, header(name));
   }
 
   Future<void> type(WidgetTester tester, String name) async {
@@ -30,7 +34,6 @@ void main() {
     await tester.pumpAndSettle();
   }
 
-  /// The renames written, as field and name.
   List<(String?, String?)> renamed() => [
     for (final rename in kit.applied(BridgeMutationKind.renameField))
       (rename.field, rename.text),
@@ -122,8 +125,7 @@ void main() {
   testWidgets('Delete field asks first; ⏎ deletes the field', (tester) async {
     await kit.show(tester, [TablePart(expenses)]);
     await open(tester, 'Category');
-    await tester.tap(inMenu(find.text('Delete field')));
-    await tester.pumpAndSettle();
+    await tap(tester, inMenu(find.text('Delete field')));
     expect(menu, findsNothing);
     expect(find.text('Delete the field “Category”?'), findsOneWidget);
     expect(find.text('Its values in all 2 rows go with it.'), findsOneWidget);
@@ -137,8 +139,7 @@ void main() {
   testWidgets('esc in the question keeps the field', (tester) async {
     await kit.show(tester, [TablePart(expenses)]);
     await open(tester, 'Category');
-    await tester.tap(inMenu(find.text('Delete field')));
-    await tester.pumpAndSettle();
+    await tap(tester, inMenu(find.text('Delete field')));
     await key(tester, LogicalKeyboardKey.escape);
     expect(dialog, findsNothing);
     expect(kit.applied(BridgeMutationKind.removeField), isEmpty);
@@ -161,7 +162,6 @@ void main() {
     final table = kit.fake.views[kit.page]!.single.block;
     await open(tester, 'Category');
     await type(tester, 'Kind');
-    // Another device removes the field.
     await kit.workspace.apply(
       mutation(
         BridgeMutationKind.removeField,
@@ -181,7 +181,6 @@ void main() {
     await kit.show(tester, [TablePart(expenses)]);
     final table = kit.fake.views[kit.page]!.single.block;
     await open(tester, 'Category');
-    // Another device renames the field.
     await kit.workspace.apply(
       mutation(
         BridgeMutationKind.renameField,
@@ -237,8 +236,7 @@ void main() {
     await kit.show(tester, [TablePart(expenses)]);
     await open(tester, 'Category');
     await type(tester, 'Kind');
-    await tester.tap(inMenu(find.text('Delete field')));
-    await tester.pumpAndSettle();
+    await tap(tester, inMenu(find.text('Delete field')));
     await key(tester, LogicalKeyboardKey.escape);
     expect(kit.applied(BridgeMutationKind.removeField), isEmpty);
     expect(renamed(), [('category', 'Kind')]);
@@ -261,13 +259,11 @@ void main() {
     await kit.show(tester, [TablePart(expenses)]);
     await open(tester, 'Category');
     await type(tester, 'Kind');
-    await tester.tap(inMenu(find.text('Delete field')));
-    await tester.pumpAndSettle();
+    await tap(tester, inMenu(find.text('Delete field')));
     expect(dialog, findsOneWidget);
     await kit.workspace.drain();
     await tester.pumpAndSettle();
     expect(renamed(), [('category', 'Kind')]);
-    // Cancelled afterwards, it is not written again.
     await key(tester, LogicalKeyboardKey.escape);
     expect(renamed(), [('category', 'Kind')]);
   });
@@ -283,8 +279,7 @@ void main() {
         ..deferredKinds = {BridgeQueryKind.rows},
     );
     await open(tester, 'Category');
-    await tester.tap(inMenu(find.text('Delete field')));
-    await tester.pumpAndSettle();
+    await tap(tester, inMenu(find.text('Delete field')));
     expect(find.text('Its values in all rows go with it.'), findsOneWidget);
   });
 }

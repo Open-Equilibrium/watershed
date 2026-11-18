@@ -10,13 +10,11 @@ import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
 import 'sidebar.dart';
 
-/// Run status and tokens. A notification takes the status slot; a click lists the latest ones.
 class StatusBar extends StatefulWidget {
   const StatusBar({super.key, required this.state, required this.keys});
 
   final SessionState state;
 
-  /// The keyboard keys of the active view.
   final String keys;
 
   @override
@@ -28,7 +26,6 @@ class _StatusBarState extends State<StatusBar> {
   final _anchor = LayerLink();
   final _listFocus = FocusNode(debugLabel: 'notifications');
 
-  /// Opens the list with the keys, so esc closes it, or closes it.
   void _toggle() {
     if (_list.isShowing) return _list.hide();
     _list.show();
@@ -50,7 +47,6 @@ class _StatusBarState extends State<StatusBar> {
     super.dispose();
   }
 
-  /// The list would cover a request the agent waits on.
   void _asked() {
     if (widget.state.request.value != null) _list.hide();
   }
@@ -89,7 +85,6 @@ class _StatusBarState extends State<StatusBar> {
                   link: _anchor,
                   child: OverlayPortal(
                     controller: _list,
-                    // A click outside the list or its opener closes it.
                     overlayChildBuilder: (context) => TapRegion(
                       groupId: _list,
                       onTapOutside: (_) => _list.hide(),
@@ -100,7 +95,6 @@ class _StatusBarState extends State<StatusBar> {
                         onClose: _list.hide,
                       ),
                     ),
-                    // Focusable, so the list opens from the keyboard too.
                     child: TapRegion(
                       groupId: _list,
                       child: InkWell(
@@ -149,7 +143,6 @@ class _StatusBarState extends State<StatusBar> {
                 style: text,
               ),
               const Spacer(),
-              // The view's keys show only while the reveal key is held.
               if (ShortcutReveal.shown(context))
                 Text(widget.keys, style: text.copyWith(color: ws.textFaint)),
             ],
@@ -160,7 +153,6 @@ class _StatusBarState extends State<StatusBar> {
   }
 }
 
-/// The symbol that tells a notification's level apart without color.
 IconData _mark(NoticeLevel level) => switch (level) {
   NoticeLevel.info => LucideIcons.info,
   NoticeLevel.warning || NoticeLevel.error => LucideIcons.triangleAlert,
@@ -172,7 +164,6 @@ Color _tone(BuildContext context, NoticeLevel level) => switch (level) {
   NoticeLevel.error => context.ws.danger,
 };
 
-/// The latest notifications above the status bar.
 class _NoticeList extends StatefulWidget {
   const _NoticeList({
     required this.state,
@@ -191,7 +182,6 @@ class _NoticeList extends StatefulWidget {
 }
 
 class _NoticeListState extends State<_NoticeList> {
-  /// The entry that shows its whole text.
   Notice? _open;
 
   @override
@@ -199,7 +189,6 @@ class _NoticeListState extends State<_NoticeList> {
     final ws = context.ws;
     final state = widget.state;
     final small = TextStyle(color: ws.textFaint, fontSize: WsMetrics.fsSmall);
-    // The list takes the keys while open, so esc closes it.
     return CallbackShortcuts(
       bindings: {escapeKey: widget.onClose},
       child: Focus(
@@ -252,7 +241,6 @@ class _NoticeListState extends State<_NoticeList> {
                           shrinkWrap: true,
                           children: [
                             for (final notice in notices) ...[
-                              // A click or ⏎ shows the whole text.
                               Shortcuts(
                                 shortcuts: activateKeys,
                                 child: InkWell(

@@ -7,12 +7,8 @@ import '../theme/icons.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
 
-/// The width of a row's handle, left of the Table, with the gap that keeps the pointer on
-/// it from the row.
 const rowHandleWidth = 46.0;
 
-/// A hovered row's handle: + inserts a row below,
-/// ⌥ and + one above, as in Notion, and ⋮⋮ opens the row's menu.
 class RowHandle extends StatelessWidget {
   const RowHandle({
     super.key,
@@ -25,10 +21,8 @@ class RowHandle extends StatelessWidget {
 
   final double height;
 
-  /// Inserts a row above or, without ⌥, below.
   final ValueChanged<bool> onInsert;
 
-  /// Where the row's menu hangs from.
   final LayerLink menu;
   final bool menuOpen;
   final VoidCallback onMenu;
@@ -62,7 +56,6 @@ class RowHandle extends StatelessWidget {
       height: height,
       padding: const EdgeInsets.only(right: WsMetrics.space1),
       alignment: Alignment.centerRight,
-      // The gap to the row belongs to the handle, so the pointer crossing it keeps it.
       color: Colors.transparent,
       child: Row(
         mainAxisSize: MainAxisSize.min,
@@ -89,8 +82,6 @@ class RowHandle extends StatelessWidget {
   }
 }
 
-/// A row's menu: insert a row above or below, or
-/// delete it without asking. ↑↓ choose, ⏎ takes, esc closes.
 class RowMenu extends StatefulWidget {
   const RowMenu({
     super.key,
@@ -99,7 +90,6 @@ class RowMenu extends StatefulWidget {
     required this.onClose,
   });
 
-  /// Inserts a row above or, when false, below.
   final ValueChanged<bool> onInsert;
   final VoidCallback onDelete;
   final VoidCallback onClose;
@@ -111,7 +101,6 @@ class RowMenu extends StatefulWidget {
 class _RowMenuState extends State<RowMenu> {
   late final _focus = FocusNode(debugLabel: 'Row menu', onKeyEvent: _key);
 
-  /// The item ↑↓ or the pointer chose: Insert above, Insert below or Delete row.
   int? _chosen;
 
   @override
@@ -211,10 +200,6 @@ class _RowMenuState extends State<RowMenu> {
   }
 }
 
-/// A region that tells when the pointer enters it and leaves it, also when it goes from
-/// under the pointer, which Flutter's MouseRegion does not tell, so no hover outlives what
-/// was hovered. Each telling names the region, so a late leave of a region gone is told
-/// apart from a newer enter of the same thing's new region.
 class HoverRegion extends StatefulWidget {
   const HoverRegion({super.key, required this.onHover, required this.child});
 
@@ -235,7 +220,6 @@ class _HoverRegionState extends State<HoverRegion> {
 
   @override
   void dispose() {
-    // Told after the frame that removed it, not while it is built.
     if (_hovered) scheduleMicrotask(() => widget.onHover(false, this));
     super.dispose();
   }
@@ -248,8 +232,6 @@ class _HoverRegionState extends State<HoverRegion> {
   );
 }
 
-/// A Table's row handle and row menu and what they write: the handle follows the row under the pointer unless the menu holds it, and
-/// the menu closes when its row moves elsewhere.
 class RowHandles extends ChangeNotifier {
   RowHandles({
     required this.indexOf,
@@ -258,16 +240,12 @@ class RowHandles extends ChangeNotifier {
     required this.remove,
   });
 
-  /// Where a row is among those read, or none.
   final int? Function(String row) indexOf;
 
-  /// The row at a position, read if it is not.
   final Future<String?> Function(int index) idAt;
 
-  /// Inserts a row after `after`, or first; a refused write shows on the Page.
   final Future<void> Function(String? after) insert;
 
-  /// Deletes a row; a refused write shows on the Page.
   final Future<void> Function(String row) remove;
 
   final handle = OverlayPortalController();
@@ -275,16 +253,11 @@ class RowHandles extends ChangeNotifier {
   final menu = OverlayPortalController();
   final menuAnchor = LayerLink();
 
-  /// The row the handle is on, and the row whose menu is open.
   String? handleRow;
   String? menuRow;
 
-  /// Where the menu's row was when the menu opened; a change elsewhere moving it closes
-  /// the menu, as other menus close when what they hang from moves.
   int? _menuAt;
 
-  /// The row the pointer is on, which the handle moves to once no menu holds it, and the
-  /// regions that told the pointer is on the row and on the handle.
   String? _pointerRow;
   Object? _rowRegion;
   Object? _handleRegion;
@@ -312,7 +285,6 @@ class RowHandles extends ChangeNotifier {
       _pointerRow = null;
       _rowRegion = null;
     }
-    // While a row's menu is open, its handle stays on that row.
     if (menuRow == null && _pointerRow != null) handleRow = _pointerRow;
     _changed();
   }
@@ -343,8 +315,6 @@ class RowHandles extends ChangeNotifier {
     _changed();
   }
 
-  /// Rows read again: a row moved elsewhere closes its menu, and a row gone takes its
-  /// handle along.
   void read() {
     if (menuRow case final row? when indexOf(row) != _menuAt) {
       menuRow = null;
@@ -363,7 +333,6 @@ class RowHandles extends ChangeNotifier {
     _show();
   }
 
-  /// Inserts a row above or below `row`, which the core places next to it (ADR-0247).
   Future<void> insertNext(String? row, {required bool above}) async {
     closeMenu();
     final index = row == null ? null : indexOf(row);
@@ -376,14 +345,12 @@ class RowHandles extends ChangeNotifier {
     if (!_disposed) await insert(after);
   }
 
-  /// Delete row deletes the menu's row without asking (section 5).
   void deleteRow() {
     final row = menuRow;
     closeMenu();
     if (row != null) unawaited(remove(row));
   }
 
-  /// The handle, left of its row's first field.
   Widget handleView(BuildContext context) => Align(
     alignment: Alignment.topLeft,
     child: CompositedTransformFollower(
@@ -406,7 +373,6 @@ class RowHandles extends ChangeNotifier {
     ),
   );
 
-  /// The open menu, under ⋮⋮.
   Widget menuView(BuildContext context) {
     if (menuRow == null) return const SizedBox.shrink();
     return Align(

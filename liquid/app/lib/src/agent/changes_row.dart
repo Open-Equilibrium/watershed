@@ -8,15 +8,11 @@ import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
 import 'session_card_rows.dart';
 
-/// The Changes row of the session card, as T3 Code's thread details show it: the branch's lines
-/// against its base ("vs main"), or the uncommitted changes when the branch has no lines against
-/// its base. A repository shows the row even with no changes; a folder outside Git shows none.
 class ChangesRow extends StatelessWidget {
   const ChangesRow({super.key, required this.state, this.onOpen});
 
   final SessionState state;
 
-  /// Opens the Diff panel at the changes the row names.
   final ValueChanged<DiffScope>? onOpen;
 
   @override

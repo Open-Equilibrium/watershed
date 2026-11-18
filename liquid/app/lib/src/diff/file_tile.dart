@@ -6,7 +6,6 @@ import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
 import 'diff_model.dart';
 
-/// A folder row, which folds, or a changed file's row, which selects its diff.
 class FileTile extends StatelessWidget {
   const FileTile({
     super.key,
@@ -20,7 +19,6 @@ class FileTile extends StatelessWidget {
   final FileRow row;
   final bool selected;
 
-  /// Whether this folder row is folded.
   final bool folded;
   final ValueChanged<BridgeFileChange> onTap;
   final ValueChanged<String> onFold;

@@ -1,22 +1,10 @@
-//! Sort keys that order siblings: a new key always fits between two neighbors, so placing an
-//! object writes only inside that object (ADR-0238).
-//!
-//! The scheme is fractional indexing as Figma and Linear use it: an integer part whose first
-//! character encodes its length, then an optional fraction. Appending or prepending
-//! increments or decrements the integer, so keys grow only logarithmically.
-
 use crate::{Error, Place};
 
 const DIGITS: &[u8] = b"0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
 const SMALLEST: &[u8] = b"A00000000000000000000000000";
 
-/// The longest key the core writes, as long as a name (ADR-0251); a key grows by about one
-/// character per six objects placed at one spot, so only some 6,000 of them reach it. A
-/// longer stored key, as another device may send, counts as no key.
 pub(crate) const MAX_KEY: usize = 1_000;
 
-/// `key` if it is one the core writes, within [`MAX_KEY`]; any other, as another device or
-/// an older version may store, counts as no key and sorts first.
 pub(crate) fn usable(key: Option<&str>) -> Option<&str> {
     key.filter(|key| key.len() <= MAX_KEY && integer(key.as_bytes()).is_some())
 }
@@ -25,10 +13,6 @@ fn value(digit: u8) -> usize {
     DIGITS.iter().position(|&d| d == digit).unwrap_or(0)
 }
 
-/// The key for an item placed at `place` among `sorted`, ordered by key, then identity
-/// (ADR-0247); `id` and `key` read an item's identity and key. After an item whose key
-/// others share, as two devices placing at one spot leave them, it goes after them all,
-/// since only identities order them.
 pub(crate) fn at<T, I: PartialEq + ?Sized>(
     sorted: &[T],
     place: Place<&I>,
@@ -51,7 +35,6 @@ pub(crate) fn at<T, I: PartialEq + ?Sized>(
         }
         Place::Last => sorted.len(),
     };
-    // Nothing sorts before an item without a usable key.
     if sorted
         .get(index)
         .is_some_and(|item| usable(key(item)).is_none())
@@ -62,8 +45,6 @@ pub(crate) fn at<T, I: PartialEq + ?Sized>(
     between(index.checked_sub(1).and_then(key_at), key_at(index))
 }
 
-/// The key for an item placed right before `before` among `sorted`, as [at] reads them.
-/// Before an item whose key others share, it goes before them all.
 pub(crate) fn before<T, I: PartialEq + ?Sized>(
     sorted: &[T],
     before: &I,
@@ -86,10 +67,6 @@ pub(crate) fn before<T, I: PartialEq + ?Sized>(
     between(below.flatten(), tied)
 }
 
-/// A key after `before` and before `after`; `None` is the start or the end. Equal or
-/// misordered neighbors, from two devices placing objects at one spot concurrently, get a
-/// key after `before`; ties order by identity. A neighbor that is no valid key counts as
-/// the start or the end, as one past [`MAX_KEY`] does; a new key past it is refused.
 fn between(before: Option<&str>, after: Option<&str>) -> Result<String, Error> {
     let before = usable(before).map(str::as_bytes);
     let after = usable(after)
@@ -114,7 +91,6 @@ fn key_between(before: Option<&[u8]>, after: Option<&[u8]>) -> Vec<u8> {
                 return int.to_vec();
             }
             match decrement(int) {
-                // The smallest integer is no key on its own, so it takes a fraction.
                 Some(smaller) if smaller == SMALLEST => [SMALLEST, &midpoint(b"", None)].concat(),
                 Some(smaller) => smaller,
                 None => [int, &midpoint(b"", Some(&after[int.len()..]))].concat(),
@@ -144,7 +120,6 @@ fn key_between(before: Option<&[u8]>, after: Option<&[u8]>) -> Vec<u8> {
     }
 }
 
-/// The integer part of `key`, whose head `a`–`z` or `Z`–`A` gives its length.
 fn integer(key: &[u8]) -> Option<&[u8]> {
     let length = match *key.first()? {
         head @ b'a'..=b'z' => usize::from(head - b'a') + 2,
@@ -152,7 +127,6 @@ fn integer(key: &[u8]) -> Option<&[u8]> {
         _ => return None,
     };
     let fraction = key.get(length..)?;
-    // The smallest integer without a fraction leaves no room before it.
     let valid = key != SMALLEST
         && key[1..].iter().all(|digit| DIGITS.contains(digit))
         && fraction.last() != Some(&b'0');
@@ -209,8 +183,6 @@ fn decrement(int: &[u8]) -> Option<Vec<u8>> {
     }
 }
 
-/// A fraction strictly between `before` and `after`, which never ends in `0`. A loop rather
-/// than recursion, so a long fraction costs no stack.
 fn midpoint(mut before: &[u8], mut after: Option<&[u8]>) -> Vec<u8> {
     let digit = |key: &[u8], i: usize| key.get(i).copied().unwrap_or(DIGITS[0]);
     let mut key = Vec::new();
@@ -249,7 +221,6 @@ mod tests {
 
     #[test]
     fn a_place_after_tied_keys_goes_after_them_and_before_the_next() {
-        // Two devices placed x and y at one spot; ties order by identity.
         let sorted = [("x", "a0"), ("y", "a0"), ("z", "a1")];
         let place = |place| at(&sorted, place, |item| item.0, |item| Some(item.1));
         let after = place(Place::After("x")).unwrap();

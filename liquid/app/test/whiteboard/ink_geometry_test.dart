@@ -3,7 +3,6 @@ import 'dart:typed_data';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:liquid/src/whiteboard/ink_geometry.dart';
 
-/// Pen ink, eraser and lasso geometry for the Whiteboard Block.
 void main() {
   group('InkPoint', () {
     test('compares by value and exposes its offset', () {
@@ -63,7 +62,7 @@ void main() {
     const stroke = [InkPoint(0, 0), InkPoint(10, 0)];
 
     test('counts the stroke half width toward reach', () {
-      const eraser = Offset(5, 2); // 2 above the stroke
+      const eraser = Offset(5, 2);
       expect(strokeTouches(stroke, eraser, 1, 0), isFalse);
       expect(strokeTouches(stroke, eraser, 1, 1.5), isTrue);
     });
@@ -76,7 +75,6 @@ void main() {
   });
 
   group('eraseInside', () {
-    // Horizontal stroke from (0, 0) at pressure 0 to (10, 0) at pressure 1.
     const stroke = [InkPoint(0, 0, 0), InkPoint(10, 0, 1)];
 
     void expectPoint(InkPoint p, double x, double y, double pressure) {
@@ -111,7 +109,6 @@ void main() {
     });
 
     test('widens the eraser by the stroke half width', () {
-      // Radius 1 plus half width 1.5 reaches the stroke 2 away.
       final pieces = eraseInside(stroke, const Offset(5, 2), 1, halfWidth: 1.5);
       expect(pieces, hasLength(2));
       expectPoint(pieces[0].last, 3.5, 0, 0.35);
@@ -119,7 +116,6 @@ void main() {
     });
 
     test('drops pieces shorter than minLength', () {
-      // Each end left outside the circle is 0.5 long.
       expect(eraseInside(stroke, const Offset(5, 0), 4.5), isEmpty);
       expect(
         eraseInside(stroke, const Offset(5, 0), 4.5, minLength: 0.4),
@@ -147,7 +143,6 @@ void main() {
     });
 
     test('uses the even-odd rule on a concave loop', () {
-      // An L shape: the notch at (6, 7) is outside, the arm at (2, 7) inside.
       const lShape = [
         Offset(0, 0),
         Offset(10, 0),

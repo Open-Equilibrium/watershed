@@ -9,27 +9,16 @@ import '../theme/tokens.g.dart';
 import 'ink_geometry.dart';
 import 'rough.dart';
 
-/// A Whiteboard's elements as the canvas draws and touches them (ADR-0306): an element's
-/// frame is its box, turned around its center; a stroke's points, as drawn, are stretched
-/// to fill its box, and a line runs across its box from corner to corner.
-
-/// The pens' widths, thin to bold, in board points.
 const penSizes = [2.5, 4.0, 7.0];
 
-/// The shapes' line widths, thin to bold, as Excalidraw's thin, bold and extra bold.
 const shapeWidths = [1.0, 2.0, 4.0];
 
-/// Text sizes S, M and L, as Excalidraw's.
 const textSizes = [16.0, 20.0, 28.0];
 
-/// A new text box's width.
 const textWidth = 240.0;
 
-/// The hand-drawn typeface (Excalifont, OFL-1.1).
 const handFont = 'Excalifont';
 
-/// The color an element is drawn in, by the theme's tokens; the highlighter's are the
-/// light theme's tag colors, as they mark paper.
 Color inkColor(WsPalette ws, BridgeInkColor color) => switch (color) {
   BridgeInkColor.text => ws.text,
   BridgeInkColor.data1 => ws.data1,
@@ -41,7 +30,6 @@ Color inkColor(WsPalette ws, BridgeInkColor color) => switch (color) {
   BridgeInkColor.pink => WsPalette.light.tag8,
 };
 
-/// The pens', shapes' and text's colors.
 const inkColors = [
   BridgeInkColor.text,
   BridgeInkColor.data1,
@@ -49,7 +37,6 @@ const inkColors = [
   BridgeInkColor.data3,
 ];
 
-/// The highlighter's colors.
 const highlightColors = [
   BridgeInkColor.yellow,
   BridgeInkColor.green,
@@ -57,15 +44,12 @@ const highlightColors = [
   BridgeInkColor.pink,
 ];
 
-/// Whether an element is the highlighter's mark, drawn beneath the rest.
 bool isHighlight(BridgeElement element) =>
     element.kind == BridgeElementKind.stroke &&
     element.pen == BridgePen.highlighter;
 
-/// The highlighter's widths, thin to broad, in board points.
 const highlighterSizes = [12.0, 18.0, 26.0];
 
-/// perfect_freehand's options for a pen, as GoodNotes' ball, fountain and brush pens.
 StrokeOptions penOptions(BridgePen pen, int width, {bool complete = true}) =>
     StrokeOptions(
       size: (pen == BridgePen.highlighter
@@ -82,7 +66,6 @@ StrokeOptions penOptions(BridgePen pen, int width, {bool complete = true}) =>
       isComplete: complete,
     );
 
-/// The closed outline perfect_freehand draws around `points`.
 Path inkOutline(List<InkPoint> points, StrokeOptions options) {
   final outline = getStroke([
     for (final point in points) PointVector(point.x, point.y, point.pressure),
@@ -91,7 +74,6 @@ Path inkOutline(List<InkPoint> points, StrokeOptions options) {
   if (outline.isEmpty) return path;
   path.moveTo(outline.first.dx, outline.first.dy);
   for (var at = 1; at < outline.length - 1; at++) {
-    // Through the midpoints, as perfect_freehand's own renderers draw it.
     final mid = Offset.lerp(outline[at], outline[at + 1], 0.5)!;
     path.quadraticBezierTo(outline[at].dx, outline[at].dy, mid.dx, mid.dy);
   }
@@ -99,11 +81,8 @@ Path inkOutline(List<InkPoint> points, StrokeOptions options) {
   return path;
 }
 
-/// The most points a stroke holds, as the core caps it.
 const maxStrokePoints = 10000;
 
-/// `ink` as strokes of at most [maxStrokePoints] points, each starting where the one
-/// before ends, so a long stroke is kept whole rather than refused.
 List<List<InkPoint>> splitInk(Iterable<InkPoint> ink) {
   final points = ink.toList();
   final pieces = <List<InkPoint>>[];
@@ -116,7 +95,6 @@ List<List<InkPoint>> splitInk(Iterable<InkPoint> ink) {
   return pieces;
 }
 
-/// The box `points` fill.
 Rect pointsBounds(List<InkPoint> points) {
   var (left, top, right, bottom) = (
     double.infinity,
@@ -133,11 +111,9 @@ Rect pointsBounds(List<InkPoint> points) {
   return Rect.fromLTRB(left, top, right, bottom);
 }
 
-/// An element's frame, unturned.
 Rect frameOf(BridgeElement element) =>
     Rect.fromLTWH(element.x, element.y, element.w, element.h);
 
-/// Turns `local`, a point in the unturned frame, as the element's rotation turns it.
 Offset turned(BridgeElement element, Offset local) {
   if (element.rotation == 0) return local;
   final center = frameOf(element).center;
@@ -146,7 +122,6 @@ Offset turned(BridgeElement element, Offset local) {
   return center + Offset(d.dx * cos - d.dy * sin, d.dx * sin + d.dy * cos);
 }
 
-/// The reverse of [turned]: a board point in the element's unturned frame.
 Offset unturned(BridgeElement element, Offset board) {
   if (element.rotation == 0) return board;
   final center = frameOf(element).center;
@@ -155,7 +130,6 @@ Offset unturned(BridgeElement element, Offset board) {
   return center + Offset(d.dx * cos - d.dy * sin, d.dx * sin + d.dy * cos);
 }
 
-/// The corners of an element's turned frame.
 List<Offset> corners(BridgeElement element) {
   final frame = frameOf(element);
   return [
@@ -166,7 +140,6 @@ List<Offset> corners(BridgeElement element) {
   ];
 }
 
-/// The box an element takes on the board, turned, with room for its line.
 Rect boundsOf(BridgeElement element) {
   final points = corners(element);
   var bounds = Rect.fromPoints(points[0], points[2]);
@@ -178,28 +151,21 @@ Rect boundsOf(BridgeElement element) {
   return bounds.inflate(penSizes.last);
 }
 
-/// The new elements and their decoded points, kept per element: an element's points never
-/// change, so a stroke is decoded and outlined once.
 class BoardCache {
   final _points = <String, List<InkPoint>>{};
   final _bounds = <String, Rect>{};
 
-  /// One outline and one shape drawing per element, each with what it was drawn for, so
-  /// a shape resized through many sizes keeps only its last.
   final _outlines = <String, (Object, Path)>{};
   final _shapes = <String, (Object, Path)>{};
 
-  /// How many drawings the cache holds.
   @visibleForTesting
   int get entries => _outlines.length + _shapes.length;
 
-  /// A stroke's points, decoded once; an element with no identity, as a draft, is not kept.
   List<InkPoint> points(BridgeElement element) => switch (element.id) {
     final id? => _points.putIfAbsent(id, () => _decode(element.points)),
     null => _decode(element.points),
   };
 
-  /// The box a stroke's points fill as drawn, measured once.
   Rect bounds(BridgeElement element) => switch (element.id) {
     final id? => _bounds.putIfAbsent(id, () => pointsBounds(points(element))),
     null => pointsBounds(points(element)),
@@ -228,13 +194,11 @@ class BoardCache {
     return path;
   }
 
-  /// A stroke's outline in its points' own place, before its frame moves it.
   Path outline(BridgeElement element) => _kept(_outlines, element.id, (
     element.pen,
     element.width,
   ), () => inkOutline(points(element), penOptions(element.pen, element.width)));
 
-  /// A shape's lines in a frame of its size at the origin, hand-drawn or clean.
   Path shape(BridgeElement element, bool hand) => _kept(_shapes, element.id, (
     element.w,
     element.h,
@@ -244,7 +208,6 @@ class BoardCache {
     element.arrowhead,
   ), () => shapePath(element, hand));
 
-  /// Forgets the elements no longer on the board.
   void keepOnly(Iterable<String> ids) {
     final kept = ids.toSet();
     _points.removeWhere((id, _) => !kept.contains(id));
@@ -254,23 +217,16 @@ class BoardCache {
   }
 }
 
-/// Whether an element is stored, so it can be selected, changed or removed: not one shown
-/// while its write is on its way, nor a piece the eraser is still cutting.
 bool isStored(BridgeElement element) =>
     element.id != null &&
     !element.id!.startsWith(pendingPrefix) &&
     !element.id!.startsWith(localPrefix);
 
-/// The names given to elements shown before the core names them; they hold no space, as
-/// the outline cache's keys are split on one.
 const pendingPrefix = 'pending-';
 const localPrefix = 'local-';
 
-/// The lines of a shape in its unturned frame moved to the origin.
 Path shapePath(BridgeElement element, bool hand) {
   final (w, h) = (element.w, element.h);
-  // rough.js takes seeds from 1 to 2^31 - 1; the core keeps any u32, which folds into
-  // that range the same on every device.
   final options = RoughOptions(seed: (element.seed - 1) % 0x7FFFFFFF + 1);
   switch (element.shape) {
     case BridgeShape.rectangle:
@@ -322,8 +278,6 @@ Path shapePath(BridgeElement element, bool hand) {
   }
 }
 
-/// Points along an element, to tell whether a lasso loop holds it: a stroke's own points,
-/// at most 64, or a frame's corners, edges' middles and center.
 List<Offset> samplesOf(BridgeElement element, BoardCache cache) {
   if (element.kind == BridgeElementKind.stroke) {
     final points = cache.points(element);
@@ -350,7 +304,6 @@ List<Offset> samplesOf(BridgeElement element, BoardCache cache) {
   ];
 }
 
-/// Where a stroke's drawn point lies on the board, its frame stretching its points.
 Offset strokePoint(BridgeElement element, BoardCache cache, Offset drawn) {
   final source = cache.bounds(element);
   final sx = source.width == 0 ? 1.0 : element.w / source.width;
@@ -364,9 +317,7 @@ Offset strokePoint(BridgeElement element, BoardCache cache, Offset drawn) {
   );
 }
 
-/// Whether a board point lies on an element, within `slop`.
 bool touches(BridgeElement element, BoardCache cache, Offset at, double slop) {
-  // Most elements lie far away; their box says so without walking their points.
   if (!boundsOf(element).inflate(slop).contains(at)) return false;
   switch (element.kind) {
     case BridgeElementKind.stroke:
@@ -393,7 +344,6 @@ bool touches(BridgeElement element, BoardCache cache, Offset at, double slop) {
   }
 }
 
-/// A new element of `kind` with nothing yet but its look.
 BridgeElement newElement(
   BridgeElementKind kind, {
   required Rect frame,
@@ -426,7 +376,6 @@ BridgeElement newElement(
   text: text,
 );
 
-/// The change that gives `element` the frame `frame`, turned `rotation`, and its look.
 BridgeElementChange changeOf(
   BridgeElement element, {
   Rect? frame,

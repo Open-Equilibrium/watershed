@@ -2,9 +2,6 @@ import 'package:flutter/foundation.dart';
 
 import '../settings_file.dart';
 
-/// The rows of the session card that can be hidden, in the card's order, which is also the rows
-/// menu's. Ids are stored, so never rename one. Rows that T3 Code leaves off by default are
-/// `shownByDefault: false`.
 enum CardItem {
   workspace('workspace', 'Environment and worktree'),
   branch('branch', 'Branch and pull request'),
@@ -22,21 +19,15 @@ enum CardItem {
 
   final String id;
 
-  /// The row's name in the card's menu.
   final String label;
 
   final bool shownByDefault;
 }
 
-/// Which rows the session card shows. Only the rows that differ from their default are kept:
-/// `hidden` names the rows shown by default that the person hid, and `shown` the rows hidden by
-/// default that the person showed.
 @immutable
 class SessionCardSettings {
   const SessionCardSettings({this.hidden = const {}, this.shown = const {}});
 
-  /// Reads the choices it knows from `json` and ignores the rest. An entry in the wrong list is
-  /// ignored, so a row keeps its default unless its own list names it.
   factory SessionCardSettings.fromJson(Map<String, Object?> json) {
     final items = {for (final item in CardItem.values) item.id: item};
     Set<CardItem> listed(String key, {required bool shownByDefault}) => {
@@ -60,7 +51,6 @@ class SessionCardSettings {
   bool shows(CardItem item) =>
       item.shownByDefault ? !hidden.contains(item) : shown.contains(item);
 
-  /// These settings with `item` shown or hidden; a choice back to the default is not kept.
   SessionCardSettings withItem(CardItem item, bool visible) =>
       item.shownByDefault
       ? SessionCardSettings(
@@ -84,7 +74,6 @@ class SessionCardSettings {
   };
 }
 
-/// The session card's settings in use; each change is saved.
 class SessionCardSettingsController extends SavedSettings<SessionCardSettings> {
   SessionCardSettingsController([
     SessionCardSettings value = const SessionCardSettings(),

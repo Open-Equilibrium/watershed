@@ -1,6 +1,3 @@
-//! Meta-Harness's types as the bridge hands them to Dart. Names, targets and the text the Chat
-//! shows cross with hiding characters written out.
-
 use meta_harness_core::{
     AgentEvent, Automation, ChatItem, Context, GitStatus, Group, ItemDetail, ItemKind, ItemStatus,
     Lineage, LineageRow, LocalServer, ModelChoice, Pace, PendingRequest, Provider,
@@ -33,7 +30,6 @@ fn int(value: impl TryInto<i64>) -> i64 {
     value.try_into().unwrap_or(i64::MAX)
 }
 
-/// An event that carries nothing but its kind.
 pub(crate) fn event(kind: BridgeEventKind, sequence: i64) -> BridgeEvent {
     BridgeEvent {
         kind,
@@ -91,9 +87,6 @@ fn usage(usage: Usage) -> BridgeUsage {
     }
 }
 
-/// The answer to question `id` as the agent sent its options: each option label the card showed
-/// written out becomes the agent's label again. Typed text goes as typed, even when it reads as
-/// such a label.
 pub(crate) fn answer_values(
     questions: &[Question],
     id: &str,
@@ -150,7 +143,6 @@ pub(crate) fn request(pending: PendingRequest) -> BridgeRequest {
                     header: visible_name(&q.header),
                     question: visible(&q.question),
                     descriptions: q.options.iter().map(|(_, d)| visible(d)).collect(),
-                    // Written out; `answer_values` gives the agent its own labels back.
                     options: q
                         .options
                         .iter()
@@ -251,7 +243,7 @@ pub(crate) fn snapshot(snapshot: Snapshot) -> BridgeSnapshot {
     }
 }
 
-fn transcript_item(chat: ChatItem) -> BridgeTranscriptItem {
+pub(crate) fn transcript_item(chat: ChatItem) -> BridgeTranscriptItem {
     BridgeTranscriptItem {
         item: item(
             chat.id,
@@ -366,8 +358,6 @@ pub(crate) fn model_choice(choice: &ModelChoice) -> BridgeModelChoice {
     }
 }
 
-/// The core's choice; a choice whose option ids and values differ in number is refused, since
-/// pairing them would drop the extra ones and run the model on other settings.
 pub(crate) fn to_model_choice(choice: BridgeModelChoice) -> Result<ModelChoice, String> {
     if choice.option_ids.len() != choice.values.len() {
         return Err("The model's options do not match their values.".to_owned());
@@ -388,6 +378,9 @@ pub(crate) fn thread_summary(thread: ThreadSummary) -> BridgeThreadSummary {
         worktree: thread.worktree.map(|p| p.to_string_lossy().into_owned()),
         running: thread.running,
         archived: thread.archived,
+        movable: thread.harness.is_some(),
+        harness_known: thread.harness_known,
+        moving: thread.moving.map(crate::api::moves::moving_of),
     }
 }
 
@@ -440,8 +433,6 @@ pub(crate) fn git_status(status: GitStatus) -> BridgeGitStatus {
 }
 
 pub(crate) fn pull_request_detail(detail: PullRequestDetail) -> BridgePullRequestDetail {
-    // The prompts quote the host's names and checks, so hiding characters are written out in
-    // them too (SECURITY.md). They are built before the fields move out.
     let fix_prompt = visible(&detail.fix_prompt());
     let resolve_prompt = visible(&detail.resolve_prompt());
     BridgePullRequestDetail {
@@ -475,8 +466,6 @@ fn pull_request_check(check: PullRequestCheck) -> BridgePullRequestCheck {
     }
 }
 
-/// Splits a unified diff into its files, each with its status, line counts and own patch. A file
-/// starts only at a line that begins with a header, so patch text quoting one stays in its file.
 pub(crate) fn diff_files(diff: &str) -> Vec<(BridgeFileChange, String)> {
     let starts: Vec<usize> = diff
         .match_indices("diff --git ")
@@ -518,7 +507,6 @@ pub(crate) fn diff_files(diff: &str) -> Vec<(BridgeFileChange, String)> {
                     added,
                     removed,
                 },
-                // SECURITY.md: the Diff panel writes out what could hide a change.
                 visible_lines(patch),
             )
         })
@@ -630,9 +618,6 @@ pub(crate) fn usage_limits(limits: UsageLimits) -> BridgeUsageLimits {
     }
 }
 
-/// The changed file's path: a rename's or copy's new name, else the second half of
-/// `a/<path> b/<path>`, which also holds for a path with ` b/` in it. Git C-quotes a half it cannot
-/// write raw, such as one with a non-ASCII byte, so a quoted half is decoded first.
 fn path_of(header: &str, section: &str) -> String {
     let moved = section.lines().find_map(|l| {
         l.strip_prefix("rename to ")
@@ -641,8 +626,6 @@ fn path_of(header: &str, section: &str) -> String {
     if let Some(to) = moved {
         return unquote(to).map_or_else(|| to.to_owned(), |(path, _)| path);
     }
-    // A quoted first half is followed by a space and the second half. A raw first half cannot
-    // hold a quote, so the first quote opens the second half.
     let second = match unquote(header) {
         Some((_, rest)) => rest.strip_prefix(' '),
         None => header.find('"').and_then(|at| header.get(at..)),
@@ -663,8 +646,6 @@ fn path_of(header: &str, section: &str) -> String {
     }
 }
 
-/// Decodes a path Git C-quotes (`"..."` with `\"`, `\\`, C escapes and `\ooo` octal bytes),
-/// returning it with the text after its closing quote; `None` when `text` is not quoted.
 fn unquote(text: &str) -> Option<(String, &str)> {
     let body = text.strip_prefix('"')?.as_bytes();
     let mut decoded = Vec::with_capacity(body.len());
@@ -672,7 +653,6 @@ fn unquote(text: &str) -> Option<(String, &str)> {
     while let Some(&byte) = body.get(index) {
         index += 1;
         match byte {
-            // The closing quote is `text[index]`, since `body` starts one byte into `text`.
             b'"' => {
                 let rest = &text[index + 1..];
                 return Some((String::from_utf8_lossy(&decoded).into_owned(), rest));

@@ -69,8 +69,6 @@ void main() {
 
   test('keeps the stored ids, their order and the rows a file names', () {
     final settings = SessionCardSettings.fromJson({
-      // `usage` is off by default, so a hidden entry for it changes nothing; `context` shown
-      // turns the default-off row on.
       'hidden': ['changes', 'sideways', 7, 'usage'],
       'shown': ['context', 'changes'],
     });

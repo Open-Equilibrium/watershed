@@ -4,16 +4,13 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 
-/// One of Liquid's settings files: a JSON object, replaced whole on each save.
 class SettingsFile {
   SettingsFile(this.file);
 
   final File file;
 
-  /// Far above any real settings; a larger file is not Liquid's.
   static const _limit = 64 * 1024;
 
-  /// The stored object, or null before the first save or when the file is unreadable.
   Future<Map<String, Object?>?> load() async {
     try {
       if (await file.length() > _limit) return null;
@@ -26,8 +23,6 @@ class SettingsFile {
     }
   }
 
-  /// Replaces the file whole, so a crash leaves the old or the new settings. Each save writes
-  /// its own temporary file, so saves at the same time cannot mix.
   Future<void> save(Map<String, Object?> json) async {
     await file.parent.create(recursive: true);
     final pending = File('${file.path}.$pid.${_saves++}.pending');
@@ -35,12 +30,9 @@ class SettingsFile {
       await pending.writeAsString(jsonEncode(json), flush: true);
       await pending.rename(file.path);
     } on Object {
-      // A failed save leaves no temporary file; the save's own error still propagates.
       try {
         await pending.delete();
-      } on FileSystemException {
-        // Never created, or already gone.
-      }
+      } on FileSystemException catch (_) {}
       rethrow;
     }
   }
@@ -48,33 +40,24 @@ class SettingsFile {
   static var _saves = 0;
 }
 
-/// A failed save of `settings`, the object that saved (a [SavedSettings] or the agent hosts), and the
-/// message that says so, as Settings show it.
 typedef SaveFailure = ({Object settings, String text});
 
-/// Settings in use that a [SettingsFile] keeps: each change applies at once and is saved after
-/// the saves before it, so the last change is the one kept. A failed save goes to [report].
 class SavedSettings<T> extends ValueNotifier<T> {
   SavedSettings(super.value, this._save, this._name);
 
-  /// Writes the settings; none for settings kept only in memory.
   final Future<void> Function(T settings)? _save;
 
-  /// What a failed save calls the settings, such as "the appearance".
   final String _name;
 
   Future<void> _saving = Future.value();
 
-  /// Receives each save's failure, or null once a save wrote the settings again.
   void Function(String? failure)? saveOutcome;
 
-  /// Uses `next` at once and saves it.
   Future<void> change(T next) {
     value = next;
     return save();
   }
 
-  /// Saves the settings in use after the saves before; completes once written or reported.
   @protected
   Future<void> save() {
     final write = _save;
@@ -93,10 +76,8 @@ class SavedSettings<T> extends ValueNotifier<T> {
     });
   }
 
-  /// The receiver of what goes wrong with these settings, or none.
   void Function(String problem)? get report => _report;
 
-  /// Receives what goes wrong with these settings; problems wait until it is set.
   set report(void Function(String problem)? report) {
     _report = report;
     if (report == null) return;

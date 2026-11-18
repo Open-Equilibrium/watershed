@@ -11,12 +11,15 @@ import 'page_kit.dart';
 
 void main() {
   final kit = PageKit();
+  const textTableText = [
+    BridgeBlockKind.text,
+    BridgeBlockKind.database,
+    BridgeBlockKind.text,
+  ];
 
-  /// Opens a Page of paragraphs holding `texts`.
   Future<void> show(WidgetTester tester, List<String> texts) =>
       kit.show(tester, [for (final text in texts) TextPart(text)]);
 
-  /// Types `typed` at the end of the Text Block at `index`, as the text input does.
   Future<void> type(WidgetTester tester, int index, String typed) async {
     if (!field(tester, index).focusNode!.hasFocus) {
       await tester.tap(block(index));
@@ -32,11 +35,26 @@ void main() {
     await tester.pumpAndSettle();
   }
 
+  Future<void> addTable(WidgetTester tester, int index) async {
+    await type(tester, index, '/');
+    await type(tester, index, 'table');
+    await key(tester, LogicalKeyboardKey.enter);
+  }
+
   final menu = find.byKey(const Key('slash commands'));
   Finder item(String label) => find.descendant(
     of: menu,
     matching: find.byKey(ValueKey('choice $label')),
   );
+
+  Finder inTable(Finder matching) =>
+      find.descendant(of: find.byType(TableBlock), matching: matching);
+
+  Finder tableName() => inTable(find.byType(TextField));
+
+  List<BridgeBlockKind> kinds() => [
+    for (final view in kit.fake.views[kit.page]!) view.kind,
+  ];
 
   BridgeTextStyle? styleOf(int index) =>
       kit.fake.styles[kit.fake.views[kit.page]![index].block];
@@ -97,61 +115,23 @@ void main() {
       await type(tester, 1, '/');
       await type(tester, 1, 'tab');
       await key(tester, LogicalKeyboardKey.enter);
-      expect(kit.fake.views[kit.page]!.map((view) => view.kind), [
-        BridgeBlockKind.text,
-        BridgeBlockKind.database,
-        BridgeBlockKind.text,
-      ]);
+      expect(kinds(), textTableText);
       expect(kit.fake.textsOf(kit.page), ['Intro', 'After']);
-      final name = find.descendant(
-        of: find.byType(TableBlock),
-        matching: find.byType(TextField),
-      );
-      expect(tester.widget<TextField>(name).focusNode!.hasFocus, isTrue);
+      expect(tester.widget<TextField>(tableName()).focusNode!.hasFocus, isTrue);
+      expect(inTable(find.text('Untitled')), findsOneWidget);
+      expect(inTable(find.text('Name')), findsOneWidget);
       expect(
-        find.descendant(
-          of: find.byType(TableBlock),
-          matching: find.text('Untitled'),
-        ),
-        findsOneWidget,
-      );
-      expect(
-        find.descendant(
-          of: find.byType(TableBlock),
-          matching: find.text('Name'),
-        ),
-        findsOneWidget,
-      );
-      expect(
-        find.descendant(
-          of: find.byType(TableBlock),
-          matching: find.textContaining('rows'),
-        ),
+        inTable(find.textContaining('rows')),
         findsNothing,
         reason: 'a Table without rows counts none',
       );
 
-      await tester.enterText(name, 'Expenses');
+      await tester.enterText(tableName(), 'Expenses');
       await tester.pumpAndSettle();
       final table = kit.fake.views[kit.page]![1].block;
       expect(kit.fake.databases[table]!.name, 'Expenses');
     },
   );
-
-  testWidgets('a Table chosen in the last line keeps a line below it', (
-    tester,
-  ) async {
-    await show(tester, ['Intro', '']);
-    await type(tester, 1, '/');
-    await tester.tap(item('Table'));
-    await tester.pumpAndSettle();
-    expect(kit.fake.views[kit.page]!.map((view) => view.kind), [
-      BridgeBlockKind.text,
-      BridgeBlockKind.database,
-      BridgeBlockKind.text,
-    ]);
-    expect(kit.fake.textsOf(kit.page), ['Intro', '']);
-  });
 
   testWidgets('esc closes the slash command menu and keeps what was typed', (
     tester,
@@ -186,10 +166,7 @@ void main() {
 
   testWidgets('a Table\'s name follows a rename elsewhere', (tester) async {
     await show(tester, ['']);
-    await type(tester, 0, '/');
-    await type(tester, 0, 'table');
-    await key(tester, LogicalKeyboardKey.enter);
-    // The caret leaves the name for the line below.
+    await addTable(tester, 0);
     await tester.tap(block(0));
     await tester.pumpAndSettle();
     final table = kit.fake.views[kit.page]![0].block;
@@ -202,13 +179,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    expect(
-      find.descendant(
-        of: find.byType(TableBlock),
-        matching: find.text('Trips'),
-      ),
-      findsOneWidget,
-    );
+    expect(inTable(find.text('Trips')), findsOneWidget);
   });
 
   for (final last in [false, true]) {
@@ -234,9 +205,7 @@ void main() {
     tester,
   ) async {
     await show(tester, ['']);
-    await type(tester, 0, '/');
-    await type(tester, 0, 'table');
-    await key(tester, LogicalKeyboardKey.enter);
+    await addTable(tester, 0);
     int renames() => kit.fake.applied
         .where((applied) => applied.kind == BridgeMutationKind.renameDatabase)
         .length;
@@ -279,9 +248,7 @@ void main() {
     tester,
   ) async {
     await show(tester, ['']);
-    await type(tester, 0, '/');
-    await type(tester, 0, 'table');
-    await key(tester, LogicalKeyboardKey.enter);
+    await addTable(tester, 0);
     tester.testTextInput.updateEditingValue(
       const TextEditingValue(
         text: 'ni',
@@ -299,9 +266,7 @@ void main() {
     'a Table\'s name renamed elsewhere while typed in shows once left',
     (tester) async {
       await show(tester, ['']);
-      await type(tester, 0, '/');
-      await type(tester, 0, 'table');
-      await key(tester, LogicalKeyboardKey.enter);
+      await addTable(tester, 0);
       final table = kit.fake.views[kit.page]![0].block;
       await kit.workspace.apply(
         mutation(
@@ -314,13 +279,7 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(block(0));
       await tester.pumpAndSettle();
-      expect(
-        find.descendant(
-          of: find.byType(TableBlock),
-          matching: find.text('Trips'),
-        ),
-        findsOneWidget,
-      );
+      expect(inTable(find.text('Trips')), findsOneWidget);
     },
   );
 
@@ -328,9 +287,7 @@ void main() {
     tester,
   ) async {
     await show(tester, ['']);
-    await type(tester, 0, '/');
-    await type(tester, 0, 'table');
-    await key(tester, LogicalKeyboardKey.enter);
+    await addTable(tester, 0);
     tester.testTextInput.updateEditingValue(
       const TextEditingValue(
         text: 'ni',
@@ -342,10 +299,7 @@ void main() {
     await tester.tap(block(0));
     await tester.pumpAndSettle();
     expect(kit.fake.databases[kit.fake.views[kit.page]![0].block]!.name, 'ni');
-    expect(
-      find.descendant(of: find.byType(TableBlock), matching: find.text('ni')),
-      findsOneWidget,
-    );
+    expect(inTable(find.text('ni')), findsOneWidget);
   });
 
   testWidgets('what is typed while a Table is added becomes its name', (
@@ -363,19 +317,10 @@ void main() {
     kit.fake.gate = null;
     gate.complete();
     await tester.pumpAndSettle();
-    expect(kit.fake.views[kit.page]!.map((view) => view.kind), [
-      BridgeBlockKind.text,
-      BridgeBlockKind.database,
-      BridgeBlockKind.text,
-    ]);
+    expect(kinds(), textTableText);
     expect(kit.fake.textsOf(kit.page), ['Intro', 'After']);
     expect(kit.fake.databases[kit.fake.views[kit.page]![1].block]!.name, 'Ex');
-    final name = tester.widget<TextField>(
-      find.descendant(
-        of: find.byType(TableBlock),
-        matching: find.byType(TextField),
-      ),
-    );
+    final name = tester.widget<TextField>(tableName());
     expect(name.focusNode!.hasFocus, isTrue);
     expect(name.controller!.text, 'Ex');
   });
@@ -384,9 +329,7 @@ void main() {
     tester,
   ) async {
     await show(tester, ['']);
-    await type(tester, 0, '/');
-    await type(tester, 0, 'table');
-    await key(tester, LogicalKeyboardKey.enter);
+    await addTable(tester, 0);
     final reads = kit.fake.deferred = [];
     kit.fake.deferredKinds = {BridgeQueryKind.database};
     for (final typed in ['A', 'AB']) {
@@ -400,12 +343,7 @@ void main() {
     }
     await tester.tap(block(0));
     await tester.pump();
-    final name = tester.widget<TextField>(
-      find.descendant(
-        of: find.byType(TableBlock),
-        matching: find.byType(TextField),
-      ),
-    );
+    final name = tester.widget<TextField>(tableName());
     expect(name.controller!.text, 'AB');
     while (reads.isNotEmpty) {
       reads.removeAt(0).complete();
@@ -427,13 +365,7 @@ void main() {
     await key(tester, LogicalKeyboardKey.enter);
     expect(kit.fake.views[kit.page]![2].kind, BridgeBlockKind.database);
     expect(kit.fake.textsOf(kit.page), ['Intro', '', 'After']);
-    final name = tester.widget<TextField>(
-      find.descendant(
-        of: find.byType(TableBlock),
-        matching: find.byType(TextField),
-      ),
-    );
-    expect(name.focusNode!.hasFocus, isTrue);
+    expect(tester.widget<TextField>(tableName()).focusNode!.hasFocus, isTrue);
     expect(kit.workspace.problem.value, isNotNull);
   });
 
@@ -444,7 +376,6 @@ void main() {
     await type(tester, 1, 'table');
     final gate = kit.fake.gate = Completer<void>();
     kit.fake.gatedKinds = {BridgeMutationKind.addDatabaseBlock};
-    // The line's read after its cleared text arrived answers once typing went on.
     final reads = kit.fake.deferred = [];
     kit.fake.deferredKinds = {BridgeQueryKind.text};
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
@@ -493,7 +424,6 @@ void main() {
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     await tester.pump();
     await type(tester, 1, 'E');
-    // The Page reads its Views again only after the next keys.
     final reads = kit.fake.deferred = [];
     kit.fake.deferredKinds = {BridgeQueryKind.views};
     kit.fake.gate = null;
@@ -559,7 +489,6 @@ void main() {
         }
         await tester.pump();
         await draining;
-        // Liquid exits now, before the Table is built.
         final table = kit.fake.views[kit.page]!.firstWhere(
           (view) => view.kind == BridgeBlockKind.database,
         );
@@ -624,7 +553,6 @@ void main() {
     final first = find.byKey(const Key('first-line'));
     await tester.enterText(first, '/');
     await tester.pump();
-    // Keys typed while the first Text Block is made arrive with it.
     await tester.enterText(first, '/ta');
     await tester.pump();
     kit.fake.gate!.complete();
@@ -647,7 +575,6 @@ void main() {
     await show(tester, ['/text', '']);
     await tester.tap(block(1));
     await tester.pump();
-    // ⌫ at the empty line's start joins it to the line above, the Page's only one.
     await key(tester, LogicalKeyboardKey.backspace);
     expect(kit.fake.textsOf(kit.page), ['/text']);
     expect(menu, findsNothing);
@@ -677,7 +604,6 @@ void main() {
       for (var line = 21; line < 50; line++) 'Line $line',
     ]);
     await type(tester, 20, '/');
-    // Only the Views in view are built, so the line is found by its text.
     final slash = find.byWidgetPredicate(
       (widget) => widget is TextField && widget.controller?.text == '/',
     );
@@ -685,7 +611,6 @@ void main() {
       tester.getRect(menu).bottom,
       lessThanOrEqualTo(tester.getRect(slash).top),
     );
-    // The line scrolls up near the window's top, where the menu no longer fits above it.
     final scroll = tester.state<ScrollableState>(
       find
           .descendant(
@@ -718,7 +643,6 @@ void main() {
       tester.getRect(find.text('Type to filter · ↑↓ · ⏎')).bottom,
       lessThanOrEqualTo(shown.bottom),
     );
-    // ↑ from the first command chooses the last.
     await key(tester, LogicalKeyboardKey.arrowUp);
     final table = tester.getRect(item('Table'));
     expect(table.top, greaterThanOrEqualTo(shown.top));

@@ -3,14 +3,10 @@ import 'dart:math';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:liquid/src/whiteboard/shape_snap.dart';
 
-/// Jitter is 2 px per axis and a corner is a sampled point up to a 5 px step
-/// away, so 8 px bounds every honest error.
 const _tolerance = 8.0;
 
-/// About 3 degrees.
 const _angleTolerance = 0.05;
 
-/// Points along the polyline through [corners], about every 5 px.
 List<Offset> _walk(List<Offset> corners) {
   final out = <Offset>[];
   for (var i = 0; i + 1 < corners.length; i++) {
@@ -24,8 +20,6 @@ List<Offset> _walk(List<Offset> corners) {
   return out;
 }
 
-/// [local] points turned by [angle] and moved to [centre], each jittered by up
-/// to 2 px per axis.
 List<Offset> _stroke(
   List<Offset> local,
   Random random, {
@@ -49,13 +43,11 @@ List<Offset> _rectangle(double w, double h) => _walk([
   Offset(-w / 2, -h / 2),
 ]);
 
-/// A closed ellipse, sampled every 5 degrees.
 List<Offset> _ellipse(double a, double b) => [
   for (var i = 0; i <= 72; i++)
     Offset(a * cos(i * pi / 36), b * sin(i * pi / 36)),
 ];
 
-/// Every expected point has an actual point within tolerance, in any order.
 void _expectPointsNear(List<Offset> actual, List<Offset> expected) {
   for (final e in expected) {
     expect(

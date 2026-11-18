@@ -5,15 +5,12 @@ import 'package:liquid/src/rust/api/replica.dart';
 import 'package:liquid/src/rust/api/workspace.dart';
 import 'package:liquid/src/workspace/follow.dart';
 
-/// Records subscriptions and closes as the bridge receives them.
 class FakeWorkspace implements LiquidWorkspace {
   final streams = <int, StreamController<BridgeChange>>{};
   final closed = <int>[];
 
   final _ended = <int, Completer<void>>{};
 
-  /// Like the bridge's stream, cancelling it finishes only once Rust drops its end, which
-  /// closing the subscription does.
   @override
   Stream<BridgeChange> subscribe({
     required int subscription,

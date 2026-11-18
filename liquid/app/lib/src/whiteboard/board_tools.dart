@@ -10,10 +10,6 @@ import 'board.dart';
 import 'rough.dart';
 import 'board_controller.dart';
 
-/// The tool bar at a focused board's bottom: lasso, pen, eraser, shape and text, then the
-/// board's style, hand-drawn or clean, both shown with the chosen one raised; with the chosen
-/// tool's options just above it, always in one order: kind, color, width
-/// (ADR-0306).
 class BoardToolBars extends StatelessWidget {
   const BoardToolBars({super.key, required this.board});
 
@@ -217,7 +213,6 @@ class BoardToolBars extends StatelessWidget {
   }
 }
 
-/// −, the zoom and +, at a focused board's bottom right.
 class ZoomBar extends StatelessWidget {
   const ZoomBar({super.key, required this.board, required this.size});
 
@@ -480,9 +475,6 @@ class _Segments extends StatelessWidget {
   }
 }
 
-/// The board's style as two choices side by side, the chosen one raised: a sketched square
-/// with "Aa" in Excalifont, and an exact one with "Aa" in Liquid's typeface, sized as the
-/// text tool's T. A click on the other switches the whole board.
 class _StyleSwitch extends StatelessWidget {
   const _StyleSwitch({required this.board});
 

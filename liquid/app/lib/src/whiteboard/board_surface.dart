@@ -14,10 +14,6 @@ import 'board_painter.dart';
 import 'ink_geometry.dart';
 import 'shape_snap.dart';
 
-/// A Whiteboard's canvas (ADR-0306): it draws the board and, while focused, takes the
-/// tools' input as GoodNotes does. Trackpad and touch gestures and the right mouse button
-/// pan and zoom it focused or not; the mouse wheel acts on it only while it is focused,
-/// and otherwise scrolls the Page.
 class BoardSurface extends StatefulWidget {
   const BoardSurface({
     super.key,
@@ -29,13 +25,10 @@ class BoardSurface extends StatefulWidget {
 
   final BoardController board;
 
-  /// Whether the board takes the tools' input.
   final bool focused;
 
-  /// A click into the unfocused board focuses it.
   final VoidCallback onFocus;
 
-  /// esc with nothing selected leaves the board.
   final VoidCallback onLeave;
 
   @override
@@ -56,21 +49,17 @@ class BoardSurfaceState extends State<BoardSurface> {
   Offset _start = Offset.zero;
   Offset _last = Offset.zero;
 
-  /// The ink drawn so far, in board points, and whether it snapped into a shape.
   final _ink = <InkPoint>[];
   BridgeElement? _snapped;
   Timer? _hold;
 
-  /// The elements as a move, resize or rotation found them.
   Map<String, BridgeElement> _before = const {};
   (List<Offset>, double)? _boxBefore;
   int _corner = 0;
 
-  /// Elements the eraser took, and the strokes it cut, as new pieces by the stroke.
   final _erased = <String>{};
   final _pieces = <String, List<BridgeElement>>{};
 
-  /// The text box being written: its element, new or stored, and its editor.
   BridgeElement? _text;
   final _typed = TextEditingController();
   final _typing = FocusNode(debugLabel: 'Whiteboard text');
@@ -102,8 +91,6 @@ class BoardSurfaceState extends State<BoardSurface> {
     super.dispose();
   }
 
-  // Pointers.
-
   void _down(PointerDownEvent event) {
     if (_pointer != null) return;
     _start = _last = event.localPosition;
@@ -127,7 +114,6 @@ class BoardSurfaceState extends State<BoardSurface> {
       return;
     }
     final at = board.toBoard(event.localPosition);
-    // A document's ink lies on its pages; between them there is nothing to draw on.
     final drawing =
         tools.tool != BoardTool.lasso && tools.tool != BoardTool.eraser;
     if (board.paged && drawing && board.pageAt(at) == null) {
@@ -150,7 +136,6 @@ class BoardSurfaceState extends State<BoardSurface> {
         _pointer = null;
         _startText(at);
     }
-    // A read during the gesture would put back what it took or moved.
     if (_drag != _Drag.none && _drag != _Drag.pan) {
       _held = true;
       board.hold();
@@ -175,7 +160,6 @@ class BoardSurfaceState extends State<BoardSurface> {
       case _Drag.shape:
         _showDragged(board.toBoard(_start), at);
       case _Drag.erase:
-        // Along the whole way since the last event, so a quick stroke misses nothing.
         final from = board.toBoard(event.localPosition - by);
         final steps = math.max(
           1,
@@ -231,8 +215,6 @@ class BoardSurfaceState extends State<BoardSurface> {
       ? event.pressure.clamp(0.05, 1.0)
       : 0.5;
 
-  /// The mouse wheel: with the right button held or ⌘ it zooms; on a focused board it
-  /// pans; elsewhere, and over a board that does not move, it scrolls the Page.
   void _signal(PointerSignalEvent event) {
     if (event is! PointerScrollEvent || board.fixed) return;
     final zooms =
@@ -252,8 +234,6 @@ class BoardSurfaceState extends State<BoardSurface> {
     });
   }
 
-  // The pen and the shape tool's snapping.
-
   void _startInk(Offset at, PointerDownEvent event) {
     _drag = _Drag.ink;
     _snapped = null;
@@ -264,7 +244,6 @@ class BoardSurfaceState extends State<BoardSurface> {
     _showInk();
   }
 
-  /// Draw and hold: a stroke held still for a moment snaps into a shape (GoodNotes).
   void _armHold() {
     _hold?.cancel();
     _hold = Timer(const Duration(milliseconds: 500), () {
@@ -282,7 +261,6 @@ class BoardSurfaceState extends State<BoardSurface> {
     });
   }
 
-  /// The tool whose color and width ink takes.
   BoardTool get _inkTool => switch (tools.tool) {
     BoardTool.shape || BoardTool.highlighter => tools.tool,
     _ => BoardTool.pen,
@@ -306,7 +284,6 @@ class BoardSurfaceState extends State<BoardSurface> {
 
   void _endInk() {
     final snapping = tools.tool == BoardTool.shape;
-    // On a document, ink stays on the page it started on, cut at its edge.
     if (board.paged && _ink.isNotEmpty) {
       final page = board.pageAt(_ink.first.offset);
       final sheet = page == null ? null : board.sheets[page];
@@ -315,7 +292,6 @@ class BoardSurfaceState extends State<BoardSurface> {
           : _ink.takeWhile((point) => sheet.contains(point.offset)).length;
       _ink.removeRange(inside, _ink.length);
     }
-    // A highlight drawn along a line straightens, as GoodNotes' does.
     if (tools.tool == BoardTool.highlighter && _ink.length > 2) {
       final (first, last) = (_ink.first, _ink.last);
       var length = 0.0;
@@ -352,7 +328,6 @@ class BoardSurfaceState extends State<BoardSurface> {
     _snapped = null;
   }
 
-  /// The perfect shape `ink` snaps into, if any.
   BridgeElement? _shapeOf(List<InkPoint> ink) {
     final snapped = snapShape([for (final point in ink) point.offset]);
     if (snapped == null) return null;
@@ -405,7 +380,6 @@ class BoardSurfaceState extends State<BoardSurface> {
     }
   }
 
-  /// A shape dragged out from `from` to `to`; ⇧ keeps a square, a circle or 15° steps.
   void _showDragged(Offset from, Offset to) {
     final shift = HardwareKeyboard.instance.isShiftPressed;
     final kind = tools.shape;
@@ -442,19 +416,15 @@ class BoardSurfaceState extends State<BoardSurface> {
     );
   }
 
-  // The eraser.
-
   double get _eraserRadius =>
       const [6.0, 12.0, 24.0][tools.widthOf(BoardTool.eraser).clamp(0, 2)] /
       board.zoom;
 
-  /// Erases at `at`: whole elements it touches, or, partly, the part of strokes under it.
   void _erase(Offset at) {
     final radius = _eraserRadius;
     final kept = <BridgeElement>[];
     var changed = false;
     for (final element in board.elements) {
-      // An element still on its way is erased once it is stored.
       if (element.id?.startsWith(pendingPrefix) ?? false) {
         kept.add(element);
         continue;
@@ -471,8 +441,6 @@ class BoardSurfaceState extends State<BoardSurface> {
         _taken(element);
         continue;
       }
-      // The eraser in the stroke's own points, as drawn, so its pieces keep the
-      // stroke's size, stretch and turn.
       final source = board.cache.bounds(element);
       final sx = source.width == 0 ? 1.0 : element.w / source.width;
       final sy = source.height == 0 ? 1.0 : element.h / source.height;
@@ -498,7 +466,6 @@ class BoardSurfaceState extends State<BoardSurface> {
           bounds.width * sx,
           bounds.height * sy,
         );
-        // Turned about its own center, the piece lies where it lay in the stroke.
         final made = newElement(
           BridgeElementKind.stroke,
           frame: Rect.fromCenter(
@@ -513,7 +480,6 @@ class BoardSurfaceState extends State<BoardSurface> {
           pen: element.pen,
           points: packPoints(piece),
         );
-        // A local name, so the next pass cuts the piece again.
         final local = BridgeElement(
           id: '$localPrefix${_localIds++}',
           kind: made.kind,
@@ -579,15 +545,12 @@ class BoardSurfaceState extends State<BoardSurface> {
     final removed = [..._erased];
     _erased.clear();
     _pieces.clear();
-    // The board as it was, so the edit removes and adds from what is stored.
     board.elements = [
       for (final element in board.elements)
         if (!(element.id?.startsWith(localPrefix) ?? false)) element,
     ];
     unawaited(board.edit(add: pieces, remove: removed));
   }
-
-  // The lasso: select, move, resize, rotate.
 
   void _startLasso(Offset view, Offset at) {
     final box = selectionBox(board);
@@ -619,7 +582,6 @@ class BoardSurfaceState extends State<BoardSurface> {
   void _endLasso() {
     final loop = _draft.loop;
     if (loop.length < 3 || _loopLength(loop) < 6 / board.zoom) {
-      // A click selects the topmost element under it, or nothing.
       final at = loop.isEmpty ? null : loop.first;
       final hit = at == null
           ? null
@@ -668,8 +630,6 @@ class BoardSurfaceState extends State<BoardSurface> {
     final (corners, rotation) = _boxBefore!;
     final fixed = corners[(_corner + 2) % 4];
     if (_before.length == 1) {
-      // In the element's unturned frame; the new box's center, turned back, keeps the
-      // fixed corner where it was.
       final element = _before.values.single;
       final center = Offset.lerp(corners[0], corners[2], 0.5)!;
       final next = Rect.fromPoints(
@@ -677,7 +637,6 @@ class BoardSurfaceState extends State<BoardSurface> {
         _rotateAround(to, center, -rotation),
       );
       final middle = _rotateAround(next.center, center, rotation);
-      // A line keeps its direction.
       final w = next.width * (element.w < 0 ? -1 : 1);
       final h = next.height * (element.h < 0 ? -1 : 1);
       _show({
@@ -689,7 +648,6 @@ class BoardSurfaceState extends State<BoardSurface> {
       });
       return;
     }
-    // Several elements scale with their common box, away from its fixed corner.
     final dragged = corners[_corner];
     double scale(double to, double from, double anchor) =>
         from == anchor ? 1 : math.max(0.05, (to - anchor) / (from - anchor));
@@ -777,8 +735,6 @@ class BoardSurfaceState extends State<BoardSurface> {
     unawaited(board.edit(change: changes));
   }
 
-  // Text.
-
   void _startText(Offset at) {
     final hit = board.elements.reversed
         .where(
@@ -861,16 +817,11 @@ class BoardSurfaceState extends State<BoardSurface> {
     text: text,
   );
 
-  // Keys.
-
-  /// The board's keys while it is focused (ADR-0306).
   KeyEventResult key(KeyEvent event) {
-    // While a text box is written, its field takes the keys; esc ends it.
     if (_text != null) {
       if (event is KeyDownEvent &&
           event.logicalKey == LogicalKeyboardKey.escape) {
         _typing.unfocus();
-        // The board takes the keys again, so the next esc leaves it.
         widget.onFocus();
         return KeyEventResult.handled;
       }
@@ -943,8 +894,6 @@ class BoardSurfaceState extends State<BoardSurface> {
     return LayoutBuilder(
       builder: (context, constraints) {
         _size = constraints.biggest;
-        // The text box being written sits above the board's pointer handling, so a click
-        // in it places the caret rather than ending it.
         return Stack(
           children: [
             Positioned.fill(
@@ -1044,8 +993,6 @@ class BoardSurfaceState extends State<BoardSurface> {
   }
 }
 
-/// Claims a board's pointers before the Page's scrolling can: trackpad gestures unless the
-/// board does not move, and other pointers while `claims` says so, as on a focused board.
 class _Claim extends OneSequenceGestureRecognizer {
   bool Function(PointerDownEvent event) claims = (_) => false;
   bool panZooms = true;

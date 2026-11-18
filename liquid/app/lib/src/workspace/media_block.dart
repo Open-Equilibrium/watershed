@@ -19,13 +19,10 @@ import 'follow.dart';
 import 'page_views.dart';
 import 'workspace_state.dart';
 
-/// The largest file a Media Block takes: 5 GiB, as the core caps it (ADR-0305).
 const maxAttachment = 5 << 30;
 
-/// The largest image or PDF Liquid shows, as the bridge's `MAX_SHOWN`; a larger one shows as a file.
 const maxShown = 100 << 20;
 
-/// A file to add: on disk, read in Rust, or pasted bytes.
 class MediaSource {
   const MediaSource.file(this.name, String this.path, this.size) : bytes = null;
   MediaSource.bytes(this.name, Uint8List this.bytes)
@@ -38,26 +35,19 @@ class MediaSource {
   final int size;
 }
 
-/// What the system offers a Media Block: its file dialogs and files' sizes. Tests replace
-/// them.
 abstract final class MediaPlatform {
-  /// Asks for files to add; none if the person cancelled.
   static Future<List<MediaSource>> Function() pickFiles = () async => [
     for (final file in await openFiles())
       MediaSource.file(file.name, file.path, await fileSize(file.path)),
   ];
 
-  /// The size of the file at `path`.
   static Future<int> Function(String path) fileSize = (path) =>
       File(path).length();
 
-  /// Asks where to save a copy of `name`; none if the person cancelled.
   static Future<String?> Function(String name) saveLocation = (name) async =>
       (await getSaveLocation(suggestedName: name))?.path;
 }
 
-/// The media types Liquid knows by a file's extension; the core stores the type with the
-/// Block, so export and sync keep it.
 const _mediaTypes = {
   'png': 'image/png',
   'jpg': 'image/jpeg',
@@ -77,7 +67,6 @@ const _mediaTypes = {
   'mp3': 'audio/mpeg',
 };
 
-/// The images Flutter decodes, which show as images (ADR-0305).
 const _shownImages = {
   'image/png',
   'image/jpeg',
@@ -91,10 +80,8 @@ String _extension(String name) {
   return dot <= 0 ? '' : name.substring(dot + 1).toLowerCase();
 }
 
-/// The media type of a file named `name`; empty if Liquid does not know it.
 String mediaTypeOf(String name) => _mediaTypes[_extension(name)] ?? '';
 
-/// A size as Finder shows it: decimal units, one decimal below 10.
 String sizeLabel(int bytes) {
   const units = ['bytes', 'KB', 'MB', 'GB', 'TB'];
   var value = bytes.toDouble();
@@ -108,33 +95,28 @@ String sizeLabel(int bytes) {
   return '${value.toStringAsFixed(digits)} ${units[unit]}';
 }
 
-/// What kind of file it is, as the line shows it: its extension, or "File".
 String kindLabel(String name, String mediaType) {
   final extension = _extension(name).toUpperCase();
   if (extension.isEmpty) return 'File';
   return mediaType.startsWith('image/') ? '$extension image' : extension;
 }
 
-/// A file going in, shown where its Media Block will be until it is.
 class PendingUpload {
   PendingUpload(this.name, this.size, this.after);
 
   final String name;
   final int size;
 
-  /// The View it follows, or none at the Page's start.
   final String? after;
 
   final written = ValueNotifier<int>(0);
 }
 
-/// The files at `paths` as sources to add; one Liquid cannot read is reported and left out.
 Future<List<MediaSource>> sourcesAt(
   WorkspaceState state,
   Iterable<String> paths,
 ) => sourcesOfPaths(paths, state.report);
 
-/// The files at `paths` as sources to add; one Liquid cannot read goes to `report`.
 Future<List<MediaSource>> sourcesOfPaths(
   Iterable<String> paths, [
   void Function(String problem)? report,
@@ -156,8 +138,6 @@ Future<List<MediaSource>> sourcesOfPaths(
   return sources;
 }
 
-/// Whether `source` fits an attachment; one over 5 GiB is reported, once the writes
-/// before it settled, as their success would take the problem away.
 Future<bool> _fits(WorkspaceState state, MediaSource source) async {
   if (source.size <= maxAttachment) return true;
   await state.settled;
@@ -167,8 +147,6 @@ Future<bool> _fits(WorkspaceState state, MediaSource source) async {
   return false;
 }
 
-/// Adds `source` as an attachment and answers its name, telling `progress` how many
-/// bytes are in so far.
 Future<String> attach(
   WorkspaceState state,
   MediaSource source, [
@@ -185,8 +163,6 @@ Future<String> attach(
   return named!;
 }
 
-/// Adds `sources` as attachments, as a file cell takes them, and answers the files that
-/// went in; a refused one is reported and left out.
 Future<List<BridgeMedia>> attachAll(
   WorkspaceState state,
   List<MediaSource> sources,
@@ -210,8 +186,6 @@ Future<List<BridgeMedia>> attachAll(
   return files;
 }
 
-/// Writes a copy of `file` where the person chooses in the save dialog; the only way an
-/// attachment leaves the Workspace (ADR-0305).
 Future<void> saveCopy(WorkspaceState state, BridgeMedia file) async {
   final path = await MediaPlatform.saveLocation(file.name);
   if (path == null) return;
@@ -225,10 +199,6 @@ Future<void> saveCopy(WorkspaceState state, BridgeMedia file) async {
   }
 }
 
-/// Adds `sources` as Media Blocks after the View `after`, or first, in their order, each
-/// shown with its progress until it is in. A file over 5 GiB is refused before it is read.
-/// The empty line `replacing` goes once the first is in, unless it ends the Page. Answers
-/// the first new View, if any went in.
 Future<String?> addMedia(
   PageViews views,
   List<MediaSource> sources, {
@@ -289,7 +259,6 @@ Future<String?> addMedia(
   return first;
 }
 
-/// A file going in: its name, and how much of it is in (ADR-0305).
 class UploadRow extends StatelessWidget {
   const UploadRow(this.upload, {super.key});
 
@@ -330,7 +299,6 @@ class UploadRow extends StatelessWidget {
   }
 }
 
-/// A file on one line: its icon, its name and, at the line's end, `trailing`.
 class _FileLine extends StatelessWidget {
   const _FileLine({required this.name, required this.trailing});
 
@@ -381,8 +349,6 @@ class _FileLine extends StatelessWidget {
   }
 }
 
-/// A Media Block: an image at its own size, never wider than the column, or a file on one
-/// line; hovering shows Save as… and ⋯ with Delete (ADR-0305).
 class MediaBlock extends StatefulWidget {
   const MediaBlock({super.key, required this.views, required this.view});
 
@@ -396,13 +362,11 @@ class MediaBlock extends StatefulWidget {
 class _MediaBlockState extends State<MediaBlock> {
   BridgeMedia? _media;
 
-  /// The image's bytes and its size in pixels, once read and decoded; none for a file.
   (Uint8List, Size)? _image;
   StreamSubscription<BridgeChange>? _followed;
   bool _hovered = false;
   final _more = OverlayPortalController();
 
-  /// Whether the system's renderer could not read the PDF, which then shows as a file.
   var _unreadable = false;
 
   WorkspaceState get _state => widget.views.state;
@@ -452,7 +416,6 @@ class _MediaBlockState extends State<MediaBlock> {
     }
   }
 
-  /// The image's bytes and pixel size; none if it does not decode, so it shows as a file.
   Future<(Uint8List, Size)?> _decode(String attachment) async {
     try {
       final bytes = await _state.workspace.readAttachment(
@@ -631,7 +594,6 @@ class _MediaBlockState extends State<MediaBlock> {
     final ws = context.ws;
     final media = _media;
     if (media == null) return const SizedBox(height: WsMetrics.lhProse);
-    // A PDF shows its pages and takes ink on them (ADR-0307).
     if (media.mediaType == 'application/pdf' &&
         media.size <= maxShown &&
         !_unreadable) {
@@ -651,7 +613,6 @@ class _MediaBlockState extends State<MediaBlock> {
           final ratio = MediaQuery.devicePixelRatioOf(context);
           return Align(
             alignment: Alignment.centerLeft,
-            // Its ink lies right over it (ADR-0307).
             child: Stack(
               clipBehavior: Clip.none,
               children: [
@@ -662,7 +623,6 @@ class _MediaBlockState extends State<MediaBlock> {
                     key: const Key('media image'),
                     width: width,
                     height: width * pixels.height / pixels.width,
-                    // Decoded at the size shown, so memory stays bounded.
                     cacheWidth: (width * ratio).round(),
                     fit: BoxFit.contain,
                     gaplessPlayback: true,
@@ -711,8 +671,6 @@ class _MediaBlockState extends State<MediaBlock> {
   }
 }
 
-/// Where files dropped on a Page land: a line above or below the Block under the pointer
-/// shows it, and each file becomes a Media Block there (ADR-0305).
 class MediaDropZone extends StatefulWidget {
   const MediaDropZone({
     super.key,
@@ -732,16 +690,13 @@ class MediaDropZone extends StatefulWidget {
 }
 
 class _MediaDropZoneState extends State<MediaDropZone> {
-  /// Whether the files land above the Block, below it, or nowhere here.
   bool? _above;
 
   bool _isAbove(Offset at) => at.dy < (context.size?.height ?? 0) / 2;
 
-  /// The Block's own cell drop, as a Table's file cells take files.
   CellDrop? get _cell => widget.views.cellDrops[widget.view.id];
 
   void _at(Offset at, Offset global) {
-    // A file cell under the pointer takes the files instead of the Page.
     final bool? above = (_cell?.hover(global) ?? false) ? null : _isAbove(at);
     if (above != _above) setState(() => _above = above);
   }
@@ -751,8 +706,6 @@ class _MediaDropZoneState extends State<MediaDropZone> {
     setState(() => _above = null);
   }
 
-  /// Adds the dropped files above or below the Block, as the drop's own position says:
-  /// the line is gone by then, as the drop first ends the drag.
   Future<void> _drop(DropDoneDetails details) async {
     final above = _isAbove(details.localPosition);
     final cell = _cell;

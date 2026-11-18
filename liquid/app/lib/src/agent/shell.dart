@@ -27,6 +27,7 @@ import '../workspace/page_view.dart';
 import '../workspace/workspace_state.dart';
 import 'action_area.dart';
 import 'chat_view.dart';
+import 'move_dialog.dart';
 import 'session_card_area.dart';
 import 'session_card_layout.dart';
 import 'session_card_settings.dart';
@@ -35,9 +36,6 @@ import 'start_page.dart';
 import 'statistics_panel.dart';
 import 'status_bar.dart';
 
-/// The window: the sidebar with the Explorer and the project's sessions, and beside it the open Page
-/// or the agent surface with its tabs, the Diff panel beside the chat, the input area and the status
-/// bar. Every part keeps its position in every tab (guidelines, principle 8).
 class AgentShell extends StatefulWidget {
   const AgentShell({
     super.key,
@@ -55,37 +53,26 @@ class AgentShell extends StatefulWidget {
     this.parseDiff = parsePatchInBackground,
   }) : assert((state == null) == (info == null));
 
-  /// The agent session, if one started.
   final SessionState? state;
   final SessionInfo? info;
 
-  /// The Workspace, or why it did not open.
   final WorkspaceState? workspace;
   final String? workspaceProblem;
 
-  /// Why no agent session started, shown in the sidebar until one does.
   final String? agentProblem;
 
-  /// Theme and text size, which Settings change; without it Settings show only shortcuts.
   final AppearanceController? appearance;
 
-  /// The shortcut settings; Standard, unsaved, without them.
   final ShortcutController? shortcuts;
 
-  /// How the Diff panel shows changes; the defaults, unsaved, without them.
   final DiffSettingsController? diffSettings;
 
-  /// Which rows the session card shows; all of them, unsaved, without it.
   final SessionCardSettingsController? cardSettings;
 
-  /// The agent hosts Settings lists (ADR-0295); without it Settings show no Agent hosts section.
   final AgentHostsController? agentHosts;
 
-  /// Where Settings are: closed (null), or open at a section. The app keeps it while the agent
-  /// session it shows changes; without it, the shell keeps its own.
   final ValueNotifier<SettingsSection?>? settings;
 
-  /// How the Diff panel reads a patch; tests pass the synchronous parser.
   final PatchParser parseDiff;
 
   @override
@@ -93,13 +80,10 @@ class AgentShell extends StatefulWidget {
 }
 
 class _AgentShellState extends State<AgentShell> {
-  /// The composer's controller, which Liquid's writes to the composer replace with a fresh one
-  /// when the input area builds (see [_writeComposer]).
   var _composer = TextEditingController();
   bool _composerReplaced = false;
   final _composerFocus = FocusNode(debugLabel: 'composer');
 
-  /// Keeps the input area's state while it moves into the open tab.
   final _inputKey = GlobalKey(debugLabel: 'input area');
   final _diffOpen = ValueNotifier(false);
   final _card = CardVisibility();
@@ -112,7 +96,6 @@ class _AgentShellState extends State<AgentShell> {
   late final _cardSettings =
       widget.cardSettings ?? SessionCardSettingsController();
 
-  /// The settings whose failed saves the status bar reports.
   late final _saved = <SavedSettings<Object?>?>[
     _shortcuts,
     _diffSettings,
@@ -120,12 +103,8 @@ class _AgentShellState extends State<AgentShell> {
     widget.appearance,
   ];
 
-  /// The latest failed save, which Settings show at their top until ✕ or esc, or until the same
-  /// settings save again.
   final _saveFailure = ValueNotifier<SaveFailure?>(null);
 
-  /// The hooks this shell set on each settings object, which it removes when it goes. A new shell,
-  /// such as one shown for another agent host, sets its own before this one is disposed.
   final _hooks =
       <
         (
@@ -135,11 +114,9 @@ class _AgentShellState extends State<AgentShell> {
         )
       >[];
 
-  /// Stops the session before the app exits; Meta-Harness keeps running after Liquid closes.
   late final _lifecycle = AppLifecycleListener(
     onExitRequested: () async {
       await widget.state?.dispose();
-      // Every edit asked for reaches the replica before Liquid exits.
       await widget.workspace?.drain();
       await widget.workspace?.dispose();
       return AppExitResponse.exit;
@@ -150,10 +127,10 @@ class _AgentShellState extends State<AgentShell> {
   void initState() {
     super.initState();
     _lifecycle;
-    // The kept choice counts every change read, also before the Diff panel opens.
     _diffSettings.addListener(_hideWhitespace);
     _hideWhitespace();
     if (widget.state case final state?) {
+      state.hostLabel = _hostName;
       state.draft.addListener(_applyDraft);
       state.request.addListener(_requestChanged);
       unawaited(state.loadStart());
@@ -174,15 +151,12 @@ class _AgentShellState extends State<AgentShell> {
   }
 
   Future<void> _askProfile() async {
-    // A request open now goes first; `_requestChanged` asks once it is answered.
     if (widget.state?.request.value != null) return;
     final profile = await askProfile(context);
-    // A question closed it before a choice; it asks again once it is answered.
     if (profile == null) return;
     await _shortcuts.change(_shortcuts.value.choose(profile));
   }
 
-  /// Shows a failed save at the top of Settings, or clears the notice once the same settings save.
   void _saveOutcome(Object settings, String? failure) {
     if (failure != null) {
       _saveFailure.value = (settings: settings, text: failure);
@@ -191,19 +165,15 @@ class _AgentShellState extends State<AgentShell> {
     }
   }
 
-  /// Settings replace the main area; closing them gives the keys back to the shell.
   void _toggleSettings() {
     _settings.value = _settings.value == null ? _firstSection : null;
     if (_settings.value == null) _focus.requestFocus();
   }
 
-  /// Appearance opens first where the app has it, else Shortcuts.
   SettingsSection get _firstSection => widget.appearance != null
       ? SettingsSection.appearance
       : SettingsSection.shortcuts;
 
-  /// A request closes Settings and any menu or dialog, which would cover it or take the keys
-  /// meant for it; once none is left, a first start asks for the profile again.
   void _requestChanged() {
     if (widget.state!.request.value != null) {
       _settings.value = null;
@@ -213,24 +183,18 @@ class _AgentShellState extends State<AgentShell> {
     }
   }
 
-  /// Shows `value` in the composer as Liquid's text; its field takes a fresh controller when the
-  /// input area builds, so ⌘Z cannot bring back what it replaced.
   void _writeComposer(TextEditingValue value) {
     if (writeText(_composer, value)) setState(() => _composerReplaced = true);
   }
 
-  /// Clears the composer after a send, so ⌘Z cannot bring the message back.
   void _sent() => _writeComposer(TextEditingValue.empty);
 
-  /// Text handed back to the input area goes before what the user typed meanwhile, which stays.
   void _applyDraft() {
     final state = widget.state!;
     final draft = state.draft.value;
     if (draft == null) return;
     final typed = _composer.text;
     final bare = typed.trim();
-    // The typed text comes back as it was typed; only the emptiness and equality checks trim
-    // it, and the same message typed again keeps its own form.
     final text = bare.isEmpty
         ? draft
         : bare == draft.trim()
@@ -242,11 +206,9 @@ class _AgentShellState extends State<AgentShell> {
         selection: TextSelection.collapsed(offset: text.length),
       ),
     );
-    // Taken, so the same text handed back again arrives again.
     state.draft.value = null;
   }
 
-  /// Reads the changes as the Diff settings say, which own the choice.
   void _hideWhitespace() =>
       widget.state?.hideWhitespace.value = _diffSettings.value.hideWhitespace;
 
@@ -275,27 +237,29 @@ class _AgentShellState extends State<AgentShell> {
     super.dispose();
   }
 
-  /// A Page opened from anywhere shows in place of Settings.
   void _pageOpened() {
     if (widget.workspace?.open.value != null) _settings.value = null;
   }
 
-  /// Shows the agent session in place of the open Page.
+  String _hostName(String? address) =>
+      widget.agentHosts?.value.hosts
+          .where((host) => host.address == address)
+          .firstOrNull
+          ?.name ??
+      widget.state?.hostNameOf(address) ??
+      (address ?? thisMacName);
+
   void _showSession() {
     _settings.value = null;
     widget.workspace?.open.value = null;
   }
 
-  /// Opens the Diff panel beside the Chat, showing `scope`; the Changes row and a turn's Open diff
-  /// do. An open panel switches to `scope` too.
   void _openDiff(DiffScope scope) {
     unawaited(widget.state!.showTurns(scope));
     _showSession();
     _diffOpen.value = true;
   }
 
-  /// Opens or closes the Diff panel, the keys and its close button alike; closing gives the keys
-  /// back to the shell.
   void _toggleDiff() {
     _showSession();
     if (_diffOpen.value) {
@@ -306,14 +270,11 @@ class _AgentShellState extends State<AgentShell> {
     }
   }
 
-  /// Opens or closes the statistics panel over the session's card corner.
   void _toggleStatistics(SessionState state) {
     _showSession();
     state.statisticsOpen.value = !state.statisticsOpen.value;
   }
 
-  /// Shows or hides the session card where it sits: beside the Chat, or as a popover. An opened
-  /// card takes keyboard focus, as T3 Code's details do.
   void _toggleCard() {
     _showSession();
     _card.toggle();
@@ -324,20 +285,17 @@ class _AgentShellState extends State<AgentShell> {
     }
   }
 
-  /// Closes the popover and gives focus back to its button, as Escape does.
   void _closeCardPopover() {
     _card.closePopover();
     _cardToggleFocus.requestFocus();
   }
 
-  /// Starts a new session in the chat, ready to describe the task.
   void _newSession() {
     _showSession();
     _composerFocus.requestFocus();
     unawaited(widget.state!.newSession());
   }
 
-  /// A new Page in the open Page's area, or else in the first one (approved Pages mockups).
   void _newPage() {
     final workspace = widget.workspace!;
     final area =
@@ -347,8 +305,6 @@ class _AgentShellState extends State<AgentShell> {
     unawaited(workspace.newPage(area).catchError((_) {}));
   }
 
-  /// What each app-wide command does, in the menu bar and from its keys alike; the agent's
-  /// commands only with a session, the Workspace's only with a Workspace.
   late final Map<Command, VoidCallback> _actions = {
     if (widget.state case final state?) ...{
       Command.chat: _showSession,
@@ -357,7 +313,6 @@ class _AgentShellState extends State<AgentShell> {
       Command.statistics: () => _toggleStatistics(state),
       Command.focusInput: () {
         _showSession();
-        // A tab that Settings just gave way to takes the keys when it opens, after this action.
         unawaited(
           WidgetsBinding.instance.endOfFrame.then(
             (_) => _composerFocus.requestFocus(),
@@ -371,8 +326,6 @@ class _AgentShellState extends State<AgentShell> {
     Command.settings: _toggleSettings,
   };
 
-  /// App-wide shortcuts in the macOS menu bar, where they stay out of the GUI;
-  /// the menu shows ⌘ keys, the bindings below handle every key on every platform.
   Widget _menus(ShortcutSettings keys, Widget child) {
     if (defaultTargetPlatform != TargetPlatform.macOS) return child;
     PlatformMenuItem item(Command command) => PlatformMenuItem(
@@ -455,7 +408,6 @@ class _AgentShellState extends State<AgentShell> {
           child: Focus(
             focusNode: _focus,
             autofocus: true,
-            // The whole window shows no focus, so Tab passes over it.
             skipTraversal: true,
             child: Material(
               color: ws.canvas,
@@ -471,6 +423,16 @@ class _AgentShellState extends State<AgentShell> {
                     onSettings: _toggleSettings,
                     onNewSession: _newSession,
                     onShowSession: _showSession,
+                    onMove: widget.state == null
+                        ? null
+                        : (listed) => unawaited(
+                            moveSession(
+                              context,
+                              widget.state!,
+                              listed,
+                              nameOf: _hostName,
+                            ),
+                          ),
                   ),
                   Expanded(
                     child: ListenableBuilder(
@@ -505,7 +467,6 @@ class _AgentShellState extends State<AgentShell> {
                           );
                         }
                         final open = widget.workspace?.open.value;
-                        // The agent surface stays built behind a Page, so it keeps its place.
                         return IndexedStack(
                           index: open == null ? 0 : 1,
                           sizing: StackFit.expand,
@@ -541,8 +502,6 @@ class _AgentShellState extends State<AgentShell> {
     );
   }
 
-  /// The agent surface: header, tabs, the Chat beside the Diff panel with the input area and
-  /// the session card, and the status bar.
   Widget _agentSurface(
     BuildContext context,
     SessionState state,
@@ -566,7 +525,6 @@ class _AgentShellState extends State<AgentShell> {
                 child: ValueListenableBuilder(
                   valueListenable: _diffOpen,
                   builder: (context, diffOpen, _) {
-                    // The input area stays with the Chat, beside the Diff panel.
                     final input = KeyedSubtree(
                       key: _inputKey,
                       child: ActionArea(
@@ -602,7 +560,6 @@ class _AgentShellState extends State<AgentShell> {
                   },
                 ),
               ),
-              // The statistics panel takes the card's corner over the Chat.
               Positioned(
                 top: WsMetrics.space4,
                 right: WsMetrics.space4,
@@ -641,8 +598,6 @@ class _AgentShellState extends State<AgentShell> {
   }
 }
 
-/// The session's title with its project and model as chips, and at the right the button that
-/// shows or hides the session card.
 class _Header extends StatelessWidget {
   const _Header({
     required this.state,
@@ -719,8 +674,6 @@ class _Header extends StatelessWidget {
   }
 }
 
-/// The header's button that shows or hides the session card, as T3 Code's sliders button does. It
-/// shares the card's tap group, so a press here toggles the card instead of closing it first.
 class _DetailsButton extends StatelessWidget {
   const _DetailsButton({
     required this.card,
@@ -776,7 +729,6 @@ class _DetailsButton extends StatelessWidget {
   }
 }
 
-/// The tab strip: the Chat, the session's only tab.
 class _Tabs extends StatelessWidget {
   const _Tabs();
 
@@ -789,7 +741,6 @@ class _Tabs extends StatelessWidget {
       decoration: BoxDecoration(
         border: Border(bottom: BorderSide(color: ws.border)),
       ),
-      // Which tab is open is told to assistive technology, not only drawn.
       child: Semantics(
         selected: true,
         inMutuallyExclusiveGroup: true,
@@ -812,8 +763,6 @@ class _Tabs extends StatelessWidget {
   }
 }
 
-/// A command's key, shown on the corner of its control while the reveal key is held. The menu
-/// bar shows the ⌘ keys itself, so they stay out of the GUI.
 class CommandHint extends StatelessWidget {
   const CommandHint({super.key, required this.command, required this.child});
 
@@ -829,7 +778,6 @@ class CommandHint extends StatelessWidget {
         label == keys.menu(command)?.label) {
       return child;
     }
-    // The hint sits on the control's corner, so the control keeps its size.
     return Stack(
       clipBehavior: Clip.none,
       children: [

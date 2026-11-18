@@ -2,7 +2,6 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
-/// One part of a [SegmentBar]: its count, its colour, and whether it is hatched (running).
 class BarSegment {
   const BarSegment(this.value, this.color, {this.hatched = false});
 
@@ -11,8 +10,6 @@ class BarSegment {
   final bool hatched;
 }
 
-/// The parts of a whole drawn in order, each as wide as its share; a part that has any count
-/// keeps at least 2 px so it stays visible. Zero parts draw nothing.
 class SegmentBar extends StatelessWidget {
   const SegmentBar({super.key, required this.segments, this.height = 3});
 
@@ -59,7 +56,6 @@ class _SegmentPainter extends CustomPainter {
     }
   }
 
-  /// Diagonal stripes, as a running tool call is drawn.
   static void _hatch(Canvas canvas, RRect rect, Color color) {
     canvas.save();
     canvas.clipRRect(rect);

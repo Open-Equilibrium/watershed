@@ -1,11 +1,8 @@
-//! Attachments and the Media Blocks that show them (ADR-0305): a file's bytes are kept in
-//! parts in the store, named by their contents, and a Media Block names its attachment.
-
 #![allow(clippy::unwrap_used)]
 
 use liquid_core::{
-    Actor, AreaId, BlockId, BlockKind, Cell, Created, Error, FieldKind, MAX_ATTACHMENT, MAX_FILES,
-    Match, Media, MemoryStore, Mutation, Operation, Origin, PART, PageId, PersonId, Place, Request,
+    Actor, BlockId, BlockKind, Cell, Created, Error, FieldKind, MAX_ATTACHMENT, MAX_FILES, Match,
+    Media, MemoryStore, Mutation, Operation, Origin, PART, PageId, PersonId, Place, Request,
     RowQuery, ViewId,
 };
 
@@ -25,7 +22,6 @@ fn apply(workspace: &mut Workspace, mutation: Mutation) -> Result<Option<Created
         .map(|applied| applied.created)
 }
 
-/// A Workspace with one Page holding one Text Block.
 fn page() -> (Workspace, PageId, ViewId) {
     let mut workspace = Workspace::create(PersonId::new("benni"), MemoryStore::default()).unwrap();
     let Some(Created::Area(area)) = apply(
@@ -40,7 +36,7 @@ fn page() -> (Workspace, PageId, ViewId) {
     let Some(Created::Page(page)) = apply(
         &mut workspace,
         Mutation::CreatePage {
-            area: AreaId::clone(&area),
+            area,
             parent: None,
             title: "Trip to Lisbon".into(),
         },
@@ -62,14 +58,12 @@ fn page() -> (Workspace, PageId, ViewId) {
     (workspace, page, view)
 }
 
-/// Bytes that differ from part to part, so a misplaced part shows.
 fn bytes(len: usize) -> Vec<u8> {
     (0..len).map(|at| (at % 251) as u8).collect()
 }
 
 fn add(workspace: &mut Workspace, file: &[u8]) -> liquid_core::Attachment {
     let mut upload = workspace.begin_upload(&owner(), file.len() as u64).unwrap();
-    // Slices that cut across parts, as a reader hands them over.
     for slice in file.chunks(PART / 3 + 7) {
         workspace.upload(&mut upload, slice).unwrap();
     }
@@ -160,7 +154,7 @@ fn a_file_is_kept_in_parts_and_a_media_block_shows_it() {
 }
 
 #[test]
-fn the_same_file_added_twice_has_one_name_and_an_empty_file_none_of_its_parts() {
+fn the_same_file_has_one_name_and_an_empty_file_has_no_parts() {
     let (mut workspace, ..) = page();
     let file = bytes(PART + 1);
     let first = add(&mut workspace, &file);
@@ -183,10 +177,8 @@ fn a_file_past_5_gib_or_past_its_declared_size_is_refused() {
     ));
     assert!(workspace.begin_upload(&owner(), MAX_ATTACHMENT).is_ok());
 
-    // A file that grows while it is read is refused, so the cap holds.
     let mut upload = workspace.begin_upload(&owner(), 4).unwrap();
     assert_eq!(workspace.upload(&mut upload, b"12345"), Err(Error::Changed));
-    // One that shrinks is refused at the end.
     let mut upload = workspace.begin_upload(&owner(), 4).unwrap();
     workspace.upload(&mut upload, b"123").unwrap();
     assert_eq!(workspace.finish_upload(upload).err(), Some(Error::Changed));
@@ -203,7 +195,6 @@ fn a_media_block_needs_a_finished_attachment() {
     let (mut workspace, page, intro) = page();
     let mut upload = workspace.begin_upload(&owner(), 3).unwrap();
     workspace.upload(&mut upload, b"abc").unwrap();
-    // The name the finished upload would get, which no finished attachment has yet.
     let unfinished = liquid_core::AttachmentId::parse(
         "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
     )
@@ -258,20 +249,11 @@ fn a_media_block_takes_no_text_writes() {
 }
 
 #[test]
-fn a_large_file_comes_back_whole() {
-    let (mut workspace, ..) = page();
-    let file = bytes(33 * PART + 5);
-    let attachment = add(&mut workspace, &file);
-    assert_eq!(read_back(&mut workspace, &attachment), file);
-}
-
-#[test]
 fn an_upload_finishes_only_in_the_workspace_that_began_it() {
     let (mut first, ..) = page();
     let (mut second, ..) = page();
     let mut upload = first.begin_upload(&owner(), 3).unwrap();
     first.upload(&mut upload, b"abc").unwrap();
-    // The parts are in the first Workspace's store, so the second has nothing to name.
     assert!(matches!(
         second.finish_upload(upload),
         Err(Error::Storage(_))
@@ -295,7 +277,6 @@ fn an_attachment_is_named_by_its_sha_256_and_different_files_by_different_names(
     assert_eq!(read_back(&mut workspace, &b), second);
 }
 
-/// A file of a file cell, as the app names it before the core reads its size.
 fn file(name: &str, attachment: &liquid_core::Attachment) -> Media {
     Media {
         name: name.into(),

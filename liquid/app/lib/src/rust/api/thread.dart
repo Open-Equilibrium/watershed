@@ -10,15 +10,9 @@ import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
 // These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
 
-/// The context window the latest request filled.
 class BridgeContext {
-  /// Tokens it holds, when known.
   final PlatformInt64? tokens;
-
-  /// Tokens it can hold.
   final PlatformInt64 window;
-
-  /// Where the agent compacts it, when known.
   final PlatformInt64? compactsAt;
 
   const BridgeContext({this.tokens, required this.window, this.compactsAt});
@@ -36,15 +30,9 @@ class BridgeContext {
           compactsAt == other.compactsAt;
 }
 
-/// What one model used.
 class BridgeModelUsage {
-  /// The model.
   final String model;
-
-  /// Its tokens.
   final BridgeUsage usage;
-
-  /// Requests that reported usage.
   final PlatformInt64 responses;
 
   const BridgeModelUsage({
@@ -66,18 +54,10 @@ class BridgeModelUsage {
           responses == other.responses;
 }
 
-/// The session at one stream position (ADR-0290).
 class BridgeSnapshot {
-  /// Events up to this sequence are contained; Liquid ignores them and applies later ones.
   final PlatformInt64 sequence;
-
-  /// The turns, oldest first, without reverted ones.
   final List<BridgeTurn> turns;
-
-  /// The Chat's items in order.
   final List<BridgeTranscriptItem> transcript;
-
-  /// Requests the agent waits on.
   final List<BridgeRequest> requests;
 
   const BridgeSnapshot({
@@ -105,21 +85,11 @@ class BridgeSnapshot {
           requests == other.requests;
 }
 
-/// A session's exact statistics (ADR-0279, ADR-0293).
 class BridgeStatistics {
-  /// What each model used, largest first.
   final List<BridgeModelUsage> models;
-
-  /// Each tool's calls, most first.
   final List<BridgeToolCalls> tools;
-
-  /// The turns, oldest first.
   final List<BridgeTurnStatistics> turns;
-
-  /// When the first turn started.
   final PlatformInt64? startedMs;
-
-  /// When the last turn ended.
   final PlatformInt64? endedMs;
 
   const BridgeStatistics({
@@ -150,24 +120,12 @@ class BridgeStatistics {
           endedMs == other.endedMs;
 }
 
-/// The calls of one tool, by outcome.
 class BridgeToolCalls {
-  /// The tool.
   final String name;
-
-  /// Calls that succeeded.
   final PlatformInt64 succeeded;
-
-  /// Calls that failed.
   final PlatformInt64 failed;
-
-  /// Calls that ended without a result.
   final PlatformInt64 cancelled;
-
-  /// Calls still running.
   final PlatformInt64 open;
-
-  /// Time its calls took, when T3 timed any.
   final PlatformInt64? durationMs;
 
   const BridgeToolCalls({
@@ -201,15 +159,9 @@ class BridgeToolCalls {
           durationMs == other.durationMs;
 }
 
-/// One item of the Chat with its text.
 class BridgeTranscriptItem {
-  /// The item.
   final BridgeItem item;
-
-  /// Its turn.
   final PlatformInt64 turn;
-
-  /// Its text or tool output.
   final String text;
 
   const BridgeTranscriptItem({
@@ -231,33 +183,15 @@ class BridgeTranscriptItem {
           text == other.text;
 }
 
-/// One turn.
 class BridgeTurn {
-  /// Its number, which also names it in diffs and reverts.
   final PlatformInt64 number;
-
-  /// How it stands.
   final BridgeTurnStatus status;
-
-  /// Its prompt.
   final String prompt;
-
-  /// When it started, in Unix milliseconds.
   final PlatformInt64? startedMs;
-
-  /// When it ended.
   final PlatformInt64? endedMs;
-
-  /// Files its end checkpoint changed.
   final PlatformInt64 files;
-
-  /// Added lines.
   final PlatformInt64 added;
-
-  /// Removed lines.
   final PlatformInt64 removed;
-
-  /// Whether its end checkpoint is ready, so its diff and revert work.
   final bool checkpoint;
 
   const BridgeTurn({
@@ -300,27 +234,13 @@ class BridgeTurn {
           checkpoint == other.checkpoint;
 }
 
-/// One turn's statistics.
 class BridgeTurnStatistics {
-  /// Its number.
   final PlatformInt64 number;
-
-  /// The first line of its prompt.
   final String prompt;
-
-  /// When it started.
   final PlatformInt64? startedMs;
-
-  /// When it ended.
   final PlatformInt64? endedMs;
-
-  /// What each model used.
   final List<BridgeModelUsage> models;
-
-  /// Time its tools took.
   final PlatformInt64? toolMs;
-
-  /// Tool calls that failed.
   final PlatformInt64 failed;
 
   const BridgeTurnStatistics({
@@ -357,17 +277,4 @@ class BridgeTurnStatistics {
           failed == other.failed;
 }
 
-/// How a turn stands.
-enum BridgeTurnStatus {
-  /// Queued behind the running turn.
-  queued,
-
-  /// Running.
-  running,
-
-  /// Ended normally.
-  completed,
-
-  /// Stopped or failed.
-  aborted,
-}
+enum BridgeTurnStatus { queued, running, completed, aborted }

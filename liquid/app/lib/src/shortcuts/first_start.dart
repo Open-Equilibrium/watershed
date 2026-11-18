@@ -5,8 +5,6 @@ import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
 import 'keymap.dart';
 
-/// Asks once which profile to start with. Nothing is preselected;
-/// esc keeps Standard. None when something else closed the question before a choice.
 Future<Profile?> askProfile(BuildContext context) => showDialog<Profile>(
   context: context,
   barrierDismissible: false,
@@ -22,7 +20,6 @@ class _FirstStart extends StatelessWidget {
     void choose(Profile profile) => Navigator.of(context).pop(profile);
     return CallbackShortcuts(
       bindings: {escapeKey: () => choose(Profile.standard)},
-      // A focused node inside the dialog, so esc reaches the binding above.
       child: Focus(
         autofocus: true,
         child: Dialog(
@@ -98,7 +95,6 @@ class _FirstStart extends StatelessWidget {
   }
 }
 
-/// One profile to choose; the whole card takes the click, Tab and Enter.
 class _Choice extends StatelessWidget {
   const _Choice({
     required this.cap,

@@ -13,11 +13,11 @@ import 'package:liquid/src/theme/theme.dart';
 import 'fake_backend.dart';
 
 const info = SessionInfo(project: 'acme-api');
+const macos = 'macos';
 
 void main() {
   late FakeProject project;
 
-  /// Shows an open session with `settings`, its keys as the person configured them.
   Future<void> show(WidgetTester tester, ShortcutSettings settings) async {
     await tester.binding.setSurfaceSize(const Size(1600, 900));
     project = FakeProject();
@@ -36,27 +36,21 @@ void main() {
     await tester.pumpAndSettle();
   }
 
-  /// Presses `key` while the Liquid key is held; whether Liquid took the key.
   Future<bool> liquid(WidgetTester tester, LogicalKeyboardKey key) async {
-    await tester.sendKeyDownEvent(liquidKey, platform: 'macos');
-    final handled = await tester.sendKeyEvent(key, platform: 'macos');
-    await tester.sendKeyUpEvent(liquidKey, platform: 'macos');
+    await tester.sendKeyDownEvent(liquidKey, platform: macos);
+    final handled = await tester.sendKeyEvent(key, platform: macos);
+    await tester.sendKeyUpEvent(liquidKey, platform: macos);
     await tester.pumpAndSettle();
     return handled;
   }
 
-  /// Presses `key` with ⌘, as the macOS keyboard sends it.
   Future<void> command(WidgetTester tester, LogicalKeyboardKey key) async {
-    await tester.sendKeyDownEvent(
-      LogicalKeyboardKey.metaLeft,
-      platform: 'macos',
-    );
-    await tester.sendKeyEvent(key, platform: 'macos');
-    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft, platform: 'macos');
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft, platform: macos);
+    await tester.sendKeyEvent(key, platform: macos);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft, platform: macos);
     await tester.pumpAndSettle();
   }
 
-  /// Asks the agent a question with one text answer, in place of the composer.
   Future<void> askInput(WidgetTester tester, String text) async {
     project.session.emit(
       event(
@@ -66,7 +60,6 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    // A question takes keys once it could be read.
     await tester.pump(const Duration(milliseconds: 500));
   }
 
@@ -89,19 +82,16 @@ void main() {
 
       await tester.sendKeyDownEvent(
         LogicalKeyboardKey.metaLeft,
-        platform: 'macos',
+        platform: macos,
       );
       await tester.pump(const Duration(milliseconds: 700));
       expect(find.text('⇪1'), findsNothing);
-      await tester.sendKeyUpEvent(
-        LogicalKeyboardKey.metaLeft,
-        platform: 'macos',
-      );
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft, platform: macos);
 
-      await tester.sendKeyDownEvent(liquidKey, platform: 'macos');
+      await tester.sendKeyDownEvent(liquidKey, platform: macos);
       await tester.pump(const Duration(milliseconds: 700));
       expect(find.text('⇪1'), findsOneWidget);
-      await tester.sendKeyUpEvent(liquidKey, platform: 'macos');
+      await tester.sendKeyUpEvent(liquidKey, platform: macos);
       await tester.pump();
       expect(find.text('⇪1'), findsNothing);
     },
@@ -136,7 +126,7 @@ void main() {
     await askInput(tester, 'Commit message');
 
     await tester.enterText(find.byKey(const Key('answer')), 'draft');
-    await tester.sendKeyEvent(LogicalKeyboardKey.enter, platform: 'macos');
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter, platform: macos);
     await tester.pumpAndSettle();
     expect(project.session.calls, ['answer q1 name=draft']);
   });
@@ -153,8 +143,7 @@ void main() {
     );
     await askInput(tester, 'Your name');
     await tester.enterText(find.byKey(const Key('answer')), 'Bob');
-    // An unbound ⏎ reaches the text field, which reports it as its done action.
-    await tester.sendKeyEvent(LogicalKeyboardKey.enter, platform: 'macos');
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter, platform: macos);
     await tester.testTextInput.receiveAction(TextInputAction.done);
     await tester.pumpAndSettle();
     expect(project.session.calls, isEmpty);

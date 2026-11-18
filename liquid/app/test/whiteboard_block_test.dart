@@ -14,7 +14,6 @@ import 'package:liquid/src/workspace/workspace_state.dart';
 import 'fake_workspace.dart';
 import 'page_kit.dart';
 
-/// Whiteboard Blocks (ADR-0306).
 void main() {
   final kit = PageKit();
 
@@ -29,13 +28,11 @@ void main() {
 
   Finder board() => find.byKey(const Key('whiteboard'));
 
-  /// The board's elements as the fake Workspace keeps them.
   List<BridgeElement> stored() => kit.fake.whiteboards.values.single.elements;
 
   BridgeDrawingEdit lastEdit() =>
       kit.applied(BridgeMutationKind.editDrawing).last.drawing!;
 
-  /// A screen point at board point `at`, the canvas starting at board (-20, -20).
   Offset screen(WidgetTester tester, Offset at) =>
       tester.getTopLeft(find.byKey(const Key('whiteboard canvas'))) +
       at +
@@ -46,7 +43,6 @@ void main() {
     await tester.pumpAndSettle();
   }
 
-  /// Drags with the left button along board points.
   Future<void> draw(
     WidgetTester tester,
     List<Offset> path, {
@@ -318,10 +314,8 @@ void main() {
     );
     await gesture.moveTo(screen(tester, const Offset(150, 120)));
     await tester.pump();
-    // A read another write started lands while the eraser is down.
     await kit.boardOf(tester).read();
     await tester.pump();
-    // Around, above the stroke, to cut it again further on.
     await gesture.moveTo(screen(tester, const Offset(150, 60)));
     await gesture.moveTo(screen(tester, const Offset(250, 60)));
     await gesture.moveTo(screen(tester, const Offset(250, 120)));
@@ -417,7 +411,6 @@ void main() {
     await tester.tapAt(screen(tester, const Offset(120, 120)));
     await tester.pumpAndSettle();
     await tester.enterText(find.byKey(const Key('whiteboard text')), 'Lisbon');
-    // A click in the box places the caret and keeps the box open.
     await tester.tap(find.byKey(const Key('whiteboard text')));
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('whiteboard text')), findsOneWidget);
@@ -548,7 +541,6 @@ void main() {
     final shown = kit.boardOf(tester);
     await tester.tap(find.byKey(const Key('whiteboard full screen')));
     await tester.pumpAndSettle();
-    // Another device deleted it.
     kit.fake.whiteboards.clear();
     await shown.read();
     await tester.pumpAndSettle();

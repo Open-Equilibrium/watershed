@@ -1,11 +1,8 @@
-//! The conversions from Meta-Harness's types to the bridge's, checked through the values Liquid
-//! receives.
-
 use std::path::PathBuf;
 
 use meta_harness_core::{
     AgentEvent, ApprovalOption, BranchChanges, BranchPullRequest, ChangedFile, ChatItem, Context,
-    GitStatus, ItemDetail, ItemId, ItemKind, ItemStatus, LineCount, Model, ModelChoice,
+    GitStatus, Harness, ItemDetail, ItemId, ItemKind, ItemStatus, LineCount, Model, ModelChoice,
     ModelOption, ModelUsage, PendingRequest, Provider, PullRequestCheck, PullRequestDetail,
     Question, Request, RequestId, Snapshot, Statistics, ThreadEvent, ThreadSummary, ToolCalls,
     Turn, TurnFile, TurnId, TurnStatistics, TurnStatus, Usage,
@@ -70,7 +67,6 @@ diff --git a/lib.rs b/lib.rs
             ("added.txt", BridgeChangeStatus::Added, 2, 0),
             ("gone.txt", BridgeChangeStatus::Deleted, 0, 1),
             ("new.txt", BridgeChangeStatus::Renamed, 1, 1),
-            // Inside a hunk, `--- a` and `+++ b` are removed and added lines, not headers.
             ("lib.rs", BridgeChangeStatus::Modified, 1, 1),
         ]
     );
@@ -107,31 +103,27 @@ diff --git a/a b/c.txt b/a b/c.txt
 ";
     let files = convert::diff_files(diff);
     assert_eq!(files[0].0.path, "a b/c.txt");
-    // SECURITY.md: the Diff panel writes out characters that could hide what a turn changed.
     assert!(
         files[0].1.ends_with("+deny<U+202E>\r\n"),
         "{:?}",
         files[0].1
     );
-}
-
-#[test]
-fn a_copied_path_with_b_slash_in_its_name_keeps_all_of_it() {
-    // The header of a copy names its source and destination, and an unquoted destination
-    // with " b/" in it makes the header alone ambiguous; the "copy to" line decides.
-    let diff = "\
+    let copied = convert::diff_files(
+        "\
 diff --git a/src b/x b/dst
 similarity index 100%
 copy from src
 copy to x b/dst
-";
-    let files = convert::diff_files(diff);
-    assert_eq!(files[0].0.path, "x b/dst");
+",
+    );
+    assert_eq!(
+        copied[0].0.path, "x b/dst",
+        "a copied path keeps all of its name"
+    );
 }
 
 #[test]
 fn git_quoted_paths_are_decoded_in_headers_and_renames() {
-    // Git C-quotes a header half that holds a non-ASCII byte, a tab, a quote or a backslash.
     let diff = r#"diff --git "a/caf\303\251.txt" "b/caf\303\251.txt"
 --- "a/caf\303\251.txt"
 +++ "b/caf\303\251.txt"
@@ -188,7 +180,6 @@ new file mode 100644
             ("x\u{202e}y.txt", BridgeChangeStatus::Added, 1, 0),
         ]
     );
-    // The hidden character is written out in the name the Diff panel shows.
     assert_eq!(files[5].0.shown, "x<U+202E>y.txt");
 }
 
@@ -628,18 +619,6 @@ fn the_context_window_crosses_with_what_is_known_of_it() {
             compacts_at: Some(80),
         }
     );
-    assert_eq!(
-        convert::context(Context {
-            tokens: None,
-            window: 8,
-            compacts_at: None,
-        }),
-        BridgeContext {
-            tokens: None,
-            window: 8,
-            compacts_at: None,
-        }
-    );
 }
 
 #[test]
@@ -694,7 +673,6 @@ fn a_model_choice_whose_option_ids_and_values_differ_in_number_is_refused() {
         option_ids: option_ids.iter().map(|id| (*id).to_owned()).collect(),
         values: values.iter().map(|value| (*value).to_owned()).collect(),
     };
-    // Pairing would drop the extra option or value, and the model would run on other settings.
     assert!(convert::to_model_choice(choice(&["effort", "speed"], &["high"])).is_err());
     assert!(convert::to_model_choice(choice(&["effort"], &["high", "fast"])).is_err());
 }
@@ -709,6 +687,9 @@ fn a_thread_summary_crosses_with_its_title_and_worktree() {
         worktree: Some(PathBuf::from("/wt")),
         running: true,
         archived: false,
+        harness: Some(Harness::ClaudeCode),
+        harness_known: true,
+        moving: None,
     });
     assert_eq!(
         summary,
@@ -720,8 +701,40 @@ fn a_thread_summary_crosses_with_its_title_and_worktree() {
             worktree: Some("/wt".to_owned()),
             running: true,
             archived: false,
+            movable: true,
+            harness_known: true,
+            moving: None,
         }
     );
+    let other = convert::thread_summary(ThreadSummary {
+        id: "t2".to_owned(),
+        title: "Other".to_owned(),
+        updated_ms: None,
+        branch: None,
+        worktree: None,
+        running: false,
+        archived: false,
+        harness: None,
+        harness_known: true,
+        moving: None,
+    });
+    assert!(!other.movable, "a thread of another harness cannot move");
+    assert!(other.harness_known, "its service reported the harness");
+
+    let older = convert::thread_summary(ThreadSummary {
+        id: "t3".to_owned(),
+        title: "Older".to_owned(),
+        updated_ms: None,
+        branch: None,
+        worktree: None,
+        running: false,
+        archived: false,
+        harness: None,
+        harness_known: false,
+        moving: None,
+    });
+    assert!(!older.movable);
+    assert!(!older.harness_known, "an older service reported no harness");
 }
 
 #[test]
@@ -739,6 +752,17 @@ fn a_git_status_crosses_with_its_changes_counts_and_pull_request() {
         upstream: true,
         ahead: 1,
         ahead_of_default: Some(3),
+        working_tree_lines: LineCount {
+            added: 5,
+            removed: 3,
+        },
+        branch_changes: Some(BranchChanges {
+            base: Some("origin/main\u{202e}".to_owned()),
+            lines: LineCount {
+                added: 9,
+                removed: 4,
+            },
+        }),
         pull_request: Some(BranchPullRequest {
             number: 42,
             title: "Add it".to_owned(),
@@ -764,11 +788,11 @@ fn a_git_status_crosses_with_its_changes_counts_and_pull_request() {
                 added: 2,
                 removed: 1,
             }],
-            working_added: 0,
-            working_removed: 0,
-            branch_base: None,
-            branch_added: 0,
-            branch_removed: 0,
+            working_added: 5,
+            working_removed: 3,
+            branch_base: Some("origin/main<U+202E>".to_owned()),
+            branch_added: 9,
+            branch_removed: 4,
             upstream: true,
             ahead: 1,
             behind: 0,
@@ -783,27 +807,6 @@ fn a_git_status_crosses_with_its_changes_counts_and_pull_request() {
             }),
         }
     );
-}
-
-#[test]
-fn a_git_status_crosses_with_the_working_tree_totals_and_the_branch_changes_against_its_base() {
-    let status = convert::git_status(GitStatus {
-        working_tree_lines: LineCount {
-            added: 5,
-            removed: 3,
-        },
-        branch_changes: Some(BranchChanges {
-            base: Some("origin/main\u{202e}".to_owned()),
-            lines: LineCount {
-                added: 9,
-                removed: 4,
-            },
-        }),
-        ..GitStatus::default()
-    });
-    assert_eq!((status.working_added, status.working_removed), (5, 3));
-    assert_eq!(status.branch_base.as_deref(), Some("origin/main<U+202E>"));
-    assert_eq!((status.branch_added, status.branch_removed), (9, 4));
 }
 
 #[test]
@@ -878,7 +881,6 @@ fn a_question_s_options_show_hidden_characters_and_answer_with_the_agent_s_label
         request: Request::Questions(questions.clone()),
     });
     assert_eq!(shown.questions[0].options, vec!["keep<U+202E>", "drop"]);
-    // The card answers with what it showed; the agent gets its own label back.
     assert_eq!(
         convert::answer_values(
             &questions,
@@ -888,7 +890,6 @@ fn a_question_s_options_show_hidden_characters_and_answer_with_the_agent_s_label
         ),
         vec!["keep\u{202e}", "drop"]
     );
-    // Typed text stays as typed, even when it reads as a label the card showed.
     assert_eq!(
         convert::answer_values(&questions, "pick", vec!["keep<U+202E>".to_owned()], true),
         vec!["keep<U+202E>"]

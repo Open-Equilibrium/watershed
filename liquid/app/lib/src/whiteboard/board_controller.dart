@@ -12,13 +12,10 @@ import '../workspace/workspace_state.dart';
 import 'board.dart';
 import 'document_pages.dart';
 
-/// The five tools, as GoodNotes has them (ADR-0306).
 enum BoardTool { lasso, pen, highlighter, eraser, shape, text }
 
-/// What the shape tool makes: a drawn shape snapped, or one dragged out.
 enum ShapeKind { snap, rectangle, ellipse, line, arrow }
 
-/// The tools and their options, the same on every Whiteboard for the session.
 class BoardTools extends ChangeNotifier {
   BoardTool _tool = BoardTool.pen;
   BoardTool get tool => _tool;
@@ -27,13 +24,10 @@ class BoardTools extends ChangeNotifier {
   BridgePen pen = BridgePen.fountain;
   ShapeKind shape = ShapeKind.snap;
 
-  /// Whether the eraser removes whole elements, rather than the parts it passes.
   bool wholeEraser = false;
 
-  /// Whether the eraser takes only the highlighter's marks, as GoodNotes' erase filter.
   bool highlighterOnly = false;
 
-  /// Each tool's color and width; the eraser's width is its size, text's its size.
   final colors = <BoardTool, BridgeInkColor>{
     BoardTool.pen: BridgeInkColor.data3,
     BoardTool.highlighter: BridgeInkColor.yellow,
@@ -59,12 +53,8 @@ class BoardTools extends ChangeNotifier {
   }
 }
 
-/// The session's tools.
 final boardTools = BoardTools();
 
-/// One Whiteboard as the Page shows it: its elements as last read, with the edits sent
-/// since shown at once, where the canvas looks, and what is selected. The Block and its
-/// full-screen view share it.
 class BoardController extends ChangeNotifier {
   BoardController(this.views, this.view) {
     _followed = follow(
@@ -85,32 +75,25 @@ class BoardController extends ChangeNotifier {
 
   StreamSubscription<BridgeChange>? _followed;
 
-  /// The elements, bottom to top; none until first read.
   List<BridgeElement> elements = const [];
   BridgeDrawingStyle style = BridgeDrawingStyle.handDrawn;
   bool loaded = false;
 
-  /// Where the canvas looks: the board point at the view's top left, and the zoom.
   Offset origin = const Offset(-20, -20);
   double zoom = 1;
 
   static const minZoom = 0.1;
   static const maxZoom = 4.0;
 
-  /// The selected elements' identities.
   Set<String> selected = const {};
 
-  /// Edits sent and not yet read back.
   int _writing = 0;
 
-  /// Gestures under way, which a read must not overtake, and whether one was held back.
   int _holds = 0;
   var _heldRead = false;
 
-  /// Holds reads back while a gesture works on the elements as shown.
   void hold() => _holds++;
 
-  /// Ends a gesture; a read held back meanwhile runs now, unless an edit's own read will.
   void release() {
     if (_holds > 0) _holds--;
     if (_holds == 0 && _heldRead) {
@@ -126,8 +109,6 @@ class BoardController extends ChangeNotifier {
 
   void _report(Object error) => _state.report('$error');
 
-  /// Reads the board; a read begun before an edit sent since is dropped, as the edit's
-  /// own change brings a newer one.
   Future<void> read() async {
     final asked = ++_reads;
     final writing = _writing;
@@ -149,7 +130,6 @@ class BoardController extends ChangeNotifier {
       }
       final board = answer.drawing;
       if (board == null) {
-        // Gone, as another device deleted it: full screen shows it no more.
         if (views.fullBoard.value?.id == view.id) views.fullBoard.value = null;
         return;
       }
@@ -167,15 +147,12 @@ class BoardController extends ChangeNotifier {
     }
   }
 
-  /// Removes, changes and adds elements as one Action, showing the result at once.
   Future<void> edit({
     List<BridgeElement> add = const [],
     List<BridgeElementChange> change = const [],
     List<String> remove = const [],
   }) async {
     if (add.isEmpty && change.isEmpty && remove.isEmpty) return;
-    // An element moved onto another page of a document goes there: it is removed from its
-    // page and added on the other, as a change keeps an element's page.
     if (paged) {
       final moved = <BridgeElementChange>[];
       for (final changed in change) {
@@ -218,7 +195,6 @@ class BoardController extends ChangeNotifier {
             _applied(element, changed)
           else
             element,
-      // Each with a name of its own until the read brings the core's.
       for (final element in add)
         _applied(
           element,
@@ -262,17 +238,12 @@ class BoardController extends ChangeNotifier {
 
   int _pending = 0;
 
-  /// A document's pages on the board, top to bottom, in their points; none on a Whiteboard,
-  /// whose canvas has no edges.
   List<Rect> sheets = const [];
 
-  /// What full screen calls the drawing: "Whiteboard", or a document's file name.
   String title = 'Whiteboard';
 
-  /// Whether the view stays where it is, as over an image shown on the Page.
   bool fixed = false;
 
-  /// The pages beneath a document's ink; none on a Whiteboard.
   DocumentPages? get pages => _pages;
   DocumentPages? _pages;
   set pages(DocumentPages? pages) {
@@ -284,17 +255,14 @@ class BoardController extends ChangeNotifier {
 
   bool get paged => sheets.isNotEmpty;
 
-  /// The document pages read: the first and how many, around those in view.
   (int, int) window = (0, 1);
 
-  /// Reads the pages from `first`, `count` of them, unless they are read already.
   void showPages(int first, int count) {
     if (window == (first, count)) return;
     window = (first, count);
     unawaited(read());
   }
 
-  /// The page under a board point, if any.
   int? pageAt(Offset at) {
     for (final (index, sheet) in sheets.indexed) {
       if (sheet.contains(at)) return index;
@@ -304,8 +272,6 @@ class BoardController extends ChangeNotifier {
 
   int _nearestPage(Offset at) => DocumentPages.nearest(sheets, at);
 
-  /// `element` as stored, its frame in its page's points, moved onto the board; none for a
-  /// page the document does not have.
   BridgeElement? _onBoard(BridgeElement element) {
     if (!paged) return element;
     if (element.docPage >= sheets.length) return null;
@@ -313,7 +279,6 @@ class BoardController extends ChangeNotifier {
     return _moved(element, at, element.docPage);
   }
 
-  /// `element` from the board onto the page it lies on, in that page's points.
   BridgeElement _onPage(BridgeElement element) {
     if (!paged) return element;
     final page = _nearestPage(frameOf(element).center);
@@ -341,7 +306,6 @@ class BoardController extends ChangeNotifier {
     );
   }
 
-  /// `element` as a new one, with no name, to be added.
   static BridgeElement _fresh(BridgeElement element) => BridgeElement(
     kind: element.kind,
     x: element.x,
@@ -382,7 +346,6 @@ class BoardController extends ChangeNotifier {
         text: element.text,
       );
 
-  /// `element` after `c`; with `id`, under the change's name too.
   static BridgeElement _applied(
     BridgeElement element,
     BridgeElementChange c, {
@@ -407,7 +370,6 @@ class BoardController extends ChangeNotifier {
     text: c.text ?? element.text,
   );
 
-  /// Switches the whole board between hand-drawn and clean.
   Future<void> toggleStyle() async {
     final next = handDrawn
         ? BridgeDrawingStyle.clean
@@ -438,16 +400,13 @@ class BoardController extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// The selected elements, bottom to top.
   List<BridgeElement> get selection => [
     for (final element in elements)
       if (selected.contains(element.id)) element,
   ];
 
-  /// A board point at a point of the view.
   Offset toBoard(Offset local) => origin + local / zoom;
 
-  /// A point of the view at a board point.
   Offset toView(Offset board) => (board - origin) * zoom;
 
   void pan(Offset by) {
@@ -456,7 +415,6 @@ class BoardController extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Zooms by `factor` around the view point `focus`, within 10 % and 400 %.
   void zoomBy(double factor, Offset focus) {
     if (fixed) return;
     final at = toBoard(focus);
@@ -468,7 +426,6 @@ class BoardController extends ChangeNotifier {
   void zoomTo(double value, Size view) =>
       zoomBy(value / zoom, view.center(Offset.zero));
 
-  /// Shows everything drawn in a view of `size`.
   void fit(Size size) {
     if (elements.isEmpty || size.isEmpty) {
       origin = const Offset(-20, -20);

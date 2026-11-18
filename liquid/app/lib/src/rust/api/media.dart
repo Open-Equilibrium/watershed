@@ -10,18 +10,10 @@ import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 // These functions are ignored because they are not marked as `pub`: `add_file_with`, `attachment`, `begin`, `bytes`, `discard`, `each_part`, `fill`, `of`, `size`, `to_core`
 // These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `eq`, `eq`, `fmt`, `fmt`
 
-/// A named file: a Media Block's, or one of a file cell's.
 class BridgeMedia {
-  /// The file's name.
   final String name;
-
-  /// The file's media type, such as `image/png`; empty if unknown.
   final String mediaType;
-
-  /// Its attachment's name.
   final String attachment;
-
-  /// Its size in bytes.
   final PlatformInt64 size;
 
   const BridgeMedia({
@@ -46,15 +38,9 @@ class BridgeMedia {
           size == other.size;
 }
 
-/// How far a file has gone in; the last event names its finished attachment.
 class BridgeUpload {
-  /// The bytes in so far.
   final PlatformInt64 written;
-
-  /// The file's size.
   final PlatformInt64 size;
-
-  /// The finished attachment's name, in the last event only.
   final String? attachment;
 
   const BridgeUpload({

@@ -3,6 +3,14 @@ import 'dart:async';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:liquid/src/workspace/windowed_list.dart';
 
+WindowedList<int> gated(List<Completer<void>> held) =>
+    WindowedList<int>((start, limit) async {
+      final release = Completer<void>();
+      held.add(release);
+      await release.future;
+      return (1000, [for (var at = start; at < start + limit; at++) at]);
+    }, (error) => fail('$error'));
+
 void main() {
   test('a reread asks again only for the windows last used', () async {
     final asked = <int>[];
@@ -29,19 +37,13 @@ void main() {
 
   test('waiting for a window while a reread runs returns its item', () async {
     final held = <Completer<void>>[];
-    final windows = WindowedList<int>((start, limit) async {
-      final release = Completer<void>();
-      held.add(release);
-      await release.future;
-      return (1000, [for (var at = start; at < start + limit; at++) at]);
-    }, (error) => fail('$error'));
+    final windows = gated(held);
     addTearDown(windows.dispose);
     final first = windows.load(0);
     held.removeAt(0).complete();
     expect(await first, 0);
     final reread = windows.reread();
     final last = windows.load(950);
-    // The window's own read answers while the reread still runs.
     while (held.isNotEmpty) {
       held.removeLast().complete();
       await Future<void>.delayed(Duration.zero);
@@ -56,19 +58,13 @@ void main() {
 
   test('a window read across a whole reread is read again', () async {
     final held = <Completer<void>>[];
-    final windows = WindowedList<int>((start, limit) async {
-      final release = Completer<void>();
-      held.add(release);
-      await release.future;
-      return (1000, [for (var at = start; at < start + limit; at++) at]);
-    }, (error) => fail('$error'));
+    final windows = gated(held);
     addTearDown(windows.dispose);
     final first = windows.load(0);
     held.removeAt(0).complete();
     expect(await first, 0);
     final last = windows.load(950);
     final window = held.removeAt(0);
-    // A whole reread runs and ends before the window's read answers.
     final reread = windows.reread();
     await Future<void>.delayed(Duration.zero);
     held.removeAt(0).complete();

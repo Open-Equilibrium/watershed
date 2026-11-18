@@ -11,7 +11,6 @@ import 'package:liquid/src/workspace/paste.dart';
 
 import 'page_kit.dart';
 
-/// The Table's file field (ADR-0305).
 void main() {
   final kit = PageKit();
   final picked = <MediaSource>[];
@@ -40,7 +39,6 @@ void main() {
     ),
   ];
 
-  /// A file the fake Workspace keeps as a finished attachment.
   Future<BridgeMedia> stored(String name, int size) async => BridgeMedia(
     name: name,
     mediaType: mediaTypeOf(name),
@@ -68,7 +66,6 @@ void main() {
     ],
   );
 
-  /// Shows a Table of bookings whose first row holds `files`.
   Future<void> bookings(
     WidgetTester tester,
     Future<List<BridgeMedia>> Function() files,
@@ -89,7 +86,6 @@ void main() {
   Finder fileCell(String row) =>
       kit.inTable(find.byKey(ValueKey('cell $row files')));
 
-  /// The row the last write went to and the names of the files it put there.
   String lastWrite() {
     final set = kit.applied(BridgeMutationKind.setCell).last;
     return '${set.row}: ${[for (final file in set.cell!.files) file.name].join(', ')}';
@@ -241,7 +237,6 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('add files')));
     await tester.pump();
-    // Meanwhile the row moves down and gets another file elsewhere.
     final extra = await tester.runAsync(() => stored('Extra.pdf', 2));
     final hotel = await tester.runAsync(() => stored('Hotel.eml', 1));
     kit.fake.putRows(kit.page, kit.fake.rows.keys.single, [
@@ -269,7 +264,6 @@ void main() {
       await tester.sendKeyRepeatEvent(LogicalKeyboardKey.keyV);
       await tester.sendKeyRepeatEvent(LogicalKeyboardKey.keyV);
       await tester.sendKeyUpEvent(LogicalKeyboardKey.keyV);
-      // A second paste right away, before the first is read back.
       readClipboard = () async => const Pasted(files: ['/Users/me/b.pdf']);
       await tester.sendKeyEvent(LogicalKeyboardKey.keyV);
       await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
@@ -323,7 +317,6 @@ void main() {
       await tester.pumpAndSettle();
       await paste('A.pdf');
       await paste('B.pdf');
-      // While A goes in, a row lands above: r1 is now second.
       final block = kit.fake.rows.keys.single;
       kit.fake.putRows(kit.page, block, [
         row('r0', 'Flight', const []),

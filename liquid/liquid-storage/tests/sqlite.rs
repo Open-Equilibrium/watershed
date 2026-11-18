@@ -1,6 +1,3 @@
-//! The local replica as a later session sees it: what was acknowledged is there after a
-//! reopen, and the file reveals nothing without its key.
-
 #![allow(clippy::unwrap_used)]
 
 use std::path::{Path, PathBuf};
@@ -13,7 +10,6 @@ use liquid_storage::Sqlite;
 
 const KEY: [u8; 32] = [7; 32];
 
-/// A fresh database path that is removed with its write-ahead log when dropped.
 struct Scratch(PathBuf);
 
 impl Scratch {
@@ -30,6 +26,12 @@ impl Scratch {
 
     fn db(&self) -> PathBuf {
         self.0.join("replica.db")
+    }
+
+    fn on_disk(&self) -> Vec<u8> {
+        let mut bytes = std::fs::read(self.db()).unwrap();
+        bytes.extend(std::fs::read(self.0.join("replica.db-wal")).unwrap_or_default());
+        bytes
     }
 }
 
@@ -54,14 +56,7 @@ fn apply(workspace: &mut Workspace<Sqlite>, mutation: Mutation) -> Option<Create
         .created
 }
 
-/// A Workspace with one area and one Page holding the Text Block "Five days in Lisbon".
-fn lisbon(path: &Path) -> (PageId, liquid_core::BlockId) {
-    let (_workspace, page, block) = lisbon_open(path);
-    (page, block)
-}
-
-/// The same Workspace as [`lisbon`], still open: its writes may sit in the write-ahead log.
-fn lisbon_open(path: &Path) -> (Workspace<Sqlite>, PageId, liquid_core::BlockId) {
+fn lisbon(path: &Path) -> (Workspace<Sqlite>, PageId, liquid_core::BlockId) {
     let store = Sqlite::open(path, &KEY).unwrap();
     let mut workspace = Workspace::create(PersonId::new("benni"), store).unwrap();
     let Some(Created::Area(area)) = apply(
@@ -94,7 +89,7 @@ fn lisbon_open(path: &Path) -> (Workspace<Sqlite>, PageId, liquid_core::BlockId)
 #[test]
 fn an_acknowledged_write_is_there_after_a_reopen() {
     let scratch = Scratch::new("reopen");
-    let (page, block) = lisbon(&scratch.db());
+    let (_, page, block) = lisbon(&scratch.db());
 
     let mut workspace = Workspace::open(Sqlite::open(&scratch.db(), &KEY).unwrap()).unwrap();
     let area = workspace.areas().unwrap().remove(0);
@@ -145,12 +140,10 @@ fn history_reads_in_pages_newest_first() {
 #[test]
 fn the_file_reveals_nothing_without_its_key() {
     let scratch = Scratch::new("key");
-    // Scanned while the writer is open: its writes are then in the log, not yet folded in.
-    let (workspace, _, _) = lisbon_open(&scratch.db());
+    let (workspace, _, _) = lisbon(&scratch.db());
     let wal = std::fs::read(scratch.0.join("replica.db-wal")).unwrap();
     assert!(!wal.is_empty(), "the writes are in the log");
-    let mut bytes = std::fs::read(scratch.db()).unwrap();
-    bytes.extend(wal);
+    let bytes = scratch.on_disk();
     assert!(!bytes.starts_with(b"SQLite format 3"));
     for plain in [&b"Lisbon"[..], b"Trips", b"benni"] {
         assert!(!bytes.windows(plain.len()).any(|window| window == plain));
@@ -172,7 +165,7 @@ fn a_database_that_holds_a_workspace_takes_no_second_one() {
 #[test]
 fn a_long_edited_document_loads_from_a_snapshot() {
     let scratch = Scratch::new("compact");
-    let (page, block) = lisbon(&scratch.db());
+    let (_, page, block) = lisbon(&scratch.db());
     let mut workspace = Workspace::open(Sqlite::open(&scratch.db(), &KEY).unwrap()).unwrap();
     for at in 0..1_200 {
         let edit = Mutation::EditText {
@@ -211,7 +204,7 @@ fn one_session_at_a_time_holds_the_replica() {
 #[test]
 fn history_keeps_a_number_cell_exactly() {
     let scratch = Scratch::new("number");
-    let (page, _) = lisbon(&scratch.db());
+    let (_, page, _) = lisbon(&scratch.db());
     let mut workspace = Workspace::open(Sqlite::open(&scratch.db(), &KEY).unwrap()).unwrap();
     let add = Mutation::AddDatabaseBlock {
         page: page.clone(),
@@ -242,7 +235,6 @@ fn history_keeps_a_number_cell_exactly() {
     let Some(Created::Row(row)) = apply(&mut workspace, row) else {
         panic!("a row")
     };
-    // A value serde_json reads back one bit off without its exact float parsing.
     let value = 51.248178375505404;
     let set = Mutation::SetCell {
         page,
@@ -262,17 +254,15 @@ fn history_keeps_a_number_cell_exactly() {
 #[test]
 fn an_attachment_is_kept_encrypted_and_there_after_a_reopen() {
     let scratch = Scratch::new("attachment");
-    let (mut workspace, ..) = lisbon_open(&scratch.db());
-    let mut file = b"Tram 28 timetable ".repeat(100_000);
-    file.truncate(liquid_core::PART + 1000);
+    let (mut workspace, ..) = lisbon(&scratch.db());
+    let file = b"Tram 28 timetable ".repeat(100_000)[..liquid_core::PART + 1000].to_vec();
     let mut upload = workspace.begin_upload(&owner(), file.len() as u64).unwrap();
     workspace.upload(&mut upload, &file).unwrap();
     let attachment = workspace.finish_upload(upload).unwrap();
 
-    let mut bytes = std::fs::read(scratch.db()).unwrap();
-    bytes.extend(std::fs::read(scratch.0.join("replica.db-wal")).unwrap_or_default());
     let plain = b"Tram 28 timetable";
-    assert!(!bytes.windows(plain.len()).any(|window| window == plain));
+    let on_disk = scratch.on_disk();
+    assert!(!on_disk.windows(plain.len()).any(|window| window == plain));
 
     drop(workspace);
     let mut store = Sqlite::open(&scratch.db(), &KEY).unwrap();

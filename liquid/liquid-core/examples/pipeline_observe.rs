@@ -1,13 +1,3 @@
-//! Observation workload for the Workspace core's mutation pipeline (PERFORMANCE.md, Liquid):
-//! typing, Page building and a Database Block's rows through the pipeline, one recorded Action
-//! per request, with an in-memory store. It prints a summary and never compares with a threshold. Run from the
-//! repository root:
-//!
-//! ```sh
-//! cargo build --release -p liquid-core --example pipeline_observe
-//! /usr/bin/time -l target/release/examples/pipeline_observe
-//! ```
-
 use std::time::{Duration, Instant};
 
 use liquid_core::{
@@ -64,7 +54,6 @@ fn summary(name: &str, mut times: Vec<Duration>) {
 }
 
 fn main() {
-    // Typing: one Action per keystroke, the worst case for an editor that groups keystrokes.
     let mut workspace = Workspace::create(PersonId::new("observer"), MemoryStore::default())
         .expect("a new in-memory Workspace opens");
     let lisbon = page(&mut workspace);
@@ -100,7 +89,6 @@ fn main() {
         times,
     );
 
-    // A long Page: each Text Block added after the last one.
     let mut workspace = Workspace::create(PersonId::new("observer"), MemoryStore::default())
         .expect("a new in-memory Workspace opens");
     let lisbon = page(&mut workspace);
@@ -136,8 +124,6 @@ fn main() {
         start.elapsed().as_secs_f64() * 1e3
     );
 
-    // A Database of 5,000 rows with four fields, as the CRDT spike measured, then one sorted
-    // and filtered window as a Table View reads it.
     let mut workspace = Workspace::create(PersonId::new("observer"), MemoryStore::default())
         .expect("a new in-memory Workspace opens");
     let budget = page(&mut workspace);

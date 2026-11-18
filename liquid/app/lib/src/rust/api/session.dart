@@ -7,6 +7,7 @@ import '../frb_generated.dart';
 import 'details.dart';
 import 'events.dart';
 import 'git.dart';
+import 'moves.dart';
 
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
@@ -18,51 +19,73 @@ import 'thread.dart';
 
 // Rust type: RustOpaqueMoi<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<AgentHost>>
 abstract class AgentHost implements RustOpaqueInterface {
-  /// Connects to the service whose data folder is `home`, else the default folder.
+  Future<BridgeHostProject> addHostProject({required String root});
+
+  Future<void> bringConfiguration({
+    required AgentHost from,
+    required BridgeConfigChanges shown,
+  });
+
+  Future<BridgeHostProject> cloneHostProject({
+    required String remoteUrl,
+    required String path,
+  });
+
+  Future<BridgeConfigChanges> configurationChanges({required AgentHost from});
+
   static Future<AgentHost> connect({String? home}) =>
       RustLib.instance.api.crateApiSessionAgentHostConnect(home: home);
 
-  /// Connects to the agent host at `address` with the device token filed under it (ADR-0299).
   static Future<AgentHost> connectRemote({required String address}) => RustLib
       .instance
       .api
       .crateApiSessionAgentHostConnectRemote(address: address);
 
-  /// The name T3 shows for this host, such as the computer's name.
+  Future<String> environmentId();
+
+  Future<String> environmentMachine();
+
   Future<String> environmentName();
 
-  /// The project for the folder `root`.
+  Future<List<BridgeHostProject>> hostProjects();
+
+  Future<BridgeArrival> moveAbort({required String transfer});
+
+  Future<BridgeMoveIn> moveIn({
+    required String root,
+    required BridgeMovePackage package,
+  });
+
+  Future<BridgeArrival> moveStatus({required String transfer});
+
+  Future<BridgeLanding> preflight({
+    required String root,
+    required String branch,
+  });
+
   Future<AgentProject> project({required String root});
 
-  /// The providers T3 offers, with their models.
   Future<List<BridgeProvider>> providers();
 
-  /// Sets the one model that writes commit messages, pull request text and session titles.
   Future<void> setWriterModel({required BridgeModelChoice choice});
 
-  /// The writer model (ADR-0294), if one is set.
+  Future<bool> supportsMoves();
+
   Future<BridgeModelChoice?> writerModel();
 }
 
 // Rust type: RustOpaqueMoi<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<AgentProject>>
 abstract class AgentProject implements RustOpaqueInterface {
-  /// Archives or restores the session `id`.
   Future<void> archive({required String id, required bool archived});
 
-  /// Deletes the session `id`, and with `worktree` its worktree, keeping the branch.
   Future<void> delete({required String id, required bool worktree});
 
-  /// Git for the project folder.
   Future<GitCheckout> git();
 
-  /// Whether `id` is the only session in its worktree, so deleting it may delete that too.
   Future<bool> onlySessionInWorktree({required String id});
 
-  /// Follows the existing session `id`.
   Future<AgentSession> open({required String id});
 
-  /// Starts a session with its first prompt, as T3's workspace selector chose: in a new
-  /// worktree from `base`, in the existing `worktree`, or else in the project folder.
   Future<AgentSession> start({
     required String text,
     required BridgeModelChoice model,
@@ -71,162 +94,123 @@ abstract class AgentProject implements RustOpaqueInterface {
     required BridgePermissions permissions,
   });
 
-  /// The project's sessions, newest first.
   Future<List<BridgeThreadSummary>> threads();
 }
 
 // Rust type: RustOpaqueMoi<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<AgentSession>>
 abstract class AgentSession implements RustOpaqueInterface {
-  /// Answers questions.
   Future<void> answer({
     required String request,
     required List<BridgeQuestionAnswer> answers,
   });
 
-  /// Streams each change of the scheduled tasks after the latest
-  /// [`AgentSession::automations_subscribe`].
   Stream<List<BridgeAutomation>> automationsEvents();
 
-  /// Ends the scheduled tasks stream now, without waiting for its next change.
   Future<void> automationsStop();
 
-  /// The scheduled tasks bound to this session now; their changes then stream from
-  /// [`AgentSession::automations_events`].
   Future<List<BridgeAutomation>> automationsSubscribe();
 
-  /// Removes a queued turn.
   Future<void> cancelQueued({required PlatformInt64 turn});
 
-  /// Confirms that Liquid applied the stream's first `applied` events (ADR-0272).
   Future<void> confirmApplied({required PlatformInt64 applied});
 
-  /// The context window the latest request filled.
   Future<BridgeContext?> context();
 
-  /// T3's "Disconnect agent session": detaches the session's provider sessions.
   Future<void> disconnect();
 
-  /// Dismisses questions without answering.
   Future<void> dismiss({required String request});
 
-  /// Replaces a queued turn's prompt.
   Future<void> editQueued({required PlatformInt64 turn, required String text});
 
-  /// Streams the events after subscription `id`, from [`AgentSession::subscribe`]. A subscription
-  /// streams once; an unknown or streamed one is an error.
   Stream<BridgeEvent> events({required PlatformInt64 id});
 
-  /// Ends the Chat's event stream now, without waiting for its next event.
   Future<void> eventsStop();
 
-  /// Writes the session's record into a new folder in Downloads (ADR-0257); returns it.
   Future<String> exportRecord({required String host, required String day});
 
-  /// T3's "Fork from this response": a new session from the end of turn `turn`; its id.
   Future<String> fork({required PlatformInt64 turn});
 
-  /// Git for the session's checkout.
   Future<GitCheckout> git();
 
-  /// The session's id.
   Future<String> id();
 
-  /// Streams the lineage after each change that may have changed it, once the changes settle,
-  /// after the latest [`AgentSession::lineage_subscribe`]. A failed read streams as an error.
   Stream<BridgeLineage> lineageEvents();
 
-  /// Ends the lineage stream now, without waiting for its next change.
   Future<void> lineageStop();
 
-  /// The lineage now: the threads related to this session, as T3's relationships panel shows
-  /// them. Its changes then stream from [`AgentSession::lineage_events`].
   Future<BridgeLineage> lineageSubscribe();
 
-  /// T3's "Merge back": merges this fork's latest finished run into the session it forked from.
   Future<void> mergeBack();
 
-  /// The session's model.
   Future<BridgeModelChoice?> model();
 
-  /// Answers an approval with one of its decisions.
+  Future<BridgeMoveCheck> moveCheck();
+
+  Future<void> moveFinish({required String transfer, String? toHost});
+
+  Future<BridgeMovePackage> moveOut({
+    required String transfer,
+    required String targetAddress,
+    required String targetName,
+    required String targetEnvironment,
+    required bool commit,
+  });
+
+  Future<BridgeMoveRecord?> moveRecord();
+
   Future<void> respond({required String request, required String decision});
 
-  /// T3's "Edit from here": rewinds to before turn `turn`, with `restore_files` its files
-  /// too. Returns the turn's prompt for the input area.
   Future<String> revert({
     required PlatformInt64 turn,
     required bool restoreFiles,
   });
 
-  /// Runs the scheduled task `id` now.
   Future<void> runAutomationNow({required String id});
 
-  /// Sends `text`: an idle session starts a turn; a running one takes it as a steer with
-  /// `steer`, else queues it.
   Future<void> send({required String text, required bool steer});
 
-  /// "Send now" on a queued turn.
   Future<void> sendQueuedNow({required PlatformInt64 turn});
 
-  /// Streams each change of the servers after the latest [`AgentSession::servers_subscribe`].
   Stream<List<BridgeLocalServer>> serversEvents();
 
-  /// Ends the servers stream now, without waiting for its next change.
   Future<void> serversStop();
 
-  /// The local servers this session's terminals and agent started now; the servers' changes
-  /// then stream from [`AgentSession::servers_events`].
   Future<List<BridgeLocalServer>> serversSubscribe();
 
-  /// Pauses or resumes the scheduled task `id`.
   Future<void> setAutomationEnabled({
     required String id,
     required bool enabled,
   });
 
-  /// Points the session at `branch`, in `worktree` when the branch picker chose one.
   Future<void> setBranch({required String branch, String? worktree});
 
-  /// Changes the model for the next turn.
   Future<void> setModel({required BridgeModelChoice model});
 
-  /// Changes what the agent may do without asking.
   Future<void> setPermissions({required BridgePermissions permissions});
 
-  /// The session now, to restore the Chat after falling behind (ADR-0290). Deltas do not merge
-  /// across its sequence, so the restored Chat never replays text it holds.
   Future<BridgeSnapshot> snapshot();
 
-  /// The session's exact statistics (ADR-0279).
   Future<BridgeStatistics> statistics();
 
-  /// Stops the running turn.
   Future<void> stop();
 
-  /// Stops the local server `pid` on `port`.
   Future<void> stopServer({
     required PlatformInt64 pid,
     required PlatformInt64 port,
   });
 
-  /// T3's "Stop subagent": stops the subagent `id`.
   Future<void> stopSubagent({required String id});
 
-  /// The session now; [`AgentSession::events`] then streams the events after it, with no gap.
-  /// Liquid shows the snapshot and applies each event whose sequence is past it (ADR-0290).
   Future<BridgeSubscription> subscribe();
 
-  /// Its title.
   Future<String> title();
 
-  /// The files that changed from the start of turn `from` to the end of turn `to`.
   Future<List<BridgeFileChange>> turnChanges({
     required PlatformInt64 from,
     required PlatformInt64 to,
     required bool hideWhitespace,
   });
 
-  /// One file's unified diff from the start of turn `from` to the end of turn `to`.
   Future<String> turnPatch({
     required PlatformInt64 from,
     required PlatformInt64 to,
@@ -234,25 +218,16 @@ abstract class AgentSession implements RustOpaqueInterface {
     required bool hideWhitespace,
   });
 
-  /// The turns, oldest first.
   Future<List<BridgeTurn>> turns();
 
-  /// The provider's usage limits, or `None` when it reports none.
   Future<BridgeUsageLimits?> usageLimits();
 
-  /// Its own worktree, if it has one.
   Future<String?> worktree();
 }
 
-/// A model and its choices.
 class BridgeModel {
-  /// The id.
   final String id;
-
-  /// The display name.
   final String name;
-
-  /// Its select options, such as reasoning effort.
   final List<BridgeModelOption> options;
 
   const BridgeModel({
@@ -274,18 +249,10 @@ class BridgeModel {
           options == other.options;
 }
 
-/// A chosen provider, model and option values.
 class BridgeModelChoice {
-  /// The provider instance.
   final String instance;
-
-  /// The model.
   final String model;
-
-  /// Option ids, matching `values`.
   final List<String> optionIds;
-
-  /// Chosen values.
   final List<String> values;
 
   const BridgeModelChoice({
@@ -310,21 +277,11 @@ class BridgeModelChoice {
           values == other.values;
 }
 
-/// One select option of a model.
 class BridgeModelOption {
-  /// The id.
   final String id;
-
-  /// The label.
   final String label;
-
-  /// The choices' ids.
   final List<String> choices;
-
-  /// The choices' labels, matching `choices`.
   final List<String> labels;
-
-  /// The default choice.
   final String? default_;
 
   const BridgeModelOption({
@@ -355,33 +312,12 @@ class BridgeModelOption {
           default_ == other.default_;
 }
 
-/// What an agent may do without asking (T3's Permissions).
-enum BridgePermissions {
-  /// Ask before commands and file changes.
-  supervised,
+enum BridgePermissions { supervised, autoAcceptEdits, auto, fullAccess }
 
-  /// Auto-approve edits, ask before other actions.
-  autoAcceptEdits,
-
-  /// Supported providers approve routine actions; others still ask.
-  auto,
-
-  /// Allow commands and edits without prompts.
-  fullAccess,
-}
-
-/// A provider and its models, as the model picker lists them.
 class BridgeProvider {
-  /// The instance id sessions choose it by.
   final String instance;
-
-  /// Its display name.
   final String name;
-
-  /// Whether it can run now.
   final bool available;
-
-  /// Its models.
   final List<BridgeModel> models;
 
   const BridgeProvider({
@@ -406,15 +342,9 @@ class BridgeProvider {
           models == other.models;
 }
 
-/// One answer to one question.
 class BridgeQuestionAnswer {
-  /// The question's id.
   final String question;
-
-  /// The chosen labels, or the typed text.
   final List<String> values;
-
-  /// Whether `values` is the typed text, which goes to the agent as written.
   final bool typed;
 
   const BridgeQuestionAnswer({
@@ -436,13 +366,8 @@ class BridgeQuestionAnswer {
           typed == other.typed;
 }
 
-/// A session as one subscription begins: its snapshot, and the id [`AgentSession::events`] streams
-/// the events after it by.
 class BridgeSubscription {
-  /// The id.
   final PlatformInt64 id;
-
-  /// The session now.
   final BridgeSnapshot snapshot;
 
   const BridgeSubscription({required this.id, required this.snapshot});
@@ -459,28 +384,17 @@ class BridgeSubscription {
           snapshot == other.snapshot;
 }
 
-/// A session as the sidebar lists it.
 class BridgeThreadSummary {
-  /// The session's id.
   final String id;
-
-  /// Its title.
   final String title;
-
-  /// When it last changed, in Unix milliseconds.
   final PlatformInt64? updatedMs;
-
-  /// Its branch.
   final String? branch;
-
-  /// Its worktree.
   final String? worktree;
-
-  /// Whether a turn runs.
   final bool running;
-
-  /// Whether it is archived.
   final bool archived;
+  final bool movable;
+  final bool harnessKnown;
+  final BridgeMoving? moving;
 
   const BridgeThreadSummary({
     required this.id,
@@ -490,6 +404,9 @@ class BridgeThreadSummary {
     this.worktree,
     required this.running,
     required this.archived,
+    required this.movable,
+    required this.harnessKnown,
+    this.moving,
   });
 
   @override
@@ -500,7 +417,10 @@ class BridgeThreadSummary {
       branch.hashCode ^
       worktree.hashCode ^
       running.hashCode ^
-      archived.hashCode;
+      archived.hashCode ^
+      movable.hashCode ^
+      harnessKnown.hashCode ^
+      moving.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -513,5 +433,8 @@ class BridgeThreadSummary {
           branch == other.branch &&
           worktree == other.worktree &&
           running == other.running &&
-          archived == other.archived;
+          archived == other.archived &&
+          movable == other.movable &&
+          harnessKnown == other.harnessKnown &&
+          moving == other.moving;
 }

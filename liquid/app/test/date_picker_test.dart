@@ -21,20 +21,28 @@ void main() {
       .controller!
       .text;
 
+  Future<void> tap(WidgetTester tester, Finder finder) async {
+    await tester.tap(finder);
+    await tester.pumpAndSettle();
+  }
+
   Future<void> key(WidgetTester tester, LogicalKeyboardKey key) async {
     await tester.sendKeyEvent(key);
     await tester.pumpAndSettle();
   }
 
-  /// The days written into date cells, by row; an emptied cell as none.
+  Future<void> type(WidgetTester tester, String text) async {
+    await tester.enterText(inPicker(find.byType(TextField)), text);
+    await tester.pumpAndSettle();
+  }
+
   List<(String, String?)> written() => [
     for (final set in kit.applied(BridgeMutationKind.setCell))
       (set.row!, set.cell!.kind == BridgeCellKind.date ? set.cell!.text : null),
   ];
 
   Future<void> open(WidgetTester tester, String row) async {
-    await tester.tap(cell(row, 'date'));
-    await tester.pumpAndSettle();
+    await tap(tester, cell(row, 'date'));
     await key(tester, LogicalKeyboardKey.enter);
   }
 
@@ -66,8 +74,7 @@ void main() {
     testWidgets('a day typed as $form is written', (tester) async {
       await kit.show(tester, [TablePart(expenses)]);
       await open(tester, 'r1');
-      await tester.enterText(inPicker(find.byType(TextField)), form);
-      await tester.pumpAndSettle();
+      await type(tester, form);
       expect(inPicker(find.text('October 2026')), findsOneWidget);
       await key(tester, LogicalKeyboardKey.enter);
       expect(written(), [('r1', '2026-10-15')]);
@@ -78,35 +85,36 @@ void main() {
     tester,
   ) async {
     await kit.show(tester, [TablePart(expenses)]);
-    await tester.tap(cell('r2', 'date'));
-    await tester.pumpAndSettle();
+    await tap(tester, cell('r2', 'date'));
     await key(tester, LogicalKeyboardKey.digit1);
     expect(picker, findsOneWidget);
     expect(typed(tester), '1');
   });
 
-  testWidgets(
-    'a typed text that is no day stays, saying so, and writes nothing',
-    (tester) async {
+  for (final (name, finish) in [
+    ('⏎', LogicalKeyboardKey.enter),
+    ('⇥', LogicalKeyboardKey.tab),
+  ]) {
+    testWidgets('$name on a text that is no day stays, saying so', (
+      tester,
+    ) async {
       await kit.show(tester, [TablePart(expenses)]);
       await open(tester, 'r1');
-      await tester.enterText(inPicker(find.byType(TextField)), 'soon');
-      await tester.pumpAndSettle();
-      await key(tester, LogicalKeyboardKey.enter);
+      await type(tester, 'soon');
+      await key(tester, finish);
       expect(picker, findsOneWidget);
       expect(typed(tester), 'soon');
       expect(kit.inTable(find.text('“soon” is no date.')), findsOneWidget);
       expect(written(), isEmpty);
-    },
-  );
+    });
+  }
 
   testWidgets(
     'a click on a day writes it and closes; the cell stays selected',
     (tester) async {
       await kit.show(tester, [TablePart(expenses)]);
       await open(tester, 'r1');
-      await tester.tap(day('2026-11-20'));
-      await tester.pumpAndSettle();
+      await tap(tester, day('2026-11-20'));
       expect(picker, findsNothing);
       expect(written(), [('r1', '2026-11-20')]);
       await key(tester, LogicalKeyboardKey.enter);
@@ -117,23 +125,19 @@ void main() {
   testWidgets('‹ and › show the month before and after', (tester) async {
     await kit.show(tester, [TablePart(expenses)]);
     await open(tester, 'r1');
-    await tester.tap(inPicker(find.byKey(const Key('next month'))));
-    await tester.pumpAndSettle();
+    await tap(tester, inPicker(find.byKey(const Key('next month'))));
     expect(inPicker(find.text('December 2026')), findsOneWidget);
-    await tester.tap(day('2026-12-24'));
-    await tester.pumpAndSettle();
+    await tap(tester, day('2026-12-24'));
     expect(written(), [('r1', '2026-12-24')]);
     await open(tester, 'r2');
-    await tester.tap(inPicker(find.byKey(const Key('previous month'))));
-    await tester.pumpAndSettle();
+    await tap(tester, inPicker(find.byKey(const Key('previous month'))));
     expect(inPicker(find.text('September 2026')), findsOneWidget);
   });
 
   testWidgets('Clear empties the cell', (tester) async {
     await kit.show(tester, [TablePart(expenses)]);
     await open(tester, 'r1');
-    await tester.tap(inPicker(find.text('Clear')));
-    await tester.pumpAndSettle();
+    await tap(tester, inPicker(find.text('Clear')));
     expect(picker, findsNothing);
     final set = kit.applied(BridgeMutationKind.setCell).single;
     expect(
@@ -147,8 +151,7 @@ void main() {
   ) async {
     await kit.show(tester, [TablePart(expenses)]);
     await open(tester, 'r1');
-    await tester.enterText(inPicker(find.byType(TextField)), '2026-10-15');
-    await tester.pumpAndSettle();
+    await type(tester, '2026-10-15');
     await key(tester, LogicalKeyboardKey.escape);
     expect(picker, findsNothing);
     expect(written(), isEmpty);
@@ -163,35 +166,21 @@ void main() {
     await key(tester, LogicalKeyboardKey.tab);
     expect(picker, findsNothing);
     expect(written(), [('r1', '2026-11-02')]);
-    // The next cell, Category, opens its options.
     await key(tester, LogicalKeyboardKey.enter);
     expect(find.byKey(const Key('select picker')), findsOneWidget);
-  });
-
-  testWidgets('⇥ on a text that is no day stays, saying so', (tester) async {
-    await kit.show(tester, [TablePart(expenses)]);
-    await open(tester, 'r1');
-    await tester.enterText(inPicker(find.byType(TextField)), 'soon');
-    await tester.pumpAndSettle();
-    await key(tester, LogicalKeyboardKey.tab);
-    expect(picker, findsOneWidget);
-    expect(kit.inTable(find.text('“soon” is no date.')), findsOneWidget);
-    expect(written(), isEmpty);
   });
 
   testWidgets('a click outside writes the day typed, and drops a text that is '
       'no day', (tester) async {
     await kit.show(tester, [TablePart(expenses)]);
     await open(tester, 'r1');
-    await tester.enterText(inPicker(find.byType(TextField)), '2026-10-15');
-    await tester.pumpAndSettle();
+    await type(tester, '2026-10-15');
     await tester.tapAt(const Offset(1300, 850));
     await tester.pumpAndSettle();
     expect(picker, findsNothing);
     expect(written(), [('r1', '2026-10-15')]);
     await open(tester, 'r2');
-    await tester.enterText(inPicker(find.byType(TextField)), 'soon');
-    await tester.pumpAndSettle();
+    await type(tester, 'soon');
     await tester.tapAt(const Offset(1300, 850));
     await tester.pumpAndSettle();
     expect(picker, findsNothing);
@@ -222,8 +211,7 @@ void main() {
     final mondays = tester.getRect(inPicker(find.text('Mo'))).left;
     final sundays = tester.getRect(inPicker(find.text('So'))).left;
     expect(mondays, lessThan(sundays));
-    await tester.enterText(inPicker(find.byType(TextField)), '15.10.2026');
-    await tester.pumpAndSettle();
+    await type(tester, '15.10.2026');
     await key(tester, LogicalKeyboardKey.enter);
     expect(written(), [('r1', '2026-10-15')]);
   });
@@ -242,8 +230,7 @@ void main() {
     ) async {
       await kit.show(tester, [TablePart(expenses)]);
       await open(tester, 'r1');
-      await tester.enterText(inPicker(find.byType(TextField)), form);
-      await tester.pumpAndSettle();
+      await type(tester, form);
       await key(tester, LogicalKeyboardKey.enter);
       expect(picker, findsOneWidget);
       expect(kit.inTable(find.text('“$form” is no date.')), findsOneWidget);
@@ -257,10 +244,8 @@ void main() {
     await kit.show(tester, [TablePart(expenses)]);
     final table = kit.fake.views[kit.page]!.single.block;
     await open(tester, 'r1');
-    await tester.enterText(inPicker(find.byType(TextField)), 'soon');
-    await tester.pumpAndSettle();
+    await type(tester, 'soon');
     await key(tester, LogicalKeyboardKey.enter);
-    // Another device adds a row above it.
     kit.fake.putRows(kit.page, table, [namedRow(3), ...kit.fake.rows[table]!]);
     await tester.pumpAndSettle();
     expect(picker, findsNothing);
@@ -275,13 +260,10 @@ void main() {
       ]);
       await open(tester, 'r1');
       await key(tester, LogicalKeyboardKey.enter);
-      // The cell stays selected; ⏎ opens it again.
       await key(tester, LogicalKeyboardKey.enter);
-      await tester.tap(day('2026-11-01'));
-      await tester.pumpAndSettle();
+      await tap(tester, day('2026-11-01'));
       await open(tester, 'r3');
-      await tester.tap(inPicker(find.text('Clear')));
-      await tester.pumpAndSettle();
+      await tap(tester, inPicker(find.text('Clear')));
       expect(picker, findsNothing);
       expect(kit.applied(BridgeMutationKind.setCell), isEmpty);
     },

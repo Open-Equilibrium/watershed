@@ -21,7 +21,6 @@ import 'package:liquid/src/workspace/workspace_state.dart';
 
 import 'fake_workspace.dart';
 
-/// A part of a Page to open: a Text Block, a Table or a Block of a kind Liquid does not know.
 sealed class Part {
   const Part();
 }
@@ -39,9 +38,8 @@ class TablePart extends Part {
 }
 
 class CodePart extends Part {
-  const CodePart(this.code, [this.language = '']);
+  const CodePart(this.code);
   final String code;
-  final String language;
 }
 
 class MediaPart extends Part {
@@ -157,16 +155,11 @@ BridgeRow namedRow(int number) => BridgeRow(
   ],
 );
 
-/// A Page opened over a fake Workspace, for the Workspace tests.
 class PageKit {
   late FakeWorkspace fake;
   late WorkspaceState workspace;
   late String page;
 
-  /// Opens a Page of `parts` in Liquid, or in a bare frame unless `app`.
-  ///
-  /// A `fresh` Page stays the new blank Page of a first start, which takes the keys in its
-  /// title; a `session` shows that agent session instead, beside the sidebar's Pages.
   Future<void> show(
     WidgetTester tester,
     List<Part> parts, {
@@ -179,7 +172,6 @@ class PageKit {
     bool pdfRenderer = false,
   }) async {
     await tester.binding.setSurfaceSize(const Size(1400, 900));
-    // Tests have no PDF renderer; those that show PDFs give one before showing the Page.
     if (!pdfRenderer) {
       PdfPages.opener = (_) async => throw const PdfUnreadable();
     }
@@ -216,73 +208,60 @@ class PageKit {
 
   Future<void> _add(List<Part> parts) async {
     String? after;
+    Future<BridgeApplied> add(
+      BridgeMutationKind kind, {
+      String? text,
+      String? mediaType,
+      String? attachment,
+    }) async {
+      final added = await workspace.apply(
+        mutation(
+          kind,
+          page: page,
+          after: after,
+          text: text,
+          mediaType: mediaType,
+          attachment: attachment,
+        ),
+      );
+      after = added.view;
+      return added;
+    }
+
     for (final part in parts) {
       switch (part) {
         case TextPart(:final text, :final style):
-          final added = await workspace.apply(
-            mutation(
-              BridgeMutationKind.addTextBlock,
-              page: page,
-              after: after,
-              text: text,
-            ),
-          );
-          after = added.view;
+          final added = await add(BridgeMutationKind.addTextBlock, text: text);
           fake.styles[added.block!] = style;
         case TablePart(:final rows, :final fields):
-          final added = await workspace.apply(
-            mutation(
-              BridgeMutationKind.addDatabaseBlock,
-              page: page,
-              after: after,
-              text: 'Expenses',
-            ),
+          final added = await add(
+            BridgeMutationKind.addDatabaseBlock,
+            text: 'Expenses',
           );
-          after = added.view;
           fake.databases[added.block!] = BridgeDatabase(
             name: 'Expenses',
             fields: fields,
           );
           fake.rows[added.block!] = [...rows];
-        case CodePart(:final code, :final language):
-          final added = await workspace.apply(
+        case CodePart(:final code):
+          final added = await add(BridgeMutationKind.addTextBlock, text: code);
+          await workspace.apply(
             mutation(
-              BridgeMutationKind.addTextBlock,
+              BridgeMutationKind.turnIntoCode,
               page: page,
-              after: after,
-              text: code,
+              block: added.block,
             ),
           );
-          after = added.view;
-          final turn = mutation(
-            BridgeMutationKind.turnIntoCode,
-            page: page,
-            block: added.block,
-          );
-          await workspace.apply(turn);
-          if (language.isNotEmpty) fake.languages[added.block!] = language;
         case MediaPart(:final name, :final bytes):
           final attachment = await fake.addBytes(bytes: bytes);
-          final added = await workspace.apply(
-            mutation(
-              BridgeMutationKind.addMediaBlock,
-              page: page,
-              after: after,
-              text: name,
-              mediaType: mediaTypeOf(name),
-              attachment: attachment,
-            ),
+          await add(
+            BridgeMutationKind.addMediaBlock,
+            text: name,
+            mediaType: mediaTypeOf(name),
+            attachment: attachment,
           );
-          after = added.view;
         case WhiteboardPart(:final elements):
-          final added = await workspace.apply(
-            mutation(
-              BridgeMutationKind.addWhiteboardBlock,
-              page: page,
-              after: after,
-            ),
-          );
-          after = added.view;
+          final added = await add(BridgeMutationKind.addWhiteboardBlock);
           fake.whiteboards[added.block!] = BridgeDrawing(
             style: BridgeDrawingStyle.handDrawn,
             elements: [
@@ -312,12 +291,10 @@ class PageKit {
   Finder inTable(Finder finder) =>
       find.descendant(of: find.byType(TableBlock), matching: finder);
 
-  /// The board of the Page's only Whiteboard.
   BoardController boardOf(WidgetTester tester) {
     final block = tester.widget<DrawingFrame>(
       find.byType(DrawingFrame, skipOffstage: false).first,
     );
-    // The Block holds the board; this look adds no user of its own.
     final board = block.views.boardFor(block.view);
     block.views.releaseBoard(block.view);
     return board;
@@ -327,7 +304,6 @@ class PageKit {
       fake.applied.where((applied) => applied.kind == kind);
 }
 
-/// The text field of the Text Block at `index`.
 Finder block(int index) => find.descendant(
   of: find.byType(TextBlock).at(index),
   matching: find.byType(TextField),

@@ -17,12 +17,8 @@ import 'theme/icons.dart';
 import 'theme/theme.dart';
 import 'theme/tokens.g.dart';
 
-/// A section of Settings.
 enum SettingsSection { appearance, shortcuts, writer, agentHosts }
 
-/// Settings: Appearance with theme, text size and thread details, Shortcuts with the profile, every
-/// action's keys and recording new ones, the Writer model with a project, and Agent hosts. It
-/// replaces the main area; esc closes it, or first dismisses a failed save's notice.
 class SettingsPage extends StatefulWidget {
   const SettingsPage({
     super.key,
@@ -40,25 +36,19 @@ class SettingsPage extends StatefulWidget {
 
   final ShortcutController shortcuts;
 
-  /// The section shown, which the owner keeps: it outlives this page while agent sessions change.
   final SettingsSection section;
   final ValueChanged<SettingsSection> onSection;
   final VoidCallback onClose;
 
-  /// The latest failed save of any settings, shown at the top until dismissed.
   final ValueListenable<SaveFailure?> saveFailure;
   final VoidCallback onDismissSaveFailure;
 
-  /// Theme and text size; without them Settings show only Shortcuts.
   final AppearanceController? appearance;
 
-  /// The session card's rows, which Appearance sets as Thread details.
   final SessionCardSettingsController? cardSettings;
 
-  /// The Writer model section; none without the project's backend.
   final Widget? writer;
 
-  /// The Agent hosts section (ADR-0295); none without the agent hosts' settings.
   final Widget? agentHosts;
 
   @override
@@ -71,7 +61,6 @@ class _SettingsPageState extends State<SettingsPage> {
   @override
   void initState() {
     super.initState();
-    // The shell keeps the focus otherwise, and esc would not reach the page.
     WidgetsBinding.instance.addPostFrameCallback((_) => _focus.requestFocus());
   }
 
@@ -81,7 +70,6 @@ class _SettingsPageState extends State<SettingsPage> {
     super.dispose();
   }
 
-  /// esc dismisses the notice of a failed save while one shows, and closes Settings otherwise.
   void _escape() {
     if (widget.saveFailure.value != null) {
       widget.onDismissSaveFailure();
@@ -107,7 +95,6 @@ class _SettingsPageState extends State<SettingsPage> {
                 color: ws.subtle,
                 border: Border(right: BorderSide(color: ws.border)),
               ),
-              // Hover and focus ink paints on a Material above the background.
               child: Material(
                 type: MaterialType.transparency,
                 child: Column(
@@ -139,7 +126,6 @@ class _SettingsPageState extends State<SettingsPage> {
                             borderRadius: BorderRadius.circular(
                               WsMetrics.radiusMd,
                             ),
-                            // Ink, so the highlights paint above the chosen section too.
                             child: Ink(
                               height: WsMetrics.rowNav,
                               padding: const EdgeInsets.symmetric(
@@ -210,7 +196,6 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 }
 
-/// A failed save, in the danger colors, until ✕ dismisses it.
 class _SaveNotice extends StatelessWidget {
   const _SaveNotice({required this.text, required this.onDismiss});
 
@@ -262,8 +247,6 @@ class _SaveNotice extends StatelessWidget {
   }
 }
 
-/// The writer model (ADR-0294): the one model that writes commit messages left blank, pull request
-/// titles and descriptions, and session titles, read and set through the project's backend.
 class WriterModelPane extends StatefulWidget {
   const WriterModelPane({super.key, required this.project});
 

@@ -17,13 +17,15 @@ import 'focus_kit.dart';
 
 const info = SessionInfo(project: 'acme-api');
 
-/// Keys in the whole shell: a dialog, a question and the composer take the keys without a click,
-/// and only the keys meant for them.
+Future<void> key(WidgetTester tester, LogicalKeyboardKey key) async {
+  await tester.sendKeyEvent(key);
+  await tester.pumpAndSettle();
+}
+
 void main() {
   late FakeProject project;
   var sequence = 0;
 
-  /// Shows an open session with `threads` in the sidebar.
   Future<void> show(
     WidgetTester tester, {
     List<BridgeThreadSummary> threads = const [],
@@ -42,7 +44,6 @@ void main() {
     await tester.pumpAndSettle();
   }
 
-  /// Asks the agent `text`, which takes the composer's place once the request arrives.
   Future<void> ask(WidgetTester tester, String id, String text) async {
     project.session.emit(
       event(
@@ -54,14 +55,12 @@ void main() {
     await tester.pumpAndSettle();
   }
 
-  /// Lets a question take keys, as it does 0.5 s after it could first be read.
   Future<void> read(WidgetTester tester) =>
       tester.pump(const Duration(milliseconds: 500));
 
   bool focused(WidgetTester tester, Key key) =>
       tester.widget<TextField>(find.byKey(key)).focusNode?.hasFocus ?? false;
 
-  /// Sets the field's text as an input method leaves it while composing.
   void compose(WidgetTester tester, Key key, String text) {
     tester
         .widget<TextField>(find.byKey(key))
@@ -79,8 +78,7 @@ void main() {
       await show(tester);
       await ask(tester, 'q1', 'Your name');
       await read(tester);
-      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
-      await tester.pumpAndSettle();
+      await key(tester, LogicalKeyboardKey.escape);
       expect(project.session.calls, ['dismiss q1']);
     },
   );
@@ -91,13 +89,11 @@ void main() {
     await show(tester);
     await ask(tester, 'q1', 'Your name');
     await tester.enterText(find.byKey(const Key('answer')), 'draft');
-    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
-    await tester.pumpAndSettle();
+    await key(tester, LogicalKeyboardKey.enter);
     expect(project.session.calls, isEmpty, reason: 'too early to answer');
 
     await read(tester);
-    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
-    await tester.pumpAndSettle();
+    await key(tester, LogicalKeyboardKey.enter);
     expect(project.session.calls, ['answer q1 name=draft']);
   });
 
@@ -127,7 +123,6 @@ void main() {
     await show(tester);
     await ask(tester, 'q1', 'Your name');
     await tester.enterText(find.byKey(const Key('answer')), 'draft');
-    // It arrived while the user worked in another app.
     tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
     await read(tester);
     tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
@@ -165,8 +160,7 @@ void main() {
     await ask(tester, 'q1', 'Your name');
     await read(tester);
     compose(tester, const Key('answer'), 'nihon');
-    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
-    await tester.pumpAndSettle();
+    await key(tester, LogicalKeyboardKey.enter);
     expect(
       project.session.calls,
       isEmpty,
@@ -180,8 +174,7 @@ void main() {
     await show(tester);
     await tester.tap(find.byKey(const Key('composer')));
     compose(tester, const Key('composer'), 'nihon');
-    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
-    await tester.pumpAndSettle();
+    await key(tester, LogicalKeyboardKey.enter);
     expect(
       project.session.calls.where((call) => call.startsWith('send')),
       isEmpty,
@@ -195,8 +188,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('Delete'));
     await tester.pumpAndSettle();
-    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
-    await tester.pumpAndSettle();
+    await key(tester, LogicalKeyboardKey.enter);
     expect(project.calls, contains('delete thread-2 worktree=false'));
   });
 

@@ -1,6 +1,3 @@
-//! Stable identities of Workspace objects: 128 random bits as 32 lowercase hex digits, so
-//! devices create them offline without coordinating.
-
 use std::fmt;
 
 use serde::{Deserialize, Serialize};
@@ -26,20 +23,17 @@ macro_rules! ids {
                 Ok(Self(hex))
             }
 
-            /// An identity read back from a document key.
             #[allow(dead_code, reason = "Action identities are read back from headers")]
             pub(crate) fn stored(key: &str) -> Self {
                 Self(key.to_string())
             }
 
-            /// The identity `text` names, if it has the stored form.
             pub fn parse(text: &str) -> Option<Self> {
                 let stored = text.len() == 32
                     && text.bytes().all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f'));
                 stored.then(|| Self(text.to_string()))
             }
 
-            /// The identity as documents store it.
             pub fn as_str(&self) -> &str {
                 &self.0
             }
@@ -54,38 +48,26 @@ macro_rules! ids {
 }
 
 ids! {
-    /// An area: a part of the Workspace with its own Page tree.
     AreaId,
-    /// A Page.
     PageId,
-    /// A Block, the canonical content its Views show.
     BlockId,
-    /// One View of a Block on a Page.
     ViewId,
-    /// One recorded Action.
     ActionId,
-    /// A field of a Database Block.
     FieldId,
-    /// A row of a Database Block.
     RowId,
-    /// One option of a select field.
     OptionId,
-    /// One stroke, shape or text of a Whiteboard Block.
     ElementId,
 }
 
-/// A person, as the account that signs in names them.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct PersonId(String);
 
 impl PersonId {
-    /// The person the account names `id`.
     pub fn new(id: impl Into<String>) -> Self {
         Self(id.into())
     }
 
-    /// The identity as the account names it.
     pub fn as_str(&self) -> &str {
         &self.0
     }

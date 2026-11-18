@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 
-/// The context bar: the share of the window in use, with a tick at `tick` where the agent compacts.
 class FillBar extends StatelessWidget {
   const FillBar({
     super.key,
@@ -11,10 +10,8 @@ class FillBar extends StatelessWidget {
     required this.mark,
   });
 
-  /// The share of the window in use, from 0 to 1; none is drawn when null.
   final double? fraction;
 
-  /// Where the tick stands, from 0 to 1.
   final double? tick;
   final Color track;
   final Color fill;

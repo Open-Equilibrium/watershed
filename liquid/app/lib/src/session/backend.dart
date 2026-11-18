@@ -3,16 +3,37 @@ import 'dart:async';
 import '../rust/api/details.dart';
 import '../rust/api/events.dart';
 import '../rust/api/git.dart';
+import '../rust/api/moves.dart' as moves;
 import '../rust/api/session.dart';
 import '../rust/api/thread.dart';
 
-/// What Liquid needs from a project on Meta-Harness's agent host; tests substitute a fake.
+class MoveConnectionLost implements Exception {
+  const MoveConnectionLost(this.message);
+
+  final String message;
+
+  @override
+  String toString() => message;
+}
+
+typedef ProjectOpener = Future<ProjectBackend> Function(
+  String? address,
+  String root,
+);
+
+abstract interface class CarriedMove {
+  String get transfer;
+}
+
+abstract interface class ConfigurationChanges {
+  List<moves.BridgeConfigChange> get changes;
+}
+
 abstract interface class ProjectBackend {
-  /// The project's sessions, newest first.
+  String get root;
+
   Future<List<BridgeThreadSummary>> threads();
 
-  /// Starts a session: in a new worktree from `base`, in the existing `worktree`, or else in
-  /// the project folder, as T3's workspace selector chose.
   Future<SessionBackend> start(
     String text,
     BridgeModelChoice model, {
@@ -22,41 +43,61 @@ abstract interface class ProjectBackend {
   });
   Future<SessionBackend> open(String id);
 
-  /// Whether `id` is the only session in its worktree, as T3 asks before deleting it.
   Future<bool> onlySessionInWorktree(String id);
   Future<void> delete(String id, {required bool worktree});
   Future<void> archive(String id, {required bool archived});
 
-  /// Git for the project folder.
   GitBackend git();
   Future<List<BridgeProvider>> providers();
   Future<BridgeModelChoice?> writerModel();
   Future<void> setWriterModel(BridgeModelChoice model);
 
-  /// The name T3 shows for this host, such as the computer's name.
   Future<String> environmentName();
 
-  /// Releases the agent host's connection once Liquid no longer shows the project.
+  Future<moves.BridgeMoveCheck> moveCheck(String id);
+  Future<String> environmentId();
+  Future<CarriedMove> moveOut(
+    String id, {
+    required String transfer,
+    required String targetAddress,
+    required String targetName,
+    required String targetEnvironment,
+    required bool commit,
+  });
+  Future<void> moveFinish(String id, String transfer, String? toHost);
+  Future<moves.BridgeArrival> moveStatus(String transfer);
+  Future<moves.BridgeArrival> moveAbort(String transfer);
+  Future<moves.BridgeLanding> preflight(String root, String branch);
+
+  Future<moves.BridgeMoveRecord?> moveRecord(String id);
+
+  Future<bool> supportsMoves();
+  Future<List<moves.BridgeHostProject>> hostProjects();
+  Future<moves.BridgeHostProject> addProject(String root);
+  Future<moves.BridgeHostProject> cloneProject(String remoteUrl, String path);
+  Future<ConfigurationChanges> configurationChanges(ProjectBackend from);
+  Future<void> bringConfiguration(
+    ProjectBackend from,
+    ConfigurationChanges shown,
+  );
+  Future<SessionBackend> moveIn(CarriedMove move, {required String root});
+  Future<String> environmentMachine();
+
   void close();
 }
 
-/// What Liquid needs from one session.
 abstract interface class SessionBackend {
   String get id;
 
-  /// The session now, with the id that [events] streams the events after it by (ADR-0290).
   Future<BridgeSubscription> subscribe();
   Stream<BridgeEvent> events(int subscription);
 
-  /// Confirms that the first [applied] events were applied, so the bridge may send more
-  /// (ADR-0272).
   Future<void> confirmApplied(int applied);
   Future<BridgeSnapshot> snapshot();
   Future<void> send(String text, {required bool steer});
   Future<void> stop();
   Future<List<BridgeTurn>> turns();
 
-  /// The files that changed from the start of turn `from` to the end of turn `to`.
   Future<List<BridgeFileChange>> turnChanges(
     int from,
     int to, {
@@ -69,10 +110,8 @@ abstract interface class SessionBackend {
     required bool hideWhitespace,
   });
 
-  /// T3's "Edit from here"; returns the turn's prompt.
   Future<String> revert(int turn, {required bool restoreFiles});
 
-  /// T3's "Fork from this response"; returns the new session's id.
   Future<String> fork(int turn);
   Future<void> respond(String request, String decision);
   Future<void> answer(String request, List<BridgeQuestionAnswer> answers);
@@ -88,39 +127,31 @@ abstract interface class SessionBackend {
   Future<String> title();
   Future<String?> worktree();
 
-  /// Git for the session's checkout.
   GitBackend git();
   Future<void> setBranch(String branch, {String? worktree});
 
-  /// Writes the session's record into Downloads; returns the folder.
   Future<String> exportRecord({required String host, required String day});
 
-  /// The servers the session's agent or terminals run, now and as they change.
   Future<List<BridgeLocalServer>> servers();
   Stream<List<BridgeLocalServer>> serverChanges();
   Future<void> stopServer(int pid, int port);
 
-  /// The session's scheduled tasks, now and as they change.
   Future<List<BridgeAutomation>> automations();
   Stream<List<BridgeAutomation>> automationChanges();
   Future<void> setAutomationEnabled(String id, {required bool enabled});
   Future<void> runAutomationNow(String id);
 
-  /// The session's related threads (T3's Lineage and Side chats), now and as they change.
   Future<BridgeLineage> lineage();
   Stream<BridgeLineage> lineageChanges();
   Future<void> mergeBack();
   Future<void> disconnect();
   Future<void> stopSubagent(String id);
 
-  /// The provider's usage limits, if it reports any.
   Future<BridgeUsageLimits?> usageLimits();
 
-  /// Releases the session once Liquid left it, which ends its follows on T3.
   void close();
 }
 
-/// Git for one checkout, as T3 runs it.
 abstract interface class GitBackend {
   Future<BridgeGitStatus> status();
   Stream<BridgeGitStatus> watch();
@@ -129,7 +160,6 @@ abstract interface class GitBackend {
   Future<void> createBranch(String name);
   Future<void> init();
 
-  /// Pulls; returns T3's title and description.
   Future<(String, String)> pull();
   Stream<BridgeGitProgress> run(
     BridgeGitAction action, {
@@ -152,7 +182,6 @@ abstract interface class GitBackend {
     required bool public,
   });
 
-  /// The branch compared with its base, as T3's "Changes vs" row.
   Future<List<BridgeFileChange>> branchChanges({required bool hideWhitespace});
   Future<String> branchPatch(String path, {required bool hideWhitespace});
   Future<BridgePullRequestDetail> pullRequest(int number);
@@ -162,19 +191,104 @@ abstract interface class GitBackend {
     String? mergeMethod,
   });
 
-  /// Checks out the pull request at `url` in a worktree, as T3's Fix and Resolve do.
   Future<BridgeCheckedOut> pullRequestWorktree(String url);
 
-  /// Releases the checkout once Liquid no longer shows it, which ends its status watch.
   void close();
 }
 
-/// The project on Meta-Harness's T3 server, reached through the Rust bridge.
 class RustProjectBackend implements ProjectBackend {
-  RustProjectBackend(this._host, this._project);
+  RustProjectBackend(this._host, this._project, {required this.root});
 
   final AgentHost _host;
   final AgentProject _project;
+  @override
+  final String root;
+
+  @override
+  Future<moves.BridgeMoveCheck> moveCheck(String id) async =>
+      (await _project.open(id: id)).moveCheck();
+  @override
+  Future<String> environmentId() => _host.environmentId();
+
+  @override
+  Future<CarriedMove> moveOut(
+    String id, {
+    required String transfer,
+    required String targetAddress,
+    required String targetName,
+    required String targetEnvironment,
+    required bool commit,
+  }) async {
+    final package = await (await _project.open(id: id)).moveOut(
+      transfer: transfer,
+      targetAddress: targetAddress,
+      targetName: targetName,
+      targetEnvironment: targetEnvironment,
+      commit: commit,
+    );
+    return _RustCarriedMove(package, await package.transfer());
+  }
+
+  @override
+  Future<void> moveFinish(String id, String transfer, String? toHost) async =>
+      (await _project.open(id: id))
+          .moveFinish(transfer: transfer, toHost: toHost);
+  @override
+  Future<moves.BridgeArrival> moveStatus(String transfer) =>
+      _host.moveStatus(transfer: transfer);
+  @override
+  Future<moves.BridgeArrival> moveAbort(String transfer) =>
+      _host.moveAbort(transfer: transfer);
+  @override
+  Future<moves.BridgeLanding> preflight(String root, String branch) =>
+      _host.preflight(root: root, branch: branch);
+  @override
+  Future<moves.BridgeMoveRecord?> moveRecord(String id) async =>
+      (await _project.open(id: id)).moveRecord();
+  @override
+  Future<bool> supportsMoves() => _host.supportsMoves();
+  @override
+  Future<List<moves.BridgeHostProject>> hostProjects() => _host.hostProjects();
+  @override
+  Future<moves.BridgeHostProject> addProject(String root) =>
+      _host.addHostProject(root: root);
+  @override
+  Future<moves.BridgeHostProject> cloneProject(String remoteUrl, String path) =>
+      _host.cloneHostProject(remoteUrl: remoteUrl, path: path);
+  @override
+  Future<ConfigurationChanges> configurationChanges(ProjectBackend from) async {
+    final plan = await _host.configurationChanges(
+      from: (from as RustProjectBackend)._host,
+    );
+    return _RustConfigurationChanges(plan, await plan.changes());
+  }
+
+  @override
+  Future<void> bringConfiguration(
+    ProjectBackend from,
+    ConfigurationChanges shown,
+  ) => _host.bringConfiguration(
+    from: (from as RustProjectBackend)._host,
+    shown: (shown as _RustConfigurationChanges).plan,
+  );
+  @override
+  Future<SessionBackend> moveIn(
+    CarriedMove move, {
+    required String root,
+  }) async {
+    final package = (move as _RustCarriedMove).package;
+    final arrival = await _host.moveIn(root: root, package: package);
+    final thread = arrival.thread;
+    if (thread == null) {
+      if (arrival.lost) throw MoveConnectionLost(arrival.message);
+      throw arrival.message;
+    }
+    final project = await _host.project(root: root);
+    return RustSessionBackend.of(await project.open(id: thread));
+  }
+
+  @override
+  Future<String> environmentMachine() => _host.environmentMachine();
 
   @override
   Future<List<BridgeThreadSummary>> threads() => _project.threads();
@@ -224,7 +338,22 @@ class RustProjectBackend implements ProjectBackend {
   }
 }
 
-/// One session on the agent host, reached through the Rust bridge.
+class _RustConfigurationChanges implements ConfigurationChanges {
+  _RustConfigurationChanges(this.plan, this.changes);
+
+  final moves.BridgeConfigChanges plan;
+  @override
+  final List<moves.BridgeConfigChange> changes;
+}
+
+class _RustCarriedMove implements CarriedMove {
+  _RustCarriedMove(this.package, this.transfer);
+
+  final moves.BridgeMovePackage package;
+  @override
+  final String transfer;
+}
+
 class RustSessionBackend implements SessionBackend {
   RustSessionBackend._(this._session, this.id);
 
@@ -351,7 +480,6 @@ class RustSessionBackend implements SessionBackend {
   void close() => _session.dispose();
 }
 
-/// Git through the Rust bridge; the checkout arrives from the bridge's worker threads.
 class RustGitBackend implements GitBackend {
   RustGitBackend(this._git);
 
@@ -459,9 +587,6 @@ class RustGitBackend implements GitBackend {
   void close() => unawaited(_git.then((git) => git.dispose()));
 }
 
-/// [changes], which calls [stop] as its listener cancels. The bridge notices a cancel only at its
-/// next change, so [stop] ends the bridge's follow at once. It is called within the cancel, ahead
-/// of anything the cancel then releases.
 Stream<T> stopOnCancel<T>(Stream<T> changes, Future<void> Function() stop) {
   late final StreamSubscription<T> subscription;
   final controller = StreamController<T>(

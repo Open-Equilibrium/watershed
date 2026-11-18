@@ -8,7 +8,6 @@ import 'package:liquid/src/theme/theme.dart';
 
 import 'fake_backend.dart';
 
-/// Opens the Commit dialog of a feature branch with `changes`, from the Git action options.
 Future<({FakeGit git, SessionState state})> openCommit(
   WidgetTester tester,
   List<BridgeFileChange> changes,
@@ -28,16 +27,18 @@ Future<({FakeGit git, SessionState state})> openCommit(
     ),
   );
   await tester.pump();
-  await tester.tap(find.byTooltip('Git action options'));
-  await tester.pumpAndSettle();
-  await tester.tap(find.text('Commit'));
-  await tester.pumpAndSettle();
+  await tap(tester, find.byTooltip('Git action options'));
+  await tap(tester, find.text('Commit'));
   return (git: git, state: state);
 }
 
-/// The row of the file at `path`, whose checkbox leaves it out while the dialog edits files.
 Finder fileRow(String path) =>
     find.ancestor(of: find.text(path), matching: find.byType(Row)).first;
+
+Future<void> tap(WidgetTester tester, Finder finder) async {
+  await tester.tap(finder);
+  await tester.pumpAndSettle();
+}
 
 void main() {
   testWidgets(
@@ -50,8 +51,7 @@ void main() {
       expect(find.text('Commit changes'), findsOneWidget);
       expect(find.text('lib/a.dart'), findsOneWidget);
       expect(find.text('+4 / -1'), findsOneWidget);
-      await tester.tap(find.widgetWithText(PrimaryButton, 'Commit'));
-      await tester.pumpAndSettle();
+      await tap(tester, find.widgetWithText(PrimaryButton, 'Commit'));
       expect(git.calls, ['run commit message=null files=null feature=false']);
       await state.dispose();
     },
@@ -64,17 +64,8 @@ void main() {
         fileOf('a.dart'),
         fileOf('b.dart'),
       ]);
-      await tester.tap(find.widgetWithText(GhostButton, 'Edit'));
-      await tester.pumpAndSettle();
-      Future<void> toggle(String path) async {
-        await tester.tap(
-          find.descendant(of: fileRow(path), matching: find.byType(Checkbox)),
-        );
-        await tester.pumpAndSettle();
-      }
-
-      await tester.tap(find.byType(Checkbox).first);
-      await tester.pumpAndSettle();
+      await tap(tester, find.widgetWithText(GhostButton, 'Edit'));
+      await tap(tester, find.byType(Checkbox).first);
       expect(find.text('Excluded'), findsNWidgets(2));
       expect(
         tester
@@ -90,13 +81,14 @@ void main() {
             .onPressed,
         isNull,
       );
-      await toggle('b.dart');
+      await tap(
+        tester,
+        find.descendant(of: fileRow('b.dart'), matching: find.byType(Checkbox)),
+      );
       expect(find.text('Excluded'), findsOneWidget);
-      await tester.tap(find.widgetWithText(GhostButton, 'Done'));
-      await tester.pumpAndSettle();
+      await tap(tester, find.widgetWithText(GhostButton, 'Done'));
       expect(find.text('(1 of 2)'), findsOneWidget);
-      await tester.tap(find.widgetWithText(PrimaryButton, 'Commit'));
-      await tester.pumpAndSettle();
+      await tap(tester, find.widgetWithText(PrimaryButton, 'Commit'));
       expect(git.calls, ['run commit message=null files=b.dart feature=false']);
       await state.dispose();
     },
@@ -107,10 +99,10 @@ void main() {
   ) async {
     final (:git, :state) = await openCommit(tester, [fileOf('a.dart')]);
     await tester.enterText(find.byType(TextField), 'Fix login');
-    await tester.tap(
+    await tap(
+      tester,
       find.widgetWithText(SecondaryButton, 'Commit on new branch'),
     );
-    await tester.pumpAndSettle();
     expect(git.calls, ['run commit message=Fix login files=null feature=true']);
     await state.dispose();
   });

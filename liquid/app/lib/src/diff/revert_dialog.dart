@@ -4,8 +4,6 @@ import '../controls.dart';
 import '../session/session_state.dart';
 import '../theme/theme.dart';
 
-/// T3's "Edit from here?" for `turn`: rewinds the Chat to before it, and with "Revert files too"
-/// also undoes the files. The files only come back when the turn's checkpoint is ready.
 Future<void> confirmRevert(
   BuildContext context,
   SessionState state,
@@ -19,7 +17,6 @@ Future<void> confirmRevert(
     context: context,
     builder: (context) => ActionDialog(
       title: 'Edit from here?',
-      // The main action is listed first, so it sits right of "Revert files too".
       actions: [
         PrimaryButton(
           label: 'Revert and keep changes',

@@ -2,47 +2,35 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 
-/// Items read at once: a screenful and more, far below the bridge's window.
 const windowItems = 100;
 
-/// A long list read in windows as it is shown, never whole (client architecture rules 3
-/// and 5). Each reread asks again for the count and the windows kept: all read so far, or
-/// the `kept` last used, whose others are read again once shown.
 class WindowedList<T> extends ChangeNotifier {
   WindowedList(this._query, this._report, {this.kept});
 
-  /// How many windows it keeps at most, for a list no walk reads far through.
   final int? kept;
 
-  /// Reads the window `start..start + limit` and the count.
   final Future<(int, List<T>)> Function(int start, int limit) _query;
   final void Function(Object error) _report;
 
-  /// How many items there are; null until first read.
   int? get count => _count;
   int? _count;
 
   final _chunks = <int, List<T>>{};
   final _loading = <int, Future<void>>{};
 
-  /// Windows asked for while a reread ran, which it reads too.
   final _wanted = <int>{};
   int _generation = 0;
   bool _disposed = false;
   bool _reading = false;
   bool _again = false;
 
-  /// Done once the running reread is, which reads the windows asked for meanwhile.
   Future<void>? _rereading;
 
-  /// Reads that failed so far.
   int _failures = 0;
 
-  /// The item at `index`, or null outside the list or while its window is read.
   T? at(int index) {
     if (index < 0 || index >= (_count ?? index + 1)) return null;
     final chunk = index ~/ windowItems;
-    // Read again as it is shown, then kept as the last used.
     final items = _chunks.remove(chunk);
     if (items == null) {
       unawaited(_load(chunk));
@@ -53,8 +41,6 @@ class WindowedList<T> extends ChangeNotifier {
     return at < items.length ? items[at] : null;
   }
 
-  /// The item at `index` if its window is kept, without reading it or counting it as used,
-  /// for walks that must not push the shown windows out.
   T? peek(int index) {
     if (index < 0) return null;
     final items = _chunks[index ~/ windowItems];
@@ -62,7 +48,6 @@ class WindowedList<T> extends ChangeNotifier {
     return items != null && at < items.length ? items[at] : null;
   }
 
-  /// The position of the first read item that passes `test`, or null.
   int? indexWhere(bool Function(T item) test) {
     for (final MapEntry(key: chunk, value: items) in _chunks.entries) {
       final at = items.indexWhere(test);
@@ -71,9 +56,6 @@ class WindowedList<T> extends ChangeNotifier {
     return null;
   }
 
-  /// The item at `index`, read first if its window was not. A read a reread crossed is
-  /// dropped, so its window comes with that reread or is read again, a few times at most;
-  /// a failed read ends the wait, as its problem shows.
   Future<T?> load(int index) async {
     if (index < 0) return null;
     final chunk = index ~/ windowItems;
@@ -87,7 +69,6 @@ class WindowedList<T> extends ChangeNotifier {
     return at(index);
   }
 
-  /// Reads one window; one the list changed under is read again.
   Future<void> _load(int chunk) =>
       _loading[chunk] ??= _read(chunk).whenComplete(() {
         _loading.remove(chunk);
@@ -98,14 +79,12 @@ class WindowedList<T> extends ChangeNotifier {
     try {
       final (count, items) = await _query(chunk * windowItems, windowItems);
       if (_disposed) return;
-      // A reread running now reads this window too, so no order mixes with another.
       if (_reading) {
         _wanted.add(chunk);
         _again = true;
         return;
       }
       if (generation != _generation) {
-        // Read again once this read has left the list of running ones.
         scheduleMicrotask(() => unawaited(_load(chunk)));
         return;
       }
@@ -119,8 +98,6 @@ class WindowedList<T> extends ChangeNotifier {
     }
   }
 
-  /// Rereads the count and every window kept, one reread at a time; one asked for while
-  /// another runs completes once the pass it asked for has read.
   Future<void> reread() async {
     if (_reading) {
       _again = true;
@@ -141,10 +118,8 @@ class WindowedList<T> extends ChangeNotifier {
           read[chunk] = items;
         }
         if (_disposed || generation != _generation) return;
-        // Windows read across a change may disagree; read them all again first.
         if (_again) continue;
         _count = count;
-        // In the order last used, the first window, read for the count, oldest.
         final used = [..._chunks.keys, ..._wanted];
         _chunks.clear();
         for (final chunk in {0, ...used}) {
@@ -164,7 +139,6 @@ class WindowedList<T> extends ChangeNotifier {
     }
   }
 
-  /// Drops the windows used longest ago beyond the kept ones.
   void _trim() {
     while (_chunks.length > (kept ?? _chunks.length)) {
       _chunks.remove(_chunks.keys.first);

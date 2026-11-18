@@ -8,22 +8,19 @@ void main() {
   const commandE = Keys(LogicalKeyboardKey.keyE, meta: true);
   const liquidD = Keys(LogicalKeyboardKey.keyD, liquid: true);
   const liquidE = Keys(LogicalKeyboardKey.keyE, liquid: true);
+  const commandD = Keys(LogicalKeyboardKey.keyD, meta: true);
 
-  test(
-    'the Liquid key profile adds ⇪ to Liquid commands and keeps their ⌘ keys',
-    () {
-      final keys = ShortcutSettings.liquidKey();
+  test('the Liquid key profile adds ⇪ and keeps the ⌘ keys', () {
+    final keys = ShortcutSettings.liquidKey();
 
-      expect(keys.bindings(Command.newSession), [liquidN, commandN]);
-      expect(keys.label(Command.newSession), '⇪N');
-      expect(keys.label(Command.answerEditor), '⇪⏎');
-      expect(keys.menu(Command.newSession), commandN);
-      // Platform standards and keys without ⌘ stay as they are.
-      expect(keys.label(Command.settings), '⌘,');
-      expect(keys.label(Command.dismissQuestion), 'esc');
-      expect(keys.label(Command.queue), '⌥⏎');
-    },
-  );
+    expect(keys.bindings(Command.newSession), [liquidN, commandN]);
+    expect(keys.label(Command.newSession), '⇪N');
+    expect(keys.label(Command.answerEditor), '⇪⏎');
+    expect(keys.menu(Command.newSession), commandN);
+    expect(keys.label(Command.settings), '⌘,');
+    expect(keys.label(Command.dismissQuestion), 'esc');
+    expect(keys.label(Command.queue), '⌥⏎');
+  });
 
   test('Session card takes ⌘⌥B, which no other command runs', () {
     final keys = ShortcutSettings.standard();
@@ -58,31 +55,24 @@ void main() {
     expect(keys.liquidKey, isFalse);
   });
 
-  test(
-    'changing a shortcut switches to Custom based on the profile it came from',
-    () {
-      final keys = ShortcutSettings.standard().change(Command.diff, commandE);
+  test('a changed shortcut switches to Custom from its base', () {
+    final keys = ShortcutSettings.standard().change(Command.diff, commandE);
 
-      expect(keys.profile, Profile.custom);
-      expect(keys.base, Profile.standard);
-      expect(keys.bindings(Command.diff), [commandE]);
-      expect(keys.changed(Command.diff), isTrue);
-      expect(keys.reset(Command.diff).bindings(Command.diff), [
-        const Keys(LogicalKeyboardKey.keyD, meta: true),
-      ]);
-      final all = keys.resetAll();
-      expect(all.profile, Profile.standard);
-      expect(all.changed(Command.diff), isFalse);
-    },
-  );
+    expect(keys.profile, Profile.custom);
+    expect(keys.base, Profile.standard);
+    expect(keys.bindings(Command.diff), [commandE]);
+    expect(keys.changed(Command.diff), isTrue);
+    expect(keys.reset(Command.diff).bindings(Command.diff), [commandD]);
+    final all = keys.resetAll();
+    expect(all.profile, Profile.standard);
+    expect(all.changed(Command.diff), isFalse);
+  });
 
-  test('a conflict is another command in the same area with the same keys', () {
+  test('a conflict is another command in its area, esc is shared', () {
     final keys = ShortcutSettings.liquidKey();
 
     expect(keys.conflicts(Command.focusInput, liquidN), [Command.newSession]);
-    // The ⌘ variant that keeps working conflicts too.
     expect(keys.conflicts(Command.focusInput, commandN), [Command.newSession]);
-    // esc stops a run in the input area and dismisses a question.
     expect(
       keys.conflicts(
         Command.dismissQuestion,
@@ -91,6 +81,13 @@ void main() {
       isEmpty,
     );
     expect(keys.conflicts(Command.newSession, liquidN), isEmpty);
+    expect(
+      ShortcutSettings.standard().conflicts(
+        Command.stop,
+        const Keys(LogicalKeyboardKey.escape),
+      ),
+      isEmpty,
+    );
   });
 
   test('a Liquid ⌘ chord conflicts with the command whose menu shows the same ⌘ keys', () {
@@ -112,7 +109,6 @@ void main() {
       isNull,
       reason: 'the menu bar would take the chord from Diff',
     );
-    // The other way round: a ⌘ chord meets the Liquid key chord of another command.
     expect(taken.conflicts(Command.focusInput, commandN), [Command.diff]);
   });
 
@@ -128,29 +124,23 @@ void main() {
     );
   });
 
-  test('a to-do shortcut cannot take a key that types in the page', () {
+  test('a to-do shortcut cannot take typing or line-break keys', () {
     expect(
       reserved(Command.toggleToDo, const Keys(LogicalKeyboardKey.keyA)),
       'typing',
     );
+    expect(
+      reserved(Command.toggleToDo, const Keys(LogicalKeyboardKey.enter)),
+      'New block or line',
+    );
+    expect(
+      reserved(
+        Command.toggleToDo,
+        const Keys(LogicalKeyboardKey.enter, shift: true),
+      ),
+      'New block or line',
+    );
   });
-
-  test(
-    'a to-do shortcut cannot take the keys that break a line in the page',
-    () {
-      expect(
-        reserved(Command.toggleToDo, const Keys(LogicalKeyboardKey.enter)),
-        'New block or line',
-      );
-      expect(
-        reserved(
-          Command.toggleToDo,
-          const Keys(LogicalKeyboardKey.enter, shift: true),
-        ),
-        'New block or line',
-      );
-    },
-  );
 
   test('a ⌘ chord of the app area conflicts in every area, both ways', () {
     const commandOne = Keys(LogicalKeyboardKey.digit1, meta: true);
@@ -177,16 +167,6 @@ void main() {
     );
     expect(taken.bindings(Command.chat), isEmpty);
     expect(taken.bindings(Command.toggleToDo), [commandOne]);
-  });
-
-  test('esc may be shared with the app area', () {
-    expect(
-      ShortcutSettings.standard().conflicts(
-        Command.stop,
-        const Keys(LogicalKeyboardKey.escape),
-      ),
-      isEmpty,
-    );
   });
 
   test('the default keys of every profile conflict with nothing', () {
@@ -242,9 +222,7 @@ void main() {
 
     final restored = taken.resetTaking(Command.newSession);
     expect(restored.bindings(Command.newSession), [liquidN, commandN]);
-    expect(restored.bindings(Command.diff), [
-      const Keys(LogicalKeyboardKey.keyD, meta: true),
-    ]);
+    expect(restored.bindings(Command.diff), [commandD]);
     expect(restored.changed(Command.newSession), isFalse);
   });
 
@@ -267,7 +245,7 @@ void main() {
     },
   );
 
-  test('clearing a command with the Liquid key off keeps its inactive Liquid key binding', () {
+  test('inactive Liquid key bindings survive a clear and a change', () {
     final custom = ShortcutSettings.liquidKey()
         .change(Command.newSession, liquidE)
         .withLiquidKey(false);
@@ -279,16 +257,9 @@ void main() {
       clear: [Command.newSession],
     );
     final read = ShortcutSettings.fromJson(taken.toJson())!;
-
     final on = read.withLiquidKey(true);
     expect(on.bindings(Command.newSession), [liquidE]);
     expect(on.bindings(Command.focusInput), contains(commandN));
-  });
-
-  test('changing a command with the Liquid key off keeps its inactive Liquid key binding', () {
-    final custom = ShortcutSettings.liquidKey()
-        .change(Command.newSession, liquidE)
-        .withLiquidKey(false);
 
     const keyJ = Keys(LogicalKeyboardKey.keyJ, meta: true);
     final edited = custom.change(Command.newSession, keyJ);
@@ -298,7 +269,6 @@ void main() {
       liquidE,
     ]);
   });
-
   test('the Custom switch decides whether Liquid key combinations exist', () {
     final off = ShortcutSettings.liquidKey().withLiquidKey(false);
     expect(off.profile, Profile.custom);
@@ -316,9 +286,7 @@ void main() {
 
     final standard = custom.choose(Profile.standard);
     expect(standard.liquidKey, isFalse);
-    expect(standard.bindings(Command.diff), [
-      const Keys(LogicalKeyboardKey.keyD, meta: true),
-    ]);
+    expect(standard.bindings(Command.diff), [commandD]);
     expect(standard.choose(Profile.custom), custom);
     expect(
       ShortcutSettings.liquidKey().choose(Profile.custom).base,
@@ -338,20 +306,13 @@ void main() {
   });
 
   test('keys macOS, a fixed row or typing use are reserved', () {
-    expect(
-      reserved(
-        Command.newSession,
-        const Keys(LogicalKeyboardKey.keyQ, meta: true),
-      ),
-      'Quit',
-    );
-    expect(
-      reserved(
-        Command.queue,
-        const Keys(LogicalKeyboardKey.enter, shift: true),
-      ),
-      'New line',
-    );
+    const commandQ = Keys(LogicalKeyboardKey.keyQ, meta: true);
+    const shiftEnter = Keys(LogicalKeyboardKey.enter, shift: true);
+    const commandLeft = Keys(LogicalKeyboardKey.arrowLeft, meta: true);
+    const controlA = Keys(LogicalKeyboardKey.keyA, control: true);
+    const commandNumpad1 = Keys(LogicalKeyboardKey.numpad1, meta: true);
+    expect(reserved(Command.newSession, commandQ), 'Quit');
+    expect(reserved(Command.queue, shiftEnter), 'New line');
     expect(
       reserved(Command.newSession, const Keys(LogicalKeyboardKey.keyN)),
       'typing',
@@ -373,18 +334,12 @@ void main() {
       reason: 'the menu ignores the Liquid key',
     );
     expect(
-      reserved(
-        Command.queue,
-        const Keys(LogicalKeyboardKey.arrowLeft, meta: true),
-      ),
+      reserved(Command.queue, commandLeft),
       'typing',
       reason: '⌘← moves the cursor',
     );
     expect(
-      reserved(
-        Command.queue,
-        const Keys(LogicalKeyboardKey.keyA, control: true),
-      ),
+      reserved(Command.queue, controlA),
       'typing',
       reason: '⌃A moves the cursor',
     );
@@ -399,15 +354,8 @@ void main() {
         reason: 'numpad ${key.keyLabel} types a character',
       );
     }
-    expect(
-      reserved(
-        Command.newSession,
-        const Keys(LogicalKeyboardKey.numpad1, meta: true),
-      ),
-      isNull,
-    );
+    expect(reserved(Command.newSession, commandNumpad1), isNull);
   });
-
   test('the Liquid key with Shift is kept for capitals, which macOS takes', () {
     expect(
       reserved(
@@ -423,68 +371,62 @@ void main() {
     );
   });
 
-  test(
-    'a default that a binding of the user’s own takes is left unbound on load',
-    () {
-      const commandU = Keys(LogicalKeyboardKey.keyU, meta: true);
-      final json = ShortcutSettings.standard()
-          .change(Command.focusInput, commandU)
-          .toJson();
+  test('a default the user’s own binding takes stays unbound', () {
+    const commandU = Keys(LogicalKeyboardKey.keyU, meta: true);
+    final json = ShortcutSettings.standard()
+        .change(Command.focusInput, commandU)
+        .toJson();
 
-      final read = ShortcutSettings.fromJson(json)!;
+    final read = ShortcutSettings.fromJson(json)!;
 
-      expect(read.bindings(Command.focusInput), [commandU]);
-      expect(
-        read.bindings(Command.statistics),
-        isEmpty,
-        reason: 'the user’s own ⌘U wins over the Statistics default',
-      );
-      expect(read.label(Command.statistics), '');
-      expect(read.changed(Command.statistics), isTrue);
-      expect(read.defaultLabel(Command.statistics), '⌘U');
-      expect(read.bindings(Command.diff), [
-        const Keys(LogicalKeyboardKey.keyD, meta: true),
-      ], reason: 'a default that nothing takes keeps its keys');
-      expect(ShortcutSettings.fromJson(read.toJson()), read);
-    },
-  );
+    expect(read.bindings(Command.focusInput), [commandU]);
+    expect(
+      read.bindings(Command.statistics),
+      isEmpty,
+      reason: 'the user’s own ⌘U wins over the Statistics default',
+    );
+    expect(read.label(Command.statistics), '');
+    expect(read.changed(Command.statistics), isTrue);
+    expect(read.defaultLabel(Command.statistics), '⌘U');
+    expect(read.bindings(Command.diff), [
+      commandD,
+    ], reason: 'a default that nothing takes keeps its keys');
+    expect(ShortcutSettings.fromJson(read.toJson()), read);
+  });
 
-  test(
-    'settings survive a JSON round trip and ignore what they do not know',
-    () {
-      final keys = ShortcutSettings.liquidKey()
-          .change(Command.diff, liquidD)
-          .change(Command.focusInput, null);
+  test('settings round-trip JSON and ignore unknown data', () {
+    final keys = ShortcutSettings.liquidKey()
+        .change(Command.diff, liquidD)
+        .change(Command.focusInput, null);
 
-      expect(ShortcutSettings.fromJson(keys.toJson()), keys);
-      final json = keys.toJson();
-      final custom = {...json['custom']! as Map<String, Object?>};
-      custom['changes'] = <String, Object?>{
-        ...custom['changes']! as Map<String, Object?>,
-        'gone': ['meta+0x6e'],
-        'diff': 'not keys',
-        'chat': ['meta+0x31', 'meta+0x31'],
-      };
-      final read = ShortcutSettings.fromJson({...json, 'custom': custom})!;
-      expect(read.bindings(Command.diff), [
-        const Keys(LogicalKeyboardKey.keyD, liquid: true),
-        const Keys(LogicalKeyboardKey.keyD, meta: true),
-      ]);
-      expect(read.bindings(Command.focusInput), [
-        const Keys(LogicalKeyboardKey.keyL, meta: true),
-      ]);
-      expect(read.bindings(Command.chat), [
-        const Keys(LogicalKeyboardKey.digit1, meta: true),
-      ], reason: 'keys listed twice would run the command twice');
-      expect(ShortcutSettings.fromJson({...json, 'version': 2}), isNull);
-      expect(
-        ShortcutSettings.fromJson({'version': 1, 'profile': 'custom'}),
-        isNull,
-      );
-      expect(
-        ShortcutSettings.fromJson({'version': 1, 'profile': 'unknown'}),
-        isNull,
-      );
-    },
-  );
+    expect(ShortcutSettings.fromJson(keys.toJson()), keys);
+    final json = keys.toJson();
+    final custom = {...json['custom']! as Map<String, Object?>};
+    custom['changes'] = <String, Object?>{
+      ...custom['changes']! as Map<String, Object?>,
+      'gone': ['meta+0x6e'],
+      'diff': 'not keys',
+      'chat': ['meta+0x31', 'meta+0x31'],
+    };
+    final read = ShortcutSettings.fromJson({...json, 'custom': custom})!;
+    expect(read.bindings(Command.diff), [
+      const Keys(LogicalKeyboardKey.keyD, liquid: true),
+      commandD,
+    ]);
+    expect(read.bindings(Command.focusInput), [
+      const Keys(LogicalKeyboardKey.keyL, meta: true),
+    ]);
+    expect(read.bindings(Command.chat), [
+      const Keys(LogicalKeyboardKey.digit1, meta: true),
+    ], reason: 'keys listed twice would run the command twice');
+    expect(ShortcutSettings.fromJson({...json, 'version': 2}), isNull);
+    expect(
+      ShortcutSettings.fromJson({'version': 1, 'profile': 'custom'}),
+      isNull,
+    );
+    expect(
+      ShortcutSettings.fromJson({'version': 1, 'profile': 'unknown'}),
+      isNull,
+    );
+  });
 }

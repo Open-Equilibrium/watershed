@@ -11,9 +11,6 @@ import '../theme/tokens.g.dart';
 import 'session_card_rows.dart';
 import 'session_menus.dart';
 
-/// The checkout's pull request, as T3 Code's thread details show it: its state as an icon, its
-/// number and title, which opens it in the browser. With checks or an action it takes a second
-/// line: the number, the checks' badge and the action the host offers.
 class PullRequestRows extends StatelessWidget {
   const PullRequestRows({super.key, required this.state});
 
@@ -39,8 +36,6 @@ class PullRequestRows extends StatelessWidget {
   );
 }
 
-/// The pull request's detail is read when the row shows it, when its number, state or draft
-/// changes, after an action, and on T3 Code's interval while it is open.
 class _PullRequestRow extends StatefulWidget {
   const _PullRequestRow({
     super.key,
@@ -63,10 +58,8 @@ class _PullRequestRowState extends State<_PullRequestRow> {
   BridgePullRequestDetail? _detail;
   Timer? _timer;
 
-  /// Counts the reads, so an answer to an earlier one never lands.
   int _attempt = 0;
 
-  /// Whether an action or a checkout runs; the trailing action then shows its pending label.
   bool _busy = false;
 
   @override
@@ -92,22 +85,16 @@ class _PullRequestRowState extends State<_PullRequestRow> {
     super.dispose();
   }
 
-  /// Reads the detail. A read that fails keeps what the row shows and tries again on the next
-  /// interval.
   Future<void> _read() async {
     _timer?.cancel();
     final attempt = ++_attempt;
     try {
       final detail = await widget.git.backend.pullRequest(widget.pr.number);
       if (mounted && attempt == _attempt) setState(() => _detail = detail);
-    } on Object {
-      // The next read tries again.
-    }
+    } on Object catch (_) {}
     if (mounted && attempt == _attempt) _schedule();
   }
 
-  /// Reads an open pull request again every 45 seconds while its checks run or wait, else every 60,
-  /// as T3 Code does.
   void _schedule() {
     _timer?.cancel();
     if (widget.pr.state != 'open') return;
@@ -124,7 +111,6 @@ class _PullRequestRowState extends State<_PullRequestRow> {
     );
   }
 
-  /// Runs the host's `action` on the pull request, then reads it again.
   Future<void> _act(String action, {String? mergeMethod}) async {
     if (_busy) return;
     setState(() => _busy = true);
@@ -151,8 +137,6 @@ class _PullRequestRowState extends State<_PullRequestRow> {
     await _read();
   }
 
-  /// Checks the pull request out in a worktree of its own, then opens the start page there with
-  /// `prompt` in the composer, as T3 Code's Fix and Resolve do.
   Future<void> _checkOut(String prompt) async {
     if (_busy) return;
     setState(() => _busy = true);
@@ -171,7 +155,6 @@ class _PullRequestRowState extends State<_PullRequestRow> {
     if (mounted) setState(() => _busy = false);
   }
 
-  /// Asks before a merge, as T3 Code does; the merge uses the method the repository uses.
   Future<void> _confirmMerge(BridgePullRequestDetail detail) async {
     final merge = await showDialog<bool>(
       context: context,
@@ -196,7 +179,6 @@ class _PullRequestRowState extends State<_PullRequestRow> {
     }
   }
 
-  /// The row's action, as T3 Code's row offers it: resolve, ready, fix or merge.
   _Trailing? _trailing(BridgePullRequestDetail detail) {
     final singular = widget.terms.singular;
     return switch (detail.action) {
@@ -338,8 +320,6 @@ class _PullRequestRowState extends State<_PullRequestRow> {
   }
 }
 
-/// The row's trailing action: its label, the label while it runs, why it is offered, and what it
-/// does.
 typedef _Trailing = ({
   String label,
   String pending,
@@ -379,8 +359,6 @@ class _TrailingButton extends StatelessWidget {
   }
 }
 
-/// The checks' count, as T3 Code's badge shows it: how many finished while some still run, else
-/// how many failed. Tapping it opens the checks.
 class _ChecksBadge extends StatelessWidget {
   const _ChecksBadge({required this.state, required this.detail});
 
@@ -435,7 +413,6 @@ class _ChecksBadge extends StatelessWidget {
     );
   }
 
-  /// Opens the checks below the badge, as T3 Code's popover does.
   Future<void> _showChecks(BuildContext context) async {
     final badge = context.findRenderObject()! as RenderBox;
     final overlay =
@@ -457,8 +434,6 @@ class _ChecksBadge extends StatelessWidget {
   }
 }
 
-/// The checks popover: the rollup's label and the summary, then each check with its status and
-/// Details link. Finished checks wait behind Show all while other checks need attention.
 class _ChecksBody extends StatefulWidget {
   const _ChecksBody({required this.state, required this.detail});
 
@@ -539,7 +514,6 @@ class _ChecksBodyState extends State<_ChecksBody> {
   }
 }
 
-/// One check: its status icon, name, what it reports, its status and its Details link.
 class _CheckRow extends StatelessWidget {
   const _CheckRow({required this.state, required this.check});
 
@@ -586,7 +560,6 @@ class _CheckRow extends StatelessWidget {
   }
 }
 
-/// The label, icon and tone of a pull request's state; an open draft reads as Draft.
 ({String label, IconData icon, Color tone}) _presentation(
   String state,
   bool draft,
@@ -636,7 +609,6 @@ String _rollupLabel(String checksState) => switch (checksState) {
   _ => (LucideIcons.circleDashed, ws.textFaint),
 };
 
-/// A check's status as T3 Code words it; a workflow run awaiting approval reads so.
 String _checkLabel(BridgePullRequestCheck check) {
   if (check.status == 'action-required' &&
       RegExp(r'/actions/runs/\d+(/|$)').hasMatch(check.url ?? '')) {
@@ -653,8 +625,6 @@ String _checkLabel(BridgePullRequestCheck check) {
   };
 }
 
-/// The hover text: the title and number, the state, the branches, the checks, a conflict and the
-/// changed lines, one per line.
 String _tooltip(BridgePullRequestDetail detail, String stateLabel) => [
   '${detail.title} #${detail.number}',
   stateLabel,

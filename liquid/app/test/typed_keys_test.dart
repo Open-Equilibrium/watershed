@@ -6,9 +6,11 @@ import 'package:liquid/src/rust/api/workspace.dart';
 
 import 'page_kit.dart';
 
-/// On desktop, Flutter selects a single-line field's text when it takes focus; a key typed
-/// onto a cell reaches the field before it does, and what the person types next goes in
-/// where the field's selection is, as macOS text input puts it.
+Future<void> key(WidgetTester tester, LogicalKeyboardKey key) async {
+  await tester.sendKeyEvent(key);
+  await tester.pumpAndSettle();
+}
+
 void main() {
   final kit = PageKit();
   final macOS = TargetPlatformVariant.only(TargetPlatform.macOS);
@@ -16,22 +18,18 @@ void main() {
   Finder cell(String row, String field) =>
       kit.inTable(find.byKey(ValueKey('cell $row $field')));
 
-  /// The focused field, as macOS text input sees it.
   EditableTextState focused(WidgetTester tester) => tester.state(
     find.byWidgetPredicate(
       (widget) => widget is EditableText && widget.focusNode.hasFocus,
     ),
   );
 
-  /// Types the first character onto the selected cell, lets its field take the keys, and
-  /// types the rest where the field's selection is.
   Future<void> type(
     WidgetTester tester,
     LogicalKeyboardKey first,
     String rest,
   ) async {
-    await tester.sendKeyEvent(first);
-    await tester.pumpAndSettle();
+    await key(tester, first);
     final field = focused(tester);
     final value = field.textEditingValue;
     field.userUpdateTextEditingValue(
@@ -58,12 +56,10 @@ void main() {
       await kit.show(tester, [TablePart(expenses)]);
       await select(tester, 'r1', 'amount');
       await type(tester, LogicalKeyboardKey.digit4, '2.5');
-      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
-      await tester.pumpAndSettle();
+      await key(tester, LogicalKeyboardKey.enter);
       await select(tester, 'r2', 'name');
       await type(tester, LogicalKeyboardKey.keyP, 'ower');
-      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
-      await tester.pumpAndSettle();
+      await key(tester, LogicalKeyboardKey.enter);
       expect(
         [
           for (final (row, _, cell) in written())
@@ -82,12 +78,10 @@ void main() {
       await select(tester, 'r1', 'category');
       await type(tester, LogicalKeyboardKey.keyH, 'om');
       expect(focused(tester).textEditingValue.text, 'hom');
-      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
-      await tester.pumpAndSettle();
+      await key(tester, LogicalKeyboardKey.escape);
       await select(tester, 'r1', 'date');
       await type(tester, LogicalKeyboardKey.digit1, '0/15/2026');
-      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
-      await tester.pumpAndSettle();
+      await key(tester, LogicalKeyboardKey.enter);
       expect(written().single.$3?.text, '2026-10-15');
     },
   );
@@ -103,11 +97,9 @@ void main() {
         focused(tester).textEditingValue.selection,
         const TextSelection.collapsed(offset: 'Category'.length),
       );
-      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
-      await tester.pumpAndSettle();
+      await key(tester, LogicalKeyboardKey.escape);
       await select(tester, 'r1', 'date');
-      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
-      await tester.pumpAndSettle();
+      await key(tester, LogicalKeyboardKey.enter);
       expect(
         focused(tester).textEditingValue.selection,
         const TextSelection.collapsed(offset: 'Nov 1, 2026'.length),

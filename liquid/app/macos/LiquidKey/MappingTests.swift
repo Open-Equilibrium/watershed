@@ -1,8 +1,6 @@
 import CoreGraphics
 import Foundation
 
-// Checks the helper's pure decisions; `test.sh` runs it on the macOS CI host.
-
 var failures = 0
 func check(_ condition: Bool, _ what: String) {
     if !condition {
@@ -63,8 +61,6 @@ check(
     turnOff(refusing: nil) && keyboards.allSatisfy(\.isEmpty),
     "turning it off succeeds once every keyboard took it")
 
-// Another session's helper may give the remapping back after this one set it. Only an active
-// helper sets it again, and only on a keyboard that lost it.
 var lost = [[entry(control, command)], [entry(Mapping.capsLock, Mapping.f18)]]
 var writes = 0
 func recheck(active: Bool) {
@@ -85,8 +81,6 @@ check(
         && pairs(lost[0]) == pairs([entry(control, command), entry(Mapping.capsLock, Mapping.f18)]),
     "an active helper re-applies a mapping another session removed and keeps the others")
 
-/// A Liquid key press at 10 s with its own `repeats`, each with the latest key press of any key
-/// then, released at `released`.
 func tap(
     _ repeats: [(at: TimeInterval, lastKeyDown: TimeInterval)] = [], released: TimeInterval,
     lastKeyDown: TimeInterval
@@ -115,7 +109,6 @@ check(
     !Mapping.givesBack(mapped: true, active: false),
     "a helper whose session left gives nothing back")
 
-// A helper started in a session that is not in front leaves the keyboards to the session in front.
 check(
     !Mapping.initiallyActive(session: nil),
     "a helper without a session dictionary starts inactive")
@@ -126,8 +119,6 @@ check(
     Mapping.initiallyActive(session: [kCGSessionOnConsoleKey as String: true]),
     "a helper in the session in front starts active")
 
-// The helper reads the session after registering its observers, so a session that resigns during
-// the start is no longer in front when it is read: it ends with no remapping applied.
 var remapped = 0
 var session: [String: Any] = [kCGSessionOnConsoleKey as String: true]
 Mapping.start(

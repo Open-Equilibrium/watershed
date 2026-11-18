@@ -8,6 +8,21 @@ import 'package:liquid/src/workspace/workspace_state.dart';
 
 import 'fake_workspace.dart';
 
+Future<void> addBlocks(WorkspaceState state, String page, int count) async {
+  String? after;
+  for (var index = 0; index < count; index++) {
+    final added = await state.apply(
+      mutation(
+        BridgeMutationKind.addTextBlock,
+        page: page,
+        after: after,
+        text: '$index',
+      ),
+    );
+    after = added.view;
+  }
+}
+
 void main() {
   test(
     'a new Workspace starts with the area Private and one blank Page, open',
@@ -111,7 +126,6 @@ void main() {
       unawaited(state.drain().then((_) => drained = true));
       await pumpEventQueue();
       expect(drained, isFalse);
-      // Asked while draining, as a handover after a split asks.
       unawaited(state.rename(page, 'Lisbon'));
       fake.gate!.complete();
       await pumpEventQueue();
@@ -189,21 +203,9 @@ void main() {
     final state = WorkspaceState(fake);
     await state.start();
     final page = state.open.value!.page;
-    String? after;
-    for (var index = 0; index < 2000; index++) {
-      final added = await state.apply(
-        mutation(
-          BridgeMutationKind.addTextBlock,
-          page: page,
-          after: after,
-          text: '$index',
-        ),
-      );
-      after = added.view;
-    }
+    await addBlocks(state, page, 2000);
     final views = PageViews(state, page)..start();
     await pumpEventQueue();
-    // Scrolled through the whole Page.
     for (var index = 0; index < 2000; index += 100) {
       expect(await views.viewAt(index), isNotNull);
     }
@@ -240,18 +242,7 @@ void main() {
       state = WorkspaceState(fake);
       await state.start();
       page = state.open.value!.page;
-      String? after;
-      for (var index = 0; index < 150; index++) {
-        final added = await state.apply(
-          mutation(
-            BridgeMutationKind.addTextBlock,
-            page: page,
-            after: after,
-            text: '$index',
-          ),
-        );
-        after = added.view;
-      }
+      await addBlocks(state, page, 150);
       views = PageViews(state, page)..start();
       await pumpEventQueue();
     });
@@ -277,7 +268,6 @@ void main() {
       );
       fake.deferredKinds = {BridgeQueryKind.views};
       fake.deferred = [];
-      // A change at the start, whose reread waits, then a window asked for meanwhile.
       await state.apply(
         mutation(BridgeMutationKind.addTextBlock, page: page, text: 'new'),
       );
@@ -303,7 +293,6 @@ void main() {
       fake.styles[block] = BridgeTextStyle.numbered;
       final run = views.readRun(2);
       await pumpEventQueue();
-      // The Text Block read its new style meanwhile.
       views.setStyle(block, BridgeTextStyle.paragraph);
       for (final release in fake.deferred!) {
         release.complete();
@@ -334,7 +323,6 @@ void main() {
       );
       await addAt(98);
       await pumpEventQueue();
-      // A second change while the first window of the reread is on its way.
       await addAt(98);
       await pumpEventQueue();
       while (fake.deferred!.isNotEmpty) {
@@ -355,7 +343,6 @@ void main() {
         expect(views.at(120), isNull);
         await pumpEventQueue();
         final window = fake.deferred!.single;
-        // A change while the window is on its way.
         await state.apply(
           mutation(BridgeMutationKind.addTextBlock, page: page, text: 'new'),
         );

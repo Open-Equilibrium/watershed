@@ -14,58 +14,44 @@ import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
 // Rust type: RustOpaqueMoi<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<GitCheckout>>
 abstract class GitCheckout implements RustOpaqueInterface {
-  /// The branch's files changed against its base, as T3's Changes tap lists them.
   Future<List<BridgeFileChange>> branchFiles({required bool hideWhitespace});
 
-  /// One file's unified diff against the branch's base.
   Future<String> branchPatch({
     required String path,
     required bool hideWhitespace,
   });
 
-  /// Checks a pull request out here, or with `worktree` in its own worktree.
   Future<BridgeCheckedOut> checkOutPullRequest({
     required String reference,
     required bool worktree,
   });
 
-  /// Creates the branch `name` here and checks it out.
   Future<void> createBranch({required String name});
 
-  /// Initializes Git in the folder.
   Future<void> init();
 
-  /// Publishes the repository as `repository` (`owner/name`) on `provider`.
   Future<void> publish({
     required String provider,
     required String repository,
     required bool public,
   });
 
-  /// Pulls; returns T3's result title and description.
   Future<List<String>> pull();
 
-  /// Pull request `number` of the checkout's branch, with its checks and the actions the card
-  /// offers.
   Future<BridgePullRequestDetail> pullRequest({required PlatformInt64 number});
 
-  /// Checks pull request `url` out into a new worktree for a new thread; returns its branch and
-  /// worktree.
   Future<BridgeCheckedOut> pullRequestWorktree({required String url});
 
-  /// Refs whose names contain `query`.
   Future<BridgeRefs> refs({
     required String query,
     required PlatformInt64 cursor,
     required PlatformInt64 limit,
   });
 
-  /// Resolves a pull request reference: a URL, a checkout command, `123` or `#123`.
   Future<BridgeResolvedPullRequest> resolvePullRequest({
     required String reference,
   });
 
-  /// Runs a stacked action, streaming its progress until it finishes or fails.
   Stream<BridgeGitProgress> run({
     required BridgeGitAction action,
     String? message,
@@ -73,55 +59,36 @@ abstract class GitCheckout implements RustOpaqueInterface {
     required bool featureBranch,
   });
 
-  /// Runs `action` (`ready` or `merge`) on pull request `number`; a merge uses `merge_method`.
   Future<void> runPullRequestAction({
     required PlatformInt64 number,
     required String action,
     String? mergeMethod,
   });
 
-  /// The checkout's status now.
   Future<BridgeGitStatus> status();
 
-  /// Checks out `name` as Git does.
   Future<void> switch_({required String name});
 
-  /// The uncommitted files against `HEAD`.
   Future<List<BridgeFileChange>> uncommittedChanges({
     required bool hideWhitespace,
   });
 
-  /// One uncommitted file's unified diff against `HEAD`.
   Future<String> uncommittedPatch({
     required String path,
     required bool hideWhitespace,
   });
 
-  /// Streams the status, then each change, including T3's background fetch.
   Stream<BridgeGitStatus> watch();
 
-  /// Ends the status watch now, without waiting for its next change.
   Future<void> watchStop();
 }
 
-/// The branch's pull request.
 class BridgeBranchPullRequest {
-  /// Its number.
   final PlatformInt64 number;
-
-  /// Its title, with hiding characters written out.
   final String title;
-
-  /// Its web address.
   final String url;
-
-  /// `open`, `closed` or `merged`.
   final String state;
-
-  /// Whether it is a draft.
   final bool draft;
-
-  /// The branch it merges into.
   final String base;
 
   const BridgeBranchPullRequest({
@@ -155,12 +122,8 @@ class BridgeBranchPullRequest {
           base == other.base;
 }
 
-/// A checked-out pull request's branch and worktree.
 class BridgeCheckedOut {
-  /// The branch.
   final String branch;
-
-  /// Its worktree, when checked out in one.
   final String? worktree;
 
   const BridgeCheckedOut({required this.branch, this.worktree});
@@ -177,36 +140,18 @@ class BridgeCheckedOut {
           worktree == other.worktree;
 }
 
-/// T3's stacked Git actions.
 enum BridgeGitAction {
-  /// Commit.
   commit,
-
-  /// Push.
   push,
-
-  /// Create a pull request.
   createPullRequest,
-
-  /// Commit and push.
   commitPush,
-
-  /// Commit, push and create a pull request.
   commitPushPullRequest,
 }
 
-/// One progress report of a running action.
 class BridgeGitProgress {
-  /// What it reports.
   final BridgeGitProgressKind kind;
-
-  /// Its text.
   final String text;
-
-  /// A finished action's description.
   final String? description;
-
-  /// The pull request a finished action created or opened.
   final String? pullRequest;
 
   const BridgeGitProgress({
@@ -234,73 +179,24 @@ class BridgeGitProgress {
           pullRequest == other.pullRequest;
 }
 
-/// What a running action reports.
-enum BridgeGitProgressKind {
-  /// A phase started; `text` is T3's label.
-  phase,
+enum BridgeGitProgressKind { phase, hook, output, finished, failed }
 
-  /// A Git hook started; `text` is its name.
-  hook,
-
-  /// `text` is a hook's latest line.
-  output,
-
-  /// The action finished; `text` is T3's result title.
-  finished,
-
-  /// The action failed; `text` says why.
-  failed,
-}
-
-/// A checkout's state.
 class BridgeGitStatus {
-  /// Whether the folder is in a repository.
   final bool repository;
-
-  /// The checked-out branch; `None` when detached.
   final String? branch;
-
-  /// Whether it is the default branch.
   final bool defaultBranch;
-
-  /// Whether the repository has its primary remote.
   final bool remote;
-
-  /// The hosting provider's name, such as GitHub.
   final String? provider;
-
-  /// Uncommitted files.
   final List<BridgeFileChange> changes;
-
-  /// Lines the uncommitted files add, in total.
   final PlatformInt64 workingAdded;
-
-  /// Lines the uncommitted files remove, in total.
   final PlatformInt64 workingRemoved;
-
-  /// The base the branch's changes are counted against, with hiding characters written out;
-  /// `None` when T3 names none.
   final String? branchBase;
-
-  /// Lines the branch adds against its base.
   final PlatformInt64 branchAdded;
-
-  /// Lines the branch removes against its base.
   final PlatformInt64 branchRemoved;
-
-  /// Whether the branch has an upstream.
   final bool upstream;
-
-  /// Commits the upstream lacks.
   final PlatformInt64 ahead;
-
-  /// Commits the branch lacks.
   final PlatformInt64 behind;
-
-  /// Commits the default branch lacks, when known.
   final PlatformInt64? aheadOfDefault;
-
-  /// The branch's pull request.
   final BridgeBranchPullRequest? pullRequest;
 
   const BridgeGitStatus({
@@ -364,19 +260,10 @@ class BridgeGitStatus {
           pullRequest == other.pullRequest;
 }
 
-/// One check of a pull request.
 class BridgePullRequestCheck {
-  /// Its name, with hiding characters written out.
   final String name;
-
-  /// T3's status: `pending`, `action-required`, `success`, `failure`, `skipped`, `neutral` or
-  /// `cancelled`.
   final String status;
-
-  /// What it reports, with hiding characters written out.
   final String? description;
-
-  /// Its web address.
   final String? url;
 
   const BridgePullRequestCheck({
@@ -401,60 +288,24 @@ class BridgePullRequestCheck {
           url == other.url;
 }
 
-/// The checkout's pull request, as T3's thread details card shows it.
 class BridgePullRequestDetail {
-  /// Its number.
   final PlatformInt64 number;
-
-  /// Its title, with hiding characters written out.
   final String title;
-
-  /// Its web address.
   final String url;
-
-  /// `open`, `closed` or `merged`.
   final String state;
-
-  /// Whether it is a draft.
   final bool draft;
-
-  /// The branch it merges into, with hiding characters written out.
   final String base;
-
-  /// Its branch, with hiding characters written out.
   final String head;
-
-  /// Whether it is open and conflicts with its base.
   final bool conflicting;
-
-  /// How many files it changes.
   final PlatformInt64 files;
-
-  /// Lines it adds.
   final PlatformInt64 added;
-
-  /// Lines it removes.
   final PlatformInt64 removed;
-
-  /// Its checks, as T3 lists them.
   final List<BridgePullRequestCheck> checks;
-
-  /// T3's rollup of the checks: `none`, `pending`, `failing` or `passing`.
   final String checksState;
-
-  /// T3's summary of the checks, such as "1 of 2 failing".
   final String checksSummary;
-
-  /// The action the card offers: `resolve`, `ready`, `fix` or `merge`; `None` when none.
   final String? action;
-
-  /// The merge method a merge uses: `merge`, `squash` or `rebase`.
   final String mergeMethod;
-
-  /// The prompt of the Fix action, with hiding characters written out.
   final String fixPrompt;
-
-  /// The prompt of the Resolve action, with hiding characters written out.
   final String resolvePrompt;
 
   const BridgePullRequestDetail({
@@ -524,24 +375,12 @@ class BridgePullRequestDetail {
           resolvePrompt == other.resolvePrompt;
 }
 
-/// One ref the branch picker lists.
 class BridgeRef {
-  /// Its name.
   final String name;
-
-  /// Its name with hiding characters written out.
   final String shown;
-
-  /// The remote of a remote ref.
   final String? remote;
-
-  /// Whether it is checked out here.
   final bool current;
-
-  /// Whether it is the default branch.
   final bool default_;
-
-  /// The worktree it is checked out in, if another.
   final String? worktree;
 
   const BridgeRef({
@@ -575,15 +414,9 @@ class BridgeRef {
           worktree == other.worktree;
 }
 
-/// A page of refs.
 class BridgeRefs {
-  /// The refs.
   final List<BridgeRef> refs;
-
-  /// The cursor of the next page.
   final PlatformInt64? next;
-
-  /// How many match.
   final PlatformInt64 total;
 
   const BridgeRefs({required this.refs, this.next, required this.total});
@@ -601,24 +434,12 @@ class BridgeRefs {
           total == other.total;
 }
 
-/// A pull request T3 resolved from a reference.
 class BridgeResolvedPullRequest {
-  /// Its number.
   final PlatformInt64 number;
-
-  /// Its title.
   final String title;
-
-  /// Its web address.
   final String url;
-
-  /// The branch it merges into.
   final String base;
-
-  /// Its branch.
   final String head;
-
-  /// `open`, `closed` or `merged`.
   final String state;
 
   const BridgeResolvedPullRequest({

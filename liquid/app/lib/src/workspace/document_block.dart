@@ -14,11 +14,6 @@ import 'page_views.dart';
 import 'pdf_pages.dart';
 import 'whiteboard_block.dart';
 
-/// A PDF on its Page, annotated in place (ADR-0307): its pages one below the other at the
-/// frame's width, scrolling inside a frame of fixed height, drawn by the system's renderer,
-/// with their ink. A click focuses it and the tools draw on its pages; hovering shows full
-/// screen, Save as…, which saves the file as it came, and ⋯ with Delete. A PDF the renderer
-/// cannot read goes to `onUnreadable`, so it shows as a file.
 class DocumentBlock extends StatefulWidget {
   const DocumentBlock({
     super.key,
@@ -77,7 +72,6 @@ class _DocumentBlockState extends State<DocumentBlock> {
     super.dispose();
   }
 
-  /// The first page at the frame's width, from its top.
   void _place(double width) {
     final sheets = _board.sheets;
     if (_placed || sheets.isEmpty || width <= 0) return;
@@ -128,8 +122,6 @@ class _DocumentBlockState extends State<DocumentBlock> {
   }
 }
 
-/// An image's ink over the image as the Page shows it (ADR-0307): the image is its one page,
-/// in its pixels, and the view stays fitted to it.
 class ImageInk extends StatefulWidget {
   const ImageInk({
     super.key,
@@ -142,7 +134,6 @@ class ImageInk extends StatefulWidget {
   final PageViews views;
   final BridgeView view;
 
-  /// The image's size in pixels, and the width it shows at.
   final Size pixels;
   final double width;
 

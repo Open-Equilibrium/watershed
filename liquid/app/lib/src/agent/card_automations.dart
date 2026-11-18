@@ -26,7 +26,6 @@ const _monthNames = [
   'Dec',
 ];
 
-/// A schedule as T3 Code words it, such as `Daily at 09:30` or `Mon, Wed at 08:00`.
 String scheduleLabel(BridgeSchedule schedule) => switch (schedule.kind) {
   BridgeScheduleKind.webhook => 'On webhook',
   BridgeScheduleKind.once => 'Once, ${_onceLabel(schedule.runAt)}',
@@ -35,7 +34,6 @@ String scheduleLabel(BridgeSchedule schedule) => switch (schedule.kind) {
     '${_daysLabel(schedule.weekdays)} at ${schedule.timeOfDay}',
 };
 
-/// A one-time run in the local time, such as `Nov 17, 2026, 9:00 AM`.
 String _onceLabel(String? runAt) {
   final at = DateTime.tryParse(runAt ?? '')?.toLocal();
   if (at == null) return 'at an unknown time';
@@ -58,8 +56,6 @@ String _daysLabel(Iterable<BigInt> weekdays) {
   return days.map((day) => _weekdayNames[day]).join(', ');
 }
 
-/// A task's schedule and state, as T3 Code's row reads it: the policy that blocks it, that it is
-/// paused, or when it runs next.
 String automationLine(BridgeAutomation task, DateTime now) {
   final schedule = scheduleLabel(task.schedule);
   final policy = task.blockedByPolicy;
@@ -80,8 +76,6 @@ String _nextRun(int ms, DateTime now) {
   return 'in ${(hours / 24).round()}d';
 }
 
-/// The Automations section: the scheduled tasks bound to the session. Each runs now or pauses
-/// through the session, as T3 Code's row does; editing them is not offered.
 class AutomationsSection extends StatelessWidget {
   const AutomationsSection({
     super.key,
@@ -159,7 +153,6 @@ class _AutomationRow extends StatelessWidget {
             ],
           ),
         ),
-        // Webhook tasks need a request from their URL.
         if (task.schedule.kind != BridgeScheduleKind.webhook)
           CardIconButton(
             icon: LucideIcons.play,
@@ -190,7 +183,6 @@ class _AutomationRow extends StatelessWidget {
     );
   }
 
-  /// The status dot: muted before a run, accent while it runs, then success or danger.
   static Color _statusColor(WsPalette ws, BridgeRunStatus status) =>
       switch (status) {
         BridgeRunStatus.never => ws.textFaint,

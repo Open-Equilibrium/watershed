@@ -38,10 +38,8 @@ void main() {
     );
   }
 
-  /// The project behind an agent session, which records what the app asks of it.
   FakeProject project(SessionState state) => state.project as FakeProject;
 
-  /// A session of a project with one thread, `thread-1`, in the sidebar.
   SessionState agent() => SessionState(
     FakeProject()..threadList = [threadOf('thread-1', title: 'Fix login')],
   );
@@ -57,6 +55,29 @@ void main() {
     of: find.byKey(const Key('page-header')),
     matching: find.text(text),
   );
+  Finder pageRow() =>
+      find.ancestor(of: inSidebar('Untitled'), matching: find.byType(InkWell));
+
+  Future<void> hover(WidgetTester tester, Finder finder) async {
+    final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    await mouse.addPointer(location: tester.getCenter(finder));
+    addTearDown(mouse.removePointer);
+    await tester.pumpAndSettle();
+  }
+
+  Future<void> composeNihon(WidgetTester tester) async {
+    await tester.tap(title());
+    await tester.pump();
+    kit.fake.applied.clear();
+    tester.testTextInput.updateEditingValue(
+      const TextEditingValue(
+        text: 'nihon',
+        selection: TextSelection.collapsed(offset: 5),
+        composing: TextRange(start: 0, end: 5),
+      ),
+    );
+    await tester.pump();
+  }
 
   testWidgets('without an agent the first start opens a blank Page to name', (
     tester,
@@ -105,7 +126,6 @@ void main() {
       await tester.pumpAndSettle();
       await tester.pumpAndSettle();
 
-      // A title Liquid assigns while the person is not typing in the field.
       FocusManager.instance.primaryFocus?.unfocus();
       await tester.pumpAndSettle();
       await kit.workspace.rename(
@@ -155,7 +175,6 @@ void main() {
       '',
     ]);
 
-    // Notion's "Add a page inside", from the row's menu.
     await tester.tapAt(
       tester.getCenter(inSidebar('Trip')),
       buttons: kSecondaryButton,
@@ -300,16 +319,7 @@ void main() {
     tester,
   ) async {
     await show(tester);
-    await tester.tap(title());
-    await tester.pump();
-    kit.fake.applied.clear();
-    tester.testTextInput.updateEditingValue(
-      const TextEditingValue(
-        text: 'nihon',
-        selection: TextSelection.collapsed(offset: 5),
-        composing: TextRange(start: 0, end: 5),
-      ),
-    );
+    await composeNihon(tester);
     await tester.pumpAndSettle();
     expect(renames(), isEmpty);
     tester.testTextInput.updateEditingValue(
@@ -326,17 +336,7 @@ void main() {
     tester,
   ) async {
     await show(tester);
-    await tester.tap(title());
-    await tester.pump();
-    kit.fake.applied.clear();
-    tester.testTextInput.updateEditingValue(
-      const TextEditingValue(
-        text: 'nihon',
-        selection: TextSelection.collapsed(offset: 5),
-        composing: TextRange(start: 0, end: 5),
-      ),
-    );
-    await tester.pump();
+    await composeNihon(tester);
     var drained = false;
     unawaited(kit.workspace.drain().then((_) => drained = true));
     await tester.pump();
@@ -348,17 +348,7 @@ void main() {
     tester,
   ) async {
     await show(tester);
-    await tester.tap(title());
-    await tester.pump();
-    kit.fake.applied.clear();
-    tester.testTextInput.updateEditingValue(
-      const TextEditingValue(
-        text: 'nihon',
-        selection: TextSelection.collapsed(offset: 5),
-        composing: TextRange(start: 0, end: 5),
-      ),
-    );
-    await tester.pump();
+    await composeNihon(tester);
     await tester.tap(find.byTooltip('Settings'));
     await tester.pumpAndSettle();
     expect(renames(), ['nihon']);
@@ -420,7 +410,6 @@ void main() {
     tester,
   ) async {
     await show(tester);
-    // The tree is not read again yet, so it still holds the title before 'P'.
     kit.fake.deferredKinds = {BridgeQueryKind.pages};
     kit.fake.deferred = [];
     await tester.enterText(title(), 'P');
@@ -441,10 +430,7 @@ void main() {
     await show(tester);
     final context = tester.element(find.byType(Sidebar));
     final theme = Theme.of(context);
-    await tabTo(
-      tester,
-      find.ancestor(of: inSidebar('Untitled'), matching: find.byType(InkWell)),
-    );
+    await tabTo(tester, pageRow());
     expect(
       find.descendant(
         of: find.byType(Sidebar),
@@ -456,10 +442,7 @@ void main() {
           'list that clips it',
     );
 
-    final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
-    await mouse.addPointer(location: tester.getCenter(inSidebar('Settings')));
-    addTearDown(mouse.removePointer);
-    await tester.pumpAndSettle();
+    await hover(tester, inSidebar('Settings'));
     expect(
       find.byType(Sidebar),
       paintsAbove(context.ws.subtle, theme.hoverColor),
@@ -471,15 +454,8 @@ void main() {
     'a hovered Page row shows its ··· inside the row, at its right end',
     (tester) async {
       await show(tester);
-      final row = tester.getRect(
-        find
-            .ancestor(of: inSidebar('Untitled'), matching: find.byType(InkWell))
-            .first,
-      );
-      final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
-      await mouse.addPointer(location: tester.getCenter(inSidebar('Untitled')));
-      addTearDown(mouse.removePointer);
-      await tester.pumpAndSettle();
+      final row = tester.getRect(pageRow().first);
+      await hover(tester, inSidebar('Untitled'));
 
       final more = tester.getRect(
         find.descendant(
@@ -509,7 +485,6 @@ void main() {
         of: card,
         matching: find.byTooltip('More actions'),
       );
-      // How visible `finder` is: its nearest fading ancestor's opacity, 1 when none fades it.
       double opacity(Finder finder) {
         final fades = find.ancestor(of: finder, matching: find.byType(Opacity));
         return fades.evaluate().isEmpty
@@ -519,10 +494,7 @@ void main() {
 
       expect(opacity(more), 0);
 
-      final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
-      await mouse.addPointer(location: tester.getCenter(card));
-      addTearDown(mouse.removePointer);
-      await tester.pumpAndSettle();
+      await hover(tester, card);
       expect(opacity(more), 1);
     },
   );
@@ -531,13 +503,7 @@ void main() {
     'Tab reaches a Page row’s ···, ⏎ there opens its menu and esc closes it',
     (tester) async {
       await show(tester);
-      await tabTo(
-        tester,
-        find.ancestor(
-          of: inSidebar('Untitled'),
-          matching: find.byType(InkWell),
-        ),
-      );
+      await tabTo(tester, pageRow());
       await tabTo(
         tester,
         find.descendant(

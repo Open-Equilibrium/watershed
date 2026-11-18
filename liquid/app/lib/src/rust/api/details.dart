@@ -9,27 +9,13 @@ import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
 // These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
 
-/// A scheduled task bound to the session.
 class BridgeAutomation {
-  /// T3's task id.
   final String id;
-
-  /// Its title, with hiding characters written out.
   final String title;
-
-  /// When it runs.
   final BridgeSchedule schedule;
-
-  /// Whether it runs.
   final bool enabled;
-
-  /// When it runs next.
   final PlatformInt64? nextRunMs;
-
-  /// How its last run ended.
   final BridgeRunStatus lastRun;
-
-  /// Why policy keeps it from running, with hiding characters written out.
   final String? blockedByPolicy;
 
   const BridgeAutomation({
@@ -66,27 +52,13 @@ class BridgeAutomation {
           blockedByPolicy == other.blockedByPolicy;
 }
 
-/// The lineage the card shows.
 class BridgeLineage {
-  /// The related threads, in T3's order.
   final List<BridgeLineageRow> rows;
-
-  /// Subagents that run.
   final PlatformInt64 running;
-
-  /// Side chats that run.
   final PlatformInt64 sideChatsRunning;
-
-  /// Whether the provider session can be disconnected.
   final bool canDisconnect;
-
-  /// The merge target's title, with hiding characters written out.
   final String? mergeTargetTitle;
-
-  /// Whether the session has a finished run to merge back.
   final bool mergeReady;
-
-  /// Whether "Merge back" can run now.
   final bool canMerge;
 
   const BridgeLineage({
@@ -123,75 +95,28 @@ class BridgeLineage {
           canMerge == other.canMerge;
 }
 
-/// The section of the card a lineage row sits in.
-enum BridgeLineageGroup {
-  /// Listed at once.
-  related,
+enum BridgeLineageGroup { related, active, previous, sideChats }
 
-  /// Subagents that still run or wait.
-  active,
-
-  /// Subagents that ended, under "Previous agents".
-  previous,
-
-  /// Side chats.
-  sideChats,
-}
-
-/// How a lineage row's thread relates to the session.
 enum BridgeLineageRelation {
-  /// Context transferred between the two.
   contextTransfer,
-
-  /// A subagent the session started.
   subagent,
-
-  /// The thread that started this session as a subagent.
   parentAgent,
-
-  /// A fork the session started.
   fork,
-
-  /// The session's fork source.
   parentThread,
-
-  /// A side chat of the session.
   sideChat,
 }
 
-/// One thread related to the session.
 class BridgeLineageRow {
-  /// The thread's id; opening the row opens it.
   final String threadId;
-
-  /// How it relates.
   final BridgeLineageRelation relation;
-
-  /// Where it sits.
   final BridgeLineageGroup group;
-
-  /// Its title, with hiding characters written out.
   final String title;
-
-  /// Its status, as T3 reports it.
   final String? status;
-
-  /// The status in T3's words.
   final String statusLabel;
-
-  /// Whether it failed.
   final bool failed;
-
-  /// When a subagent started; set only while its elapsed time is known.
   final PlatformInt64? startedMs;
-
-  /// When a finished subagent ended; `None` while it runs.
   final PlatformInt64? endedMs;
-
-  /// Whether it is the thread this session merges back into.
   final bool mergeTarget;
-
-  /// The subagent a stop would end.
   final String? stopSubagent;
 
   const BridgeLineageRow({
@@ -240,24 +165,12 @@ class BridgeLineageRow {
           stopSubagent == other.stopSubagent;
 }
 
-/// A local server a terminal or the agent of the session started.
 class BridgeLocalServer {
-  /// The host, such as `localhost`.
   final String host;
-
-  /// The port it listens on.
   final PlatformInt64 port;
-
-  /// Its address, which opens in the browser.
   final String url;
-
-  /// The process's name, with hiding characters written out.
   final String? process;
-
-  /// The process id, which stopping the server needs.
   final PlatformInt64? pid;
-
-  /// Whether a terminal started it rather than the agent.
   final bool terminal;
 
   const BridgeLocalServer({
@@ -291,48 +204,15 @@ class BridgeLocalServer {
           terminal == other.terminal;
 }
 
-/// Where a usage window stands against the time it covers.
-enum BridgePace {
-  /// Used faster than time passed.
-  ahead,
+enum BridgePace { ahead, on_, under }
 
-  /// Used about as fast as time passed.
-  on_,
+enum BridgeRunStatus { never, running, succeeded, failed }
 
-  /// Used slower than time passed.
-  under,
-}
-
-/// How a scheduled task's last run ended, or that it never ran.
-enum BridgeRunStatus {
-  /// It never ran.
-  never,
-
-  /// It runs now.
-  running,
-
-  /// Its last run succeeded.
-  succeeded,
-
-  /// Its last run failed.
-  failed,
-}
-
-/// A schedule with the fields of its kind; the card words it.
 class BridgeSchedule {
-  /// The kind.
   final BridgeScheduleKind kind;
-
-  /// The interval, for an interval schedule.
   final PlatformInt64? everyMs;
-
-  /// The time of day, `HH:MM`, for a fixed-time schedule.
   final String? timeOfDay;
-
-  /// The weekdays, 0 for Sunday; empty for every day.
   final Int64List weekdays;
-
-  /// The ISO 8601 time with its offset, for a one-time schedule.
   final String? runAt;
 
   const BridgeSchedule({
@@ -363,27 +243,10 @@ class BridgeSchedule {
           runAt == other.runAt;
 }
 
-/// When a scheduled task runs.
-enum BridgeScheduleKind {
-  /// Every `every_ms`.
-  interval,
+enum BridgeScheduleKind { interval, fixedTime, once, webhook }
 
-  /// At `time_of_day` on `weekdays`.
-  fixedTime,
-
-  /// Once, at `run_at`.
-  once,
-
-  /// On each webhook request.
-  webhook,
-}
-
-/// The provider's usage limits: its windows, or why there are none.
 class BridgeUsageLimits {
-  /// Why the windows are missing, with hiding characters written out.
   final String? notice;
-
-  /// The windows, in T3's order.
   final List<BridgeUsageWindow> windows;
 
   const BridgeUsageLimits({this.notice, required this.windows});
@@ -400,18 +263,10 @@ class BridgeUsageLimits {
           windows == other.windows;
 }
 
-/// One window of the provider's usage limits.
 class BridgeUsageWindow {
-  /// Its label, with hiding characters written out.
   final String label;
-
-  /// The percentage left, from 0 to 100.
   final PlatformInt64 remainingPercent;
-
-  /// When it resets, when that is still ahead.
   final PlatformInt64? resetsAtMs;
-
-  /// Its pace, when known.
   final BridgePace? pace;
 
   const BridgeUsageWindow({
