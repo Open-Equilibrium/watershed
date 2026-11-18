@@ -54,7 +54,6 @@ for row in rows:
         elif action == 'rename': target.rename(auxiliary); Path(auxiliary).rename(target)
         elif action == 'chmod': target.chmod(0o777)
         elif action == 'xattr':
-            # Darwin's six-argument API; Python's os.setxattr is Linux-only.
             native = ctypes.CDLL(None, use_errno=True).setxattr
             native.argtypes = [ctypes.c_char_p, ctypes.c_char_p, ctypes.c_void_p,
                                ctypes.c_size_t, ctypes.c_uint32, ctypes.c_int]

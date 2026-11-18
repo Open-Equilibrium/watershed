@@ -12,7 +12,7 @@ Thanks for contributing to Watershed.
 
 Follow [AGENTS.md](AGENTS.md) for language, documentation, scope, VCS, and Definition-of-Done rules. Test and performance requirements are canonical in [TESTING.md](TESTING.md) and [PERFORMANCE.md](PERFORMANCE.md).
 
-Code carries no comments or docstrings; only generated files and shebang lines are exempt, and `tests/test_no_code_comments.py` enforces this.
+Code carries no comments or docstrings; only generated files and shebang lines are exempt. `tests/test_no_code_comments.py` enforces this, except inside scripts embedded in strings or heredocs, which follow the rule unchecked.
 
 ## Workflow
 

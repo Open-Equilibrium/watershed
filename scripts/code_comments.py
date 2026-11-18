@@ -48,7 +48,7 @@ DART = _syntax(
 JAVASCRIPT = _syntax(
     r"""(?P<prefix>)(?P<hashes>)(?P<quote>["'`])""",
     other=(
-        r"(?:(?<=[(,=:\[!&|?{};\n])|(?<=[(,=:\[!&|?{};]\s)|(?<=return\s))"
+        r"(?:(?<=[(,=:\[!&|?{};>\n])|(?<=[(,=:\[!&|?{};>]\s)|(?<=return\s))"
         r"/(?![/*])(?:\\.|\[(?:\\.|[^\]\n])*\]|[^/\\\n\[])+/[a-z]*"
     ),
     nested_blocks=False,
@@ -150,7 +150,7 @@ def _shell_comments(text: str) -> list[tuple[int, str]]:
             end = re.compile(rf"^{indent}{re.escape(match['delimiter'])}$", re.MULTILINE)
             line_end = text.find("\n", position)
             closing = end.search(text, line_end + 1) if line_end >= 0 else None
-            position = closing.end() if closing else len(text)
+            position = closing.end() if closing else position
     return found
 
 

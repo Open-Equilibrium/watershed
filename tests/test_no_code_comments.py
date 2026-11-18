@@ -34,6 +34,7 @@ CASES = {
         const a = "// s" + '/* s';
         const b = `// ${c("// key")} /* s`;
         const d = e.replace(/["/]\\/\\//g, "");
+        const i = (j) => /"/.test(j);
         const f = g / h; /* one /* */
         // end
         """,
@@ -63,8 +64,10 @@ CASES = {
         "echo a#b '# s' \"# s\" $# ${#x} $'#\\'' \\# # two\n"
         "cat <<EOF\n# body\nEOF\n"
         "cat <<-'END'\n\t# body\n\tEND\n"
-        "cat <<< '# s'\n",
-        ["# one", "# two"],
+        "cat <<< '# s'\n"
+        "x=$((1 << 2))\n"
+        "# three\n",
+        ["# one", "# two", "# three"],
     ),
 }
 
