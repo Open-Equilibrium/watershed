@@ -192,8 +192,8 @@ Canonical terms. Use these exactly; do not introduce synonyms. Tool names are fi
 - **Recovery key** — The second way to regain a Workspace's keys when no signed-in device can approve a new one. Area keys are also wrapped for it, and the person or their company holds it (ADR-0228).
 - **Headless replica** — A Liquid replica without UI, on a server for Automations and schedules or on a separate agent host. It holds only the Workspaces enabled for it and, once selective replication follows the complete M3 replicas, only the areas its Roles allow (ADR-0255).
 - **Text Block** — One paragraph, heading, list item, to-do or quote; ⏎ ends it and starts the next.
-- **Table** — The Block of typed fields and rows, kept in its home Page's document and shown through Views such as Table, Board and Calendar. The core calls it the Database Block (ADR-0244).
-- **Home Page** — The Page a Block was made on, whose document stores the Block.
+- **Table** — The Block of typed fields and rows, kept in a document of its own, listed in the sidebar's Tables section and shown on Pages through Views such as Table, Board and Calendar (ADR-0309). The core calls it the Database Block (ADR-0244).
+- **Home Page** — The Page a Block was made on, whose document stores the Block. A Table has none.
 - **Code Block** — A Block of code with syntax colors that Liquid never runs; a Text Block turns into one with ``` or the slash command Code (ADR-0302).
 - **Media Block** — A Block that shows an image or a file, kept as an attachment (ADR-0305).
 - **Whiteboard Block** — A Block whose Drawing lies on a canvas without edges, drawn on in place (ADR-0306).
