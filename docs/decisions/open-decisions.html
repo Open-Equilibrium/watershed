@@ -127,30 +127,6 @@
         <p><strong>Acceptance criterion:</strong> a change to the fake that makes it answer a covered scenario differently from the core fails a test in CI, and every mutation kind the fake handles is covered by a scenario.</p>
       </details>
 
-      <details id="d-111" class="decision wide">
-        <summary><h3>D-111 - How Much Ink One Annotated PDF May Hold</h3></summary>
-        <p><strong>Status:</strong> Open; raised by the review of PDF annotation (ADR-0307).</p>
-        <p><strong>Problem:</strong> A Whiteboard holds at most 10,000 elements and 1,000,000 ink points, about 12 MB. An annotated PDF has those limits on each of its up to 2,000 pages, as approved with the mockup, so one PDF's ink may reach 20 million elements and about 24 GB. It lives in its Page's one stored document, which is loaded and synced whole, and today each read or change of a PDF's ink goes through the ink of all its pages, not just those on screen. Real use stays far below this; a buggy or hostile agent need not. A Page with many Whiteboards can grow the same way, and the planned size caps (ADR-0251) are not built yet.</p>
-        <p><strong>Question:</strong> Should one annotated PDF's ink have a limit as a whole, and when?</p>
-        <div class="dia">
-          <div class="opt rec"><h4>A: Leave it to the size caps <span class="tag">Recommended</span></h4>
-            <div class="b ws">Per-page limits stay as approved</div>
-            <div class="a">ADR-0251's caps, when built, also bound a Page's whole size, Whiteboards included</div>
-            <ul><li>Pro: one rule for every way a Page grows; nothing to change now.</li><li>Con: until those caps land, one PDF can grow very large.</li></ul>
-          </div>
-          <div class="opt"><h4>B: A total limit per PDF now</h4>
-            <div class="b ws">For example 10× a Whiteboard's limits for the whole PDF</div>
-            <ul><li>Pro: bounded today, with a small change in the core.</li><li>Con: a long, densely annotated PDF can hit it; a second limit people must understand.</li></ul>
-          </div>
-          <div class="opt"><h4>C: Ink stored by page</h4>
-            <div class="b ws">The core keeps each page's ink apart</div>
-            <ul><li>Pro: reads and changes touch only the pages asked for.</li><li>Con: a change to how ink is stored; it bounds work, not size, so A or B is still needed.</li></ul>
-          </div>
-        </div>
-        <p><strong>Recommendation:</strong> A, as it bounds Whiteboards too; take B only if the caps slip past sync (M3c).</p>
-        <p><strong>Acceptance criterion:</strong> a write that would take a Page, or a PDF's ink, past the chosen bound is refused with its reason, and a test shows it.</p>
-      </details>
-
       <details id="d-027" class="decision">
         <summary><h3>D-027 - Liquid CLI/API Surface</h3></summary>
         <p><strong>Status:</strong> Open before external-agent Liquid edits.</p>
