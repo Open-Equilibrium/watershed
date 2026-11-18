@@ -203,7 +203,6 @@ fn open_system_browser(url: &str) -> Result<(), RuntimeError> {
     spawn_reaped(Command::new(system_browser_launcher()).arg(url)).map(|_| ())
 }
 
-/// Starts a launcher and reaps it on a detached thread, so callback handling never waits for it.
 pub(crate) fn spawn_reaped(command: &mut Command) -> Result<Pid, RuntimeError> {
     let mut child = command.spawn().map_err(|_| auth_protocol())?;
     let pid = Pid::from_child(&child);

@@ -2,6 +2,13 @@ use super::super::{dispatch_in_workspace, execution::set_run_activation_observer
 use crate::{interrupt::InterruptCoordinator, test_support};
 use flow_agent_core::RuntimeError;
 
+fn smoke_run_args() -> Vec<String> {
+    ["run", "smoke-flow"]
+        .into_iter()
+        .map(str::to_owned)
+        .collect()
+}
+
 #[test]
 fn fixture_run_keeps_the_productive_interrupt_coordinator_idle() {
     if test_support::run_current_test_isolated_session_home() {
@@ -15,10 +22,7 @@ fn fixture_run_keeps_the_productive_interrupt_coordinator_idle() {
             flow_agent_core::ProductiveInterruptAction::Exit
         );
     });
-    let args = ["run", "smoke-flow"]
-        .into_iter()
-        .map(str::to_owned)
-        .collect::<Vec<_>>();
+    let args = smoke_run_args();
 
     dispatch_in_workspace(&args, &InterruptCoordinator::new(), &workspace)
         .expect("fixture run completes without productive activation");
@@ -48,10 +52,7 @@ fn activated_backend_selection_remains_authoritative_for_execution() {
             flow_agent_core::ProductiveInterruptAction::Cancel
         );
     });
-    let args = ["run", "smoke-flow"]
-        .into_iter()
-        .map(str::to_owned)
-        .collect::<Vec<_>>();
+    let args = smoke_run_args();
 
     let result = dispatch_in_workspace(&args, &InterruptCoordinator::new(), &workspace);
 
@@ -92,10 +93,7 @@ fn cancellation_during_fallible_preflight_is_returned_without_a_session() {
         );
         std::fs::remove_file(registry_file).expect("registry failure is injected");
     });
-    let args = ["run", "smoke-flow"]
-        .into_iter()
-        .map(str::to_owned)
-        .collect::<Vec<_>>();
+    let args = smoke_run_args();
 
     let result = dispatch_in_workspace(&args, &InterruptCoordinator::new(), &workspace);
 

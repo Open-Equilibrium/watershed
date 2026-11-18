@@ -93,8 +93,10 @@ pub(crate) fn workspace_log_dir(workspace: &Path) -> PathBuf {
 
 #[allow(dead_code)]
 fn workspace_store_dir(workspace: &Path) -> PathBuf {
+    use std::os::unix::ffi::OsStrExt as _;
+
     let canonical = fs::canonicalize(workspace).expect("workspace canonicalizes");
-    let path = stable_native_path_bytes(&canonical);
+    let path = canonical.as_os_str().as_bytes();
     let mut digest = Sha256::new();
     digest.update(b"watershed-flow-agent-workspace-v1\0");
     digest.update((path.len() as u64).to_le_bytes());
@@ -109,12 +111,6 @@ fn workspace_store_dir(workspace: &Path) -> PathBuf {
         .join(format!("workspace-v1-{key}"))
 }
 
-fn stable_native_path_bytes(path: &Path) -> Vec<u8> {
-    use std::os::unix::ffi::OsStrExt as _;
-
-    path.as_os_str().as_bytes().to_vec()
-}
-
 fn test_session_home() -> &'static PathBuf {
     SESSION_HOME_PATH.get_or_init(|| {
         std::env::var_os("FLOW_AGENT_HOME")
@@ -125,10 +121,6 @@ fn test_session_home() -> &'static PathBuf {
 
 #[allow(dead_code)]
 pub(crate) fn run_current_test_isolated_session_home() -> bool {
-    run_current_test_isolated_session_home_with_args(&[])
-}
-
-fn run_current_test_isolated_session_home_with_args(extra_args: &[&str]) -> bool {
     const CHILD_ENV: &str = "WATERSHED_ISOLATED_SESSION_HOME_CHILD";
 
     if std::env::var_os("NEXTEST").is_some() {
@@ -150,7 +142,6 @@ fn run_current_test_isolated_session_home_with_args(extra_args: &[&str]) -> bool
         std::env::current_exe().expect("test executable resolves for session-home isolation"),
     );
     command.args(["--exact", &test_name, "--nocapture"]);
-    command.args(extra_args);
     let status = command
         .env(CHILD_ENV, &session_home)
         .env("FLOW_AGENT_HOME", &session_home)

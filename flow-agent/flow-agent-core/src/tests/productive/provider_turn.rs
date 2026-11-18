@@ -2,10 +2,11 @@ use super::super::test_support::workspace_copy;
 use super::support::{
     DefinitiveFailureProvider, FailingRecoveryBoundary, FakeProvider, FakeToolExecutionFault,
     FakeToolExecutor, MemoryAttempts, MemorySink, ReplyInvalidProvider, ScriptedProvider,
-    UnsupportedToolExecutor, disabled_smoke_productive_execution_fixture,
-    execute_failing_recovery_case, execute_scripted_productive_case,
-    execute_scripted_productive_case_with_tools, load_productive_execution_fixture_for_flow,
-    smoke_productive_execution_fixture,
+    UnsupportedToolExecutor, assert_terminal_error_contains, count_events,
+    disabled_smoke_productive_execution_fixture, event_of, execute_failing_recovery_case,
+    execute_scripted_productive_case, execute_scripted_productive_case_with_tools,
+    fake_tool_attempt_output, has_event, load_productive_execution_fixture_for_flow,
+    single_tool_provider_turn, smoke_productive_execution_fixture, string_provider_turn,
 };
 use crate::runtime::{
     context::{
@@ -25,7 +26,16 @@ use crate::runtime::{
     validate::validate_protocol_jsonl_text,
 };
 use proto::{EventEnvelope, EventType};
-use std::{collections::VecDeque, path::Path};
+use std::path::Path;
+
+fn tool_call(call_id: &str, name: &str, arguments: &str) -> ProviderToolCall {
+    ProviderToolCall {
+        call_id: call_id.to_owned(),
+        name: name.to_owned(),
+        arguments: arguments.to_owned(),
+    }
+}
+
 #[test]
 fn productive_tool_preflight_rejects_an_executor_that_cannot_honor_the_flow_policy() {
     let (_workspace, fixture) = smoke_productive_execution_fixture();
@@ -80,114 +90,51 @@ fn productive_tool_preflight_rejects_fixture_only_commands_before_provider_dispa
 }
 
 #[test]
-fn productive_provider_rejects_undeclared_tool_arguments_before_execution() {
-    let turn = ProviderTurn {
-        token_usage: None,
-        response_id: "response-invalid-tool-arguments".to_owned(),
-        output_text: String::new(),
-        retained_items: Vec::new(),
-        tool_calls: vec![ProviderToolCall {
-            call_id: "call-invalid-tool-arguments".to_owned(),
-            name: "echo".to_owned(),
-            arguments: r#"{"unexpected":"value"}"#.to_owned(),
-        }],
+fn productive_tool_requests_are_rejected_before_any_tool_starts() {
+    let valid = || tool_call("call-valid", "echo", "{}");
+    let undeclared_argument = || {
+        tool_call(
+            "call-invalid-arguments",
+            "echo",
+            r#"{"unexpected":"value"}"#,
+        )
     };
-
-    let (execution, _, attempts, sink, tools) =
-        execute_scripted_productive_case("productive-invalid-tool-arguments", [turn], |_| {})
-            .expect("invalid arguments become a typed failed run");
-    assert!(execution.failed);
-    assert!(
-        execution.terminal_error.as_ref().is_some_and(|error| error
-            .to_string()
-            .contains("tool echo received undeclared parameter unexpected")),
-        "unexpected terminal error: {:?}",
-        execution.terminal_error
-    );
-    assert_eq!(
-        attempts.intents.len(),
-        1,
-        "only the provider attempt commits"
-    );
-    assert!(tools.invocations.is_empty());
-    assert!(
-        !sink
-            .0
-            .iter()
-            .any(|event| event.event_type == EventType::ToolStarted)
-    );
-}
-
-#[test]
-fn productive_tool_prepare_failure_stops_before_attempt_or_dispatch() {
-    let turn = ProviderTurn {
-        token_usage: None,
-        response_id: "response-tool-prepare-failure".to_owned(),
-        output_text: String::new(),
-        retained_items: Vec::new(),
-        tool_calls: vec![ProviderToolCall {
-            call_id: "call-tool-prepare-failure".to_owned(),
-            name: "echo".to_owned(),
-            arguments: "{}".to_owned(),
-        }],
-    };
-
-    let (execution, _, attempts, sink, tools) = execute_scripted_productive_case_with_tools(
-        "productive-tool-prepare-failure",
-        [turn],
-        |_| {},
-        |tools| tools.fault = FakeToolExecutionFault::PrepareError,
-    )
-    .expect("Tool preparation failure becomes a typed failed run");
-
-    assert!(execution.failed);
-    assert!(execution.terminal_error.as_ref().is_some_and(|error| {
-        error
-            .to_string()
-            .contains("fixture Executor preparation failure")
-    }));
-    assert_eq!(
-        attempts.intents.len(),
-        1,
-        "only the provider attempt commits"
-    );
-    assert!(tools.invocations.is_empty());
-    assert!(
-        !sink
-            .0
-            .iter()
-            .any(|event| event.event_type == EventType::ToolStarted)
-    );
-}
-
-#[test]
-fn productive_provider_preflights_each_tool_batch_before_execution() {
-    let valid = || ProviderToolCall {
-        call_id: "call-valid".to_owned(),
-        name: "echo".to_owned(),
-        arguments: "{}".to_owned(),
-    };
-    let invalid_batches = [
-        vec![
-            valid(),
-            ProviderToolCall {
-                call_id: "call-outside".to_owned(),
-                name: "undeclared-tool".to_owned(),
-                arguments: "{}".to_owned(),
-            },
-        ],
-        vec![
-            valid(),
-            ProviderToolCall {
-                call_id: "call-invalid-arguments".to_owned(),
-                name: "echo".to_owned(),
-                arguments: r#"{"unexpected":"value"}"#.to_owned(),
-            },
-        ],
-        vec![valid(), valid()],
-    ];
-
-    for (index, tool_calls) in invalid_batches.into_iter().enumerate() {
+    let outside = || tool_call("call-outside", "undeclared-tool", "{}");
+    for (index, (tool_calls, fault, expected)) in [
+        (
+            vec![outside()],
+            FakeToolExecutionFault::None,
+            "outside active Phase smoke",
+        ),
+        (
+            vec![undeclared_argument()],
+            FakeToolExecutionFault::None,
+            "tool echo received undeclared parameter unexpected",
+        ),
+        (
+            vec![valid(), outside()],
+            FakeToolExecutionFault::None,
+            "outside active Phase smoke",
+        ),
+        (
+            vec![valid(), undeclared_argument()],
+            FakeToolExecutionFault::None,
+            "tool echo received undeclared parameter unexpected",
+        ),
+        (
+            vec![valid(), valid()],
+            FakeToolExecutionFault::None,
+            "repeated Tool call id",
+        ),
+        (
+            vec![valid()],
+            FakeToolExecutionFault::PrepareError,
+            "fixture Executor preparation failure",
+        ),
+    ]
+    .into_iter()
+    .enumerate()
+    {
         let turn = ProviderTurn {
             token_usage: None,
             response_id: format!("response-invalid-tool-batch-{index}"),
@@ -195,85 +142,52 @@ fn productive_provider_preflights_each_tool_batch_before_execution() {
             retained_items: Vec::new(),
             tool_calls,
         };
-        let (execution, _, _, sink, tools) = execute_scripted_productive_case(
-            &format!("productive-invalid-tool-batch-{index}"),
-            [turn],
-            |_| {},
-        )
-        .expect("an invalid Tool batch becomes a typed failed run");
+        let (execution, provider, attempts, sink, tools) =
+            execute_scripted_productive_case_with_tools(
+                &format!("productive-invalid-tool-batch-{index}"),
+                [turn],
+                |_| {},
+                |tools| tools.fault = fault,
+            )
+            .expect("an invalid Tool batch becomes a typed failed run");
 
-        assert!(execution.failed);
+        assert!(execution.failed, "invalid batch {index}");
+        assert!(
+            execution
+                .terminal_error
+                .as_ref()
+                .is_some_and(|error| error.to_string().contains(expected)),
+            "invalid batch {index}: {:?}",
+            execution.terminal_error
+        );
+        assert_eq!(provider.bodies.len(), 1, "invalid batch {index}");
+        assert_eq!(attempts.intents.len(), 1, "invalid batch {index}");
         assert!(tools.invocations.is_empty(), "invalid batch {index}");
         assert!(
-            !sink
-                .0
-                .iter()
-                .any(|event| event.event_type == EventType::ToolStarted),
+            !has_event(&sink.0, EventType::ToolStarted),
+            "invalid batch {index}"
+        );
+        assert_eq!(
+            sink.0.last().unwrap().event_type,
+            EventType::SessionFailed,
             "invalid batch {index}"
         );
     }
 }
 
 #[test]
-fn productive_provider_tool_requests_are_confined_and_call_ids_are_run_unique() {
-    let outside = ProviderTurn {
-        token_usage: None,
-        response_id: "response-outside".to_owned(),
-        output_text: String::new(),
-        retained_items: Vec::new(),
-        tool_calls: vec![ProviderToolCall {
-            call_id: "call-outside".to_owned(),
-            name: "undeclared-tool".to_owned(),
-            arguments: "{}".to_owned(),
-        }],
-    };
-    let (execution, provider, attempts, sink, tools) =
-        execute_scripted_productive_case("productive-outside-tool", [outside], |_| {})
-            .expect("a confined provider request becomes a typed failed run");
-    assert!(execution.failed);
-    assert!(
-        execution
-            .terminal_error
-            .as_ref()
-            .is_some_and(|error| { error.to_string().contains("outside active Phase smoke") })
-    );
-    assert_eq!(provider.bodies.len(), 1);
-    assert_eq!(attempts.results.len(), 1);
-    assert!(tools.invocations.is_empty());
-    assert_eq!(sink.0.last().unwrap().event_type, EventType::SessionFailed);
-
-    let repeated_call = || ProviderToolCall {
-        call_id: "call-repeated".to_owned(),
-        name: "echo".to_owned(),
-        arguments: "{}".to_owned(),
-    };
-    let first = ProviderTurn {
-        token_usage: None,
-        response_id: "response-first".to_owned(),
-        output_text: String::new(),
-        retained_items: Vec::new(),
-        tool_calls: vec![repeated_call()],
-    };
-    let repeated = ProviderTurn {
-        token_usage: None,
-        response_id: "response-repeated".to_owned(),
-        output_text: String::new(),
-        retained_items: Vec::new(),
-        tool_calls: vec![repeated_call()],
-    };
+fn productive_provider_call_ids_are_unique_across_the_run() {
     let (execution, provider, attempts, sink, tools) = execute_scripted_productive_case(
         "productive-repeated-tool-call",
-        [first, repeated],
+        [
+            single_tool_provider_turn("response-first", "call-repeated"),
+            single_tool_provider_turn("response-repeated", "call-repeated"),
+        ],
         |_| {},
     )
     .expect("a repeated provider call id becomes a typed failed run");
     assert!(execution.failed);
-    assert!(
-        execution
-            .terminal_error
-            .as_ref()
-            .is_some_and(|error| error.to_string().contains("repeated Tool call id"))
-    );
+    assert_terminal_error_contains(&execution, "repeated Tool call id");
     assert_eq!(provider.bodies.len(), 2);
     assert_eq!(attempts.intents.len(), 3);
     assert_eq!(tools.invocations.len(), 1, "the repeated call is not rerun");
@@ -293,17 +207,8 @@ fn productive_runtime_rejects_provider_output_contract_violations() {
         execute_scripted_productive_case("productive-output-contract", [boolean], |_| {})
             .expect("an output-contract violation becomes a typed failed run");
     assert!(execution.failed);
-    assert!(
-        execution
-            .terminal_error
-            .as_ref()
-            .is_some_and(|error| { error.to_string().contains("violates its output contract") })
-    );
-    assert!(
-        sink.0
-            .iter()
-            .any(|event| event.event_type == EventType::PhaseFailed)
-    );
+    assert_terminal_error_contains(&execution, "violates its output contract");
+    assert!(has_event(&sink.0, EventType::PhaseFailed));
 }
 
 #[test]
@@ -329,12 +234,8 @@ fn productive_recovery_boundary_failures_never_commit_past_the_failed_boundary()
         let error = result.expect_err("recovery durability failure aborts directly");
         assert!(error.to_string().contains("recovery failure"), "{error}");
         assert_eq!(sink.0.last().unwrap().event_type, final_event);
-        assert!(!sink.0.iter().any(|event| {
-            matches!(
-                event.event_type,
-                EventType::FlowFailed | EventType::SessionFailed
-            )
-        }));
+        assert!(!has_event(&sink.0, EventType::FlowFailed));
+        assert!(!has_event(&sink.0, EventType::SessionFailed));
     }
 
     let (result, sink) = execute_failing_recovery_case(
@@ -345,12 +246,35 @@ fn productive_recovery_boundary_failures_never_commit_past_the_failed_boundary()
     let error = result.expect_err("failed terminal recovery aborts directly");
     assert!(error.to_string().contains("terminal recovery failure"));
     assert_eq!(sink.0.last().unwrap().event_type, EventType::FlowFailed);
-    assert!(!sink.0.iter().any(|event| {
-        matches!(
-            event.event_type,
-            EventType::SessionFailed | EventType::SessionCompleted
-        )
-    }));
+    assert!(!has_event(&sink.0, EventType::SessionFailed));
+    assert!(!has_event(&sink.0, EventType::SessionCompleted));
+}
+
+fn prior_answer_history() -> ContextHistory {
+    let mut history = ContextHistory::default();
+    history.record(&EventEnvelope::new(
+        "prior-delta",
+        EventType::MessageDelta,
+        "prior-run",
+        1,
+        "2026-07-30T12:00:00Z",
+        "flow-agent-cli",
+        serde_json::json!({
+            "content_delta": "prior answer",
+            "message_id": "prior-message",
+            "role": "assistant",
+        }),
+    ));
+    history.record(&EventEnvelope::new(
+        "prior-completed",
+        EventType::MessageCompleted,
+        "prior-run",
+        2,
+        "2026-07-30T12:00:01Z",
+        "flow-agent-cli",
+        serde_json::json!({"message_id": "prior-message", "role": "assistant"}),
+    ));
+    history
 }
 
 #[test]
@@ -360,43 +284,9 @@ fn productive_leaf_dispatches_once_and_commits_its_typed_result() {
     let mut provider = FakeProvider::default();
     let mut attempts = MemoryAttempts::default();
     let mut sink = MemorySink::default();
-    let prior_events = [
-        EventEnvelope::new(
-            "prior-delta",
-            EventType::MessageDelta,
-            "prior-run",
-            1,
-            "2026-07-30T12:00:00Z",
-            "flow-agent-cli",
-            serde_json::json!({
-                "content_delta": "prior answer",
-                "message_id": "prior-message",
-                "role": "assistant",
-            }),
-        ),
-        EventEnvelope::new(
-            "prior-completed",
-            EventType::MessageCompleted,
-            "prior-run",
-            2,
-            "2026-07-30T12:00:01Z",
-            "flow-agent-cli",
-            serde_json::json!({
-                "message_id": "prior-message",
-                "role": "assistant",
-            }),
-        ),
-    ];
-
     let execution = execute_productive_flow(
         ProductiveExecution {
-            prior_history: {
-                let mut history = ContextHistory::default();
-                for event in &prior_events {
-                    history.record(event);
-                }
-                history
-            },
+            prior_history: prior_answer_history(),
             agent_instructions: "Agent guidance.",
             ..fixture.execution(flow, "productive-fixture")
         },
@@ -421,11 +311,7 @@ fn productive_leaf_dispatches_once_and_commits_its_typed_result() {
     assert_eq!(attempts.results.len(), 1);
     assert_eq!(attempts.intents[0].0, RunAttemptKind::Provider);
     assert_eq!(attempts.results[0].2, "completed");
-    let completed = sink
-        .0
-        .iter()
-        .find(|event| event.event_type == EventType::PhaseCompleted)
-        .expect("Phase completion");
+    let completed = event_of(&sink.0, EventType::PhaseCompleted);
     assert_eq!(
         completed.payload["result"],
         serde_json::json!({"type":"string","value":"productive"})
@@ -467,31 +353,8 @@ impl RuntimeEventSink for ContextManifestSink {
 fn leaf_turn_omits_recent_history_when_only_the_mandatory_request_fits() {
     let (_workspace, fixture) = disabled_smoke_productive_execution_fixture();
     let flow = fixture.smoke_flow();
-    let mut recent_history = ContextHistory::default();
-    recent_history.record(&EventEnvelope::new(
-        "prior-delta",
-        EventType::MessageDelta,
-        "prior-run",
-        1,
-        "2026-07-30T12:00:00Z",
-        "flow-agent-cli",
-        serde_json::json!({
-            "content_delta": "prior answer",
-            "message_id": "prior-message",
-            "role": "assistant",
-        }),
-    ));
-    recent_history.record(&EventEnvelope::new(
-        "prior-completed",
-        EventType::MessageCompleted,
-        "prior-run",
-        2,
-        "2026-07-30T12:00:01Z",
-        "flow-agent-cli",
-        serde_json::json!({"message_id": "prior-message", "role": "assistant"}),
-    ));
+    let recent_history = prior_answer_history();
 
-    // The complete request with the recent interaction sets the budget one byte below it.
     let mut complete = FakeProvider::default();
     execute_productive_flow(
         ProductiveExecution {
@@ -548,36 +411,29 @@ fn productive_leaf_runs_only_provider_requested_phase_tools_and_returns_the_resu
             "type": "function_call",
         })
     });
-    let mut provider = ScriptedProvider {
-        bodies: Vec::new(),
-        turns: VecDeque::from([
-            ProviderTurn {
-                token_usage: None,
-                response_id: "response-tool".to_owned(),
-                output_text: String::new(),
-                retained_items: call_items.to_vec(),
-                tool_calls: ["call-1", "call-2"]
-                    .map(|call_id| ProviderToolCall {
-                        call_id: call_id.to_owned(),
-                        name: "echo".to_owned(),
-                        arguments: "{}".to_owned(),
-                    })
-                    .to_vec(),
-            },
-            ProviderTurn {
-                token_usage: None,
-                response_id: "response-final".to_owned(),
-                output_text: "{\"type\":\"string\",\"value\":\"after-tool\"}".to_owned(),
-                retained_items: vec![serde_json::json!({
-                    "content": [],
-                    "id": "message-final",
-                    "role": "assistant",
-                    "type": "message"
-                })],
-                tool_calls: Vec::new(),
-            },
-        ]),
-    };
+    let mut provider = ScriptedProvider::new([
+        ProviderTurn {
+            token_usage: None,
+            response_id: "response-tool".to_owned(),
+            output_text: String::new(),
+            retained_items: call_items.to_vec(),
+            tool_calls: ["call-1", "call-2"]
+                .map(|call_id| tool_call(call_id, "echo", "{}"))
+                .to_vec(),
+        },
+        ProviderTurn {
+            token_usage: None,
+            response_id: "response-final".to_owned(),
+            output_text: "{\"type\":\"string\",\"value\":\"after-tool\"}".to_owned(),
+            retained_items: vec![serde_json::json!({
+                "content": [],
+                "id": "message-final",
+                "role": "assistant",
+                "type": "message"
+            })],
+            tool_calls: Vec::new(),
+        },
+    ]);
     let mut attempts = MemoryAttempts::default();
     let mut sink = MemorySink::default();
     let mut tools = FakeToolExecutor::default();
@@ -630,13 +486,7 @@ fn productive_leaf_runs_only_provider_requested_phase_tools_and_returns_the_resu
         tool_started[1].payload["attempt_id"].as_str(),
         Some(attempts.intents[2].1.as_str())
     );
-    assert_eq!(
-        sink.0
-            .iter()
-            .filter(|event| event.event_type == EventType::ToolCompleted)
-            .count(),
-        2
-    );
+    assert_eq!(count_events(&sink.0, EventType::ToolCompleted), 2);
     let durable_text = sink
         .0
         .iter()
@@ -644,11 +494,7 @@ fn productive_leaf_runs_only_provider_requested_phase_tools_and_returns_the_resu
         .collect::<String>();
     validate_protocol_jsonl_text(Path::new("productive-repeated-tool.jsonl"), &durable_text)
         .expect("repeated productive Tool calls remain protocol-valid");
-    let completed = sink
-        .0
-        .iter()
-        .find(|event| event.event_type == EventType::PhaseCompleted)
-        .expect("Phase completion");
+    let completed = event_of(&sink.0, EventType::PhaseCompleted);
     assert_eq!(
         completed.payload["result"],
         serde_json::json!({"type":"string","value":"after-tool"})
@@ -675,22 +521,14 @@ fn accumulated_provider_input_overflow_stops_before_another_dispatch() {
         .expect("canonical empty provider input")
         .len();
     let retained_bytes = MAX_ACCUMULATED_PROVIDER_INPUT_BYTES + 1 - empty_input_bytes;
-    let retained_item = serde_json::Value::String("x".repeat(retained_bytes));
     let turn = ProviderTurn {
         token_usage: None,
         response_id: "response-tool".to_owned(),
         output_text: String::new(),
-        retained_items: vec![retained_item],
-        tool_calls: vec![ProviderToolCall {
-            call_id: "call-1".to_owned(),
-            name: "echo".to_owned(),
-            arguments: "{}".to_owned(),
-        }],
+        retained_items: vec![serde_json::Value::String("x".repeat(retained_bytes))],
+        tool_calls: vec![tool_call("call-1", "echo", "{}")],
     };
-    let mut provider = ScriptedProvider {
-        bodies: Vec::new(),
-        turns: VecDeque::from([turn]),
-    };
+    let mut provider = ScriptedProvider::new([turn]);
     let mut attempts = MemoryAttempts::default();
     let mut sink = MemorySink::default();
     let mut tools = FakeToolExecutor::default();
@@ -708,12 +546,7 @@ fn accumulated_provider_input_overflow_stops_before_another_dispatch() {
     .expect("runtime records the rejected execution");
 
     assert!(execution.failed);
-    assert!(
-        execution
-            .terminal_error
-            .as_ref()
-            .is_some_and(|error| error.to_string().contains("accumulated provider input"))
-    );
+    assert_terminal_error_contains(&execution, "accumulated provider input");
     assert_eq!(provider.bodies.len(), 1, "no later provider dispatch");
     assert_eq!(tools.invocations.len(), 1, "no later Tool dispatch");
     let tool_attempt = attempts
@@ -732,7 +565,7 @@ fn accumulated_provider_input_overflow_stops_before_another_dispatch() {
     assert_eq!(attempts.results[tool_attempt].2, "completed");
     assert_eq!(
         attempts.durable_outputs[tool_attempt],
-        Some(super::support::fake_tool_attempt_output(tool_result)),
+        Some(fake_tool_attempt_output(tool_result)),
         "the actual Tool result is durable before the model-input boundary stops the Run"
     );
     let tool_completed = sink
@@ -762,25 +595,12 @@ fn productive_provider_turn_rejects_retained_input_that_exceeds_the_model_budget
             "role": "assistant",
             "type": "message",
         })],
-        tool_calls: vec![ProviderToolCall {
-            call_id: "call-1".to_owned(),
-            name: "echo".to_owned(),
-            arguments: "{}".to_owned(),
-        }],
+        tool_calls: vec![tool_call("call-1", "echo", "{}")],
     };
-    let mut provider = ScriptedProvider {
-        bodies: Vec::new(),
-        turns: VecDeque::from([
-            turn,
-            ProviderTurn {
-                token_usage: None,
-                response_id: "response-must-not-run".to_owned(),
-                output_text: "{\"type\":\"string\",\"value\":\"must-not-run\"}".to_owned(),
-                retained_items: Vec::new(),
-                tool_calls: Vec::new(),
-            },
-        ]),
-    };
+    let mut provider = ScriptedProvider::new([
+        turn,
+        string_provider_turn("response-must-not-run", "must-not-run"),
+    ]);
     let mut attempts = MemoryAttempts::default();
     let mut sink = MemorySink::default();
     let mut tools = FakeToolExecutor::default();
@@ -802,12 +622,7 @@ fn productive_provider_turn_rejects_retained_input_that_exceeds_the_model_budget
     .expect("runtime records the rejected execution");
 
     assert!(execution.failed);
-    assert!(
-        execution
-            .terminal_error
-            .as_ref()
-            .is_some_and(|error| error.to_string().contains("context_budget_exceeded"))
-    );
+    assert_terminal_error_contains(&execution, "context_budget_exceeded");
     assert_eq!(provider.bodies.len(), 1, "no over-budget provider dispatch");
     assert_eq!(tools.invocations.len(), 1, "the first Tool remains durable");
     let Some(RuntimeError::ContextBudgetExceeded {
@@ -817,11 +632,7 @@ fn productive_provider_turn_rejects_retained_input_that_exceeds_the_model_budget
     else {
         panic!("the retained input must fail at the model budget boundary");
     };
-    let error = sink
-        .0
-        .iter()
-        .find(|event| event.event_type == EventType::Error)
-        .expect("the context budget diagnostic is durable");
+    let error = event_of(&sink.0, EventType::Error);
     assert_eq!(
         error.payload,
         serde_json::json!({
@@ -859,43 +670,24 @@ fn productive_provider_turn_rejects_retained_input_that_exceeds_the_model_budget
 fn productive_failed_tool_closes_the_active_execution_without_another_provider_turn() {
     let (_workspace, fixture) = smoke_productive_execution_fixture();
     let flow = fixture.smoke_flow();
-    let mut provider = ScriptedProvider {
-        bodies: Vec::new(),
-        turns: VecDeque::from([
-            ProviderTurn {
-                token_usage: None,
-                response_id: "response-tool".to_owned(),
-                output_text: String::new(),
-                retained_items: vec![serde_json::json!({
-                    "arguments": "{}",
-                    "call_id": "call-1",
-                    "name": "echo",
-                    "type": "function_call",
-                })],
-                tool_calls: vec![ProviderToolCall {
-                    call_id: "call-1".to_owned(),
-                    name: "echo".to_owned(),
-                    arguments: "{}".to_owned(),
-                }],
-            },
-            ProviderTurn {
-                token_usage: None,
-                response_id: "response-after-failure".to_owned(),
-                output_text: "{\"type\":\"string\",\"value\":\"must-not-run\"}".to_owned(),
-                retained_items: Vec::new(),
-                tool_calls: Vec::new(),
-            },
-        ]),
-    };
+    let mut provider = ScriptedProvider::new([
+        ProviderTurn {
+            token_usage: None,
+            response_id: "response-tool".to_owned(),
+            output_text: String::new(),
+            retained_items: vec![serde_json::json!({
+                "arguments": "{}",
+                "call_id": "call-1",
+                "name": "echo",
+                "type": "function_call",
+            })],
+            tool_calls: vec![tool_call("call-1", "echo", "{}")],
+        },
+        string_provider_turn("response-after-failure", "must-not-run"),
+    ]);
     let mut attempts = MemoryAttempts::default();
     let mut sink = MemorySink::default();
     let mut tools = FakeToolExecutor {
-        cancel_before_outcome: false,
-        cleanup_unknown: false,
-        error_after_interrupt: false,
-        fault: Default::default(),
-        invocations: Vec::new(),
-        preflights: 0,
         outcome: ToolExecutionOutcome {
             status: RunAttemptOutcome::Failed,
             classification: Some(ToolTerminalClassification::NonzeroExit),
@@ -903,6 +695,7 @@ fn productive_failed_tool_closes_the_active_execution_without_another_provider_t
             stdout: Vec::new(),
             stderr: b"failed\n".to_vec(),
         },
+        ..FakeToolExecutor::default()
     };
 
     let execution = execute_productive_flow_with_tool_executor(
@@ -924,31 +717,21 @@ fn productive_failed_tool_closes_the_active_execution_without_another_provider_t
         1,
         "provider must not receive Tool failure output"
     );
-    assert!(
-        sink.0
-            .iter()
-            .any(|event| event.event_type == EventType::ToolFailed)
-    );
+    assert!(has_event(&sink.0, EventType::ToolFailed));
     for event_type in [
         EventType::PhaseFailed,
         EventType::FlowFailed,
         EventType::SessionFailed,
     ] {
         assert_eq!(
-            sink.0
-                .iter()
-                .filter(|event| event.event_type == event_type)
-                .count(),
+            count_events(&sink.0, event_type),
             1,
             "each enclosing scope must fail exactly once"
         );
     }
-    assert!(!sink.0.iter().any(|event| {
-        matches!(
-            event.event_type,
-            EventType::PhaseCompleted | EventType::FlowCompleted | EventType::SessionCompleted
-        )
-    }));
+    assert!(!has_event(&sink.0, EventType::PhaseCompleted));
+    assert!(!has_event(&sink.0, EventType::FlowCompleted));
+    assert!(!has_event(&sink.0, EventType::SessionCompleted));
 }
 
 #[test]
@@ -999,11 +782,7 @@ fn provider_reply_that_breaks_the_format_is_recorded_as_reply_invalid_and_never_
             "schema": "flow-provider-reply-invalid-v0",
         }))]
     );
-    let error_event = sink
-        .0
-        .iter()
-        .find(|event| event.event_type == EventType::Error)
-        .expect("reply failure is durable");
+    let error_event = event_of(&sink.0, EventType::Error);
     assert_eq!(error_event.payload["code"], "provider_reply_invalid");
 }
 
@@ -1044,11 +823,7 @@ fn definitive_provider_failure_is_terminal_and_persists_the_direct_message() {
             "schema": "flow-provider-error-v0",
         }))]
     );
-    let error_event = sink
-        .0
-        .iter()
-        .find(|event| event.event_type == EventType::Error)
-        .expect("provider failure is durable");
+    let error_event = event_of(&sink.0, EventType::Error);
     assert_eq!(error_event.payload["code"], "provider_error");
     assert_eq!(
         error_event.payload["message"],

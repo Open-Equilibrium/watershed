@@ -1,13 +1,10 @@
 use super::{PolicyArtifactValidationError, policy_artifact_error};
 use serde::{Deserialize, Serialize};
 
-/// Environment variable policy.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct EnvironmentPolicy {
-    /// Explicitly allowed environment variable names.
     pub allow: Vec<String>,
-    /// Default environment behavior.
     pub default: EnvironmentDefault,
 }
 
@@ -21,11 +18,9 @@ impl EnvironmentPolicy {
     }
 }
 
-/// Default environment behavior.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum EnvironmentDefault {
-    /// Start from an empty environment.
     Clear,
 }
 

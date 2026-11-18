@@ -1,10 +1,8 @@
-use super::{SessionProvider, session_credential};
+use super::{SessionProvider, continuation::operator_profile, session_credential};
 use crate::{
     runtime::{
         config_io::load_global_config,
-        context::{
-            CONTEXT_SAFETY_MARGIN, ContextHistory, ContextModelProfile, OPERATOR_MODEL_PROFILE_ID,
-        },
+        context::{ContextHistory, ContextModelProfile},
         conversations::{
             ConversationAttemptLog, ConversationEventWriter, ProductiveRecoveryWriter,
             StatusTransactionCrashPoint, append_run_attempt_intent,
@@ -61,12 +59,7 @@ impl ProductiveResumeFixture {
             execution_fixture.smoke_flow(),
         )
         .expect("definition metadata");
-        let model_profile = ContextModelProfile {
-            context_limit: 128000,
-            id: OPERATOR_MODEL_PROFILE_ID,
-            output_reserve: 16384,
-            safety_margin: CONTEXT_SAFETY_MARGIN,
-        };
+        let model_profile = operator_profile();
         create_conversation_run_with_model_profile(
             &workspace,
             "conversation",
@@ -142,7 +135,6 @@ impl ProductiveResumeFixture {
 fn executor_readiness_failure_precedes_recovery_reservation() {
     let fixture = ProductiveResumeFixture::new(workspace_copy("smoke-flow"));
     drop(fixture.create_recovery(&ContextHistory::default()));
-    // Another owner holds the recovery reservation, so readiness must fail before any reservation attempt.
     let held = reserve_conversation_run_recovery(&fixture.workspace, "conversation", "run")
         .expect("another owner holds the recovery reservation");
     set_productive_executor_readiness_observer(|| {
@@ -176,6 +168,17 @@ fn executor_readiness_failure_precedes_recovery_reservation() {
         .expect("recovery reservation releases");
 }
 
+fn provider_intent(request_hash: &str) -> RunAttemptIntent {
+    RunAttemptIntent {
+        attempt_id: "provider-001".to_owned(),
+        attempt_kind: RunAttemptKind::Provider,
+        expected_enforcement: None,
+        request_hash: request_hash.to_owned(),
+        tool_id: None,
+        timestamp: "2026-07-30T12:00:00Z".to_owned(),
+    }
+}
+
 #[test]
 fn paired_resume_refuses_to_redispatch_an_uncertain_productive_attempt() {
     let workspace = workspace_copy("smoke-flow");
@@ -185,15 +188,7 @@ fn paired_resume_refuses_to_redispatch_an_uncertain_productive_attempt() {
         &fixture.workspace,
         "conversation",
         "run",
-        &RunAttemptIntent {
-            attempt_id: "provider-001".to_owned(),
-            attempt_kind: RunAttemptKind::Provider,
-            expected_enforcement: None,
-            request_hash: "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
-                .to_owned(),
-            tool_id: None,
-            timestamp: "2026-07-30T12:00:00Z".to_owned(),
-        },
+        &provider_intent("sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"),
     )
     .expect("uncertain Provider intent is durable");
     let run_log = crate::tests::helpers::workspace_session_dir(&fixture.workspace)
@@ -220,75 +215,30 @@ fn paired_resume_refuses_to_redispatch_an_uncertain_productive_attempt() {
     );
 }
 
-#[test]
-fn exact_productive_resume_reuses_the_committed_attempt_and_finishes_the_addressed_run() {
-    let workspace = workspace_copy("smoke-flow");
-    disable_smoke_echo_tool(&workspace);
-    let fixture = ProductiveResumeFixture::new(workspace);
+fn interrupt(fixture: &ProductiveResumeFixture, point: ProductiveInterruptionPoint) -> String {
     let prior_history = ContextHistory::default();
     let (mut recovery, mut writer, mut attempts) = fixture.open_recovery_prefix(&prior_history);
-    let mut initial_provider = SessionProvider::default();
-    {
-        let mut interruption =
-            InterruptingProductiveRecovery::new(&mut recovery, ProductiveInterruptionPoint::Phase);
-        let error = execute_productive_flow_with_recovery(
-            fixture.execution(prior_history),
-            &mut initial_provider,
-            &mut attempts,
-            &mut writer,
-            &mut interruption,
-        )
-        .expect_err("interruption leaves an exact-recovery prefix");
-        assert!(
-            error
-                .to_string()
-                .contains("interruption after committed provider result")
-        );
-    }
-    writer.finish().expect("event prefix finalizes");
-    drop(recovery);
-    assert_eq!(initial_provider.calls, 1);
-
-    let mut recovery_provider = SessionProvider::default();
-    let output = resume_conversation_run_with_provider(
-        &fixture.workspace,
-        "conversation",
-        "run",
-        EmitMode::Human,
-        || Ok(fixture.execution_fixture.credential().clone()),
-        &mut recovery_provider,
-    )
-    .expect("exact productive resume completes");
-
-    assert!(!output.failed);
-    assert_eq!(output.session_id, "run");
-    assert!(output.stdout.contains("run run) completed"));
-    assert_eq!(recovery_provider.calls, 0, "provider must not redispatch");
-    assert_eq!(
-        read_conversation_history(&fixture.workspace, "conversation")
-            .expect("conversation history")
-            .len(),
-        1
-    );
-}
-
-fn interrupted_before_terminal_snapshot() -> ProductiveResumeFixture {
-    let workspace = workspace_copy("smoke-flow");
-    disable_smoke_echo_tool(&workspace);
-    let fixture = ProductiveResumeFixture::new(workspace);
-    let prior_history = ContextHistory::default();
-    let (mut recovery, mut writer, mut attempts) = fixture.open_recovery_prefix(&prior_history);
-    let mut interruption =
-        InterruptingProductiveRecovery::new(&mut recovery, ProductiveInterruptionPoint::Terminal);
-    execute_productive_flow_with_recovery(
+    let mut interruption = InterruptingProductiveRecovery::new(&mut recovery, point);
+    let error = execute_productive_flow_with_recovery(
         fixture.execution(prior_history),
         &mut SessionProvider::default(),
         &mut attempts,
         &mut writer,
         &mut interruption,
     )
-    .expect_err("interruption leaves every pre-terminal recovery boundary");
+    .expect_err("interruption leaves a recovery prefix");
     writer.finish().expect("event prefix finalizes");
+    error.to_string()
+}
+
+fn interrupted_before_terminal_snapshot() -> ProductiveResumeFixture {
+    let workspace = workspace_copy("smoke-flow");
+    disable_smoke_echo_tool(&workspace);
+    let fixture = ProductiveResumeFixture::new(workspace);
+    assert!(
+        interrupt(&fixture, ProductiveInterruptionPoint::Terminal)
+            .contains("prevents a terminal snapshot")
+    );
     fixture
 }
 
@@ -354,36 +304,11 @@ fn exact_productive_resume_completes_an_interrupted_run_object_write() {
 
 #[test]
 fn exact_productive_resume_resyncs_a_complete_recovery_record_before_publication() {
-    let workspace = workspace_copy("smoke-flow");
-    disable_smoke_echo_tool(&workspace);
-    let fixture = ProductiveResumeFixture::new(workspace);
-    let prior_history = ContextHistory::default();
-    let (mut recovery, mut writer, mut attempts) = fixture.open_recovery_prefix(&prior_history);
-    let mut initial_provider = SessionProvider::default();
-    {
-        let mut interruption = InterruptingProductiveRecovery::new(
-            &mut recovery,
-            ProductiveInterruptionPoint::Terminal,
-        );
-        let error = execute_productive_flow_with_recovery(
-            fixture.execution(prior_history),
-            &mut initial_provider,
-            &mut attempts,
-            &mut writer,
-            &mut interruption,
-        )
-        .expect_err("interruption leaves every pre-terminal recovery boundary");
-        assert!(error.to_string().contains("prevents a terminal snapshot"));
-    }
-    writer.finish().expect("event prefix finalizes");
-    drop(recovery);
-    assert_eq!(initial_provider.calls, 1);
-
+    let fixture = interrupted_before_terminal_snapshot();
     let run = crate::tests::helpers::workspace_session_dir(&fixture.workspace)
         .join("conversation/runs/run");
     let recovery_path = run.join("recovery.jsonl");
-    let history_path = crate::tests::helpers::workspace_session_dir(&fixture.workspace)
-        .join("conversation/history.jsonl");
+    let history_path = conversation_history_path(&fixture);
     let history_before = fs::read(&history_path).expect("history prefix reads");
     let mut resumed_recovery =
         ProductiveRecoveryWriter::open_for_resume(&fixture.workspace, "conversation", "run")
@@ -480,20 +405,8 @@ fn exact_productive_resume_resyncs_a_complete_recovery_record_before_publication
         history_before
     );
 
-    let mut final_retry_provider = SessionProvider::default();
-    let output = resume_conversation_run_with_provider(
-        &fixture.workspace,
-        "conversation",
-        "run",
-        EmitMode::Human,
-        || Ok(fixture.execution_fixture.credential().clone()),
-        &mut final_retry_provider,
-    )
-    .expect("the synchronized terminal record resumes exactly once");
-    assert!(!output.failed);
-    assert_eq!(
-        final_retry_provider.calls, 0,
-        "provider must not redispatch"
+    assert!(
+        !resume_exact_run(&fixture).expect("the synchronized terminal record resumes exactly once")
     );
     let mut reader =
         SessionEventReader::open_conversation_run(&fixture.workspace, "conversation", "run")
@@ -524,23 +437,7 @@ fn exact_productive_resume_announces_committed_failure_before_returning_error() 
         "tool_refs: []\n  output:\n    type: string\n  loop:\n    max_iterations: 1\n    until:\n      path: []\n      equals:\n        type: string\n        value: done",
     );
     let fixture = ProductiveResumeFixture::new(workspace);
-    let prior_history = ContextHistory::default();
-    let (mut recovery, mut writer, mut attempts) = fixture.open_recovery_prefix(&prior_history);
-    let mut initial_provider = SessionProvider::default();
-    {
-        let mut interruption =
-            InterruptingProductiveRecovery::new(&mut recovery, ProductiveInterruptionPoint::Phase);
-        execute_productive_flow_with_recovery(
-            fixture.execution(prior_history),
-            &mut initial_provider,
-            &mut attempts,
-            &mut writer,
-            &mut interruption,
-        )
-        .expect_err("interruption leaves an exact-recovery prefix");
-    }
-    writer.finish().expect("event prefix finalizes");
-    drop(recovery);
+    interrupt(&fixture, ProductiveInterruptionPoint::Phase);
 
     let (notifier, receiver) = live_event_channel();
     let mut recovery_provider = SessionProvider::default();
@@ -578,7 +475,6 @@ fn exact_productive_resume_announces_committed_failure_before_returning_error() 
     assert_eq!(recovery_provider.calls, 0, "provider must not redispatch");
 }
 
-/// Truncates the final byte of a durable file, as a power cut that loses its line feed does.
 fn cut_final_byte(path: &Path) {
     let len = fs::metadata(path).expect("durable file reads").len();
     fs::OpenOptions::new()
@@ -605,15 +501,7 @@ fn exact_productive_resume_rolls_back_a_cut_run_log_intent_and_issues_its_attemp
         &fixture.workspace,
         "conversation",
         "run",
-        &RunAttemptIntent {
-            attempt_id: "provider-001".to_owned(),
-            attempt_kind: RunAttemptKind::Provider,
-            expected_enforcement: None,
-            request_hash: "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
-                .to_owned(),
-            tool_id: None,
-            timestamp: "2026-07-30T12:00:00Z".to_owned(),
-        },
+        &provider_intent("sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"),
     )
     .expect_err("the crash point leaves the intent's status transaction recorded");
     let run_log = crate::tests::helpers::workspace_session_dir(&fixture.workspace)

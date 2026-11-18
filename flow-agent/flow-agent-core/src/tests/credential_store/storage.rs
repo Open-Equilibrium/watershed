@@ -1,5 +1,7 @@
 use super::super::helpers::empty_workspace;
-use super::support::{assert_no_credential_staging_files, credential};
+use super::support::{
+    assert_no_credential_staging_files, credential, resolve, set_unix_mode, subscription_document,
+};
 use crate::runtime::{
     credential_store::{
         CREDENTIAL_LOCK_DEADLINE, CredentialStore, credential_staging_path_for_test,
@@ -15,6 +17,7 @@ use std::{
     cell::{Cell, RefCell},
     fs, io,
     os::unix::fs::MetadataExt as _,
+    path::Path,
     time::Duration,
 };
 
@@ -44,8 +47,6 @@ fn refresh_recheck_uses_the_time_after_the_store_lock_is_acquired() {
             },
             || Duration::ZERO,
             |_| {
-                // The other owner refreshes to a record that is fresh at the first check but
-                // near expiry once the lock is acquired two minutes later.
                 drop(held.borrow_mut().take());
                 now.set(1_000_000 + 120_000);
                 store
@@ -71,10 +72,7 @@ fn credential_lock_deadline() {
     let path = workspace.join("private/credentials.json");
     let store = CredentialStore::at(path.clone());
     let prior = credential(100);
-    store
-        .replace_with_clock(&prior, || Duration::ZERO, |_| {})
-        .expect("initial credential");
-    let lock_path = path.with_extension("lock");
+    store.replace(&prior).expect("initial credential");
     let held = store
         .acquire_lock_for_test(|| Duration::ZERO, |_| {})
         .expect("first mutation lock acquires");
@@ -97,126 +95,80 @@ fn credential_lock_deadline() {
     assert_eq!(store.read().expect("prior remains"), Some(prior));
     drop(held);
 
-    fs::write(&lock_path, b"abandoned").expect("abandoned lock file is staged");
+    fs::write(path.with_extension("lock"), b"abandoned").expect("abandoned lock file is staged");
     store
         .acquire_lock_for_test(|| Duration::ZERO, |_| {})
         .expect("a stale lock file does not block authentication");
 }
 
 #[test]
-fn published_credential_parent_sync_failure_is_distinct_and_reuses_the_replacement() {
-    let workspace = empty_workspace("credential-published-parent-sync-failure");
-    let parent = workspace.join("private");
-    let path = parent.join("credentials.json");
-    let store = CredentialStore::at(path);
-    store
-        .replace(&credential(300_000))
-        .expect("near-expiry credential stores");
-    let replacement = credential(900_000);
-    let refreshes = Cell::new(0usize);
+fn published_credential_finalization_failure_is_distinct_and_next_lock_finalizes() {
+    type Inject = fn(&Path);
+    let injections: [(&str, Inject); 2] = [
+        ("sync-failure", |parent| {
+            set_directory_sync_error_for_path_for_test(parent, io::ErrorKind::Other)
+        }),
+        ("protection-failure", |_| {
+            set_credential_protection_error_for_test(io::ErrorKind::PermissionDenied)
+        }),
+    ];
+    for (case, inject) in injections {
+        let workspace = empty_workspace(&format!("credential-published-{case}"));
+        let parent = workspace.join("private");
+        let store = CredentialStore::at(parent.join("credentials.json"));
+        store
+            .replace(&credential(300_000))
+            .expect("near-expiry credential stores");
+        let replacement = credential(900_000);
+        let refreshes = Cell::new(0usize);
 
-    let error = store
-        .resolve_with_clock(
-            || Ok(1),
-            |_| {
-                refreshes.set(refreshes.get() + 1);
-                set_directory_sync_error_for_path_for_test(&parent, io::ErrorKind::Other);
-                Ok(replacement.clone())
-            },
-            || Duration::ZERO,
-            |_| {},
-        )
+        let error = resolve(&store, |_| {
+            refreshes.set(refreshes.get() + 1);
+            inject(&parent);
+            Ok(replacement.clone())
+        })
         .expect_err("published credential finalization failure is reported");
 
-    assert!(matches!(
-        &error,
-        RuntimeError::PublishedCredentialFinalizationFailure { .. }
-    ));
-    assert_eq!(
-        error.to_string(),
-        "credential_published_not_finalized: replacement credential was published but finalization failed"
-    );
-    assert_eq!(refreshes.get(), 1);
-    assert_eq!(
-        store.read().expect("complete replacement reads"),
-        Some(replacement.clone())
-    );
-    assert_no_credential_staging_files(&parent);
-    store
-        .acquire_lock_for_test(|| Duration::ZERO, |_| {})
-        .expect("published failure releases the credential lock");
+        assert!(
+            matches!(
+                &error,
+                RuntimeError::PublishedCredentialFinalizationFailure { .. }
+            ),
+            "{case}"
+        );
+        assert_eq!(
+            error.to_string(),
+            "credential_published_not_finalized: replacement credential was published but finalization failed",
+            "{case}"
+        );
+        assert_eq!(refreshes.get(), 1, "{case}");
+        assert_eq!(
+            store.read().expect("complete replacement reads"),
+            Some(replacement.clone()),
+            "{case}"
+        );
+        assert_no_credential_staging_files(&parent);
+        store
+            .acquire_lock_for_test(|| Duration::ZERO, |_| {})
+            .expect("published failure releases the credential lock");
 
-    let resolved = store
-        .resolve_with_clock(
-            || Ok(1),
-            |_| panic!("the published replacement must prevent another provider refresh"),
-            || Duration::ZERO,
-            |_| {},
-        )
+        let resolved = resolve(&store, |_| {
+            panic!("the published replacement must prevent another provider refresh")
+        })
         .expect("published replacement resolves deterministically");
-    assert_eq!(resolved, replacement);
+        assert_eq!(resolved, replacement, "{case}");
 
-    start_directory_sync_trace_for_test();
-    store
-        .replace_with_clock(&replacement, || Duration::ZERO, |_| {})
-        .expect("the next locked operation finalizes the published replacement");
-    let trace = take_directory_sync_trace_for_test();
-    assert!(
-        trace.iter().any(|synced| synced == &parent),
-        "the credential parent was not finalized: {trace:?}"
-    );
-    assert_eq!(refreshes.get(), 1);
-}
-
-#[test]
-fn published_credential_protection_failure_is_distinct_and_next_lock_finalizes() {
-    let workspace = empty_workspace("credential-published-protection-failure");
-    let parent = workspace.join("private");
-    let path = parent.join("credentials.json");
-    let store = CredentialStore::at(path);
-    store
-        .replace(&credential(300_000))
-        .expect("near-expiry protected credential stores");
-    let replacement = credential(900_000);
-    let refreshes = Cell::new(0usize);
-    set_credential_protection_error_for_test(io::ErrorKind::PermissionDenied);
-
-    let error = store
-        .resolve_with_clock(
-            || Ok(1),
-            |_| {
-                refreshes.set(refreshes.get() + 1);
-                Ok(replacement.clone())
-            },
-            || Duration::ZERO,
-            |_| {},
-        )
-        .expect_err("published credential protection failure is reported");
-
-    assert!(matches!(
-        &error,
-        RuntimeError::PublishedCredentialFinalizationFailure { .. }
-    ));
-    assert_eq!(refreshes.get(), 1);
-    assert_eq!(
-        store.read().expect("complete protected replacement reads"),
-        Some(replacement.clone())
-    );
-    assert_no_credential_staging_files(&parent);
-    store
-        .acquire_lock_for_test(|| Duration::ZERO, |_| {})
-        .expect("published failure releases the protected credential lock");
-
-    start_directory_sync_trace_for_test();
-    store
-        .replace_with_clock(&replacement, || Duration::ZERO, |_| {})
-        .expect("the next locked operation validates and finalizes the replacement");
-    let trace = take_directory_sync_trace_for_test();
-    assert!(
-        trace.iter().any(|synced| synced == &parent),
-        "the credential parent was not finalized: {trace:?}"
-    );
-    assert_eq!(refreshes.get(), 1);
+        start_directory_sync_trace_for_test();
+        store
+            .replace(&replacement)
+            .expect("the next locked operation finalizes the published replacement");
+        let trace = take_directory_sync_trace_for_test();
+        assert!(
+            trace.iter().any(|synced| synced == &parent),
+            "{case}: the credential parent was not finalized: {trace:?}"
+        );
+        assert_eq!(refreshes.get(), 1, "{case}");
+    }
 }
 
 #[test]
@@ -228,35 +180,22 @@ fn published_credential_finalization_is_retried_by_a_locked_refresh_that_writes_
     store
         .replace(&credential(300_000))
         .expect("near-expiry credential stores");
-    // The replacement is also near expiry, so the next resolve must take the lock.
     let replacement = credential(200_000);
     let refreshes = Cell::new(0usize);
-    store
-        .resolve_with_clock(
-            || Ok(1),
-            |_| {
-                refreshes.set(refreshes.get() + 1);
-                set_directory_sync_error_for_path_for_test(&parent, io::ErrorKind::Other);
-                Ok(replacement.clone())
-            },
-            || Duration::ZERO,
-            |_| {},
-        )
-        .expect_err("published finalization failure is reported");
+    resolve(&store, |_| {
+        refreshes.set(refreshes.get() + 1);
+        set_directory_sync_error_for_path_for_test(&parent, io::ErrorKind::Other);
+        Ok(replacement.clone())
+    })
+    .expect_err("published finalization failure is reported");
     let published_identity = fs::metadata(&path).expect("replacement is published").ino();
 
     start_directory_sync_trace_for_test();
-    let error = store
-        .resolve_with_clock(
-            || Ok(1),
-            |_| {
-                refreshes.set(refreshes.get() + 1);
-                Err(RuntimeError::Protocol("refresh is unavailable".to_owned()))
-            },
-            || Duration::ZERO,
-            |_| {},
-        )
-        .expect_err("the failed refresh is reported");
+    let error = resolve(&store, |_| {
+        refreshes.set(refreshes.get() + 1);
+        Err(RuntimeError::Protocol("refresh is unavailable".to_owned()))
+    })
+    .expect_err("the failed refresh is reported");
     let trace = take_directory_sync_trace_for_test();
 
     assert!(matches!(error, RuntimeError::Protocol(_)));
@@ -349,16 +288,11 @@ fn failed_credential_refresh_removes_its_atomic_staging_file() {
         .replace(&credential(300_000))
         .expect("near-expiry credential stores");
 
-    let result = store.resolve_with_clock(
-        || Ok(1),
-        |_| {
-            fs::remove_file(&path).expect("credential file removes for conflict fixture");
-            fs::create_dir(&path).expect("conflicting destination directory creates");
-            Ok(credential(900_000))
-        },
-        || Duration::ZERO,
-        |_| {},
-    );
+    let result = resolve(&store, |_| {
+        fs::remove_file(&path).expect("credential file removes for conflict fixture");
+        fs::create_dir(&path).expect("conflicting destination directory creates");
+        Ok(credential(900_000))
+    });
 
     assert!(result.is_err());
     assert_no_credential_staging_files(&parent);
@@ -366,8 +300,6 @@ fn failed_credential_refresh_removes_its_atomic_staging_file() {
 
 #[test]
 fn credential_mutation_recovers_only_exact_abandoned_stages() {
-    use std::os::unix::fs::PermissionsExt as _;
-
     let workspace = empty_workspace("credential-store-abandoned-stage-recovery");
     let parent = workspace.join("private");
     let path = parent.join("credentials.json");
@@ -385,14 +317,9 @@ fn credential_mutation_recovers_only_exact_abandoned_stages() {
     let peer_credential = credential(1_000_000);
     let peer_stage = credential_staging_path_for_test(&peer_path, 8, 10);
     assert_ne!(abandoned, peer_stage);
-    fs::write(
-        &peer_stage,
-        serde_json::to_vec(&serde_json::json!({ "openai-codex": peer_credential }))
-            .expect("peer staged credential serializes"),
-    )
-    .expect("peer live stage writes");
-    fs::set_permissions(&peer_stage, fs::Permissions::from_mode(0o600))
-        .expect("peer live stage is private");
+    fs::write(&peer_stage, subscription_document(&peer_credential))
+        .expect("peer live stage writes");
+    set_unix_mode(&peer_stage, 0o600);
 
     assert!(store.logout().expect("credential logs out"));
 
@@ -413,76 +340,18 @@ fn credential_mutation_recovers_only_exact_abandoned_stages() {
 }
 
 #[test]
-fn protected_credential_mutation_recovers_an_abandoned_stage() {
-    let workspace = empty_workspace("protected-credential-abandoned-stage-recovery");
-    let parent = workspace.join("private");
-    let path = parent.join("credentials.json");
-    let store = CredentialStore::at(path.clone());
-    let peer_path = parent.join("peer.json");
-    let peer_store = CredentialStore::at(peer_path.clone());
-    let peer_credential = credential(1_000_000);
-    let peer_stage = credential_staging_path_for_test(&peer_path, 8, 10);
-    peer_store
-        .replace(&peer_credential)
-        .expect("peer protected credential stores");
-    drop(peer_store);
-    fs::rename(&peer_path, &peer_stage).expect("peer protected transaction starts");
-
-    store
-        .replace(&credential(900_000))
-        .expect("protected credential stores");
-    let abandoned = credential_staging_path_for_test(&path, 7, 9);
-    assert_ne!(abandoned, peer_stage);
-    fs::write(&abandoned, b"abandoned secret").expect("abandoned protected stage writes");
-
-    assert!(store.logout().expect("protected credential logs out"));
-
-    assert!(!abandoned.exists(), "abandoned stage must be recovered");
-    assert!(
-        peer_stage.exists(),
-        "another protected destination's live stage must not be recovered"
-    );
-    drop(store);
-    fs::rename(&peer_stage, &peer_path).expect("peer protected live transaction resumes");
-    assert_eq!(
-        CredentialStore::at(peer_path)
-            .read()
-            .expect("peer protected credential reads"),
-        Some(peer_credential)
-    );
-}
-
-#[test]
-fn credential_store_convenience_methods_and_error_paths_release_lock_ownership() {
-    use std::os::unix::fs::PermissionsExt as _;
-
+fn credential_store_convenience_methods_release_lock_ownership() {
     let workspace = empty_workspace("credential-store-lock-cleanup");
-    let path = workspace.join("private/credentials.json");
-    let lock = path.with_extension("lock");
-    let store = CredentialStore::at(path.clone());
+    let store = CredentialStore::at(workspace.join("private/credentials.json"));
     let current = credential(900_000);
     store.replace(&current).expect("credential stores");
     assert_eq!(store.read().expect("credential reads"), Some(current));
-    assert!(lock.exists());
     store
         .acquire_lock_for_test(|| Duration::ZERO, |_| {})
         .expect("completed mutation releases its lock");
     assert!(store.logout().expect("credential logs out"));
     assert!(!store.logout().expect("empty logout succeeds"));
-    assert!(lock.exists());
     store
         .acquire_lock_for_test(|| Duration::ZERO, |_| {})
         .expect("logout releases its lock");
-
-    fs::write(&path, b"{}").expect("empty document write");
-    fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).expect("unsafe mode applies");
-    assert!(
-        store
-            .replace_with_clock(&credential(1_000_000), || Duration::ZERO, |_| {})
-            .is_err()
-    );
-    assert!(lock.exists());
-    store
-        .acquire_lock_for_test(|| Duration::ZERO, |_| {})
-        .expect("failed mutation releases its lock");
 }

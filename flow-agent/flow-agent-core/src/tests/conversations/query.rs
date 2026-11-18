@@ -10,6 +10,15 @@ use crate::runtime::{
 };
 use std::fs;
 
+fn page_ids(page: &serde_json::Value) -> Vec<&str> {
+    page["conversations"]
+        .as_array()
+        .expect("page has conversations")
+        .iter()
+        .map(|status| status["conversation_id"].as_str().expect("id is text"))
+        .collect()
+}
+
 #[test]
 fn conversation_page_count_budget_and_human_truncation_notice() {
     let workspace = empty_workspace("conversation-status-delete");
@@ -39,12 +48,7 @@ fn conversation_page_count_budget_and_human_truncation_notice() {
         serde_json::from_str(&first_jsonl).expect("first JSONL page parses");
     assert_eq!(first["schema"], "flow-conversation-status-page-v0");
     assert_eq!(
-        first["conversations"]
-            .as_array()
-            .expect("first page has conversations")
-            .iter()
-            .map(|status| status["conversation_id"].as_str().expect("id is text"))
-            .collect::<Vec<_>>(),
+        page_ids(&first),
         expected_ids[..MAX_CONVERSATION_STATUS_RECORDS]
             .iter()
             .map(String::as_str)
@@ -66,12 +70,7 @@ fn conversation_page_count_budget_and_human_truncation_notice() {
     let second: serde_json::Value =
         serde_json::from_str(&second_jsonl).expect("second JSONL page parses");
     assert_eq!(
-        second["conversations"]
-            .as_array()
-            .expect("second page has conversations")
-            .iter()
-            .map(|status| status["conversation_id"].as_str().expect("id is text"))
-            .collect::<Vec<_>>(),
+        page_ids(&second),
         expected_ids[MAX_CONVERSATION_STATUS_RECORDS..]
             .iter()
             .map(String::as_str)

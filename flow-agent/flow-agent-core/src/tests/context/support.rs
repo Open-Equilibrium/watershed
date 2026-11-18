@@ -1,6 +1,6 @@
 use crate::runtime::context::{
     ContextManifestCheckpoint, ContextModelProfile, ContextOmissionCounts, ContextSource,
-    compile_context, context_source,
+    compile_context, context_source, context_source_bytes,
 };
 
 pub(super) fn compiled_context_checkpoint(turn: &str, ordinal: usize) -> ContextManifestCheckpoint {
@@ -25,6 +25,17 @@ pub(super) fn test_profile(input_budget: usize) -> ContextModelProfile {
         output_reserve: 10,
         safety_margin: 10,
     }
+}
+
+pub(super) fn total_source_bytes(sources: &[ContextSource]) -> usize {
+    sources
+        .iter()
+        .map(|source| {
+            context_source_bytes(source)
+                .expect("mandatory source serializes")
+                .len()
+        })
+        .sum()
 }
 
 pub(super) fn tier_zero(turn_value: &str) -> [ContextSource; 8] {

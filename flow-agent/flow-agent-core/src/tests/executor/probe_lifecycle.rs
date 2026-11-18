@@ -1,11 +1,15 @@
-use super::conformance::{compile_fake_executor, isolate_executor_configuration, stage_case};
-use crate::{
-    runtime::{executor::configure_executor_path, types::RuntimeError},
-    tests::empty_workspace,
+use super::{
+    conformance::{
+        assert_executor_code, compile_fake_executor, isolate_executor_configuration, stage_case,
+    },
+    private_workspace,
+};
+use crate::runtime::{
+    executor::{ExecutorSelection, configure_executor_path},
+    types::RuntimeError,
 };
 use std::{
     fs,
-    os::unix::fs::PermissionsExt as _,
     path::{Path, PathBuf},
     thread,
     time::{Duration, Instant},
@@ -19,9 +23,7 @@ fn failed_probe_does_not_retain_output_descriptors_from_an_escaped_descendant() 
         return;
     }
 
-    let root = empty_workspace();
-    fs::set_permissions(&*root, fs::Permissions::from_mode(0o700))
-        .expect("fixture root is private");
+    let root = private_workspace("probe-lifecycle");
     let fixture = compile_fake_executor(&root);
     isolate_executor_configuration(&root);
 
@@ -43,15 +45,10 @@ fn failed_probe_does_not_retain_output_descriptors_from_an_escaped_descendant() 
     );
 }
 
-fn assert_unavailable(result: Result<crate::runtime::executor::ExecutorSelection, RuntimeError>) {
-    let error = result.expect_err("faulty probe must fail closed");
-    assert!(
-        matches!(
-            error,
-            RuntimeError::Executor(ref failure)
-                if failure.code() == proto::ExecutorErrorCodeV0::Unavailable
-        ),
-        "unexpected probe result: {error}"
+fn assert_unavailable(result: Result<ExecutorSelection, RuntimeError>) {
+    assert_executor_code(
+        &result.expect_err("faulty probe must fail closed"),
+        proto::ExecutorErrorCodeV0::Unavailable,
     );
 }
 
@@ -90,12 +87,6 @@ impl EscapedProbeGuard {
     }
 
     fn cleanup(&mut self) -> Result<(), String> {
-        self.release_and_wait()?;
-        fs::remove_file(&self.pid_path)
-            .map_err(|error| format!("remove escaped probe child PID marker: {error}"))
-    }
-
-    fn release_and_wait(&self) -> Result<(), String> {
         fs::write(&self.release_path, b"release")
             .map_err(|error| format!("release escaped probe fixture: {error}"))?;
         let raw_pid = fs::read_to_string(&self.pid_path)
@@ -104,17 +95,17 @@ impl EscapedProbeGuard {
             .map_err(|error| format!("parse escaped probe child PID: {error}"))?;
         let pid = rustix::process::Pid::from_raw(raw_pid)
             .ok_or_else(|| "escaped probe child PID is invalid".to_owned())?;
-        if wait_for_exit(pid) {
-            return Ok(());
+        if !wait_for_exit(pid) {
+            rustix::process::kill_process(pid, rustix::process::Signal::KILL)
+                .map_err(|error| format!("kill escaped probe child {raw_pid}: {error}"))?;
+            if !wait_for_exit(pid) {
+                return Err(format!(
+                    "escaped probe child {raw_pid} survived fixture cleanup"
+                ));
+            }
         }
-        rustix::process::kill_process(pid, rustix::process::Signal::KILL)
-            .map_err(|error| format!("kill escaped probe child {raw_pid}: {error}"))?;
-        if wait_for_exit(pid) {
-            return Ok(());
-        }
-        Err(format!(
-            "escaped probe child {raw_pid} survived fixture cleanup"
-        ))
+        fs::remove_file(&self.pid_path)
+            .map_err(|error| format!("remove escaped probe child PID marker: {error}"))
     }
 }
 
@@ -132,7 +123,7 @@ fn wait_for_exit(pid: rustix::process::Pid) -> bool {
 impl Drop for EscapedProbeGuard {
     fn drop(&mut self) {
         if self.pid_path.exists() {
-            let _ = self.release_and_wait();
+            let _ = self.cleanup();
         }
         let _ = fs::remove_file(&self.release_path);
         let _ = fs::remove_file(&self.pid_path);

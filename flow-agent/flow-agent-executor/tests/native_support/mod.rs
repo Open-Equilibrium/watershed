@@ -4,7 +4,6 @@ mod acceptance;
 mod artifact;
 pub mod builds;
 mod lifetime;
-mod process;
 mod pty;
 
 use proto::{ExecutorLimitsV0, ExecutorRequestV0, ExecutorResponseV0};
@@ -17,7 +16,7 @@ use std::{
         unix::{fs::MetadataExt, process::CommandExt},
     },
     path::{Path, PathBuf},
-    process::{Child, ChildStdin, Command, Output, Stdio},
+    process::{Child, ChildStdin, Command, ExitStatus, Output, Stdio},
     sync::{
         atomic::{AtomicU64, Ordering},
         mpsc,
@@ -201,6 +200,17 @@ impl Fixture {
         running.completed(&request)
     }
 
+    pub fn execute(&self, request: &ExecutorRequestV0, guarded: bool) {
+        if guarded {
+            let mut running = self.spawn(request);
+            running.ready(request);
+            running.start(request);
+            assert_success(&running.completed(request));
+        } else {
+            self.baseline(request, &[]);
+        }
+    }
+
     pub fn baseline(&self, request: &ExecutorRequestV0, handles: &[(i32, i32)]) -> Output {
         let policy = &request.resolved_policy;
         let mut command = Command::new(&policy.executable);
@@ -211,7 +221,6 @@ impl Fixture {
             .current_dir(&policy.working_directory)
             .stdin(Stdio::null());
         inherit_handles(&mut command, handles.to_vec());
-        // File capture avoids a full pipe blocking the controlled baseline.
         let stdout = self.project.join("baseline.stdout");
         let stderr = self.project.join("baseline.stderr");
         command
@@ -257,12 +266,9 @@ impl Fixture {
 }
 
 fn inherit_handles(command: &mut Command, remaps: Vec<(i32, i32)>) {
-    // Pin every source above the fixed target slots before any dup2. Parallel
-    // fixtures can otherwise place a source in another remap's destination.
     let handles = remaps
         .into_iter()
         .map(|(source, target)| {
-            // Each source is a live parent-owned fixture handle at this call site.
             let source = unsafe { std::os::fd::BorrowedFd::borrow_raw(source) };
             (
                 rustix::io::fcntl_dupfd_cloexec(source, 256).unwrap(),
@@ -383,8 +389,7 @@ impl Running {
     }
 
     pub fn exited(&mut self) {
-        // A terminal record precedes process finalization, including coverage output.
-        let status = process::wait_for_exit(&mut self.child).unwrap();
+        let status = wait_for_exit(&mut self.child);
         assert!(status.success(), "Executor exit: {status}");
     }
 }
@@ -392,7 +397,22 @@ impl Running {
 impl Drop for Running {
     fn drop(&mut self) {
         let _ = self.child.kill();
-        process::wait_for_exit(&mut self.child).unwrap();
+        wait_for_exit(&mut self.child);
+    }
+}
+
+pub fn denied(result: &serde_json::Value) -> bool {
+    matches!(result["errno"].as_i64(), Some(1 | 13 | 30))
+}
+
+fn wait_for_exit(child: &mut Child) -> ExitStatus {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        if let Some(status) = child.try_wait().unwrap() {
+            return status;
+        }
+        assert!(Instant::now() < deadline, "test Executor did not exit");
+        thread::sleep(Duration::from_millis(5));
     }
 }
 

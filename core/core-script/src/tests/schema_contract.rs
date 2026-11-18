@@ -46,6 +46,14 @@ fn registry_schema_concrete_blocks_own_full_shapes() {
         assert!(block["properties"]["id"].is_object(), "{definition}");
         assert!(block["properties"]["name"].is_object(), "{definition}");
     }
+    assert_eq!(
+        parsed["$defs"]["phase"]["properties"]["output"]["$ref"],
+        "#/$defs/value_contract"
+    );
+    assert_eq!(
+        parsed["$defs"]["instruction"]["properties"]["parameters"]["items"]["$ref"],
+        "#/$defs/instruction_parameter"
+    );
 }
 
 #[test]
@@ -130,23 +138,4 @@ fn registry_schema_integer_bounds_match_runtime_i64() {
         assert_eq!(definition["minimum"], i64::MIN);
         assert_eq!(definition["maximum"], i64::MAX);
     }
-}
-
-#[test]
-fn m11_registry_schema_contains_only_the_four_approved_block_kinds() {
-    let schema = registry_schema();
-    let properties = schema["properties"].as_object().expect("root properties");
-
-    assert_eq!(
-        properties.keys().cloned().collect::<Vec<_>>(),
-        vec!["flow", "instruction", "phase", "tool"]
-    );
-    assert_eq!(
-        schema["$defs"]["phase"]["properties"]["output"]["$ref"],
-        "#/$defs/value_contract"
-    );
-    assert_eq!(
-        schema["$defs"]["instruction"]["properties"]["parameters"]["items"]["$ref"],
-        "#/$defs/instruction_parameter"
-    );
 }

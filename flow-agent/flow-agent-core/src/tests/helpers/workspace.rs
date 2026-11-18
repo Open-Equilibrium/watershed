@@ -4,7 +4,7 @@ use crate::{
         session_authority::session_ownership_is_active,
         session_lock::SessionReservation,
         session_reservation::{
-            materialize_session_candidate, materialize_session_candidate_with_publish_observer,
+            materialize_session_candidate_with_publish_observer,
             reserve_unique_session_candidate_with_anchored_workspace,
         },
         session_store::{WorkspaceStore, workspace_store_path},
@@ -18,10 +18,7 @@ pub(in crate::tests) fn reserve_session_log(
     workspace: &Path,
     base_session_id: &str,
 ) -> Result<SessionReservation, crate::runtime::types::RuntimeError> {
-    let workspace = AnchoredWorkspace::open(workspace)?;
-    let candidate =
-        reserve_unique_session_candidate_with_anchored_workspace(&workspace, base_session_id)?;
-    materialize_session_candidate(&workspace, candidate)
+    reserve_session_log_with_publish_observer(workspace, base_session_id, || {})
 }
 
 pub(in crate::tests) fn reserve_session_log_with_publish_observer(

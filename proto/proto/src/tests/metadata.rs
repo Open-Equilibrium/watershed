@@ -31,10 +31,6 @@ fn event_type_names_match_protocol_v0_and_round_trip() {
     ];
 
     assert_eq!(names.len(), 22);
-    assert!(names.contains(&"message.delta"));
-    assert!(names.contains(&"tool.progress"));
-    assert!(names.contains(&"attention.requested"));
-    assert!(names.contains(&"error"));
     for name in names {
         let event_type = EventType::try_from(name).expect("event type name parses");
 

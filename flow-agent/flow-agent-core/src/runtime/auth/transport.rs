@@ -180,7 +180,6 @@ pub(crate) async fn send_auth_request_async(
     read_auth_response(response, maximum, deadlines.read).await
 }
 
-/// OpenAI device polling reports a pending authorization as HTTP 403 or 404.
 pub(crate) fn post_device_poll_with_deadlines(
     endpoint: &str,
     body: &serde_json::Value,

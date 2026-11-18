@@ -15,7 +15,6 @@ where
 }
 
 impl AllowedParameter {
-    /// Validates a Tool parameter declaration before compilation or invocation.
     pub fn validate(&self) -> Result<(), String> {
         if !super::paths::is_valid_allowed_parameter_name(&self.name) {
             return Err(format!(

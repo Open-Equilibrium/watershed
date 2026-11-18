@@ -6,6 +6,22 @@ use crate::runtime::{
     },
 };
 
+pub(super) fn credential_record(
+    access: &str,
+    refresh: &str,
+    expires: u64,
+    account_id: &str,
+) -> CredentialRecord {
+    CredentialRecord {
+        credential_type: "oauth".to_owned(),
+        access: access.to_owned(),
+        refresh: refresh.to_owned(),
+        expires,
+        account_id: account_id.to_owned(),
+        is_fedramp: false,
+    }
+}
+
 pub(super) fn jwt_with_account(account_id: &str) -> String {
     jwt_with_account_routing(account_id, None)
 }
@@ -15,6 +31,10 @@ pub(super) fn jwt_with_account_routing(account_id: &str, is_fedramp: Option<bool
     if let Some(is_fedramp) = is_fedramp {
         auth["chatgpt_account_is_fedramp"] = is_fedramp.into();
     }
+    jwt_with_auth_claim(auth)
+}
+
+fn jwt_with_auth_claim(auth: serde_json::Value) -> String {
     let payload = serde_json::json!({"https://api.openai.com/auth": auth});
     format!(
         "e30.{}.x",
@@ -27,45 +47,32 @@ pub(super) fn jwt_with_account_routing(account_id: &str, is_fedramp: Option<bool
 }
 
 #[test]
-fn credential_record_validation_is_bounded() {
-    let credential = CredentialRecord {
-        credential_type: "oauth".to_owned(),
-        access: "access".to_owned(),
-        refresh: "refresh".to_owned(),
-        expires: 1,
-        account_id: "account".to_owned(),
-        is_fedramp: false,
-    };
-    validate_credential_record(&credential).expect("valid credential record");
-
-    for invalid in [
-        CredentialRecord {
-            credential_type: "api-key".to_owned(),
-            ..credential.clone()
-        },
-        CredentialRecord {
-            expires: 0,
-            ..credential.clone()
-        },
-        CredentialRecord {
-            refresh: String::new(),
-            ..credential.clone()
-        },
-    ] {
-        assert!(validate_credential_record(&invalid).is_err());
+fn credential_record_validation_rejects_each_invalid_field() {
+    let valid = credential_record("access", "refresh", 1, "account");
+    validate_credential_record(&valid).expect("valid credential record");
+    let mutations: [fn(&mut CredentialRecord); 6] = [
+        |record| record.credential_type = "api-key".to_owned(),
+        |record| record.expires = 0,
+        |record| record.refresh = String::new(),
+        |record| record.account_id = "account\nx".to_owned(),
+        |record| record.access = "access x".to_owned(),
+        |record| record.access = "access\u{e9}".to_owned(),
+    ];
+    for mutate in mutations {
+        let mut invalid = valid.clone();
+        mutate(&mut invalid);
+        assert!(validate_credential_record(&invalid).is_err(), "{invalid:?}");
     }
 }
 
 #[test]
 fn credential_record_debug_never_prints_tokens_or_account() {
-    let credential = CredentialRecord {
-        credential_type: "oauth".to_owned(),
-        access: "access-secret-fixture".to_owned(),
-        refresh: "refresh-secret-fixture".to_owned(),
-        expires: 1,
-        account_id: "account-secret-fixture".to_owned(),
-        is_fedramp: false,
-    };
+    let credential = credential_record(
+        "access-secret-fixture",
+        "refresh-secret-fixture",
+        1,
+        "account-secret-fixture",
+    );
     let debug = format!("{credential:?}");
     for secret in [
         "access-secret-fixture",
@@ -94,20 +101,10 @@ fn account_routing_defaults_to_standard_and_preserves_fedramp() {
         assert_eq!(routing.is_fedramp, expected);
     }
 
-    let payload = serde_json::json!({
-        "https://api.openai.com/auth": {
-            "chatgpt_account_id": "account",
-            "chatgpt_account_is_fedramp": "true"
-        }
-    });
-    let token = format!(
-        "e30.{}.x",
-        base64url_encode(
-            serde_json::to_string(&payload)
-                .expect("JWT payload")
-                .as_bytes()
-        )
-    );
+    let token = jwt_with_auth_claim(serde_json::json!({
+        "chatgpt_account_id": "account",
+        "chatgpt_account_is_fedramp": "true"
+    }));
     assert!(account_routing_from_id_token(&token).is_err());
 }
 
@@ -134,35 +131,4 @@ fn base64url_decoder_accepts_canonical_chunk_shapes() {
         base64url_decode("-A").expect("URL-safe dash decodes"),
         [248]
     );
-}
-
-#[test]
-fn header_bound_credential_fields_accept_only_visible_ascii() {
-    let credential = CredentialRecord {
-        credential_type: "oauth".to_owned(),
-        access: "access".to_owned(),
-        refresh: "refresh".to_owned(),
-        expires: 1,
-        account_id: "account".to_owned(),
-        is_fedramp: false,
-    };
-    validate_credential_record(&credential).expect("valid credential record");
-
-    // reqwest refuses these header values when a request is built, after the attempt is recorded.
-    for invalid in [
-        CredentialRecord {
-            account_id: "account\nx".to_owned(),
-            ..credential.clone()
-        },
-        CredentialRecord {
-            access: "access x".to_owned(),
-            ..credential.clone()
-        },
-        CredentialRecord {
-            access: "access\u{e9}".to_owned(),
-            ..credential.clone()
-        },
-    ] {
-        assert!(validate_credential_record(&invalid).is_err(), "{invalid:?}");
-    }
 }

@@ -1,5 +1,3 @@
-//! Flow Agent command-line entry point.
-
 #![cfg_attr(not(test), deny(clippy::wildcard_imports))]
 
 mod authoring;

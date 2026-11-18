@@ -51,24 +51,22 @@ pub(crate) fn write_sized_conversation_replay(
 pub(crate) fn remove_replay_segments(run: &Path) {
     for entry in fs::read_dir(run).expect("sized replay run directory is readable") {
         let entry = entry.expect("sized replay run entry is readable");
-        if !entry
-            .file_type()
-            .expect("sized replay run entry type is readable")
-            .is_file()
-        {
-            continue;
-        }
         let name = entry.file_name();
         let Some(name) = name.to_str() else {
             continue;
         };
-        let numbered_ordinal = name
+        let ordinal = name
             .strip_prefix("events.")
-            .and_then(|name| name.strip_suffix(".jsonl"));
-        if name == "events.jsonl"
-            || numbered_ordinal.is_some_and(|ordinal| {
+            .and_then(|rest| rest.strip_suffix(".jsonl"));
+        let segment = name == "events.jsonl"
+            || ordinal.is_some_and(|ordinal| {
                 ordinal.len() == 6 && ordinal.bytes().all(|byte| byte.is_ascii_digit())
-            })
+            });
+        if segment
+            && entry
+                .file_type()
+                .expect("sized replay run entry type is readable")
+                .is_file()
         {
             fs::remove_file(entry.path()).expect("stale sized replay segment is removed");
         }

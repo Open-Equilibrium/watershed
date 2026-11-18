@@ -1,4 +1,4 @@
-use super::{Fixture, NEXT, assert_success, limits};
+use super::{Fixture, NEXT, assert_success, denied, limits};
 use serde_json::Value;
 use std::{
     fs,
@@ -20,7 +20,6 @@ struct Channel {
 
 impl Channel {
     fn new() -> Self {
-        // Darwin's ordinary temporary directory can exceed sockaddr_un's limit.
         let root = PathBuf::from(format!(
             "/tmp/flow-child-{}-{}",
             std::process::id(),
@@ -37,8 +36,6 @@ impl Channel {
         loop {
             match self.listener.accept() {
                 Ok((stream, _)) => {
-                    // Darwin inherits the listener's nonblocking flag; the
-                    // connected protocol uses blocking I/O with bounded waits.
                     stream.set_nonblocking(false).unwrap();
                     stream
                         .set_read_timeout(Some(Duration::from_secs(10)))
@@ -68,8 +65,6 @@ impl Drop for Channel {
 #[cfg(target_os = "linux")]
 fn peer_pid(stream: &UnixStream) -> i32 {
     use std::os::fd::AsRawFd;
-    // SO_PEERCRED returns the child's PID in the controller's PID namespace.
-    // The child creates this socket after fork, before signalling its parent.
     let mut credentials = [0_i32; 3];
     let mut length = std::mem::size_of_val(&credentials) as u32;
     let result = unsafe {
@@ -89,19 +84,22 @@ fn peer_pid(stream: &UnixStream) -> i32 {
 
 #[cfg(target_os = "linux")]
 fn assert_child_exited(pid: i32) {
+    let pid = rustix::process::Pid::from_raw(pid).unwrap();
     let deadline = Instant::now() + Duration::from_secs(2);
     loop {
-        // Signal zero observes this known fixture child; it never sends a signal.
-        let result = unsafe { kill(pid, 0) };
-        if result < 0 {
-            assert_eq!(std::io::Error::last_os_error().raw_os_error(), Some(3));
-            return;
+        match rustix::process::test_kill_process(pid) {
+            Ok(()) => {
+                assert!(
+                    Instant::now() < deadline,
+                    "closed channel is not proof child {pid:?} exited"
+                );
+                thread::sleep(Duration::from_millis(5));
+            }
+            Err(error) => {
+                assert_eq!(error.raw_os_error(), Some(3));
+                return;
+            }
         }
-        assert!(
-            Instant::now() < deadline,
-            "closed channel is not proof child {pid} exited"
-        );
-        thread::sleep(Duration::from_millis(5));
     }
 }
 
@@ -114,7 +112,6 @@ unsafe extern "C" {
         value: *mut std::ffi::c_void,
         length: *mut u32,
     ) -> i32;
-    fn kill(pid: i32, signal: i32) -> i32;
 }
 
 #[test]
@@ -154,8 +151,6 @@ fn new_session_helper_remains_protected_after_observed_tool_root_exit() {
         if let Some(running) = &mut running {
             assert_success(&running.completed(&request));
         }
-        // Both paths have now observed the actual Tool-root's successful exit.
-        // Release cannot race ahead of that observation.
         let released = stream.get_mut().write_all(b"G");
         if let Err(error) = &released {
             assert!(
@@ -169,9 +164,6 @@ fn new_session_helper_remains_protected_after_observed_tool_root_exit() {
         line.clear();
         stream.read_line(&mut line).unwrap();
         if guarded && cfg!(target_os = "linux") && line.is_empty() {
-            // A private PID namespace may terminate this child at root exit.
-            // EOF alone is insufficient: observe this exact child gone, not a
-            // claim that root termination cleans up arbitrary descendants.
             #[cfg(target_os = "linux")]
             assert_child_exited(pid);
         } else {
@@ -180,10 +172,7 @@ fn new_session_helper_remains_protected_after_observed_tool_root_exit() {
                 serde_json::from_str(&line).expect("surviving child must report its write attempt");
             assert_eq!(result.as_object().unwrap().len(), 1);
             if guarded {
-                assert!(
-                    matches!(result["errno"].as_i64(), Some(1 | 13 | 30)),
-                    "{result}"
-                );
+                assert!(denied(&result), "{result}");
             } else {
                 assert_eq!(result["errno"], 0);
             }

@@ -265,8 +265,6 @@ pub(crate) fn reserve_conversation_continuation(
                 let candidate_path = runs.path.join(&candidate);
                 match runs.dir.symlink_metadata(&candidate) {
                     Ok(metadata) if !metadata.is_dir() => continue,
-                    // WHY: an interrupted continuation leaves an unpublished Run that only
-                    // reclamation under its Run lease may remove.
                     Ok(_) => match runs.dir.symlink_metadata(
                         Path::new(&candidate).join(UNPUBLISHED_PRODUCTIVE_RUN_MARKER),
                     ) {
@@ -333,8 +331,6 @@ pub(crate) fn reserve_conversation_continuation(
     }
 }
 
-/// Recovers a pending status transaction under the Conversation lease before a read that precedes
-/// the reservations, so that the torn append the transaction records does not refuse the read.
 fn recover_status_before_read(workspace: &Path, conversation_id: &str) -> Result<(), RuntimeError> {
     let conversation = existing_anchored_conversation(workspace, conversation_id)?;
     if !status_recovery_is_required(&conversation)? {

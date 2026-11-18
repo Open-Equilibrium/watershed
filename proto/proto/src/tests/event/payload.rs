@@ -1,3 +1,4 @@
+use super::super::raw_event;
 use crate::{
     EventEnvelope, EventStateIdentifierKind, EventType, FLOW_VALUE_MAX_BYTES_V0,
     FLOW_VALUE_MAX_DEPTH_V0, FLOW_VALUE_MAX_KEY_CHARS_V0, FLOW_VALUE_MAX_MEMBERS_V0,
@@ -14,57 +15,42 @@ pub(super) struct PayloadCase {
 
 pub(super) fn payload_cases() -> Vec<PayloadCase> {
     vec![
-        PayloadCase {
-            event_type: EventType::SessionStarted,
-            valid_payload: json!({}),
-            required_field: None,
-            typed_field: "reason",
-        },
-        PayloadCase {
-            event_type: EventType::SessionPaused,
-            valid_payload: json!({"reason": "pause"}),
-            required_field: None,
-            typed_field: "reason",
-        },
-        PayloadCase {
-            event_type: EventType::SessionResumed,
-            valid_payload: json!({}),
-            required_field: None,
-            typed_field: "reason",
-        },
-        PayloadCase {
-            event_type: EventType::SessionCompleted,
-            valid_payload: json!({}),
-            required_field: None,
-            typed_field: "reason",
-        },
-        PayloadCase {
-            event_type: EventType::SessionFailed,
-            valid_payload: json!({"reason": "failed"}),
-            required_field: Some("reason"),
-            typed_field: "reason",
-        },
-        PayloadCase {
-            event_type: EventType::FlowStarted,
-            valid_payload: json!({"flow_definition_id": "flow-1"}),
-            required_field: Some("flow_definition_id"),
-            typed_field: "flow_definition_id",
-        },
-        PayloadCase {
-            event_type: EventType::FlowCompleted,
-            valid_payload: json!({"flow_definition_id": "flow-1", "flow_name": "Flow"}),
-            required_field: Some("flow_definition_id"),
-            typed_field: "flow_definition_id",
-        },
-        PayloadCase {
-            event_type: EventType::FlowFailed,
-            valid_payload: json!({"flow_definition_id": "flow-1", "error": "failed"}),
-            required_field: Some("error"),
-            typed_field: "error",
-        },
-        PayloadCase {
-            event_type: EventType::PhaseEntered,
-            valid_payload: json!({
+        case(EventType::SessionStarted, json!({}), None, "reason"),
+        case(
+            EventType::SessionPaused,
+            json!({"reason": "pause"}),
+            None,
+            "reason",
+        ),
+        case(EventType::SessionResumed, json!({}), None, "reason"),
+        case(EventType::SessionCompleted, json!({}), None, "reason"),
+        case(
+            EventType::SessionFailed,
+            json!({"reason": "failed"}),
+            Some("reason"),
+            "reason",
+        ),
+        case(
+            EventType::FlowStarted,
+            json!({"flow_definition_id": "flow-1"}),
+            Some("flow_definition_id"),
+            "flow_definition_id",
+        ),
+        case(
+            EventType::FlowCompleted,
+            json!({"flow_definition_id": "flow-1", "flow_name": "Flow"}),
+            Some("flow_definition_id"),
+            "flow_definition_id",
+        ),
+        case(
+            EventType::FlowFailed,
+            json!({"flow_definition_id": "flow-1", "error": "failed"}),
+            Some("error"),
+            "error",
+        ),
+        case(
+            EventType::PhaseEntered,
+            json!({
                 "iteration": 1,
                 "phase_execution_id": "phase-execution-1",
                 "phase_id": "phase-1",
@@ -73,165 +59,172 @@ pub(super) fn payload_cases() -> Vec<PayloadCase> {
                 "instruction_ids": [],
                 "tool_ids": []
             }),
-            required_field: Some("phase_id"),
-            typed_field: "phase_id",
-        },
-        PayloadCase {
-            event_type: EventType::PhaseCompleted,
-            valid_payload: json!({
+            Some("phase_id"),
+            "phase_id",
+        ),
+        case(
+            EventType::PhaseCompleted,
+            json!({
                 "iteration": 1,
                 "phase_execution_id": "phase-execution-1",
                 "phase_id": "phase-1",
                 "result": {"type": "string", "value": "done"}
             }),
-            required_field: Some("phase_id"),
-            typed_field: "phase_id",
-        },
-        PayloadCase {
-            event_type: EventType::PhaseFailed,
-            valid_payload: json!({
+            Some("phase_id"),
+            "phase_id",
+        ),
+        case(
+            EventType::PhaseFailed,
+            json!({
                 "error": "failed",
                 "iteration": 1,
                 "phase_execution_id": "phase-execution-2",
                 "phase_id": "phase-1"
             }),
-            required_field: Some("error"),
-            typed_field: "error",
-        },
-        PayloadCase {
-            event_type: EventType::MessageDelta,
-            valid_payload: json!({
-                "message_id": "message-1",
-                "role": "assistant",
-                "content_delta": "hi"
-            }),
-            required_field: Some("content_delta"),
-            typed_field: "content_delta",
-        },
-        PayloadCase {
-            event_type: EventType::MessageCompleted,
-            valid_payload: json!({"message_id": "message-1", "role": "assistant"}),
-            required_field: Some("message_id"),
-            typed_field: "message_id",
-        },
-        PayloadCase {
-            event_type: EventType::ToolStarted,
-            valid_payload: json!({
+            Some("error"),
+            "error",
+        ),
+        case(
+            EventType::MessageDelta,
+            json!({"message_id": "message-1", "role": "assistant", "content_delta": "hi"}),
+            Some("content_delta"),
+            "content_delta",
+        ),
+        case(
+            EventType::MessageCompleted,
+            json!({"message_id": "message-1", "role": "assistant"}),
+            Some("message_id"),
+            "message_id",
+        ),
+        case(
+            EventType::ToolStarted,
+            json!({
                 "tool_id": "tool-1",
                 "tool_name": "Tool",
                 "tool_kind": "predefined-command",
                 "allowed_parameters": []
             }),
-            required_field: Some("tool_id"),
-            typed_field: "tool_id",
-        },
-        PayloadCase {
-            event_type: EventType::ToolProgress,
-            valid_payload: json!({"tool_id": "tool-1", "message": "working"}),
-            required_field: Some("message"),
-            typed_field: "message",
-        },
-        PayloadCase {
-            event_type: EventType::ToolCompleted,
-            valid_payload: json!({"tool_id": "tool-1", "exit_code": 0}),
-            required_field: Some("tool_id"),
-            typed_field: "tool_id",
-        },
-        PayloadCase {
-            event_type: EventType::ToolFailed,
-            valid_payload: json!({"tool_id": "tool-1", "error": "failed"}),
-            required_field: Some("error"),
-            typed_field: "error",
-        },
-        PayloadCase {
-            event_type: EventType::ToolTimedOut,
-            valid_payload: json!({"tool_id": "tool-1", "error": "timed out"}),
-            required_field: Some("error"),
-            typed_field: "error",
-        },
-        PayloadCase {
-            event_type: EventType::ArtifactLogged,
-            valid_payload: json!({
-                "artifact_id": "artifact-1",
-                "artifact_type": "text",
-                "uri": "file.txt"
-            }),
-            required_field: Some("artifact_type"),
-            typed_field: "artifact_type",
-        },
-        PayloadCase {
-            event_type: EventType::AttentionRequested,
-            valid_payload: json!({"request_id": "request-1", "reason": "approval"}),
-            required_field: Some("reason"),
-            typed_field: "reason",
-        },
-        PayloadCase {
-            event_type: EventType::MetricSample,
-            valid_payload: json!({"metric_name": "latency", "value": 1.5}),
-            required_field: Some("metric_name"),
-            typed_field: "metric_name",
-        },
-        PayloadCase {
-            event_type: EventType::Error,
-            valid_payload: json!({"code": "runtime_error", "message": "failed", "data": {}}),
-            required_field: Some("code"),
-            typed_field: "code",
-        },
+            Some("tool_id"),
+            "tool_id",
+        ),
+        case(
+            EventType::ToolProgress,
+            json!({"tool_id": "tool-1", "message": "working"}),
+            Some("message"),
+            "message",
+        ),
+        case(
+            EventType::ToolCompleted,
+            json!({"tool_id": "tool-1", "exit_code": 0}),
+            Some("tool_id"),
+            "tool_id",
+        ),
+        case(
+            EventType::ToolFailed,
+            json!({"tool_id": "tool-1", "error": "failed"}),
+            Some("error"),
+            "error",
+        ),
+        case(
+            EventType::ToolTimedOut,
+            json!({"tool_id": "tool-1", "error": "timed out"}),
+            Some("error"),
+            "error",
+        ),
+        case(
+            EventType::ArtifactLogged,
+            json!({"artifact_id": "artifact-1", "artifact_type": "text", "uri": "file.txt"}),
+            Some("artifact_type"),
+            "artifact_type",
+        ),
+        case(
+            EventType::AttentionRequested,
+            json!({"request_id": "request-1", "reason": "approval"}),
+            Some("reason"),
+            "reason",
+        ),
+        case(
+            EventType::MetricSample,
+            json!({"metric_name": "latency", "value": 1.5}),
+            Some("metric_name"),
+            "metric_name",
+        ),
+        case(
+            EventType::Error,
+            json!({"code": "runtime_error", "message": "failed", "data": {}}),
+            Some("code"),
+            "code",
+        ),
     ]
+}
+
+fn case(
+    event_type: EventType,
+    valid_payload: Value,
+    required_field: Option<&'static str>,
+    typed_field: &'static str,
+) -> PayloadCase {
+    PayloadCase {
+        event_type,
+        valid_payload,
+        required_field,
+        typed_field,
+    }
 }
 
 #[test]
 fn tool_started_retains_exact_invocation_metadata() {
-    for tool_kind in ["predefined-command", "own-script"] {
-        for attempt_id in [None, Some("attempt-1")] {
-            let mut payload = json!({
-                "tool_id": "tool-1",
-                "tool_name": "Tool",
-                "tool_kind": tool_kind,
-                "allowed_parameters": ["path", "format"]
-            });
-            if let Some(attempt_id) = attempt_id {
-                payload["attempt_id"] = json!(attempt_id);
-            }
-            let mut event = EventEnvelope::new(
-                "evt-001",
-                EventType::ToolStarted,
-                "smoke001",
-                1,
-                "2026-01-01T00:00:00Z",
-                "flow-agent-cli",
-                payload.clone(),
-            );
-            event.flow_id = Some("flow-1".to_owned());
-            event.validate_v0().expect("invocation metadata is valid");
-            let jsonl = event.canonical_jsonl().expect("event serializes");
-            let decoded: EventEnvelope = serde_json::from_str(&jsonl).expect("event parses");
-            assert_eq!(decoded.payload, payload);
+    for (tool_kind, attempt_id) in [
+        ("predefined-command", None),
+        ("own-script", Some("attempt-1")),
+    ] {
+        let mut payload = json!({
+            "tool_id": "tool-1",
+            "tool_name": "Tool",
+            "tool_kind": tool_kind,
+            "allowed_parameters": ["path", "format"]
+        });
+        if let Some(attempt_id) = attempt_id {
+            payload["attempt_id"] = json!(attempt_id);
+        }
+        let mut event = EventEnvelope::new(
+            "evt-001",
+            EventType::ToolStarted,
+            "smoke001",
+            1,
+            "2026-01-01T00:00:00Z",
+            "flow-agent-cli",
+            payload.clone(),
+        );
+        event.flow_id = Some("flow-1".to_owned());
+        event.validate_v0().expect("invocation metadata is valid");
+        let jsonl = event.canonical_jsonl().expect("event serializes");
+        let decoded: EventEnvelope = serde_json::from_str(&jsonl).expect("event parses");
+        assert_eq!(decoded.payload, payload);
 
-            for (field, value) in [
-                ("read_only_mounts", json!(["workspace"])),
-                ("writable_mounts", json!([])),
-                ("runtime_profile", json!("exact")),
-                ("max_concurrent_processes_and_threads", json!(32)),
-                ("network_access", json!("deny")),
-                ("network", json!("deny")),
-                ("unknown_metadata", json!(true)),
-            ] {
-                let mut obsolete = event.clone();
-                obsolete.payload[field] = value;
-                assert_eq!(
-                    obsolete
-                        .validate_v0()
-                        .expect_err("undeclared invocation metadata must be rejected")
-                        .field(),
-                    format!("payload.{field}")
-                );
-                assert!(obsolete.canonical_jsonl().is_err());
-                assert!(serde_json::to_string(&obsolete).is_err());
-                let mut raw = serde_json::to_value(&event).expect("valid event serializes");
-                raw["payload"] = obsolete.payload;
-                assert!(serde_json::from_value::<EventEnvelope>(raw).is_err());
-            }
+        for (field, value) in [
+            ("read_only_mounts", json!(["workspace"])),
+            ("writable_mounts", json!([])),
+            ("runtime_profile", json!("exact")),
+            ("max_concurrent_processes_and_threads", json!(32)),
+            ("network_access", json!("deny")),
+            ("network", json!("deny")),
+            ("unknown_metadata", json!(true)),
+        ] {
+            let mut obsolete = event.clone();
+            obsolete.payload[field] = value;
+            assert_eq!(
+                obsolete
+                    .validate_v0()
+                    .expect_err("undeclared invocation metadata must be rejected")
+                    .field(),
+                format!("payload.{field}")
+            );
+            assert!(obsolete.canonical_jsonl().is_err());
+            assert!(serde_json::to_string(&obsolete).is_err());
+            let mut raw = serde_json::to_value(&event).expect("valid event serializes");
+            raw["payload"] = obsolete.payload;
+            assert!(serde_json::from_value::<EventEnvelope>(raw).is_err());
         }
     }
 }
@@ -297,13 +290,7 @@ fn every_v0_event_exposes_and_mutates_its_state_identifiers() {
             .validate_v0()
             .unwrap_or_else(|err| panic!("{}: {err}", event_type.as_str()));
 
-        let mut identifiers = Vec::new();
-        event
-            .try_for_each_state_identifier::<()>(|kind, value| {
-                identifiers.push((kind, value.to_owned()));
-                Ok(())
-            })
-            .unwrap();
+        let identifiers = state_identifiers(&event);
         let payload_identifiers = identifiers
             .iter()
             .filter(|(kind, _)| {
@@ -334,15 +321,8 @@ fn every_v0_event_exposes_and_mutates_its_state_identifiers() {
             })
             .unwrap();
         assert_eq!(replacement, identifiers.len());
-        let mut normalized_identifiers = Vec::new();
-        event
-            .try_for_each_state_identifier::<()>(|kind, value| {
-                normalized_identifiers.push((kind, value.to_owned()));
-                Ok(())
-            })
-            .unwrap();
         assert_eq!(
-            normalized_identifiers,
+            state_identifiers(&event),
             identifiers
                 .iter()
                 .enumerate()
@@ -364,6 +344,17 @@ fn every_v0_event_exposes_and_mutates_its_state_identifiers() {
         u64::try_from(maximum_payload_identifiers).unwrap(),
         MAX_EVENT_PAYLOAD_STATE_IDENTIFIERS_V0
     );
+}
+
+fn state_identifiers(event: &EventEnvelope) -> Vec<(EventStateIdentifierKind, String)> {
+    let mut identifiers = Vec::new();
+    event
+        .try_for_each_state_identifier::<()>(|kind, value| {
+            identifiers.push((kind, value.to_owned()));
+            Ok(())
+        })
+        .unwrap();
+    identifiers
 }
 
 fn expected_state_identifiers(
@@ -499,6 +490,9 @@ fn event_specific_payload_invariants_are_bounded() {
         (EventType::ToolCompleted, "exit_code", Some(json!(1.5))),
         (EventType::Error, "data", Some(json!([]))),
         (EventType::MetricSample, "value", Some(json!("1"))),
+        (EventType::PhaseEntered, "phase_execution_id", None),
+        (EventType::PhaseEntered, "phase_kind", None),
+        (EventType::PhaseEntered, "iteration", None),
     ];
 
     for (event_type, field, invalid_value) in cases {
@@ -536,41 +530,6 @@ fn event_specific_payload_invariants_are_bounded() {
             format!("payload.{field}"),
             "{}",
             event_type.as_str()
-        );
-    }
-}
-
-#[test]
-fn phase_entered_execution_metadata_is_required() {
-    let complete_payload = payload_cases()
-        .into_iter()
-        .find(|case| case.event_type == EventType::PhaseEntered)
-        .expect("phase entered has a payload case")
-        .valid_payload;
-
-    for missing_field in ["phase_execution_id", "phase_kind", "iteration"] {
-        let mut partial_payload = complete_payload.clone();
-        partial_payload
-            .as_object_mut()
-            .expect("payload is an object")
-            .remove(missing_field);
-        let mut partial_event = EventEnvelope::new(
-            "evt-001",
-            EventType::PhaseEntered,
-            "smoke001",
-            1,
-            "2026-01-01T00:00:00Z",
-            "flow-agent-cli",
-            partial_payload,
-        );
-        partial_event.flow_id = Some("flow-1".to_owned());
-
-        assert_eq!(
-            partial_event
-                .validate_v0()
-                .expect_err("partial execution metadata must be rejected")
-                .field(),
-            format!("payload.{missing_field}")
         );
     }
 }
@@ -747,17 +706,10 @@ fn flow_completed_validates_a_present_result() {
         payload
     };
     let wire = |payload: Value| {
-        json!({
-            "event_id": "evt-001",
-            "event_type": "flow.completed",
-            "flow_id": "flow-1",
-            "payload": payload,
-            "protocol_version": "0",
-            "sequence": 1,
-            "session_id": "smoke001",
-            "source": "flow-agent-cli",
-            "timestamp": "2026-01-01T00:00:00Z"
-        })
+        let mut raw = raw_event(payload);
+        raw["event_type"] = json!("flow.completed");
+        raw["flow_id"] = json!("flow-1");
+        raw
     };
 
     for valid in [None, Some(json!({"type": "boolean", "value": true}))] {

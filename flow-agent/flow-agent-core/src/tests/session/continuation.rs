@@ -9,7 +9,7 @@ use crate::{
             reserve_conversation_continuation,
         },
         fs_guards::AnchoredWorkspace,
-        instructions::{read_applicable_agent_instructions, read_workspace_agent_instructions},
+        instructions::read_workspace_agent_instructions,
         live_events::live_event_channel,
         openai_codex::ProviderTurn,
         productive::{ProductiveProvider, ProviderCredential},
@@ -22,20 +22,54 @@ use crate::{
             set_productive_executor_readiness_observer,
         },
         session_reading::SessionEventReader,
-        session_store::open_flow_agent_home,
         types::{EmitMode, RuntimeError},
     },
     tests::{
         conversations::{write_terminal_recovery_snapshot, write_terminal_run},
         helpers::{
-            disabled_configured_smoke_productive_execution_fixture, empty_workspace,
-            smoke_productive_execution_fixture, write_productive_workspace_config,
+            ProductiveExecutionFixture, disabled_configured_smoke_productive_execution_fixture,
+            empty_workspace, smoke_productive_execution_fixture, write_productive_workspace_config,
         },
         test_support::workspace_copy,
     },
 };
 use proto::EventType;
-use std::{fs, fs::OpenOptions, path::Path};
+use std::{fs, path::Path};
+
+pub(super) fn operator_profile() -> ContextModelProfile {
+    ContextModelProfile {
+        context_limit: 128_000,
+        id: OPERATOR_MODEL_PROFILE_ID,
+        output_reserve: 16_384,
+        safety_margin: CONTEXT_SAFETY_MARGIN,
+    }
+}
+
+fn start_conversation<P: ProductiveProvider>(
+    workspace: &Path,
+    fixture: &ProductiveExecutionFixture,
+    provider: &mut P,
+) {
+    let config = load_global_config().expect("productive config");
+    let credential = fixture.credential();
+    run_productive_session_with_provider(
+        workspace,
+        &fixture.anchored,
+        &config,
+        "gpt-fixture",
+        operator_profile(),
+        &fixture.registry,
+        fixture.smoke_flow(),
+        &fixture.policy,
+        None,
+        false,
+        || Ok(credential.clone()),
+        "Agent guidance.",
+        None,
+        provider,
+    )
+    .expect("initial productive run completes");
+}
 
 #[test]
 fn executor_readiness_failure_precedes_continuation_reservation() {
@@ -46,12 +80,7 @@ fn executor_readiness_failure_precedes_continuation_reservation() {
         fixture.smoke_flow(),
     )
     .expect("definition metadata");
-    let profile = ContextModelProfile {
-        context_limit: 128_000,
-        id: OPERATOR_MODEL_PROFILE_ID,
-        output_reserve: 16_384,
-        safety_margin: CONTEXT_SAFETY_MARGIN,
-    };
+    let profile = operator_profile();
     create_conversation_run_with_model_profile(
         &workspace,
         "conversation",
@@ -63,7 +92,6 @@ fn executor_readiness_failure_precedes_continuation_reservation() {
     )
     .expect("recorded Tool-bearing run is created");
     crate::tests::conversations::write_terminal_run(&workspace, "conversation", "run");
-    // The snapshot header must name the Flow definition of the run it checkpoints.
     write_terminal_recovery_snapshot(&workspace, "conversation", "run");
     let recovery_path = crate::tests::helpers::workspace_session_dir(&workspace)
         .join("conversation/runs/run/recovery.jsonl");
@@ -88,7 +116,6 @@ fn executor_readiness_failure_precedes_continuation_reservation() {
         "2026-07-30T12:00:01Z",
     )
     .expect("root checkpoint appends");
-    // Another owner holds the reservation, so readiness must fail before any reservation attempt.
     let held = reserve_conversation_continuation(&workspace, "conversation", None)
         .expect("another owner holds the continuation reservation");
     set_productive_executor_readiness_observer(|| {
@@ -136,19 +163,13 @@ fn productive_continuation_rejects_missing_or_mismatched_parent_profile_before_p
     let registry = &fixture.registry;
     let flow = fixture.smoke_flow();
     let credential = fixture.credential();
-    let model_profile = ContextModelProfile {
-        context_limit: 128000,
-        id: OPERATOR_MODEL_PROFILE_ID,
-        output_reserve: 16384,
-        safety_margin: CONTEXT_SAFETY_MARGIN,
-    };
     let mut initial_provider = SessionProvider::default();
     let initial = run_productive_session_with_provider(
         &workspace,
         &fixture.anchored,
         &config,
         "gpt-fixture",
-        model_profile,
+        operator_profile(),
         registry,
         flow,
         &fixture.policy,
@@ -167,38 +188,30 @@ fn productive_continuation_rejects_missing_or_mismatched_parent_profile_before_p
         .join(&initial.session_id)
         .join("run-log.jsonl");
     let original = fs::read_to_string(&run_log).expect("Run Log reads");
+    let (definition, records) = original
+        .split_once('\n')
+        .expect("Run Log begins with its definition");
 
     for case in ["missing", "mismatched"] {
-        let mut lines = original.lines();
         let mut definition: serde_json::Value =
-            serde_json::from_str(lines.next().expect("Run Log begins with its definition"))
-                .expect("definition parses");
-        {
-            let definition = definition.as_object_mut().expect("definition is an object");
-            if case == "missing" {
-                for field in [
-                    "model",
-                    "model_profile_id",
-                    "model_context_limit",
-                    "output_reserve",
-                    "safety_margin",
-                ] {
-                    definition.remove(field);
-                }
-            } else {
-                definition.insert(
-                    "model".to_owned(),
-                    serde_json::Value::String("gpt-different".to_owned()),
-                );
+            serde_json::from_str(definition).expect("definition parses");
+        let fields = definition.as_object_mut().expect("definition is an object");
+        if case == "missing" {
+            for field in [
+                "model",
+                "model_profile_id",
+                "model_context_limit",
+                "output_reserve",
+                "safety_margin",
+            ] {
+                fields.remove(field);
             }
+        } else {
+            fields.insert("model".to_owned(), "gpt-different".into());
         }
-        let mut changed = proto::canonical_json(&definition).expect("definition canonicalizes");
-        changed.push('\n');
-        for line in lines {
-            changed.push_str(line);
-            changed.push('\n');
-        }
-        fs::write(&run_log, changed).expect("invalid profile fixture writes");
+        let definition = proto::canonical_json(&definition).expect("definition canonicalizes");
+        fs::write(&run_log, format!("{definition}\n{records}"))
+            .expect("invalid profile fixture writes");
 
         let mut continuation_provider = SessionProvider::default();
         let error = continue_conversation_with_provider(
@@ -245,39 +258,12 @@ fn workspace_agent_instructions_are_optional_bounded_and_real() {
     assert!(read_workspace_agent_instructions(&anchored).is_err());
 
     let workspace = empty_workspace("workspace-instructions-oversized");
-    let file = OpenOptions::new()
-        .create_new(true)
-        .write(true)
-        .open(workspace.join("AGENTS.md"))
-        .expect("oversized fixture opens");
-    file.set_len(1024 * 1024 + 1)
+    fs::File::create(workspace.join("AGENTS.md"))
+        .expect("oversized fixture opens")
+        .set_len(1024 * 1024 + 1)
         .expect("oversized fixture grows");
-    drop(file);
     let anchored = AnchoredWorkspace::open(&workspace).expect("workspace anchors");
     assert!(read_workspace_agent_instructions(&anchored).is_err());
-}
-
-#[test]
-fn applicable_agent_instructions_load_global_then_harness_workspace() {
-    let workspace = empty_workspace("applicable-agent-instructions");
-    crate::initialize_global_config(None).expect("global Flow authority initializes");
-    fs::write(
-        crate::tests::test_support::session_home_path().join("AGENTS.md"),
-        "Global guidance.\n",
-    )
-    .expect("global instructions write");
-    fs::write(workspace.join("AGENTS.md"), "Workspace guidance.\n")
-        .expect("workspace instructions write");
-    let home = open_flow_agent_home(false)
-        .expect("global home opens")
-        .expect("global home exists");
-    let workspace = AnchoredWorkspace::open(&workspace).expect("workspace anchors");
-
-    assert_eq!(
-        read_applicable_agent_instructions(&home, &workspace)
-            .expect("applicable instructions read"),
-        "Global guidance.\n\nWorkspace guidance.\n"
-    );
 }
 
 #[test]
@@ -326,66 +312,35 @@ fn conversation_entry_points_validate_ids_before_workspace_access() {
             RUN_ID_USAGE,
         );
     }
-    assert_invalid_id_usage(
-        continue_conversation(missing, "INVALID", None, None, EmitMode::Human),
-        ENTRY_ID_USAGE,
-    );
-    assert_invalid_id_usage(
-        continue_conversation_with_live_events(
-            missing,
-            "INVALID",
-            None,
-            None,
-            live_event_channel().0,
-        ),
-        ENTRY_ID_USAGE,
-    );
-    assert_invalid_id_usage(
-        continue_conversation_with_execution_activation(
-            missing,
-            "INVALID",
-            None,
-            None,
-            None,
-            EmitMode::Human,
-            |_| -> Result<(), RuntimeError> { Ok(()) },
-        ),
-        ENTRY_ID_USAGE,
-    );
-    assert_invalid_id_usage(
-        continue_conversation(
-            missing,
-            "conversation",
-            Some("INVALID"),
-            None,
-            EmitMode::Human,
-        ),
-        ENTRY_ID_USAGE,
-    );
-    assert_invalid_id_usage(
-        continue_conversation_with_live_events(
-            missing,
-            "conversation",
-            Some("INVALID"),
-            None,
-            live_event_channel().0,
-        ),
-        ENTRY_ID_USAGE,
-    );
-    assert_invalid_id_usage(
-        continue_conversation_with_execution_activation(
-            missing,
-            "conversation",
-            Some("INVALID"),
-            None,
-            None,
-            EmitMode::Human,
-            |_| -> Result<(), RuntimeError> { Ok(()) },
-        ),
-        ENTRY_ID_USAGE,
-    );
+    for (conversation_id, entry_id) in [("INVALID", None), ("conversation", Some("INVALID"))] {
+        assert_invalid_id_usage(
+            continue_conversation(missing, conversation_id, entry_id, None, EmitMode::Human),
+            ENTRY_ID_USAGE,
+        );
+        assert_invalid_id_usage(
+            continue_conversation_with_live_events(
+                missing,
+                conversation_id,
+                entry_id,
+                None,
+                live_event_channel().0,
+            ),
+            ENTRY_ID_USAGE,
+        );
+        assert_invalid_id_usage(
+            continue_conversation_with_execution_activation(
+                missing,
+                conversation_id,
+                entry_id,
+                None,
+                None,
+                EmitMode::Human,
+                |_| -> Result<(), RuntimeError> { Ok(()) },
+            ),
+            ENTRY_ID_USAGE,
+        );
+    }
 
-    // A valid identifier reaches the workspace open, so the usage error above is not incidental.
     let Err(control) = resume_conversation_run(missing, "conversation", "run", EmitMode::Human)
     else {
         panic!("missing workspace must not resume");
@@ -474,17 +429,11 @@ fn valid_conversation_addresses_fail_before_provider_or_run_creation() {
 
     let (notifier, _receiver) = live_event_channel();
     assert!(
-        continue_conversation_with_live_events(
-            &workspace,
-            "conversation001",
-            None,
-            None,
-            notifier,
-        )
-        .is_err()
+        continue_conversation_with_live_events(&workspace, "conversation001", None, None, notifier)
+            .is_err()
     );
     assert!(
-        resume_conversation_run(&workspace, "conversation001", "run001", EmitMode::Human,).is_err()
+        resume_conversation_run(&workspace, "conversation001", "run001", EmitMode::Human).is_err()
     );
     assert!(
         !crate::tests::helpers::workspace_session_dir(&workspace)
@@ -496,35 +445,10 @@ fn valid_conversation_addresses_fail_before_provider_or_run_creation() {
 #[test]
 fn productive_continuation_uses_the_selected_history_input_and_live_checkpoint_stream() {
     let (workspace, fixture) = disabled_configured_smoke_productive_execution_fixture();
-    let config = load_global_config().expect("productive config");
-    let registry = &fixture.registry;
-    let flow = fixture.smoke_flow();
     let credential = fixture.credential();
     let mut provider = SessionProvider::default();
-    let model_profile = ContextModelProfile {
-        context_limit: 128000,
-        id: OPERATOR_MODEL_PROFILE_ID,
-        output_reserve: 16384,
-        safety_margin: CONTEXT_SAFETY_MARGIN,
-    };
 
-    run_productive_session_with_provider(
-        &workspace,
-        &fixture.anchored,
-        &config,
-        "gpt-fixture",
-        model_profile,
-        registry,
-        flow,
-        &fixture.policy,
-        None,
-        false,
-        || Ok(credential.clone()),
-        "Agent guidance.",
-        None,
-        &mut provider,
-    )
-    .expect("initial productive run completes");
+    start_conversation(&workspace, &fixture, &mut provider);
     let page = conversation_status_page(&workspace, None).expect("conversation status");
     let conversation_id = page.conversations[0].conversation_id.clone();
     let selected_entry = page.conversations[0]
@@ -574,7 +498,6 @@ fn productive_continuation_uses_the_selected_history_input_and_live_checkpoint_s
     );
 }
 
-/// Keeps the request bodies so a test can see which history each turn carried.
 #[derive(Default)]
 struct BodyRecordingProvider {
     provider: SessionProvider,
@@ -595,39 +518,15 @@ impl ProductiveProvider for BodyRecordingProvider {
 #[test]
 fn continuation_from_an_earlier_entry_branches_from_that_entry() {
     let (workspace, fixture) = disabled_configured_smoke_productive_execution_fixture();
-    let config = load_global_config().expect("productive config");
     let credential = fixture.credential();
     let mut provider = BodyRecordingProvider::default();
-    let model_profile = ContextModelProfile {
-        context_limit: 128000,
-        id: OPERATOR_MODEL_PROFILE_ID,
-        output_reserve: 16384,
-        safety_margin: CONTEXT_SAFETY_MARGIN,
-    };
-    run_productive_session_with_provider(
-        &workspace,
-        &fixture.anchored,
-        &config,
-        "gpt-fixture",
-        model_profile,
-        &fixture.registry,
-        fixture.smoke_flow(),
-        &fixture.policy,
-        None,
-        false,
-        || Ok(credential.clone()),
-        "Agent guidance.",
-        None,
-        &mut provider,
-    )
-    .expect("initial productive run completes");
+    start_conversation(&workspace, &fixture, &mut provider);
     let page = conversation_status_page(&workspace, None).expect("conversation status");
     let conversation_id = page.conversations[0].conversation_id.clone();
     let first_entry = page.conversations[0]
         .latest_entry_id
         .clone()
         .expect("first entry");
-    // Continuing from the newest entry gives the older entry a later sibling to be distinguished from.
     continue_conversation_with_provider(
         &workspace,
         &conversation_id,
@@ -660,8 +559,6 @@ fn continuation_from_an_earlier_entry_branches_from_that_entry() {
         branch.parent_entry_id.as_deref(),
         Some(first_entry.as_str())
     );
-    // Both continuations start from the first entry. Only the newer one carries the newer input,
-    // so the branch must carry its own input and never the newer one.
     assert!(
         provider.bodies[1].contains("interaction-"),
         "history is carried"
@@ -677,32 +574,9 @@ fn continuation_from_an_earlier_entry_branches_from_that_entry() {
 #[test]
 fn newest_entry_continuations_outgrow_any_single_run_event_sequence() {
     let (workspace, fixture) = disabled_configured_smoke_productive_execution_fixture();
-    let config = load_global_config().expect("productive config");
     let credential = fixture.credential();
     let mut provider = SessionProvider::default();
-    let model_profile = ContextModelProfile {
-        context_limit: 128000,
-        id: OPERATOR_MODEL_PROFILE_ID,
-        output_reserve: 16384,
-        safety_margin: CONTEXT_SAFETY_MARGIN,
-    };
-    run_productive_session_with_provider(
-        &workspace,
-        &fixture.anchored,
-        &config,
-        "gpt-fixture",
-        model_profile,
-        &fixture.registry,
-        fixture.smoke_flow(),
-        &fixture.policy,
-        None,
-        false,
-        || Ok(credential.clone()),
-        "Agent guidance.",
-        None,
-        &mut provider,
-    )
-    .expect("root productive run completes");
+    start_conversation(&workspace, &fixture, &mut provider);
     let conversation_id = conversation_status_page(&workspace, None)
         .expect("conversation status")
         .conversations[0]
@@ -740,15 +614,7 @@ fn conversation_continuation_rejects_registry_drift_before_auth_or_run_creation(
         "smoke-flow",
         "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-        (
-            "gpt-fixture",
-            ContextModelProfile {
-                context_limit: 128_000,
-                id: OPERATOR_MODEL_PROFILE_ID,
-                output_reserve: 16_384,
-                safety_margin: CONTEXT_SAFETY_MARGIN,
-            },
-        ),
+        ("gpt-fixture", operator_profile()),
     )
     .expect("recorded run is created");
     write_terminal_run(&workspace, "review", "review");

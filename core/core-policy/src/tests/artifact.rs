@@ -20,43 +20,26 @@ fn policy_artifact_rejects_unsupported_policy_version() {
 }
 
 #[test]
-fn policy_artifact_rejects_unknown_top_level_fields() {
-    let mut value = serde_json::to_value(valid_policy_artifact("unknown-field"))
-        .expect("policy artifact serializes");
-    value
-        .as_object_mut()
-        .expect("policy artifact is an object")
-        .insert("future_restriction".to_owned(), serde_json::json!(true));
-
-    let error = serde_json::from_value::<PolicyArtifact>(value)
-        .expect_err("unknown policy fields must fail closed");
-
-    assert!(
-        error
-            .to_string()
-            .contains("unknown field `future_restriction`"),
-        "{error}"
-    );
-}
-
-#[test]
-fn policy_artifact_rejects_unknown_nested_capability_fields() {
+fn policy_artifact_rejects_unknown_fields_at_every_capability_object() {
     for pointer in [
+        "",
         "/phase_scope/0",
         "/runtime_limits",
+        "/commands/0",
+        "/commands/0/allowed_parameters/0",
         "/commands/0/environment",
     ] {
-        let mut value = serde_json::to_value(valid_policy_artifact("unknown-nested-field"))
+        let mut value = serde_json::to_value(valid_policy_artifact("unknown-field"))
             .expect("policy artifact serializes");
         value
             .pointer_mut(pointer)
-            .expect("nested policy object exists")
+            .expect("policy object exists")
             .as_object_mut()
-            .expect("nested policy value is an object")
+            .expect("policy value is an object")
             .insert("future_restriction".to_owned(), serde_json::json!(true));
 
         let error = serde_json::from_value::<PolicyArtifact>(value)
-            .expect_err("unknown nested policy fields must fail closed");
+            .expect_err("unknown policy fields must fail closed");
         assert!(
             error
                 .to_string()

@@ -124,7 +124,6 @@ impl ProviderTerminalClassification {
         Self::Cancelled,
     ];
 
-    /// The classification of a settled provider failure.
     pub(crate) fn for_failure(failure: &ProviderFailure) -> Self {
         match failure.kind() {
             ProviderFailureKind::ReplyInvalid => Self::ProviderReplyInvalid,

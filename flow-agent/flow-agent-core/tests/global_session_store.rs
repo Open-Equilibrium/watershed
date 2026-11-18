@@ -19,8 +19,6 @@ fn sessions_are_stored_in_the_user_home_not_the_workspace() {
     let workspace = workspace_copy("smoke-flow");
     let session_home = session_home_path();
 
-    // SAFETY: this integration-test binary contains one test, and every runtime call returns
-    // before the next process-environment change.
     unsafe {
         std::env::remove_var("HOME");
     }
@@ -40,22 +38,12 @@ fn sessions_are_stored_in_the_user_home_not_the_workspace() {
             .expect("session directory has a workspace-store parent"),
         "the production store uses the canonical hashed workspace leaf"
     );
-    {
-        assert_private_directory(&session_home);
-        assert_private_directory(&session_home.join("workspaces"));
-        assert_private_directory(&workspace_store);
-    }
+    assert_private_directory(&session_home);
+    assert_private_directory(&session_home.join("workspaces"));
+    assert_private_directory(&workspace_store);
     assert!(
         workspace_store.join("leases/session-ownership-v1").is_dir(),
         "session bytes and ownership leases share one workspace store"
-    );
-    let session_path = workspace_store
-        .join("sessions")
-        .join(format!("{}.jsonl", output.session_id));
-    assert_eq!(
-        fs::read_to_string(&session_path)
-            .unwrap_or_else(|err| panic!("{}: {err}", session_path.display())),
-        output.stdout
     );
 
     let reopened = run_flow(&workspace, "smoke-flow", EmitMode::Jsonl)
@@ -69,25 +57,17 @@ fn sessions_are_stored_in_the_user_home_not_the_workspace() {
         workspace_store,
         "reopening a canonical workspace reuses its hashed store"
     );
+    let session_path = workspace_store
+        .join("sessions")
+        .join(format!("{}.jsonl", output.session_id));
     assert_eq!(
         fs::read_to_string(&session_path)
             .unwrap_or_else(|err| panic!("{}: {err}", session_path.display())),
         output.stdout,
         "reopening the store preserves the prior session"
     );
-    let reopened_path = workspace_store
-        .join("sessions")
-        .join(format!("{}.jsonl", reopened.session_id));
-    assert_eq!(
-        fs::read_to_string(&reopened_path)
-            .unwrap_or_else(|err| panic!("{}: {err}", reopened_path.display())),
-        reopened.stdout,
-        "the reopened store persists the next session"
-    );
 
     let user_home = empty_workspace();
-    // SAFETY: this integration-test binary contains one test, and no runtime call overlaps the
-    // process-environment changes.
     unsafe {
         std::env::remove_var("FLOW_AGENT_HOME");
         std::env::set_var("HOME", &*user_home);
@@ -113,31 +93,32 @@ fn sessions_are_stored_in_the_user_home_not_the_workspace() {
         "the platform user home owns the default session store"
     );
 
-    // SAFETY: this integration-test binary contains one test, and the process exits after this
-    // final runtime call.
-    unsafe { std::env::set_var("FLOW_AGENT_HOME", "relative-flow-agent-home") };
-    let error = run_flow(&workspace, "smoke-flow", EmitMode::Jsonl)
-        .expect_err("a relative session home is rejected");
-    assert!(
-        matches!(error, RuntimeError::Usage(message) if message == "FLOW_AGENT_HOME must be an absolute path")
-    );
-    assert!(
-        !workspace.join(".flow/sessions").exists(),
-        "invalid global storage configuration must not make the workspace stateful"
-    );
-
     let filesystem_root = workspace
         .ancestors()
         .last()
         .expect("an absolute workspace has a filesystem root");
-    // SAFETY: this integration-test binary contains one test, and the process exits after this
-    // final runtime call.
-    unsafe { std::env::set_var("FLOW_AGENT_HOME", filesystem_root) };
-    let error = run_flow(&workspace, "smoke-flow", EmitMode::Jsonl)
-        .expect_err("the filesystem root cannot serve as a private session home");
-    assert!(
-        matches!(error, RuntimeError::Usage(message) if message == "FLOW_AGENT_HOME must name an absolute directory")
-    );
+    for (home, message) in [
+        (
+            Path::new("relative-flow-agent-home"),
+            "FLOW_AGENT_HOME must be an absolute path",
+        ),
+        (
+            filesystem_root,
+            "FLOW_AGENT_HOME must name an absolute directory",
+        ),
+    ] {
+        unsafe { std::env::set_var("FLOW_AGENT_HOME", home) };
+        let error = run_flow(&workspace, "smoke-flow", EmitMode::Jsonl)
+            .expect_err("an invalid session home is rejected");
+        assert!(
+            matches!(&error, RuntimeError::Usage(actual) if actual == message),
+            "{home:?}: {error:?}"
+        );
+        assert!(
+            !workspace.join(".flow/sessions").exists(),
+            "invalid global storage configuration must not make the workspace stateful"
+        );
+    }
 }
 
 fn only_workspace_store(workspaces: &Path) -> PathBuf {

@@ -4,11 +4,9 @@ use crate::runtime::{
 };
 use std::{fmt, net::IpAddr};
 
-/// Stable provider identifier of the OpenAI-compatible endpoint provider (ADR-0263).
 pub const OPENAI_COMPATIBLE_PROVIDER_ID: &str = "openai-compatible";
 pub(crate) const ENDPOINT_CREDENTIAL_TYPE: &str = "api-key";
 
-/// An endpoint key kept with the base URL it was issued for, so it only ever goes to that host.
 #[derive(Clone, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
 pub(crate) struct EndpointCredential {
     #[serde(rename = "type")]
@@ -29,7 +27,6 @@ impl EndpointCredential {
         Ok(credential)
     }
 
-    /// The Responses endpoint, `<base URL>/responses`.
     pub(crate) fn responses_url(&self) -> Result<String, RuntimeError> {
         let mut url = parse_base_url(&self.base_url)?;
         url.path_segments_mut()
@@ -72,8 +69,6 @@ pub(crate) fn validate_endpoint_credential(
     Ok(())
 }
 
-/// Accepts `https` URLs, and `http` only for a loopback IP literal, without credentials,
-/// query or fragment; loopback names such as `localhost` are not accepted.
 fn parse_base_url(raw: &str) -> Result<reqwest::Url, RuntimeError> {
     if raw.is_empty() || raw.len() > MAX_OAUTH_FIELD_BYTES {
         return Err(base_url_rule());

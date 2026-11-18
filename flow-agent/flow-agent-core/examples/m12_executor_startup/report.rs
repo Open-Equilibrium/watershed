@@ -111,7 +111,6 @@ pub(super) fn write_report(writer: &mut impl Write, config: Config) -> Result<bo
     write_report_with_measurement(writer, config, &mut || fresh_child_measurement(&executor))
 }
 
-/// Hashes the selected Executor image before any measured interval starts.
 fn executor_sha256(path: &Path) -> Result<String, DynError> {
     Ok(Sha256::digest(std::fs::read(path)?)
         .iter()

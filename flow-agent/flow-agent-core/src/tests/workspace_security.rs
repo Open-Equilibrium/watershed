@@ -33,6 +33,7 @@ fn shared_workspace_tool_write_parents_are_concurrent_safe() {
     let workspace = workspace_copy("hello-flow");
     fs::remove_dir_all(workspace.join("out")).expect("fixture output dir removed");
 
+    let registry = session_home_path().join("registry");
     for index in 0..10 {
         let tool = format!(
             "tool:\n  id: write-summary-{index}\n  name: WriteSummary{index}\n  tool_kind: own-script\n  command: script:write-summary-{index}\n  script_runtime: posix-sh\n  script_body: |\n    printf 'hello {index}\\n' > out/summary-{index}.txt\n  allowed_parameters: []\n"
@@ -43,26 +44,21 @@ fn shared_workspace_tool_write_parents_are_concurrent_safe() {
         let flow = format!(
             "flow:\n  id: hello-flow-{index}\n  name: HelloFlow{index}\n  phase_refs: [inspect, summarize-{index}]\n  subflow_refs: []\n"
         );
-        for registry in [
-            workspace.join("registry"),
-            session_home_path().join("registry"),
-        ] {
-            fs::write(
-                registry.join(format!("tools/write-summary-{index}.yaml")),
-                &tool,
-            )
-            .expect("tool fixture written");
-            fs::write(
-                registry.join(format!("phases/summarize-{index}.yaml")),
-                &phase,
-            )
-            .expect("phase fixture written");
-            fs::write(
-                registry.join(format!("flows/hello-flow-{index}.yaml")),
-                &flow,
-            )
-            .expect("flow fixture written");
-        }
+        fs::write(
+            registry.join(format!("tools/write-summary-{index}.yaml")),
+            &tool,
+        )
+        .expect("tool fixture written");
+        fs::write(
+            registry.join(format!("phases/summarize-{index}.yaml")),
+            &phase,
+        )
+        .expect("phase fixture written");
+        fs::write(
+            registry.join(format!("flows/hello-flow-{index}.yaml")),
+            &flow,
+        )
+        .expect("flow fixture written");
     }
 
     let barrier = Arc::new(Barrier::new(10));
@@ -111,11 +107,7 @@ fn run_flow_rejects_symlinked_log_dir_without_side_effects() {
 
     assert!(matches!(err, RuntimeError::Protocol(message) if message.contains("symlink")));
     assert!(!outside.join("smoke-flow.log").exists());
-    assert!(
-        !crate::tests::helpers::workspace_session_dir(&workspace)
-            .join("smoke-flow.jsonl")
-            .exists()
-    );
+    assert_no_session_artifacts(&workspace, "smoke-flow");
 }
 
 #[test]
@@ -133,37 +125,47 @@ fn run_flow_rejects_symlinked_session_leaf_without_side_effects() {
 
     assert!(matches!(err, RuntimeError::Protocol(message) if message.contains("symlink")));
     assert!(!outside_target.exists());
-    assert!(
-        !crate::tests::helpers::workspace_log_dir(&workspace)
-            .join("smoke-flow.log")
-            .exists()
-    );
+    assert_no_session_artifacts(&workspace, "smoke-flow");
 }
 
 #[test]
-fn run_flow_rejects_symlinked_summary_leaf_without_side_effects() {
+fn run_flow_rejects_linked_summary_leaf_without_side_effects() {
     use std::os::unix::fs::symlink;
 
-    let workspace = workspace_copy("hello-flow");
-    let outside = empty_workspace("outside-summary");
-    let outside_target = outside.join("summary.txt");
-    fs::write(&outside_target, "outside\n").expect("outside target written");
-    fs::create_dir_all(workspace.join("out")).expect("out dir");
-    symlink(&outside_target, workspace.join("out/summary.txt")).expect("summary leaf symlink");
+    type LinkFn = fn(&Path, &Path) -> std::io::Result<()>;
+    let cases: [(&str, LinkFn, core_policy::DenyReasonCode, &str); 2] = [
+        (
+            "symlink",
+            |target, link| symlink(target, link),
+            core_policy::DenyReasonCode::SymlinkEscapeDenied,
+            "symlink",
+        ),
+        (
+            "hard link",
+            |target, link| fs::hard_link(target, link),
+            core_policy::DenyReasonCode::WriteDenied,
+            "hard-linked",
+        ),
+    ];
+    for (label, link, reason, fragment) in cases {
+        let workspace = workspace_copy("hello-flow");
+        let outside = empty_workspace(&format!("outside-summary-{}", label.replace(' ', "-")));
+        let outside_target = outside.join("summary.txt");
+        fs::write(&outside_target, "outside\n").expect("outside target written");
+        fs::create_dir_all(workspace.join("out")).expect("out dir");
+        link(&outside_target, &workspace.join("out/summary.txt")).expect("summary leaf links");
 
-    let err = run_flow(&workspace, "hello-flow", EmitMode::Jsonl)
-        .expect_err("symlinked summary leaf must fail");
+        let err = run_flow(&workspace, "hello-flow", EmitMode::Jsonl)
+            .expect_err("linked summary leaf must fail");
 
-    assert_denied(
-        err,
-        core_policy::DenyReasonCode::SymlinkEscapeDenied,
-        "symlink",
-    );
-    assert_eq!(
-        fs::read_to_string(&outside_target).expect("outside target readable"),
-        "outside\n"
-    );
-    assert_no_session_artifacts(&workspace, "hello-flow");
+        assert_denied(err, reason, fragment);
+        assert_eq!(
+            fs::read_to_string(&outside_target).expect("outside target readable"),
+            "outside\n",
+            "{label}"
+        );
+        assert_no_session_artifacts(&workspace, "hello-flow");
+    }
 }
 
 #[test]
@@ -415,24 +417,4 @@ fn own_script_fixture_rejects_internal_output_directory_alias() {
         expected_alias,
     );
     assert!(!workspace.join("private/summary.txt").exists());
-}
-
-#[test]
-fn run_flow_rejects_hardlinked_summary_leaf_without_side_effects() {
-    let workspace = workspace_copy("hello-flow");
-    let outside = empty_workspace("outside-summary-hardlink");
-    let outside_target = outside.join("summary.txt");
-    fs::write(&outside_target, "outside\n").expect("outside target written");
-    fs::create_dir_all(workspace.join("out")).expect("out dir");
-    fs::hard_link(&outside_target, workspace.join("out/summary.txt")).expect("summary hard link");
-
-    let err = run_flow(&workspace, "hello-flow", EmitMode::Jsonl)
-        .expect_err("hard-linked summary leaf must fail");
-
-    assert_denied(err, core_policy::DenyReasonCode::WriteDenied, "hard-linked");
-    assert_eq!(
-        fs::read_to_string(&outside_target).expect("outside target readable"),
-        "outside\n"
-    );
-    assert_no_session_artifacts(&workspace, "hello-flow");
 }

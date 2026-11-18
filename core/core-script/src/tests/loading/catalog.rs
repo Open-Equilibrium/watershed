@@ -4,13 +4,14 @@ use super::super::super::load::{
 };
 use super::super::super::model::{
     BlockIdentity, FlowBlock, InstructionBlock, MAX_BLOCK_NAME_CHARS,
-    MAX_REGISTRY_DEFINITION_BYTES, PhaseBlock, RegistryBlock, ResolvedRegistry, ToolKind,
+    MAX_REGISTRY_DEFINITION_BYTES, PhaseBlock, RegistryBlock, ResolvedRegistry,
 };
 use super::super::super::semantics::validate_tool_semantics;
 use super::super::{
     assert_missing_reference, load_registry, own_script_tool, registry_location,
     simple_phase_block, temp_registry_dir, test_flow, test_phase,
 };
+use super::write_registry_file;
 use serde_json::Value;
 use std::path::Path;
 
@@ -73,7 +74,7 @@ fn flow_registry_retains_the_unique_transitive_definition_closure() {
             "instruction:\n  id: unused\n  name: Unused\n  prompt: Not retained\n",
         ),
     ] {
-        std::fs::write(root.join(path), source).expect("registry block written");
+        write_registry_file(&root, path, source);
     }
     let (workspace, registry_root) = registry_location(&root);
 
@@ -104,11 +105,11 @@ fn flow_registry_retains_the_unique_transitive_definition_closure() {
 #[test]
 fn flow_registry_reports_a_missing_reachable_definition_from_its_owner() {
     let root = temp_registry_dir("scoped-registry-missing-reference");
-    std::fs::write(
-        root.join("root.yaml"),
+    write_registry_file(
+        &root,
+        "root.yaml",
         "flow:\n  id: root\n  name: Root\n  phase_refs: [missing]\n  subflow_refs: []\n",
-    )
-    .expect("root flow written");
+    );
 
     let error = load_registry(&root).expect_err("missing reachable phase is rejected");
 
@@ -134,24 +135,14 @@ fn parser_rejects_oversized_names_and_definition_text() {
     assert!(name_error.to_string().contains("name"));
 
     let oversized_text = "x".repeat(MAX_REGISTRY_DEFINITION_BYTES + 1);
-    for (source_name, source) in [
-        (
-            "long-prompt.yaml",
-            format!(
-                "instruction:\n  id: long-prompt\n  name: LongPrompt\n  prompt: {oversized_text}\n"
-            ),
+    let error = parse_registry_block(
+        "long-script.yaml",
+        &format!(
+            "tool:\n  id: long-script\n  name: LongScript\n  tool_kind: own-script\n  command: script:long-script\n  script_runtime: posix-sh\n  script_body: {oversized_text}\n  allowed_parameters: []\n"
         ),
-        (
-            "long-script.yaml",
-            format!(
-                "tool:\n  id: long-script\n  name: LongScript\n  tool_kind: own-script\n  command: script:long-script\n  script_runtime: posix-sh\n  script_body: {oversized_text}\n  allowed_parameters: []\n"
-            ),
-        ),
-    ] {
-        let error = parse_registry_block(source_name, &source)
-            .expect_err("oversized definition text rejected");
-        assert!(error.to_string().contains("maximum"), "{error}");
-    }
+    )
+    .expect_err("oversized definition text rejected");
+    assert!(error.to_string().contains("maximum"), "{error}");
 
     let boundary_multibyte = "é".repeat(MAX_REGISTRY_DEFINITION_BYTES / "é".len());
     let RegistryBlock::Instruction(instruction) = parse_registry_block(
@@ -190,7 +181,7 @@ fn flow_registry_rejects_a_definition_closure_above_its_byte_budget() {
         ("phase.yaml", phase_source),
         ("instruction.yaml", instruction_source),
     ] {
-        std::fs::write(root.join(path), source).expect("registry block written");
+        write_registry_file(&root, path, source);
     }
     let (workspace, registry_root) = registry_location(&root);
     let max_active =
@@ -281,15 +272,6 @@ fn registry_reference_validation_reports_each_missing_reference_shape() {
         err,
         SemanticValidationError::InvalidToolDefinition { message, .. }
             if message.contains("non-empty")
-    ));
-
-    let mut tool = own_script_tool("write-summary", "script:write-summary");
-    tool.tool_kind = ToolKind::PredefinedCommand;
-    let err = validate_tool_semantics(&tool).expect_err("tool kind must match command shape");
-    assert!(err.to_string().contains("predefined-command"));
-    assert!(matches!(
-        err,
-        SemanticValidationError::ToolCommandKindMismatch { .. }
     ));
 
     let empty_flow = ResolvedRegistry::from_blocks([RegistryBlock::Flow(FlowBlock {

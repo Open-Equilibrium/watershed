@@ -33,7 +33,6 @@ pub fn open_anchored_session_log_append_file(
     Ok(file)
 }
 
-/// `O_NONBLOCK` makes an open of a FIFO return instead of waiting for its other end.
 fn nonblocking_flag() -> i32 {
     rustix::fs::OFlags::NONBLOCK.bits() as i32
 }

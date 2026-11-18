@@ -28,8 +28,6 @@ impl CleanupController {
         }
     }
 
-    /// Cleanup of a supervisor that runs its own `new` sequence for the Tool root:
-    /// it receives that complete TERM/forced-reap budget plus one grace to report.
     pub(crate) fn delegated(started: Instant) -> Self {
         Self {
             phase: CleanupPhase::TermGrace,

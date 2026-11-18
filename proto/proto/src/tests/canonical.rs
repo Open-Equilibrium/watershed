@@ -1,4 +1,4 @@
-use super::test_event;
+use super::{raw_event, test_event};
 use crate::{
     CanonicalJsonError, EventEnvelope, EventType, EventValidationError, JSON_NESTING_LIMIT_V0,
     canonical_json, parse_unique_json,
@@ -82,16 +82,6 @@ fn canonical_event_jsonl_sorts_keys_and_ends_with_lf() {
 }
 
 #[test]
-fn canonical_json_normalizes_strings_to_nfc() {
-    let decomposed = json!("e\u{301}");
-
-    assert_eq!(
-        canonical_json(&decomposed).expect("value canonicalizes"),
-        "\"é\""
-    );
-}
-
-#[test]
 fn canonical_event_output_normalizes_all_string_values_to_nfc() {
     let mut event = EventEnvelope::new(
         "evt-e\u{301}",
@@ -129,6 +119,9 @@ fn canonical_json_serializes_scalars_in_shortest_form() {
         ("-2.0", "-2"),
         ("1.50", "1.5"),
         ("1e-7", "1e-7"),
+        ("1000000", "1000000"),
+        ("1e6", "1000000"),
+        ("-1e6", "-1000000"),
     ] {
         let value: Value = serde_json::from_str(input).expect("valid JSON scalar");
         assert_eq!(
@@ -140,31 +133,13 @@ fn canonical_json_serializes_scalars_in_shortest_form() {
 }
 
 #[test]
-fn canonical_json_normalizes_equivalent_integer_and_exponent_numbers() {
-    for (integer, exponent, expected) in [
-        ("1000000", "1e6", "1000000"),
-        ("-1000000", "-1e6", "-1000000"),
-    ] {
-        let integer: Value = serde_json::from_str(integer).expect("valid integer JSON number");
-        let exponent: Value = serde_json::from_str(exponent).expect("valid exponent JSON number");
-
-        assert_eq!(
-            canonical_json(&integer).expect("integer canonicalizes"),
-            expected
-        );
-        assert_eq!(
-            canonical_json(&exponent).expect("exponent canonicalizes"),
-            expected
-        );
-    }
-}
-
-#[test]
-fn canonical_json_normalizes_object_keys_to_nfc() {
-    let decomposed = json!({ "e\u{301}": 1 });
-
+fn canonical_json_normalizes_strings_and_object_keys_to_nfc() {
     assert_eq!(
-        canonical_json(&decomposed).expect("value canonicalizes"),
+        canonical_json(&json!("e\u{301}")).expect("value canonicalizes"),
+        "\"é\""
+    );
+    assert_eq!(
+        canonical_json(&json!({ "e\u{301}": 1 })).expect("value canonicalizes"),
         "{\"é\":1}"
     );
 }
@@ -253,10 +228,12 @@ fn assert_event_nesting_boundaries(
     serde_json::from_str::<EventEnvelope>(&accepted_wire)
         .expect("accepted wire event deserializes");
 
-    assert_event_nesting_error(
-        rejected
-            .validate_v0()
-            .expect_err("the 128th total container must fail validation"),
+    let err = rejected
+        .validate_v0()
+        .expect_err("the 128th total container must fail validation");
+    assert_eq!(
+        err.requirement(),
+        "must stay below the protocol v0 JSON nesting limit"
     );
     for err in [
         serde_json::to_string(&rejected)
@@ -277,13 +254,6 @@ fn assert_event_nesting_boundaries(
     assert!(err.to_string().contains("recursion limit exceeded"));
 }
 
-fn assert_event_nesting_error(err: EventValidationError) {
-    assert_eq!(
-        err.requirement(),
-        "must stay below the protocol v0 JSON nesting limit"
-    );
-}
-
 fn nested_arrays(depth: usize) -> Value {
     (0..depth).fold(json!("leaf"), |value, _| Value::Array(vec![value]))
 }
@@ -292,19 +262,6 @@ fn payload_with_nested_arrays(array_depth: usize) -> Value {
     let mut payload = Map::new();
     payload.insert("future".to_owned(), nested_arrays(array_depth));
     Value::Object(payload)
-}
-
-fn raw_event(payload: Value) -> Value {
-    let mut event = Map::new();
-    event.insert("event_id".to_owned(), json!("evt-001"));
-    event.insert("event_type".to_owned(), json!("session.started"));
-    event.insert("payload".to_owned(), payload);
-    event.insert("protocol_version".to_owned(), json!("0"));
-    event.insert("sequence".to_owned(), json!(1));
-    event.insert("session_id".to_owned(), json!("smoke001"));
-    event.insert("source".to_owned(), json!("flow-agent-cli"));
-    event.insert("timestamp".to_owned(), json!("2026-01-01T00:00:00Z"));
-    Value::Object(event)
 }
 
 fn raw_event_with_additive(value: Value) -> Value {
@@ -318,22 +275,19 @@ fn raw_event_with_additive(value: Value) -> Value {
 
 fn wire_event_with_payload_arrays(array_depth: usize) -> String {
     wire_event(
-        "payload",
         &format!("{{\"future\":{}}}", nested_array_json(array_depth)),
+        "",
     )
 }
 
 fn wire_event_with_additive_arrays(array_depth: usize) -> String {
-    wire_event("future", &nested_array_json(array_depth))
+    wire_event(
+        "{}",
+        &format!("\"future\":{},", nested_array_json(array_depth)),
+    )
 }
 
-fn wire_event(field: &str, value: &str) -> String {
-    let payload = if field == "payload" { value } else { "{}" };
-    let additive = if field == "payload" {
-        String::new()
-    } else {
-        format!("\"{field}\":{value},")
-    };
+fn wire_event(payload: &str, additive: &str) -> String {
     format!(
         "{{{additive}\"event_id\":\"evt-001\",\"event_type\":\"session.started\",\"payload\":{payload},\"protocol_version\":\"0\",\"sequence\":1,\"session_id\":\"smoke001\",\"source\":\"flow-agent-cli\",\"timestamp\":\"2026-01-01T00:00:00Z\"}}"
     )

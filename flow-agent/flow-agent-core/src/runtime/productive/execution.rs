@@ -116,7 +116,6 @@ where
     T: ProductiveToolExecutor,
 {
     execution.workspace.verify_binding()?;
-    // A credential the store would refuse is refused before any attempt intent is recorded.
     if let ProviderCredential::OpenAiCodex(credential) = execution.credential {
         validate_credential_record(credential)?;
     }

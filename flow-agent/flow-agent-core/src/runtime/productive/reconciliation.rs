@@ -12,10 +12,8 @@ use crate::runtime::{
     workspace_text::read_workspace_text_file,
 };
 
-/// Maximum canonical bytes accepted by `flow reconcile-tool`.
 pub const MAX_TOOL_RECONCILIATION_BYTES: usize = 128 * 1024;
 
-/// Reads one bounded Tool reconciliation result relative to the workspace.
 pub fn read_tool_reconciliation_file(
     workspace: impl AsRef<std::path::Path>,
     source: &str,
@@ -28,7 +26,6 @@ pub fn read_tool_reconciliation_file(
     )
 }
 
-/// Settles the only uncertain Tool attempt in one run from canonical external evidence.
 pub fn reconcile_tool_attempt(
     workspace: impl AsRef<std::path::Path>,
     conversation_id: &str,

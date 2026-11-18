@@ -1,7 +1,6 @@
 mod protocol;
 mod transport;
 
-/// Stable provider identifier used by configuration and CLI commands.
 pub const OPENAI_CODEX_PROVIDER_ID: &str = "openai-codex";
 pub(crate) const OPENAI_CODEX_ORIGINATOR: &str = "flow-agent";
 pub(crate) const OPENAI_CODEX_RESPONSES_URL: &str =

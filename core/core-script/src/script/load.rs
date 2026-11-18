@@ -40,7 +40,6 @@ impl Write for DefinitionByteCounter {
     }
 }
 
-/// Returns the canonical serialized definition size, including its trailing newline.
 pub fn registry_block_definition_bytes(block: &RegistryBlock) -> Result<u64, RegistryError> {
     let mut bytes = DefinitionByteCounter::default();
     serde_json::to_writer_pretty(&mut bytes, block).map_err(RegistryError::Serialize)?;
@@ -295,7 +294,6 @@ impl ResolvedRegistry {
     }
 }
 
-/// Loads the unique transitive registry closure for one top-level Flow.
 pub fn load_flow_registry_from_root(
     root: impl AsRef<Path>,
     registry_root: impl AsRef<Path>,
@@ -311,7 +309,6 @@ pub fn load_flow_registry_from_root(
     )
 }
 
-/// Loads one Flow registry from an already opened root-directory capability.
 pub fn load_flow_registry_from_root_dir(
     root_dir: &Dir,
     root_path: impl AsRef<Path>,
@@ -329,7 +326,6 @@ pub fn load_flow_registry_from_root_dir(
     )
 }
 
-/// Validates every block and reference beneath an explicitly selected root.
 pub fn validate_registry_from_root(
     root: impl AsRef<Path>,
     registry_root: impl AsRef<Path>,
@@ -343,7 +339,6 @@ pub fn validate_registry_from_root(
     .map(|_| ())
 }
 
-/// Validates every block and reference from an already opened root-directory capability.
 pub fn validate_registry_from_root_dir(
     root_dir: &Dir,
     root_path: impl AsRef<Path>,
@@ -359,7 +354,6 @@ pub fn validate_registry_from_root_dir(
     .map(|_| ())
 }
 
-/// Validates a candidate block against every existing block without publishing it.
 pub fn validate_registry_addition_from_root_dir(
     root_dir: &Dir,
     root_path: impl AsRef<Path>,
@@ -376,7 +370,6 @@ pub fn validate_registry_addition_from_root_dir(
     )
 }
 
-/// Parses one registry block from a named YAML source.
 pub fn parse_registry_block(
     source_name: &str,
     source: &str,

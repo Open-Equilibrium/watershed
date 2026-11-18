@@ -1,5 +1,3 @@
-//! Feature-gated observational evidence for the M1.2 Executor startup boundary.
-
 use std::{
     path::Path,
     time::{Duration, Instant},
@@ -42,12 +40,9 @@ fn fixed_executor_policy() -> core_policy::PolicyArtifact {
     }
 }
 
-/// One unadjusted observation through the selected and prepared Executor.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct M12ExecutorStartupMeasurement {
-    /// Preparation and readiness through validated Tool result and enforcement receipt.
     pub executor_elapsed: Duration,
-    /// Mandatory Flow-owned write protection confirmed by the validated Executor receipt.
     pub flow_owned_write_protection_active: bool,
 }
 
@@ -55,13 +50,11 @@ fn is_prefixed_lower_sha256(value: &str) -> bool {
     strip_sha256_prefix(value).is_some_and(is_lowercase_sha256_hex)
 }
 
-/// Rejects public M1.2 Executor checks outside supported native Tool hosts.
 pub fn ensure_m12_executor_host() -> Result<(), String> {
     ensure_productive_tool_execution_platform()
         .map_err(|_| "M1.2 Executor startup requires a supported native Tool host".to_owned())
 }
 
-/// Measures one fixed no-op Tool through the real prepared Executor.
 pub fn run_m12_executor_startup(workspace: &Path) -> Result<M12ExecutorStartupMeasurement, String> {
     ensure_m12_executor_host()?;
     let policy = fixed_executor_policy();

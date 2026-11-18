@@ -1,4 +1,7 @@
-use super::super::test_support::expected_stream;
+use super::super::{
+    helpers::{empty_workspace, reserve_session_log},
+    test_support::{TempWorkspace, expected_stream},
+};
 use crate::runtime::{
     event_writer::{RuntimeEventSink, SerialSessionWriter, SerialWriterStart},
     live_events::{LiveEventNotifier, LiveEventReceiveError, LiveEventReceiver},
@@ -9,6 +12,7 @@ use crate::runtime::{
 };
 use proto::EventEnvelope;
 use std::{
+    fmt::Display,
     io,
     path::Path,
     sync::{
@@ -18,8 +22,10 @@ use std::{
     time::Duration,
 };
 
+type Appends = Arc<Mutex<Vec<Vec<u8>>>>;
+
 struct BatchProbeAppender {
-    appends: Arc<Mutex<Vec<Vec<u8>>>>,
+    appends: Appends,
     failure_prefix: Option<Option<usize>>,
     notification_probe: Option<Arc<Mutex<LiveEventReceiver>>>,
     sync_failure: bool,
@@ -111,25 +117,19 @@ fn progress_batch(
     let validation =
         SessionAppendValidationState::from_prior_events(path, "hello-flow", &fixture[..6])
             .expect("fixture prefix validates");
+    let renumbered = |template: &EventEnvelope, sequence: u64| {
+        let mut event = template.clone();
+        event.event_id = format!("evt-batch-{sequence:03}");
+        event.sequence = sequence;
+        event.timestamp = EventClock::fixed_fixture()
+            .timestamp(sequence)
+            .expect("fixture timestamp is valid");
+        event
+    };
     let progress = (0..count)
-        .map(|index| {
-            let sequence = index as u64 + 7;
-            let mut event = fixture[6].clone();
-            event.event_id = format!("evt-batch-{sequence:03}");
-            event.sequence = sequence;
-            event.timestamp = EventClock::fixed_fixture()
-                .timestamp(sequence)
-                .expect("fixture timestamp is valid");
-            event
-        })
-        .collect::<Vec<_>>();
-    let sequence = count as u64 + 7;
-    let mut terminal = fixture[7].clone();
-    terminal.event_id = format!("evt-batch-{sequence:03}");
-    terminal.sequence = sequence;
-    terminal.timestamp = EventClock::fixed_fixture()
-        .timestamp(sequence)
-        .expect("fixture timestamp is valid");
+        .map(|index| renumbered(&fixture[6], index as u64 + 7))
+        .collect();
+    let terminal = renumbered(&fixture[7], count as u64 + 7);
     (validation, progress, terminal)
 }
 
@@ -137,30 +137,16 @@ pub(in crate::tests) fn progress_writer<'a>(
     reservation: &'a SessionReservation,
     count: usize,
     notifier: LiveEventNotifier,
-    appends: Arc<Mutex<Vec<Vec<u8>>>>,
-    failure_prefix: Option<Option<usize>>,
-    notification_probe: Option<Arc<Mutex<LiveEventReceiver>>>,
-) -> (SerialSessionWriter<'a>, Vec<EventEnvelope>, EventEnvelope) {
-    progress_writer_with_sync_probe(
-        reservation,
-        count,
-        notifier,
-        appends,
-        failure_prefix,
-        notification_probe,
-        None,
-    )
-}
-
-pub(in crate::tests) fn progress_writer_with_sync_probe<'a>(
-    reservation: &'a SessionReservation,
-    count: usize,
-    notifier: LiveEventNotifier,
-    appends: Arc<Mutex<Vec<Vec<u8>>>>,
     failure_prefix: Option<Option<usize>>,
     notification_probe: Option<Arc<Mutex<LiveEventReceiver>>>,
     sync_probe: Option<SyncProbe>,
-) -> (SerialSessionWriter<'a>, Vec<EventEnvelope>, EventEnvelope) {
+) -> (
+    SerialSessionWriter<'a>,
+    Vec<EventEnvelope>,
+    EventEnvelope,
+    Appends,
+) {
+    let appends = Arc::default();
     let (validation, progress, terminal) =
         progress_batch(reservation.session_path.diagnostic_path(), count);
     let writer = SerialSessionWriter::start_with_appender(
@@ -173,7 +159,7 @@ pub(in crate::tests) fn progress_writer_with_sync_probe<'a>(
             notifier: Some(notifier),
         },
         BatchProbeAppender {
-            appends,
+            appends: Arc::clone(&appends),
             failure_prefix,
             notification_probe,
             sync_failure: sync_probe.as_ref().is_some_and(|probe| probe.failure),
@@ -181,7 +167,21 @@ pub(in crate::tests) fn progress_writer_with_sync_probe<'a>(
         },
     )
     .expect("writer starts");
-    (writer, progress, terminal)
+    (writer, progress, terminal, appends)
+}
+
+pub(in crate::tests) fn reserved_session(
+    label: &str,
+    session_id: &str,
+) -> (TempWorkspace, SessionReservation) {
+    let workspace = empty_workspace(label);
+    let reservation = reserve_session_log(&workspace, session_id).expect("session reserved");
+    (workspace, reservation)
+}
+
+pub(in crate::tests) fn assert_error_contains(error: impl Display, expected: &str) {
+    let message = error.to_string();
+    assert!(message.contains(expected), "{message}");
 }
 
 pub(in crate::tests) fn enqueue_test_event(

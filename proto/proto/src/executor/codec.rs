@@ -10,7 +10,6 @@ use super::{
 use crate::{canonical::nfc_json_string_values, canonical_json, parse_unique_json};
 use serde::{Serialize, de::DeserializeOwned};
 
-/// Validates active Flow-owned write protection and the digest of the complete policy Flow requested.
 pub fn validate_enforcement_receipt_v0(
     receipt: &EnforcementReceiptV0,
     expected_policy_digest: &str,
@@ -18,7 +17,6 @@ pub fn validate_enforcement_receipt_v0(
     validate_receipt(receipt, expected_policy_digest)
 }
 
-/// Serializes and validates one canonical Executor request plus LF.
 pub fn canonical_executor_request_v0(
     request: &ExecutorRequestV0,
 ) -> Result<Vec<u8>, ExecutorProtocolError> {
@@ -29,7 +27,6 @@ pub fn canonical_executor_request_v0(
     Ok(bytes)
 }
 
-/// Serializes and validates one canonical Executor preflight response plus LF.
 pub fn canonical_executor_preflight_v0(
     preflight: &ExecutorPreflightV0,
 ) -> Result<Vec<u8>, ExecutorProtocolError> {
@@ -43,7 +40,6 @@ pub fn canonical_executor_preflight_v0(
     Ok(bytes)
 }
 
-/// Serializes and validates one canonical Executor start record plus LF.
 pub fn canonical_executor_start_v0(
     start: &ExecutorStartV0,
 ) -> Result<Vec<u8>, ExecutorProtocolError> {
@@ -53,7 +49,6 @@ pub fn canonical_executor_start_v0(
     Ok(bytes)
 }
 
-/// Serializes and validates one canonical Executor response plus LF.
 pub fn canonical_executor_response_v0(
     response: &ExecutorResponseV0,
 ) -> Result<Vec<u8>, ExecutorProtocolError> {
@@ -74,7 +69,6 @@ pub fn canonical_executor_response_v0(
     Ok(bytes)
 }
 
-/// Serializes and validates one canonical Executor probe plus LF.
 pub fn canonical_executor_probe_v0(
     probe: &ExecutorProbeV0,
 ) -> Result<Vec<u8>, ExecutorProtocolError> {
@@ -84,7 +78,6 @@ pub fn canonical_executor_probe_v0(
     Ok(bytes)
 }
 
-/// Parses one exact canonical LF-terminated Executor request.
 pub fn parse_executor_request_v0(bytes: &[u8]) -> Result<ExecutorRequestV0, ExecutorProtocolError> {
     let value = parse_canonical_document(bytes, MAX_EXECUTOR_REQUEST_BYTES_V0, "request")?;
     let request = decode_document(value, "request")?;
@@ -92,7 +85,6 @@ pub fn parse_executor_request_v0(bytes: &[u8]) -> Result<ExecutorRequestV0, Exec
     Ok(request)
 }
 
-/// Parses one exact canonical Executor preflight response for the expected request.
 pub fn parse_executor_preflight_v0(
     bytes: &[u8],
     expected_request_id: &str,
@@ -103,7 +95,6 @@ pub fn parse_executor_preflight_v0(
     Ok(preflight)
 }
 
-/// Parses one exact canonical Executor start record for the expected request.
 pub fn parse_executor_start_v0(
     bytes: &[u8],
     expected_request_id: &str,
@@ -114,7 +105,6 @@ pub fn parse_executor_start_v0(
     Ok(start)
 }
 
-/// Parses and validates one canonical Executor terminal response.
 pub fn parse_executor_response_v0(
     bytes: &[u8],
     expected_request_id: &str,
@@ -126,7 +116,6 @@ pub fn parse_executor_response_v0(
     Ok(response)
 }
 
-/// Parses and validates one canonical Executor readiness response.
 pub fn parse_executor_probe_v0(bytes: &[u8]) -> Result<ExecutorProbeV0, ExecutorProtocolError> {
     let value = parse_canonical_document(bytes, MAX_EXECUTOR_PROBE_BYTES_V0, "probe")?;
     let probe = decode_document(value, "probe")?;

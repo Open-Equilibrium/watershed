@@ -102,7 +102,6 @@ pub fn parse_segmented_jsonl_leaf(name: &str, stem: &str) -> SegmentedJsonlLeaf 
     }
 }
 
-/// Same reserved shape as `parse_segmented_jsonl_leaf` (`<stem>.<ordinal>.jsonl`), on raw bytes.
 fn is_reserved_segment_name_bytes(name: &[u8], folded_stem: &str) -> bool {
     name.to_ascii_lowercase()
         .strip_prefix(folded_stem.as_bytes())
@@ -169,7 +168,6 @@ pub fn for_each_segmented_jsonl_member(
         let entry = entry.map_err(|source| path_io_error(&base.parent.path, source))?;
         let name = entry.file_name();
         let Some(name) = name.to_str() else {
-            // A non-UTF-8 name cannot be canonical, but one with the reserved shape is malformed.
             if is_reserved_segment_name_bytes(name.as_bytes(), &folded_leaf) {
                 return Err(RuntimeError::Protocol(format!(
                     "{} contains malformed segmented JSONL name {}",
@@ -363,7 +361,6 @@ pub fn for_each_segmented_jsonl_line(
     })
 }
 
-/// Visits each line in order until `visit` breaks; the rest of the stream is neither read nor framed.
 pub fn for_each_segmented_jsonl_line_until(
     base: &AnchoredFile,
     limits: SessionStreamLimits,

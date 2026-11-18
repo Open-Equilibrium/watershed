@@ -329,7 +329,6 @@ pub(super) fn validate_text(
     }
 }
 
-// WHY: canonical serialization converts text to NFC, so refusing keeps the bytes Flow reviewed.
 pub(super) fn validate_nfc(value: &str, name: &str) -> Result<(), ExecutorProtocolError> {
     if is_nfc(value) {
         Ok(())
@@ -341,7 +340,6 @@ pub(super) fn validate_nfc(value: &str, name: &str) -> Result<(), ExecutorProtoc
 }
 
 pub(super) fn validate_absolute_path(value: &str, name: &str) -> Result<(), ExecutorProtocolError> {
-    // WHY: canonical serialization normalizes strings, which would redirect a non-NFC path.
     if value == "/"
         || !is_nfc(value)
         || !value.starts_with('/')

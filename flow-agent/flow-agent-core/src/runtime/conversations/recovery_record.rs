@@ -88,7 +88,6 @@ pub(super) fn parse_productive_recovery_records(
                 "productive recovery snapshot contains more than one header",
             ));
         }
-        // WHY: a terminal is always last, so the last record is the only one to check.
         if matches!(
             records.last(),
             Some(ProductiveRecoveryRecord::Terminal { .. })

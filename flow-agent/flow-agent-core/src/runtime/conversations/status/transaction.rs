@@ -591,11 +591,6 @@ fn finalize_status_append_recovery(
     sync_anchored_stream(&base, STATUS_APPEND_STREAM_LIMITS)
 }
 
-/// Discards the bytes of a torn append, so the append counts as never applied (ADR-0259).
-///
-/// A target longer than its recorded prior length but shorter than the recorded append is torn:
-/// its bytes are the uncommitted tail of the append the transaction names. Every other length is
-/// left to `status_append_was_applied`, which refuses it without changing the target.
 fn roll_back_torn_status_append(
     conversation: &AnchoredDir,
     transaction: &ConversationStatusTransaction,

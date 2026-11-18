@@ -19,23 +19,7 @@ const X32_SYSCALL_BIT: u32 = 0x4000_0000;
 const CLONE_SYSCALL: u32 = 56;
 const CLONE3_SYSCALL: u32 = 435;
 const DENY_EPERM_SYSCALLS: [u32; 17] = [
-    101, // ptrace
-    155, // pivot_root
-    165, // mount
-    166, // umount2
-    248, // add_key
-    249, // request_key
-    250, // keyctl
-    272, // unshare
-    308, // setns
-    425, // io_uring_setup
-    428, // open_tree
-    429, // move_mount
-    430, // fsopen
-    431, // fsconfig
-    432, // fsmount
-    433, // fspick
-    442, // mount_setattr
+    101, 155, 165, 166, 248, 249, 250, 272, 308, 425, 428, 429, 430, 431, 432, 433, 442,
 ];
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -121,7 +105,6 @@ fn filter_instructions() -> Vec<Instruction> {
         program.push(Instruction::jump(BPF_JMP_JEQ_K, syscall, 0, 1));
         program.push(Instruction::statement(BPF_RET_K, SECCOMP_RET_ERRNO | EPERM));
     }
-    // Normal clone/fork remains usable; new namespaces are denied.
     program.extend([
         Instruction::jump(BPF_JMP_JEQ_K, CLONE_SYSCALL, 0, 3),
         Instruction::statement(BPF_LD_W_ABS, 16),
@@ -139,7 +122,6 @@ mod tests {
     use super::{Instruction, filter_bytes, filter_instructions};
     use std::{fs::File, io::Read};
 
-    // Only the forward-only BPF operations used by this filter are needed.
     fn decision(program: &[Instruction], arch: u32, syscall: u32, flags: u32) -> u32 {
         let mut accumulator = 0;
         let mut cursor = 0;
@@ -176,7 +158,6 @@ mod tests {
     #[test]
     fn filter_enforces_the_boundary_without_blocking_ordinary_processes() {
         let program = filter_instructions();
-        // Keep syscall numbers, ABI values and outcomes independent of production constants.
         let check = |arch, syscall, flags, expected| {
             assert_eq!(
                 decision(&program, arch, syscall, flags),
@@ -187,13 +168,13 @@ mod tests {
         for syscall in [
             101, 155, 165, 166, 248, 249, 250, 272, 308, 425, 428, 429, 430, 431, 432, 433, 442,
         ] {
-            check(0xc000_003e, syscall, 0, 0x0005_0001); // EPERM
+            check(0xc000_003e, syscall, 0, 0x0005_0001);
         }
         for syscall in [0, 1, 41, 42, 57, 58, 59, 102] {
-            check(0xc000_003e, syscall, 0, 0x7fff_0000); // ALLOW
+            check(0xc000_003e, syscall, 0, 0x7fff_0000);
         }
         for flags in [0, 17, 0x0000_0100, 0x0001_0f00] {
-            check(0xc000_003e, 56, flags, 0x7fff_0000); // Ordinary clone
+            check(0xc000_003e, 56, flags, 0x7fff_0000);
         }
         for namespace in [
             0x0002_0000,
@@ -207,13 +188,13 @@ mod tests {
         ] {
             check(0xc000_003e, 56, namespace | 17, 0x0005_0001);
         }
-        check(0xc000_003e, 435, 0, 0x0005_0026); // clone3 -> ENOSYS
+        check(0xc000_003e, 435, 0, 0x0005_0026);
         for syscall in [0, 56, 101, 435] {
-            check(0xc000_003e, syscall | 0x4000_0000, 0, 0x0005_0001); // x32
+            check(0xc000_003e, syscall | 0x4000_0000, 0, 0x0005_0001);
         }
         for arch in [0x4000_0003, 0xc000_00b7] {
             for syscall in [0, 101, 0x4000_0000] {
-                check(arch, syscall, 0, 0x8000_0000); // KILL_PROCESS before syscall checks
+                check(arch, syscall, 0, 0x8000_0000);
             }
         }
     }

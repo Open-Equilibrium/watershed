@@ -19,7 +19,6 @@ use std::{
 
 pub(crate) const FLOW_AGENT_HOME: (&str, &str) = ("FLOW_AGENT_HOME", ".flow");
 const MAX_SAMPLE_COUNT: usize = 1_000;
-/// Most bytes kept from each measurement child stream; a child that writes more is killed.
 const MAX_MEASUREMENT_CHILD_STREAM_BYTES: usize = 64 * 1024;
 
 pub(crate) type DynError = Box<dyn Error + Send + Sync>;
@@ -45,7 +44,6 @@ where
         command.env(variable, session_root.path().join(leaf));
     }
     let mut child = command.spawn()?;
-    // The child leads its own process group, so a kill also reaches any grandchild holding a pipe.
     let group = rustix::process::Pid::from_child(&child);
     let stdout = child.stdout.take().expect("stdout is piped");
     let stderr = child.stderr.take().expect("stderr is piped");
@@ -53,7 +51,6 @@ where
     let stderr_reader = thread::spawn(move || read_bounded(stderr, group));
     let stdout = join_reader(stdout_reader)?;
     let stderr = join_reader(stderr_reader)?;
-    // Reaping happens only after both readers ended, so the leader's id cannot be reused while signalled.
     let status = child.wait()?;
     if stdout.overflowed || stderr.overflowed {
         return Err(std::io::Error::other(format!(
@@ -73,7 +70,6 @@ struct BoundedStream {
     overflowed: bool,
 }
 
-/// Reads at most one byte past the bound, and kills the still-unreaped group on overflow.
 fn read_bounded(stream: impl Read, group: rustix::process::Pid) -> std::io::Result<BoundedStream> {
     let mut bytes = Vec::new();
     stream

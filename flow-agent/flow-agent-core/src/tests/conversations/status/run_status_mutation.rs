@@ -1,4 +1,4 @@
-use super::super::super::helpers::empty_workspace;
+use super::super::super::helpers::{empty_workspace, workspace_session_dir};
 use super::super::super::test_support::TempWorkspace;
 use super::super::recovery_fixtures::write_terminal_recovery_fixture;
 use super::super::{
@@ -12,13 +12,23 @@ use crate::runtime::{
     },
     fs_guards::{
         set_directory_sync_error_for_path_for_test, start_directory_sync_trace_for_test,
-        take_directory_sync_trace_for_test,
+        take_directory_sync_trace_for_test, test_path_key,
     },
 };
 use std::{
     fs, io,
     path::{Path, PathBuf},
 };
+
+fn transaction_path(workspace: &Path) -> PathBuf {
+    workspace_session_dir(workspace).join("review/.status-transaction.json")
+}
+
+fn run_dir(workspace: &Path, run_id: &str) -> PathBuf {
+    workspace_session_dir(workspace)
+        .join("review/runs")
+        .join(run_id)
+}
 
 fn assert_run_creation_crashes(workspace: &Path, run_id: &str, point: StatusTransactionCrashPoint) {
     set_status_transaction_crash_point(point);
@@ -35,6 +45,14 @@ fn assert_run_creation_crashes(workspace: &Path, run_id: &str, point: StatusTran
     assert!(crash.is_err(), "{point:?}");
 }
 
+fn assert_run_reclamation_crashes(workspace: &Path, point: StatusTransactionCrashPoint) {
+    set_status_transaction_crash_point(point);
+    let crash = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        reclaim_unpublished_productive_run(workspace, "review", "review-2")
+    }));
+    assert!(crash.is_err(), "{point:?}");
+}
+
 fn populated_run_creation_stage(label: &str) -> (TempWorkspace, PathBuf) {
     let workspace = empty_workspace(label);
     assert_run_creation_crashes(
@@ -42,13 +60,12 @@ fn populated_run_creation_stage(label: &str) -> (TempWorkspace, PathBuf) {
         "review-1",
         StatusTransactionCrashPoint::RunCreationStagePopulated,
     );
-    let stage =
-        fs::read_dir(crate::tests::helpers::workspace_session_dir(&workspace).join("review/runs"))
-            .expect("staging directory reads")
-            .next()
-            .expect("staging directory exists")
-            .expect("staging directory entry reads")
-            .path();
+    let stage = fs::read_dir(workspace_session_dir(&workspace).join("review/runs"))
+        .expect("staging directory reads")
+        .next()
+        .expect("staging directory exists")
+        .expect("staging directory entry reads")
+        .path();
     (workspace, stage)
 }
 
@@ -63,6 +80,37 @@ fn create_reclaimable_review_run(workspace: &Path) {
         FLOW_HASH,
     )
     .expect("unpublished Run is created");
+}
+
+fn assert_runs_synced_before_transaction_clear(workspace: &Path, label: &str) {
+    let trace = take_directory_sync_trace_for_test();
+    let conversation = test_path_key(&workspace_session_dir(workspace).join("review"));
+    let runs = test_path_key(&workspace_session_dir(workspace).join("review/runs"));
+    let runs_sync = trace
+        .iter()
+        .position(|path| path == &runs)
+        .unwrap_or_else(|| panic!("{label}: missing runs sync: {trace:?}"));
+    let transaction_clear = trace
+        .iter()
+        .position(|path| path == &conversation)
+        .unwrap_or_else(|| panic!("{label}: missing transaction clear: {trace:?}"));
+    assert!(runs_sync < transaction_clear, "{label}: {trace:?}");
+}
+
+fn assert_rebound_run_fails_closed(workspace: &Path, target: &Path, replacement: &Path) {
+    fs::rename(target, target.with_extension("original")).expect("original Run moves aside");
+    fs::rename(replacement, target).expect("replacement Run takes the bound path");
+    let replacement_bytes = file_tree_bytes(target);
+
+    let error = conversation_status_page(workspace, None)
+        .expect_err("status recovery must reject a rebound Run");
+
+    assert!(error.to_string().contains("identity"), "{error}");
+    assert_eq!(file_tree_bytes(target), replacement_bytes);
+    assert!(
+        transaction_path(workspace).is_file(),
+        "the unresolved transaction remains"
+    );
 }
 
 #[test]
@@ -101,33 +149,12 @@ fn conversation_status_recovers_run_creation_before_and_after_publication() {
                     "{continuation} {point:?}"
                 );
             }
-            let trace = take_directory_sync_trace_for_test();
-            let runs = crate::runtime::fs_guards::test_path_key(
-                &crate::tests::helpers::workspace_session_dir(&workspace).join("review/runs"),
-            );
-            let conversation = crate::runtime::fs_guards::test_path_key(
-                &crate::tests::helpers::workspace_session_dir(&workspace).join("review"),
-            );
-            let runs_sync = trace
-                .iter()
-                .position(|path| path == &runs)
-                .unwrap_or_else(|| {
-                    panic!("{continuation} {point:?}: missing runs sync: {trace:?}")
-                });
-            let transaction_clear = trace
-                .iter()
-                .position(|path| path == &conversation)
-                .unwrap_or_else(|| {
-                    panic!("{continuation} {point:?}: missing transaction clear: {trace:?}")
-                });
-            assert!(
-                runs_sync < transaction_clear,
-                "{continuation} {point:?}: {trace:?}"
+            assert_runs_synced_before_transaction_clear(
+                &workspace,
+                &format!("{continuation} {point:?}"),
             );
             assert!(
-                !crate::tests::helpers::workspace_session_dir(&workspace)
-                    .join("review/.status-transaction.json")
-                    .exists(),
+                !transaction_path(&workspace).exists(),
                 "{continuation} {point:?}"
             );
         }
@@ -143,9 +170,7 @@ fn run_creation_retry_reclaims_an_unrecorded_identity_stage() {
         StatusTransactionCrashPoint::RunCreationStageAnchored,
     );
     assert!(
-        !crate::tests::helpers::workspace_session_dir(&workspace)
-            .join("review/.status-transaction.json")
-            .exists(),
+        !transaction_path(&workspace).exists(),
         "the interruption precedes transaction publication"
     );
 
@@ -159,7 +184,7 @@ fn run_creation_retry_reclaims_an_unrecorded_identity_stage() {
     )
     .expect("retry reclaims the empty identity stage and creates the Run");
 
-    let runs = crate::tests::helpers::workspace_session_dir(&workspace).join("review/runs");
+    let runs = workspace_session_dir(&workspace).join("review/runs");
     assert!(runs.join("review-1").is_dir());
     assert_eq!(fs::read_dir(runs).expect("Runs read").count(), 1);
 }
@@ -189,9 +214,7 @@ fn conversation_status_preserves_unbound_run_creation_stage_bytes() {
             bytes
         );
         assert!(
-            crate::tests::helpers::workspace_session_dir(&workspace)
-                .join("review/.status-transaction.json")
-                .is_file(),
+            transaction_path(&workspace).is_file(),
             "{label}: unresolved transaction must remain"
         );
     }
@@ -213,9 +236,7 @@ fn conversation_status_bounds_run_creation_stage_inventory() {
         .expect_err("excess stage inventory must fail closed");
     assert!(error.to_string().contains("too many entries"), "{error}");
     assert!(
-        crate::tests::helpers::workspace_session_dir(&workspace)
-            .join("review/.status-transaction.json")
-            .is_file(),
+        transaction_path(&workspace).is_file(),
         "unresolved transaction must remain"
     );
 }
@@ -224,16 +245,14 @@ fn conversation_status_bounds_run_creation_stage_inventory() {
 fn conversation_status_recovers_a_marker_bound_partial_known_stage() {
     let (workspace, stage) =
         populated_run_creation_stage("conversation-run-create-partial-known-stage");
-    let runs = crate::tests::helpers::workspace_session_dir(&workspace).join("review/runs");
+    let runs = workspace_session_dir(&workspace).join("review/runs");
     fs::remove_file(stage.join("contexts.jsonl")).expect("known staged leaf is absent");
 
     let page = conversation_status_page(&workspace, None)
         .expect("marker-bound partial known stage is reclaimed");
     assert_eq!(page.conversations[0].run_count, 0);
     assert!(
-        !crate::tests::helpers::workspace_session_dir(&workspace)
-            .join("review/.status-transaction.json")
-            .exists(),
+        !transaction_path(&workspace).exists(),
         "recovery completes after reclaiming the owned partial stage"
     );
     assert!(
@@ -272,7 +291,7 @@ fn continuation_reservation_reclaims_a_staged_run_with_an_empty_run_log() {
     }));
     assert!(crash.is_err(), "continuation creation is interrupted");
 
-    let runs = crate::tests::helpers::workspace_session_dir(&workspace).join("review/runs");
+    let runs = workspace_session_dir(&workspace).join("review/runs");
     let stage = fs::read_dir(&runs)
         .expect("runs directory reads")
         .map(|entry| entry.expect("run entry reads").path())
@@ -281,8 +300,6 @@ fn continuation_reservation_reclaims_a_staged_run_with_an_empty_run_log() {
                 .is_some_and(|name| name.to_string_lossy().starts_with(".run-review-2-"))
         })
         .expect("the interrupted continuation left a staged Run");
-    // WHY: a process that dies between creating and writing the definition leaves an empty
-    // run-log, which is known partial inventory of the staged Run (PROTOCOL.md).
     fs::write(stage.join("run-log.jsonl"), b"").expect("definition is cut off before its write");
 
     let reservation = reserve_conversation_continuation(&workspace, "review", None)
@@ -302,90 +319,61 @@ fn continuation_reservation_reclaims_a_staged_run_with_an_empty_run_log() {
 }
 
 #[test]
-fn conversation_status_still_refuses_an_empty_published_run_log() {
-    let workspace = empty_workspace("conversation-run-create-empty-published-run-log");
-    assert_run_creation_crashes(
-        &workspace,
-        "review-1",
-        StatusTransactionCrashPoint::RunCreationPublished,
-    );
-    let run_log = crate::tests::helpers::workspace_session_dir(&workspace)
-        .join("review/runs/review-1/run-log.jsonl");
-    fs::write(&run_log, b"").expect("published definition is emptied");
+fn conversation_status_rejects_a_published_run_with_a_broken_identity_or_definition() {
+    type Corruption = fn(&Path);
+    let cases: [(&str, Corruption, &str); 3] = [
+        (
+            "missing-identity-marker",
+            |run| {
+                let marker = fs::read_dir(run)
+                    .expect("published Run reads")
+                    .map(|entry| entry.expect("published Run entry reads"))
+                    .find(|entry| {
+                        entry
+                            .file_name()
+                            .to_string_lossy()
+                            .starts_with(".run-creation-identity-")
+                    })
+                    .expect("published Run retains its identity marker")
+                    .path();
+                fs::remove_file(&marker).expect("identity marker is removed for the fixture");
+            },
+            "identity marker",
+        ),
+        (
+            "foreign-definition",
+            |run| {
+                fs::write(run.join("run-log.jsonl"), b"foreign definition bytes\n")
+                    .expect("foreign definition writes");
+            },
+            "definition differs from its transaction",
+        ),
+        (
+            "empty-definition",
+            |run| {
+                fs::write(run.join("run-log.jsonl"), b"").expect("published definition is emptied");
+            },
+            "definition is incomplete",
+        ),
+    ];
 
-    let error = conversation_status_page(&workspace, None)
-        .expect_err("a published Run must not recover from an empty definition");
-    assert!(
-        error.to_string().contains("definition is incomplete"),
-        "{error}"
-    );
-    assert!(
-        crate::tests::helpers::workspace_session_dir(&workspace)
-            .join("review/.status-transaction.json")
-            .is_file(),
-        "unresolved transaction must remain"
-    );
-}
+    for (name, corrupt, expected) in cases {
+        let workspace = empty_workspace(&format!("conversation-run-create-published-{name}"));
+        assert_run_creation_crashes(
+            &workspace,
+            "review-1",
+            StatusTransactionCrashPoint::RunCreationPublished,
+        );
+        corrupt(&run_dir(&workspace, "review-1"));
 
-#[test]
-fn conversation_status_requires_a_permanent_identity_marker_after_publication() {
-    let workspace = empty_workspace("conversation-run-create-marker-required");
-    assert_run_creation_crashes(
-        &workspace,
-        "review-1",
-        StatusTransactionCrashPoint::RunCreationPublished,
-    );
-    let run = crate::tests::helpers::workspace_session_dir(&workspace).join("review/runs/review-1");
-    let marker = fs::read_dir(&run)
-        .expect("published Run reads")
-        .map(|entry| entry.expect("published Run entry reads"))
-        .find(|entry| {
-            entry
-                .file_name()
-                .to_string_lossy()
-                .starts_with(".run-creation-identity-")
-        })
-        .expect("published Run retains its identity marker")
-        .path();
-    fs::remove_file(&marker).expect("identity marker is removed for the fixture");
-
-    let error = conversation_status_page(&workspace, None)
-        .expect_err("published recovery without its identity marker must fail closed");
-    assert!(error.to_string().contains("identity marker"), "{error}");
-    assert!(
-        crate::tests::helpers::workspace_session_dir(&workspace)
-            .join("review/.status-transaction.json")
-            .is_file(),
-        "unresolved transaction must remain"
-    );
-}
-
-#[test]
-fn conversation_status_requires_the_exact_published_run_definition() {
-    let workspace = empty_workspace("conversation-run-create-definition-required");
-    assert_run_creation_crashes(
-        &workspace,
-        "review-1",
-        StatusTransactionCrashPoint::RunCreationPublished,
-    );
-    let run_log = crate::tests::helpers::workspace_session_dir(&workspace)
-        .join("review/runs/review-1/run-log.jsonl");
-    fs::write(&run_log, b"foreign definition bytes\n").expect("foreign definition writes");
-
-    let error = conversation_status_page(&workspace, None)
-        .expect_err("published recovery must require its exact definition");
-    assert!(
-        error
-            .to_string()
-            .contains("definition differs from its transaction"),
-        "{error}"
-    );
-    assert!(
-        crate::tests::helpers::workspace_session_dir(&workspace)
-            .join("review/.status-transaction.json")
-            .is_file(),
-        "unresolved transaction must remain"
-    );
+        let error = conversation_status_page(&workspace, None)
+            .expect_err("a published Run must fail closed");
+        assert!(error.to_string().contains(expected), "{name}: {error}");
+        assert!(
+            transaction_path(&workspace).is_file(),
+            "{name}: unresolved transaction must remain"
+        );
+    }
 }
 
 #[test]
@@ -393,23 +381,10 @@ fn conversation_status_rejects_a_rebound_run_creation_stage() {
     let (workspace, stage) = populated_run_creation_stage("conversation-run-create-rebound-stage");
     let replacement_workspace = empty_workspace("conversation-run-create-stage-replacement");
     create_review_run(&replacement_workspace);
-    let replacement = crate::tests::helpers::workspace_session_dir(&replacement_workspace)
-        .join("review/runs/review-1");
-    let original = stage.with_extension("original");
-    fs::rename(&stage, &original).expect("original stage moves aside");
-    fs::rename(&replacement, &stage).expect("replacement Run takes the staged path");
-    let replacement_bytes = file_tree_bytes(&stage);
-
-    let error = conversation_status_page(&workspace, None)
-        .expect_err("status recovery must reject a rebound creation stage");
-
-    assert!(error.to_string().contains("identity"), "{error}");
-    assert_eq!(file_tree_bytes(&stage), replacement_bytes);
-    assert!(
-        crate::tests::helpers::workspace_session_dir(&workspace)
-            .join("review/.status-transaction.json")
-            .is_file(),
-        "the unresolved transaction remains"
+    assert_rebound_run_fails_closed(
+        &workspace,
+        &stage,
+        &run_dir(&replacement_workspace, "review-1"),
     );
 }
 
@@ -423,68 +398,29 @@ fn conversation_status_rejects_a_rebound_published_run() {
     );
     let replacement_workspace = empty_workspace("conversation-run-create-published-replacement");
     create_review_run(&replacement_workspace);
-    let target =
-        crate::tests::helpers::workspace_session_dir(&workspace).join("review/runs/review-1");
-    let replacement = crate::tests::helpers::workspace_session_dir(&replacement_workspace)
-        .join("review/runs/review-1");
-    fs::rename(&target, target.with_extension("original")).expect("original Run moves aside");
-    fs::rename(&replacement, &target).expect("replacement Run takes the published path");
-    let replacement_bytes = file_tree_bytes(&target);
-
-    let error = conversation_status_page(&workspace, None)
-        .expect_err("status recovery must reject a rebound published Run");
-
-    assert!(error.to_string().contains("identity"), "{error}");
-    assert_eq!(file_tree_bytes(&target), replacement_bytes);
-    assert!(
-        crate::tests::helpers::workspace_session_dir(&workspace)
-            .join("review/.status-transaction.json")
-            .is_file(),
-        "the unresolved transaction remains"
+    assert_rebound_run_fails_closed(
+        &workspace,
+        &run_dir(&workspace, "review-1"),
+        &run_dir(&replacement_workspace, "review-1"),
     );
 }
 
 #[test]
 fn conversation_status_recovers_run_reclamation_before_and_after_removal() {
-    for (point, expected_runs) in [
-        (StatusTransactionCrashPoint::RunReclamationRecorded, 1),
-        (StatusTransactionCrashPoint::RunReclamationApplied, 1),
+    for point in [
+        StatusTransactionCrashPoint::RunReclamationRecorded,
+        StatusTransactionCrashPoint::RunReclamationApplied,
     ] {
         let workspace = empty_workspace(&format!("conversation-run-reclaim-crash-{point:?}"));
         create_reclaimable_review_run(&workspace);
-        set_status_transaction_crash_point(point);
-
-        let crash = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            reclaim_unpublished_productive_run(&workspace, "review", "review-2")
-        }));
-        assert!(crash.is_err(), "{point:?}");
+        assert_run_reclamation_crashes(&workspace, point);
 
         start_directory_sync_trace_for_test();
         let page = conversation_status_page(&workspace, None)
             .expect("run-reclamation status transaction recovers");
-        assert_eq!(page.conversations[0].run_count, expected_runs, "{point:?}");
-        let trace = take_directory_sync_trace_for_test();
-        let runs = crate::runtime::fs_guards::test_path_key(
-            &crate::tests::helpers::workspace_session_dir(&workspace).join("review/runs"),
-        );
-        let conversation = crate::runtime::fs_guards::test_path_key(
-            &crate::tests::helpers::workspace_session_dir(&workspace).join("review"),
-        );
-        let runs_sync = trace
-            .iter()
-            .position(|path| path == &runs)
-            .unwrap_or_else(|| panic!("{point:?}: missing runs sync: {trace:?}"));
-        let transaction_clear = trace
-            .iter()
-            .position(|path| path == &conversation)
-            .unwrap_or_else(|| panic!("{point:?}: missing transaction clear: {trace:?}"));
-        assert!(runs_sync < transaction_clear, "{point:?}: {trace:?}");
-        assert!(
-            !crate::tests::helpers::workspace_session_dir(&workspace)
-                .join("review/.status-transaction.json")
-                .exists(),
-            "{point:?}"
-        );
+        assert_eq!(page.conversations[0].run_count, 1, "{point:?}");
+        assert_runs_synced_before_transaction_clear(&workspace, &format!("{point:?}"));
+        assert!(!transaction_path(&workspace).exists(), "{point:?}");
     }
 }
 
@@ -492,19 +428,13 @@ fn conversation_status_recovers_run_reclamation_before_and_after_removal() {
 fn run_reclamation_recovery_finishes_an_authorized_partial_cleanup() {
     let workspace = empty_workspace("conversation-run-reclaim-partial-cleanup");
     create_reclaimable_review_run(&workspace);
-    set_status_transaction_crash_point(StatusTransactionCrashPoint::RunReclamationRecorded);
-
-    let crash = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        reclaim_unpublished_productive_run(&workspace, "review", "review-2")
-    }));
-    assert!(
-        crash.is_err(),
-        "the durable reclamation transaction remains"
+    assert_run_reclamation_crashes(
+        &workspace,
+        StatusTransactionCrashPoint::RunReclamationRecorded,
     );
 
-    let conversation = crate::tests::helpers::workspace_session_dir(&workspace).join("review");
-    let runs = conversation.join("runs");
-    let reclaimed = runs.join("review-2");
+    let conversation = workspace_session_dir(&workspace).join("review");
+    let reclaimed = conversation.join("runs/review-2");
     fs::remove_dir(reclaimed.join("objects"))
         .expect("the first authorized cleanup mutation is interrupted");
     set_directory_sync_error_for_path_for_test(&reclaimed, io::ErrorKind::Other);
@@ -539,52 +469,23 @@ fn run_reclamation_recovery_finishes_an_authorized_partial_cleanup() {
         !conversation.join(".status-transaction.json").exists(),
         "the transaction clears only after cleanup is durable"
     );
-    let trace = take_directory_sync_trace_for_test();
-    let runs = crate::runtime::fs_guards::test_path_key(&runs);
-    let conversation = crate::runtime::fs_guards::test_path_key(&conversation);
-    let runs_sync = trace
-        .iter()
-        .position(|path| path == &runs)
-        .unwrap_or_else(|| panic!("missing runs sync: {trace:?}"));
-    let transaction_clear = trace
-        .iter()
-        .position(|path| path == &conversation)
-        .unwrap_or_else(|| panic!("missing transaction clear: {trace:?}"));
-    assert!(runs_sync < transaction_clear, "{trace:?}");
+    assert_runs_synced_before_transaction_clear(&workspace, "partial cleanup");
 }
 
 #[test]
 fn conversation_status_rejects_a_rebound_reclaimed_run() {
     let workspace = empty_workspace("conversation-run-reclaim-rebound");
     create_reclaimable_review_run(&workspace);
-    set_status_transaction_crash_point(StatusTransactionCrashPoint::RunReclamationRecorded);
-    let crash = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        reclaim_unpublished_productive_run(&workspace, "review", "review-2")
-    }));
-    assert!(
-        crash.is_err(),
-        "the durable reclamation transaction remains"
+    assert_run_reclamation_crashes(
+        &workspace,
+        StatusTransactionCrashPoint::RunReclamationRecorded,
     );
 
     let replacement_workspace = empty_workspace("conversation-run-reclaim-replacement");
     create_reclaimable_review_run(&replacement_workspace);
-    let target =
-        crate::tests::helpers::workspace_session_dir(&workspace).join("review/runs/review-2");
-    let replacement = crate::tests::helpers::workspace_session_dir(&replacement_workspace)
-        .join("review/runs/review-2");
-    fs::rename(&target, target.with_extension("original")).expect("original Run moves aside");
-    fs::rename(&replacement, &target).expect("replacement Run takes the reclaimed path");
-    let replacement_bytes = file_tree_bytes(&target);
-
-    let error = conversation_status_page(&workspace, None)
-        .expect_err("status recovery must reject a rebound reclaimed Run");
-
-    assert!(error.to_string().contains("identity"), "{error}");
-    assert_eq!(file_tree_bytes(&target), replacement_bytes);
-    assert!(
-        crate::tests::helpers::workspace_session_dir(&workspace)
-            .join("review/.status-transaction.json")
-            .is_file(),
-        "the unresolved transaction remains"
+    assert_rebound_run_fails_closed(
+        &workspace,
+        &run_dir(&workspace, "review-2"),
+        &run_dir(&replacement_workspace, "review-2"),
     );
 }

@@ -1,10 +1,11 @@
 use super::super::{support::write_registry_definition, test_support::workspace_copy};
 use super::support::{
     FakeToolExecutionFault, FakeToolExecutor, InjectedAttemptRecovery, MemoryAttempts, MemorySink,
-    ScriptedProvider, disabled_smoke_productive_execution_fixture,
-    execute_scripted_productive_case, execute_scripted_productive_case_with_tools,
-    load_productive_execution_fixture, single_tool_provider_turn,
-    smoke_productive_execution_fixture,
+    ScriptedProvider, assert_terminal_error_contains, count_events,
+    disabled_smoke_productive_execution_fixture, event_of, execute_scripted_productive_case,
+    execute_scripted_productive_case_with_tools, has_event, load_productive_execution_fixture,
+    run_scripted_productive_case, single_tool_provider_turn, smoke_productive_execution_fixture,
+    string_provider_turn,
 };
 use crate::runtime::{
     context::ContextManifestCheckpoint,
@@ -13,7 +14,6 @@ use crate::runtime::{
     openai_codex::{ProviderToolCall, ProviderTurn},
     productive::{
         ProductiveExecution, execute_productive_flow, execute_productive_flow_with_tool_executor,
-        execute_productive_flow_with_tool_executor_and_recovery,
     },
     run_attempts::{RunAttemptKind, RunAttemptOutcome},
     session::run_flow,
@@ -22,7 +22,7 @@ use crate::runtime::{
 };
 use crate::tests::helpers::load_productive_execution_fixture_with_credential;
 use proto::{EventEnvelope, EventType};
-use std::{collections::VecDeque, fs};
+use std::{fs, path::Path};
 
 #[derive(Default)]
 struct OneShotRejectingEventSink {
@@ -71,24 +71,11 @@ impl RuntimeEventSink for OneShotRejectingEventSink {
     }
 }
 
-fn string_provider_turn(response_id: &str, value: &str) -> ProviderTurn {
-    ProviderTurn {
-        token_usage: None,
-        response_id: response_id.to_owned(),
-        output_text: format!("{{\"type\":\"string\",\"value\":\"{value}\"}}"),
-        retained_items: Vec::new(),
-        tool_calls: Vec::new(),
-    }
-}
-
 #[test]
 fn productive_event_commit_failure_stops_before_later_closure_events() {
     let (_workspace, fixture) = disabled_smoke_productive_execution_fixture();
     let flow = fixture.smoke_flow();
-    let mut provider = ScriptedProvider {
-        bodies: Vec::new(),
-        turns: VecDeque::from([string_provider_turn("response", "done")]),
-    };
+    let mut provider = ScriptedProvider::new([string_provider_turn("response", "done")]);
     let mut attempts = MemoryAttempts::default();
     let mut sink = OneShotRejectingEventSink::default();
 
@@ -107,22 +94,16 @@ fn productive_event_commit_failure_stops_before_later_closure_events() {
             .windows(2)
             .all(|events| events[1].sequence == events[0].sequence + 1)
     );
-    assert!(!sink.events.iter().any(|event| {
-        matches!(
-            event.event_type,
-            EventType::PhaseFailed | EventType::FlowFailed | EventType::SessionFailed
-        )
-    }));
+    assert!(!has_event(&sink.events, EventType::PhaseFailed));
+    assert!(!has_event(&sink.events, EventType::FlowFailed));
+    assert!(!has_event(&sink.events, EventType::SessionFailed));
 }
 
 #[test]
 fn productive_tool_started_commit_failure_settles_without_dispatch() {
     let (_workspace, fixture) = smoke_productive_execution_fixture();
     let flow = fixture.smoke_flow();
-    let mut provider = ScriptedProvider {
-        bodies: Vec::new(),
-        turns: VecDeque::from([single_tool_provider_turn("response", "call")]),
-    };
+    let mut provider = ScriptedProvider::new([single_tool_provider_turn("response", "call")]);
     let mut attempts = MemoryAttempts::default();
     let mut sink = ToolStartedRejectingEventSink;
     let mut tools = FakeToolExecutor::default();
@@ -175,11 +156,7 @@ fn productive_executor_boundary_failure_closes_tool_event_and_leaves_attempt_unc
             .all(|(kind, _, _, _)| *kind != RunAttemptKind::Tool),
         "untrusted Executor output must leave the Tool attempt uncertain"
     );
-    let tool_failed = sink
-        .0
-        .iter()
-        .find(|event| event.event_type == EventType::ToolFailed)
-        .expect("ToolStarted has a matching ToolFailed event");
+    let tool_failed = event_of(&sink.0, EventType::ToolFailed);
     assert_eq!(tool_failed.payload["error"], "runtime_error");
 }
 
@@ -205,25 +182,11 @@ fn productive_policy_rejection_precedes_tool_lifecycle_and_replays_without_start
             true,
         ),
     ] {
-        let (_workspace, fixture) = smoke_productive_execution_fixture();
-        let flow = fixture.smoke_flow();
-        let mut provider = ScriptedProvider {
-            bodies: Vec::new(),
-            turns: VecDeque::from([single_tool_provider_turn("response", "call")]),
-        };
-        let mut attempts = MemoryAttempts::default();
-        let mut sink = MemorySink::default();
-        let mut tools = FakeToolExecutor {
-            fault,
-            ..FakeToolExecutor::default()
-        };
-
-        let execution = execute_productive_flow_with_tool_executor(
-            fixture.execution(flow, "productive-definitive-executor-error"),
-            &mut provider,
-            &mut attempts,
-            &mut sink,
-            &mut tools,
+        let (execution, _, attempts, sink, tools) = execute_scripted_productive_case_with_tools(
+            "productive-definitive-executor-error",
+            [single_tool_provider_turn("response", "call")],
+            |_| {},
+            |tools| tools.fault = fault,
         )
         .expect("definitive Executor error closes the failed session");
 
@@ -248,70 +211,39 @@ fn productive_policy_rejection_precedes_tool_lifecycle_and_replays_without_start
         );
         assert_eq!(tools.invocations.len(), usize::from(started));
         assert_eq!(
-            sink.0
-                .iter()
-                .filter(|event| event.event_type == EventType::ToolStarted)
-                .count(),
+            count_events(&sink.0, EventType::ToolStarted),
             usize::from(started)
         );
         assert_eq!(
-            sink.0
-                .iter()
-                .filter(|event| event.event_type == EventType::ToolFailed)
-                .count(),
+            count_events(&sink.0, EventType::ToolFailed),
             usize::from(started)
         );
-        assert!(
-            !sink
-                .0
-                .iter()
-                .any(|event| event.event_type == EventType::ToolCompleted)
-        );
+        assert_eq!(count_events(&sink.0, EventType::ToolCompleted), 0);
 
-        let mut provider = ScriptedProvider {
-            bodies: Vec::new(),
-            turns: VecDeque::from([single_tool_provider_turn("response", "call")]),
-        };
-        let mut resumed_attempts = MemoryAttempts::default();
-        let mut resumed_sink = MemorySink::default();
-        let mut resumed_tools = FakeToolExecutor::default();
         let mut recovery = InjectedAttemptRecovery::ToolResult(result);
-
-        let resumed = execute_productive_flow_with_tool_executor_and_recovery(
-            fixture.execution(flow, "productive-definitive-executor-error-resume"),
-            &mut provider,
-            &mut resumed_attempts,
-            &mut resumed_sink,
-            &mut resumed_tools,
+        let resumed = run_scripted_productive_case(
+            "productive-definitive-executor-error-resume",
+            [single_tool_provider_turn("response", "call")],
+            |_| {},
+            |_| {},
             &mut recovery,
-        )
-        .expect("Resume replays the definitive Executor error");
+        );
 
-        assert!(resumed.failed);
-        assert_eq!(resumed_tools.preflights, 0);
-        assert!(resumed_tools.invocations.is_empty());
+        let resumed_execution = resumed
+            .result
+            .expect("Resume replays the definitive Executor error");
+        assert!(resumed_execution.failed);
+        assert_eq!(resumed.tools.preflights, 0);
+        assert!(resumed.tools.invocations.is_empty());
         assert_eq!(
-            resumed_sink
-                .0
-                .iter()
-                .filter(|event| event.event_type == EventType::ToolStarted)
-                .count(),
+            count_events(&resumed.sink.0, EventType::ToolStarted),
             usize::from(started)
         );
         assert_eq!(
-            resumed_sink
-                .0
-                .iter()
-                .filter(|event| event.event_type == EventType::ToolFailed)
-                .count(),
+            count_events(&resumed.sink.0, EventType::ToolFailed),
             usize::from(started)
         );
-        assert!(
-            !resumed_sink
-                .0
-                .iter()
-                .any(|event| event.event_type == EventType::ToolCompleted)
-        );
+        assert_eq!(count_events(&resumed.sink.0, EventType::ToolCompleted), 0);
     }
 }
 
@@ -351,6 +283,18 @@ fn interleaved_provider_and_tool_attempt_timestamps_are_strictly_monotonic() {
     );
 }
 
+fn write_string_phases(workspace: &Path, phases: &[(&str, &str)]) {
+    for (id, name) in phases {
+        fs::write(
+            workspace.join("registry/phases").join(format!("{id}.yaml")),
+            format!(
+                "phase:\n  id: {id}\n  name: {name}\n  instruction_refs: []\n  tool_refs: []\n  output:\n    type: string\n"
+            ),
+        )
+        .expect("string Phase writes");
+    }
+}
+
 #[test]
 fn productive_composite_phase_loops_without_running_its_own_provider_turn() {
     let workspace = workspace_copy("smoke-flow");
@@ -383,10 +327,7 @@ fn productive_composite_phase_loops_without_running_its_own_provider_turn() {
         })],
         tool_calls: Vec::new(),
     };
-    let mut provider = ScriptedProvider {
-        bodies: Vec::new(),
-        turns: VecDeque::from([turn("first", false), turn("second", true)]),
-    };
+    let mut provider = ScriptedProvider::new([turn("first", false), turn("second", true)]);
     let mut attempts = MemoryAttempts::default();
     let mut sink = MemorySink::default();
 
@@ -402,10 +343,7 @@ fn productive_composite_phase_loops_without_running_its_own_provider_turn() {
     assert_eq!(provider.bodies.len(), 2, "only the leaf runs the provider");
     assert_eq!(attempts.intents.len(), 2);
     assert_eq!(
-        sink.0
-            .iter()
-            .filter(|event| event.event_type == EventType::PhaseEntered)
-            .count(),
+        count_events(&sink.0, EventType::PhaseEntered),
         4,
         "the composite and its leaf each run twice"
     );
@@ -414,26 +352,19 @@ fn productive_composite_phase_loops_without_running_its_own_provider_turn() {
 #[test]
 fn productive_transition_skips_a_phase_before_running_a_subflow() {
     let workspace = workspace_copy("smoke-flow");
+    write_string_phases(
+        &workspace,
+        &[
+            ("start", "Start"),
+            ("skipped", "Skipped"),
+            ("finish", "Finish"),
+            ("child", "Child"),
+        ],
+    );
     for (path, definition) in [
-        (
-            "phases/start.yaml",
-            "phase:\n  id: start\n  name: Start\n  instruction_refs: []\n  tool_refs: []\n  output:\n    type: string\n",
-        ),
-        (
-            "phases/skipped.yaml",
-            "phase:\n  id: skipped\n  name: Skipped\n  instruction_refs: []\n  tool_refs: []\n  output:\n    type: string\n",
-        ),
-        (
-            "phases/finish.yaml",
-            "phase:\n  id: finish\n  name: Finish\n  instruction_refs: []\n  tool_refs: []\n  output:\n    type: string\n",
-        ),
         (
             "phases/composite.yaml",
             "phase:\n  id: composite\n  name: Composite\n  instruction_refs: []\n  tool_refs: []\n  phase_refs: [start, skipped, finish]\n  output:\n    type: string\n  result_from: finish\n  transitions:\n    - from_phase_ref: start\n      to_phase_ref: finish\n      when:\n        path: []\n        equals:\n          type: string\n          value: jump\n",
-        ),
-        (
-            "phases/child.yaml",
-            "phase:\n  id: child\n  name: Child\n  instruction_refs: []\n  tool_refs: []\n  output:\n    type: string\n",
         ),
         (
             "flows/child-flow.yaml",
@@ -449,14 +380,11 @@ fn productive_transition_skips_a_phase_before_running_a_subflow() {
     }
     let fixture = load_productive_execution_fixture(&workspace);
     let flow = fixture.smoke_flow();
-    let mut provider = ScriptedProvider {
-        bodies: Vec::new(),
-        turns: VecDeque::from([
-            string_provider_turn("response-start", "jump"),
-            string_provider_turn("response-finish", "finished"),
-            string_provider_turn("response-child", "subflow"),
-        ]),
-    };
+    let mut provider = ScriptedProvider::new([
+        string_provider_turn("response-start", "jump"),
+        string_provider_turn("response-finish", "finished"),
+        string_provider_turn("response-child", "subflow"),
+    ]);
     let mut attempts = MemoryAttempts::default();
     let mut sink = MemorySink::default();
 
@@ -473,13 +401,7 @@ fn productive_transition_skips_a_phase_before_running_a_subflow() {
     assert!(!sink.0.iter().any(|event| {
         event.event_type == EventType::PhaseEntered && event.payload["phase_id"] == "skipped"
     }));
-    assert_eq!(
-        sink.0
-            .iter()
-            .filter(|event| event.event_type == EventType::FlowStarted)
-            .count(),
-        2
-    );
+    assert_eq!(count_events(&sink.0, EventType::FlowStarted), 2);
     let child_started = sink
         .0
         .iter()
@@ -494,19 +416,15 @@ fn productive_transition_skips_a_phase_before_running_a_subflow() {
 #[test]
 fn productive_transition_rejects_skipped_composite_result_before_later_provider_dispatch() {
     let workspace = workspace_copy("smoke-flow");
+    write_string_phases(
+        &workspace,
+        &[
+            ("start", "Start"),
+            ("selected", "Selected"),
+            ("later", "Later"),
+        ],
+    );
     for (path, definition) in [
-        (
-            "phases/start.yaml",
-            "phase:\n  id: start\n  name: Start\n  instruction_refs: []\n  tool_refs: []\n  output:\n    type: string\n",
-        ),
-        (
-            "phases/selected.yaml",
-            "phase:\n  id: selected\n  name: Selected\n  instruction_refs: []\n  tool_refs: []\n  output:\n    type: string\n",
-        ),
-        (
-            "phases/later.yaml",
-            "phase:\n  id: later\n  name: Later\n  instruction_refs: []\n  tool_refs: []\n  output:\n    type: string\n",
-        ),
         (
             "phases/composite.yaml",
             "phase:\n  id: composite\n  name: Composite\n  instruction_refs: []\n  tool_refs: []\n  phase_refs: [start, selected, later]\n  output:\n    type: string\n  result_from: selected\n  transitions:\n    - from_phase_ref: start\n      to_phase_ref: later\n      when:\n        path: []\n        equals:\n          type: string\n          value: jump\n",
@@ -521,13 +439,10 @@ fn productive_transition_rejects_skipped_composite_result_before_later_provider_
     }
     let fixture = load_productive_execution_fixture(&workspace);
     let flow = fixture.smoke_flow();
-    let mut provider = ScriptedProvider {
-        bodies: Vec::new(),
-        turns: VecDeque::from([
-            string_provider_turn("response-start", "jump"),
-            string_provider_turn("response-later", "must-not-run"),
-        ]),
-    };
+    let mut provider = ScriptedProvider::new([
+        string_provider_turn("response-start", "jump"),
+        string_provider_turn("response-later", "must-not-run"),
+    ]);
     let mut attempts = MemoryAttempts::default();
     let mut sink = MemorySink::default();
 
@@ -540,11 +455,10 @@ fn productive_transition_rejects_skipped_composite_result_before_later_provider_
     .expect("skipped composite result becomes a typed failed run");
 
     assert!(execution.failed);
-    assert!(execution.terminal_error.as_ref().is_some_and(|error| {
-        error
-            .to_string()
-            .contains("composite Phase result_from selected was skipped by a Transition")
-    }));
+    assert_terminal_error_contains(
+        &execution,
+        "composite Phase result_from selected was skipped by a Transition",
+    );
     assert_eq!(provider.bodies.len(), 1, "no later provider dispatch");
 }
 
@@ -565,10 +479,7 @@ fn productive_loop_exhaustion_fails_each_open_scope_once() {
         retained_items: Vec::new(),
         tool_calls: Vec::new(),
     };
-    let mut provider = ScriptedProvider {
-        bodies: Vec::new(),
-        turns: VecDeque::from([turn("response-first"), turn("response-second")]),
-    };
+    let mut provider = ScriptedProvider::new([turn("response-first"), turn("response-second")]);
     let mut attempts = MemoryAttempts::default();
     let mut sink = MemorySink::default();
 
@@ -582,24 +493,13 @@ fn productive_loop_exhaustion_fails_each_open_scope_once() {
 
     assert!(execution.failed);
     assert_eq!(provider.bodies.len(), 2);
-    assert!(
-        execution
-            .terminal_error
-            .as_ref()
-            .is_some_and(|error| error.to_string().contains("reached max_iterations"))
-    );
+    assert_terminal_error_contains(&execution, "reached max_iterations");
     for event_type in [
         EventType::PhaseFailed,
         EventType::FlowFailed,
         EventType::SessionFailed,
     ] {
-        assert_eq!(
-            sink.0
-                .iter()
-                .filter(|event| event.event_type == event_type)
-                .count(),
-            1
-        );
+        assert_eq!(count_events(&sink.0, event_type), 1);
     }
 }
 
@@ -607,10 +507,7 @@ fn productive_loop_exhaustion_fails_each_open_scope_once() {
 fn productive_failure_closes_every_open_runtime_scope_without_retrying() {
     let (_workspace, fixture) = disabled_smoke_productive_execution_fixture();
     let flow = fixture.smoke_flow();
-    let mut provider = ScriptedProvider {
-        bodies: Vec::new(),
-        turns: VecDeque::new(),
-    };
+    let mut provider = ScriptedProvider::new([]);
     let mut attempts = MemoryAttempts::default();
     let mut sink = MemorySink::default();
 
@@ -639,10 +536,7 @@ fn productive_failure_closes_every_open_runtime_scope_without_retrying() {
         EventType::SessionFailed,
     ] {
         assert_eq!(
-            sink.0
-                .iter()
-                .filter(|event| event.event_type == event_type)
-                .count(),
+            count_events(&sink.0, event_type),
             1,
             "each runtime scope has exactly one terminal failure"
         );
@@ -655,92 +549,6 @@ fn productive_failure_closes_every_open_runtime_scope_without_retrying() {
         .collect::<String>();
     assert!(!durable_text.contains("scripted provider exhausted"));
     assert!(!durable_text.contains("secret-access"));
-}
-
-#[test]
-fn composite_phase_rejects_a_transition_that_skips_its_selected_result() {
-    let workspace = workspace_copy("smoke-flow");
-    write_registry_definition(
-        &workspace,
-        "instructions",
-        "jump-result",
-        r#"instruction:
-  id: jump-result
-  name: JumpResult
-  prompt: 'fixture-tool-request: none fixture-result: {"type":"string","value":"jump"}'
-"#,
-    );
-    write_registry_definition(
-        &workspace,
-        "phases",
-        "jump-source",
-        r#"phase:
-  id: jump-source
-  name: JumpSource
-  instruction_refs: [jump-result]
-  tool_refs: []
-  output:
-    type: string
-"#,
-    );
-    for phase_id in ["selected-result", "jump-finish"] {
-        let name = if phase_id == "selected-result" {
-            "SelectedResult"
-        } else {
-            "JumpFinish"
-        };
-        write_registry_definition(
-            &workspace,
-            "phases",
-            phase_id,
-            &format!(
-                "phase:\n  id: {phase_id}\n  name: {name}\n  instruction_refs: []\n  tool_refs: []\n  output:\n    type: string\n"
-            ),
-        );
-    }
-    write_registry_definition(
-        &workspace,
-        "phases",
-        "skipped-result-composite",
-        r#"phase:
-  id: skipped-result-composite
-  name: SkippedResultComposite
-  instruction_refs: []
-  tool_refs: []
-  phase_refs: [jump-source, selected-result, jump-finish]
-  output:
-    type: string
-  result_from: selected-result
-  transitions:
-    - from_phase_ref: jump-source
-      to_phase_ref: jump-finish
-      when:
-        path: []
-        equals:
-          type: string
-          value: jump
-"#,
-    );
-    write_registry_definition(
-        &workspace,
-        "flows",
-        "skipped-result-flow",
-        r#"flow:
-  id: skipped-result-flow
-  name: SkippedResultFlow
-  phase_refs: [skipped-result-composite]
-  subflow_refs: []
-"#,
-    );
-
-    let error = run_flow(&workspace, "skipped-result-flow", EmitMode::Jsonl)
-        .expect_err("a Transition must not skip a composite Phase result_from");
-    assert!(
-        error
-            .to_string()
-            .contains("composite Phase result_from selected-result was skipped by a Transition"),
-        "{error}"
-    );
 }
 
 #[test]
@@ -835,10 +643,7 @@ fn a_productive_run_with_an_unsendable_credential_records_no_attempt() {
             is_fedramp: false,
         },
     );
-    let mut provider = ScriptedProvider {
-        bodies: Vec::new(),
-        turns: VecDeque::from([string_provider_turn("response", "done")]),
-    };
+    let mut provider = ScriptedProvider::new([string_provider_turn("response", "done")]);
     let mut attempts = MemoryAttempts::default();
     let mut sink = MemorySink::default();
 

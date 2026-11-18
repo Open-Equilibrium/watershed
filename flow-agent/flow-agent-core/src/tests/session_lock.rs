@@ -1,18 +1,25 @@
 use super::{helpers::empty_workspace, support::assert_active_session};
 use crate::runtime::{
-    fs_guards::AnchoredWorkspace, session_authority::session_ownership_is_active,
-    session_reservation::acquire_anchored_session_lock, session_store::ensure_runtime_dirs,
+    fs_guards::{AnchoredDir, AnchoredWorkspace},
+    session_authority::session_ownership_is_active,
+    session_reservation::acquire_anchored_session_lock,
+    session_store::ensure_runtime_dirs,
     types::RuntimeError,
 };
-use std::fs;
+use std::{fs, path::Path};
+
+fn runtime_sessions(workspace: &Path) -> (AnchoredWorkspace, AnchoredDir) {
+    let sessions = ensure_runtime_dirs(workspace)
+        .expect("runtime dirs")
+        .sessions;
+    let anchored = AnchoredWorkspace::open(workspace).expect("workspace opens");
+    (anchored, sessions)
+}
 
 #[test]
 fn session_lock_release_rejects_a_missing_marker() {
     let workspace = empty_workspace("missing-session-lock");
-    let sessions = ensure_runtime_dirs(&workspace)
-        .expect("runtime dirs")
-        .sessions;
-    let anchored = AnchoredWorkspace::open(&workspace).expect("workspace opens");
+    let (anchored, sessions) = runtime_sessions(&workspace);
     let guard = acquire_anchored_session_lock(&anchored, &sessions, "missing-resume")
         .expect("lock reserved");
     guard.path.remove().expect("lock removed");
@@ -31,19 +38,14 @@ fn session_lock_release_rejects_a_missing_marker() {
 fn session_lock_rejects_a_directory_from_another_workspace() {
     let authority_workspace = empty_workspace("bound-session-lock-a");
     let marker_workspace = empty_workspace("bound-session-lock-b");
-    let authority_sessions = ensure_runtime_dirs(&authority_workspace)
-        .expect("workspace A runtime dirs")
-        .sessions;
-    let marker_sessions = ensure_runtime_dirs(&marker_workspace)
-        .expect("workspace B runtime dirs")
-        .sessions;
-    let authority = AnchoredWorkspace::open(&authority_workspace).expect("workspace A opens");
+    let (authority, authority_sessions) = runtime_sessions(&authority_workspace);
+    let (_, marker_sessions) = runtime_sessions(&marker_workspace);
 
-    let error =
-        match acquire_anchored_session_lock(&authority, &marker_sessions, "boundsessionlock001") {
-            Ok(_) => panic!("workspace A authority cannot publish a workspace B marker"),
-            Err(error) => error,
-        };
+    let Err(error) =
+        acquire_anchored_session_lock(&authority, &marker_sessions, "boundsessionlock001")
+    else {
+        panic!("workspace A authority cannot publish a workspace B marker");
+    };
 
     assert!(matches!(error, RuntimeError::Protocol(_)), "{error}");
     assert!(
@@ -67,10 +69,7 @@ fn session_lock_rejects_a_directory_from_another_workspace() {
 #[test]
 fn partial_release_error_makes_the_session_lock_guard_terminal() {
     let workspace = empty_workspace("partial-release-session-lock");
-    let sessions = ensure_runtime_dirs(&workspace)
-        .expect("runtime dirs")
-        .sessions;
-    let anchored = AnchoredWorkspace::open(&workspace).expect("workspace opens");
+    let (anchored, sessions) = runtime_sessions(&workspace);
     let guard = acquire_anchored_session_lock(&anchored, &sessions, "partialrelease001")
         .expect("first owner acquires");
     let marker_path = guard.path.diagnostic_path().to_owned();
@@ -100,16 +99,12 @@ fn partial_release_error_makes_the_session_lock_guard_terminal() {
 #[test]
 fn earlier_lock_guard_cannot_release_a_later_owner_at_the_same_path() {
     let workspace = empty_workspace("sequential-lock-owners");
-    let sessions = ensure_runtime_dirs(&workspace)
-        .expect("runtime dirs")
-        .sessions;
-    let anchored = AnchoredWorkspace::open(&workspace).expect("workspace opens");
+    let (anchored, sessions) = runtime_sessions(&workspace);
     let first = acquire_anchored_session_lock(&anchored, &sessions, "sequential001")
         .expect("first owner acquires");
     first.path.remove().expect("first lock unlinked externally");
-    let second = match acquire_anchored_session_lock(&anchored, &sessions, "sequential001") {
-        Ok(_) => panic!("workspace marker deletion cannot grant ownership"),
-        Err(error) => error,
+    let Err(second) = acquire_anchored_session_lock(&anchored, &sessions, "sequential001") else {
+        panic!("workspace marker deletion cannot grant ownership");
     };
     assert_active_session(second, "sequential001", "sequential001.lock");
 
@@ -137,10 +132,7 @@ fn earlier_lock_guard_cannot_release_a_later_owner_at_the_same_path() {
 #[test]
 fn released_lock_guard_drop_does_not_touch_a_later_owner() {
     let workspace = empty_workspace("released-lock-owner");
-    let sessions = ensure_runtime_dirs(&workspace)
-        .expect("runtime dirs")
-        .sessions;
-    let anchored = AnchoredWorkspace::open(&workspace).expect("workspace opens");
+    let (anchored, sessions) = runtime_sessions(&workspace);
     let guard = acquire_anchored_session_lock(&anchored, &sessions, "released001")
         .expect("lock owner acquires");
     let lock_path = guard.path.diagnostic_path().to_owned();
@@ -159,10 +151,7 @@ fn released_lock_guard_drop_does_not_touch_a_later_owner() {
 #[test]
 fn lock_release_rejects_hardlinked_ownership_without_removing_either_name() {
     let workspace = empty_workspace("hardlinked-lock-owner");
-    let sessions = ensure_runtime_dirs(&workspace)
-        .expect("runtime dirs")
-        .sessions;
-    let anchored = AnchoredWorkspace::open(&workspace).expect("workspace opens");
+    let (anchored, sessions) = runtime_sessions(&workspace);
     let guard = acquire_anchored_session_lock(&anchored, &sessions, "hardlock001")
         .expect("lock owner acquires");
     let alias = workspace.join("lock-alias");
@@ -184,10 +173,7 @@ fn lock_release_rejects_symlink_replacement_without_touching_its_target() {
     use std::os::unix::fs::symlink;
 
     let workspace = empty_workspace("symlink-lock-owner");
-    let sessions = ensure_runtime_dirs(&workspace)
-        .expect("runtime dirs")
-        .sessions;
-    let anchored = AnchoredWorkspace::open(&workspace).expect("workspace opens");
+    let (anchored, sessions) = runtime_sessions(&workspace);
     let guard = acquire_anchored_session_lock(&anchored, &sessions, "symlinklock001")
         .expect("lock owner acquires");
     let target = workspace.join("foreign-lock-target");

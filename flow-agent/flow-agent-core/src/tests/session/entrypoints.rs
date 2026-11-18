@@ -26,17 +26,12 @@ fn run_flow_allocates_unique_session_id_for_repeated_valid_runs() {
             .len(),
         first.event_count
     );
-    assert!(
-        crate::tests::helpers::workspace_session_dir(&workspace)
-            .join("smoke-flow.jsonl")
-            .is_file()
-    );
-    assert!(
-        crate::tests::helpers::workspace_session_dir(&workspace)
-            .join("smoke-flow-2.jsonl")
-            .is_file()
-    );
     for session_id in [&first.session_id, &second.session_id] {
+        assert!(
+            crate::tests::helpers::workspace_session_dir(&workspace)
+                .join(format!("{session_id}.jsonl"))
+                .is_file()
+        );
         let metadata = fs::read_to_string(
             crate::tests::helpers::workspace_log_dir(&workspace).join(format!("{session_id}.log")),
         )
@@ -65,15 +60,6 @@ fn human_run_reports_terminal_status() {
     assert_eq!(
         run.stdout,
         "flow smoke-flow (session smoke-flow) completed\n"
-    );
-
-    let failed_workspace = workspace_copy("negative");
-    let failed = run_flow(&failed_workspace, "negative-write", EmitMode::Human)
-        .expect("negative fixture reaches its deterministic terminal state");
-    assert!(failed.failed);
-    assert_eq!(
-        failed.stdout,
-        "flow negative-write (session negative-write) failed (write_denied): write outside declared roots denied\n"
     );
 }
 

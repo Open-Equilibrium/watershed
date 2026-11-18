@@ -9,7 +9,18 @@ use core_script::{
     MAX_REGISTRY_ENTRIES, MAX_REGISTRY_FILE_BYTES, MAX_REGISTRY_TOTAL_BYTES, RegistryBlock,
     ToolCommand, parse_registry_block,
 };
-use std::fs;
+use std::{fs, path::Path};
+
+fn write_instruction_entries(workspace: &Path, prefix: &str, count: usize, bytes: usize) {
+    for index in 0..count {
+        let id = format!("{prefix}-{index:04}");
+        fs::write(
+            workspace.join(format!("registry/instructions/{id}.yaml")),
+            padded_instruction(&id, bytes),
+        )
+        .expect("boundary registry entry is written");
+    }
+}
 
 #[test]
 fn authoring_definition_budget() {
@@ -32,14 +43,7 @@ fn authoring_registry_byte_budget() {
     let workspace = authoring_workspace("authoring-registry-byte-budget");
     let per_entry = usize::try_from(MAX_REGISTRY_TOTAL_BYTES).expect("registry limit fits usize")
         / MAX_REGISTRY_ENTRIES;
-    for index in 0..MAX_REGISTRY_ENTRIES {
-        let id = format!("byte-{index:04}");
-        fs::write(
-            workspace.join(format!("registry/instructions/{id}.yaml")),
-            padded_instruction(&id, per_entry),
-        )
-        .expect("boundary registry entry is written");
-    }
+    write_instruction_entries(&workspace, "byte", MAX_REGISTRY_ENTRIES, per_entry);
 
     validate_global_registry(None).expect("16 MiB registry is accepted");
 
@@ -56,14 +60,7 @@ fn authoring_create_counts_the_candidate_toward_the_registry_byte_budget() {
     let per_entry = usize::try_from(MAX_REGISTRY_FILE_BYTES).expect("file limit fits usize");
     let entries = usize::try_from(MAX_REGISTRY_TOTAL_BYTES / MAX_REGISTRY_FILE_BYTES)
         .expect("entry count fits usize");
-    for index in 0..entries {
-        let id = format!("create-byte-{index:04}");
-        fs::write(
-            workspace.join(format!("registry/instructions/{id}.yaml")),
-            padded_instruction(&id, per_entry),
-        )
-        .expect("boundary registry entry is written");
-    }
+    write_instruction_entries(&workspace, "create-byte", entries, per_entry);
     validate_global_registry(None).expect("full registry is accepted");
 
     let error = create_global_registry_block(maximum_tool())
@@ -75,14 +72,7 @@ fn authoring_create_counts_the_candidate_toward_the_registry_byte_budget() {
 #[test]
 fn authoring_registry_entry_budget() {
     let workspace = authoring_workspace("authoring-registry-entry-budget");
-    for index in 0..MAX_REGISTRY_ENTRIES {
-        let id = format!("entry-{index:04}");
-        fs::write(
-            workspace.join(format!("registry/instructions/{id}.yaml")),
-            padded_instruction(&id, 128),
-        )
-        .expect("boundary registry entry is written");
-    }
+    write_instruction_entries(&workspace, "entry", MAX_REGISTRY_ENTRIES, 128);
 
     validate_global_registry(None).expect("1,024 definitions are accepted");
     let error = create_global_registry_block(maximum_tool())

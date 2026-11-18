@@ -7,10 +7,10 @@ This is the canonical M1.1 source for hard functional limits, their boundary pro
 - Binary units are used. A byte cap counts the bytes identified in the row, not Unicode scalars, allocator capacity or a transport's framing overhead.
 - `F:<name>` is a required functional test in the workspace `nextest` gate on Flow Agent's native targets; capability-specific evidence follows [TESTING.md](../../TESTING.md). For a byte or count cap `N`, a valid `N` fixture succeeds and `N + 1` fails before unbounded allocation or productive effects. Parameterized rows execute every named field or operation separately. Required malformed, missing, zero, negative and checked-arithmetic cases remain part of the relevant protocol test even when they are not additional numeric selections.
 - A deadline test uses a fake monotonic clock unless the row explicitly requires a child process. Fake-clock tests assert that at `limit - 1 ns` the operation remains eligible; at `limit` it reaches exactly one terminal timeout path; advancing past the limit cannot create another effect or terminal result. Real-process tests assert the outcomes and elapsed ranges named in the row; these observations do not prove exact transition times.
-- `P:<name>` is a release-mode, one-process-at-a-time observation on the fixed `ubuntu-24.04` x64 runner. Five warmups and 30 measured fresh-child samples produce `target/m11-performance/m11-performance-evidence.jsonl` with schema `flow-m11-performance-evidence-v0`. The report records unadjusted elapsed-time and Linux `post-workload VmHWM - pre-workload VmRSS` observations without threshold comparisons.
+- `P:<name>` is a release-mode observation on the fixed `ubuntu-24.04` x64 runner, collected under the [evidence convention](../../PERFORMANCE.md#evidence-convention): five warmups and 30 measured fresh-child samples write `target/m11-performance/m11-performance-evidence.jsonl` with schema `flow-m11-performance-evidence-v0`. Elapsed time is unadjusted; the RSS observation is Linux `post-workload VmHWM - pre-workload VmRSS`.
 - `P:rss_detection_fixture` is always present. It allocates, touches and frees exactly 4 MiB in a fresh child and must report at least 4 MiB minus the documented 512 KiB Linux accounting tolerance. This validates measurement integrity; it is not a product RSS limit.
 - `F`-only rows are intentionally excluded from maximum-load observation because they exercise parser, cardinality or fake-clock boundaries rather than representative product work.
-- The report records the commit, runner image/version, CPU, logical CPU count, total memory, exact inputs, exclusions, raw samples and aggregates. CI uploads the JSONL artifact and fails only when workload, lifecycle, schema, measurement, report or artifact integrity fails.
+- The report records the commit, runner image/version, CPU, logical CPU count, total memory, exact inputs, exclusions, raw samples and aggregates. CI uploads it as the `m11-performance-evidence` artifact; its integrity gate follows [PERFORMANCE.md](../../PERFORMANCE.md#evidence-convention).
 
 The functional proofs run in the workspace `nextest` gate. The reference evidence command is:
 
@@ -71,7 +71,7 @@ A raw SSE line excludes its LF delimiter and an immediately preceding CR. An ass
 
 ## Productive dispatch reservation
 
-The concrete Run writer inventories current stored usage and admits the complete applicable envelope before durable attempt intent. Reservation uses checked sums against the 352 MiB/22-segment event stream, 48 MiB context stream, 16 MiB metadata, 5,216 MiB and 131,072-object inventory, and unchanged 5.5 GiB bundle. The bounded route to the next dispatch and its lifecycle closure require 69 maximum-size Event records plus 33 objects totaling 18 MiB.
+The concrete Run writer inventories current stored usage and admits the complete applicable envelope before durable attempt intent. Reservation uses checked sums against the [storage limits](../../PERFORMANCE.md#safety-envelope), including the 16 MiB session-metadata limit. The bounded route to the next dispatch and its lifecycle closure require 69 maximum-size Event records plus 33 objects totaling 18 MiB.
 
 | ID | Selected contract | Exact fixture and functional proof | Performance observation or exclusion |
 |---|---|---|---|

@@ -209,7 +209,6 @@ fn terminal_event_decoding_is_independent_of_chunking() {
     );
     assert_eq!(completion.len(), LINE_BYTES);
     let comment = format!(":{}\n", "x".repeat(LINE_BYTES - 2));
-    // Exactly the wire budget ends at the completion; the byte after it is never consumed.
     let mut stream = comment.repeat(budget / LINE_BYTES - 1);
     stream.push_str(&completion);
     stream.push('\n');
@@ -261,11 +260,9 @@ fn terminal_event_decoding_is_independent_of_chunking_at_crlf() {
     let budget = MAX_RESPONSES_DECODED_STREAM_BYTES + MAX_RESPONSES_EVENT_BYTES;
     let comment = format!(":{}\r\n", "x".repeat(LINE_BYTES - 3));
     assert_eq!(comment.len(), LINE_BYTES);
-    // The split falls between the first comment's CR and its LF.
     let split_at = LINE_BYTES - 1;
     let base = "data:{\"type\":\"response.completed\",\"response\":{\"id\":\"\"}}\n\n";
     for (extra_bytes, accepted) in [(0, true), (1, false)] {
-        // The completion is LINE_BYTES plus `extra_bytes`, so the budget ends exactly at or one past it.
         let completion = format!(
             "data:{{\"type\":\"response.completed\",\"response\":{{\"id\":\"{}\"}}}}\n\n",
             "r".repeat(LINE_BYTES - base.len() + extra_bytes)

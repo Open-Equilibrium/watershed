@@ -22,7 +22,6 @@ pub fn for_each_reader_line_with_limit(
     })
 }
 
-/// Visits each line until `visit` breaks; the rest of the reader is not read or framed.
 pub(super) fn for_each_reader_line_with_limit_inner(
     reader: impl Read,
     path: &Path,

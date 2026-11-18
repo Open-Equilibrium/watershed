@@ -4,7 +4,6 @@ use crate::runtime::{
 };
 use std::{collections::BTreeMap, os::fd::OwnedFd, path::Path};
 
-/// An admitted Flow-owned object, retained independently of subsequent pathname lookup.
 pub(super) struct ProtectedObject {
     pub(super) descriptor: OwnedFd,
     pub(super) identity: proto::UnixObjectIdentityV0,
@@ -12,7 +11,6 @@ pub(super) struct ProtectedObject {
 }
 
 impl PreparedExecutor {
-    /// Retains and hashes the exact Executor request without launching any process.
     pub(crate) fn prepare_tool(
         &self,
         workspace: &AnchoredWorkspace,
@@ -29,7 +27,6 @@ impl PreparedExecutor {
                     environment.insert(name.clone(), value);
                 }
                 Err(std::env::VarError::NotPresent) => {}
-                // WHY: a present value that is not UTF-8 must not silently run without its variable.
                 Err(std::env::VarError::NotUnicode(_)) => {
                     return Err(RuntimeError::executor(
                         proto::ExecutorErrorCodeV0::PolicyUnsupported,
@@ -77,8 +74,6 @@ impl PreparedExecutor {
             )
         })?;
         let request_hash = crate::runtime::digest::prefixed_sha256_hex(&request_bytes);
-        // The inventory is admitted once per controller. Per-Tool work duplicates
-        // only the bounded retained object handles, never a recursive home scan.
         let protected_descriptors = self
             .protected_objects
             .iter()

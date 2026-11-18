@@ -25,7 +25,6 @@ use crate::runtime::{
 };
 use std::path::Path;
 
-/// Runs a globally registered Flow in one Workspace and captures its output.
 pub fn run_flow(
     workspace: impl AsRef<Path>,
     flow_ref: &str,
@@ -34,7 +33,6 @@ pub fn run_flow(
     run_flow_internal_with_root_input(workspace, flow_ref, None, None, emit == EmitMode::Jsonl)
 }
 
-/// Runs a Flow with one validated typed selected-root-Flow input.
 pub fn run_flow_with_root_input(
     workspace: impl AsRef<Path>,
     flow_ref: &str,
@@ -50,10 +48,6 @@ pub fn run_flow_with_root_input(
     )
 }
 
-/// Runs a flow with bounded, non-blocking committed-event notifications.
-///
-/// The caller owns the receiver and any blocking transport. Notifications carry only a
-/// high-watermark wake-up; read event payloads from [`crate::SessionEventReader`] by sequence.
 pub fn run_flow_with_live_events(
     workspace: impl AsRef<Path>,
     flow_ref: &str,
@@ -65,7 +59,6 @@ pub fn run_flow_with_live_events(
     Ok(output)
 }
 
-/// Runs a typed-input Flow with bounded committed-event notifications.
 pub fn run_flow_with_root_input_and_live_events(
     workspace: impl AsRef<Path>,
     flow_ref: &str,
@@ -83,7 +76,6 @@ pub fn run_flow_with_root_input_and_live_events(
     Ok(output)
 }
 
-/// Runs a Flow after binding one caller-owned guard to the loaded execution backend.
 pub fn run_flow_with_execution_activation<G>(
     workspace: impl AsRef<Path>,
     flow_ref: &str,

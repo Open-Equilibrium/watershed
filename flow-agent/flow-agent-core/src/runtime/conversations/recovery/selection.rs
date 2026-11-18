@@ -50,7 +50,6 @@ pub(super) fn read_productive_recovery_header(
     Ok(record)
 }
 
-/// Rejects a recovery header whose Flow definition identity contradicts its run log.
 pub(super) fn ensure_header_matches_definition(
     flow_definition_id: &str,
     registry_hash: &str,

@@ -95,12 +95,10 @@ impl<'de> Visitor<'de> for UniqueJsonVisitor {
     }
 }
 
-/// Parses one JSON value while rejecting duplicate object keys at every depth.
 pub fn parse_unique_json(source: &str) -> Result<Value, serde_json::Error> {
     serde_json::from_str::<UniqueJsonValue>(source).map(UniqueJsonValue::into_json)
 }
 
-/// Whether `value` is already in Unicode NFC form.
 pub fn is_nfc(value: &str) -> bool {
     value.nfc().eq(value.chars())
 }
@@ -118,7 +116,6 @@ pub(crate) fn nfc_json_string_values(mut value: Value) -> Value {
     value
 }
 
-/// Location of the first object key that repeats after NFC normalization, at any depth.
 pub(crate) fn normalized_key_collision(value: &Value, location: &str) -> Option<String> {
     match value {
         Value::Object(values) => {
@@ -176,7 +173,6 @@ pub(crate) fn json_nesting_reaches_limit(value: &Value, enclosing_depth: usize) 
     false
 }
 
-/// Serializes a JSON value with deterministic key ordering and NFC normalization.
 pub fn canonical_json(value: &Value) -> Result<String, CanonicalJsonError> {
     if json_nesting_reaches_limit(value, 0) {
         return Err(CanonicalJsonError::JsonNestingLimitExceeded);

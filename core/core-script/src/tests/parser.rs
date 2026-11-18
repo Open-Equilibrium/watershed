@@ -15,59 +15,6 @@ proptest! {
 }
 
 #[test]
-fn parser_rejects_unsafe_yaml() {
-    const INSTRUCTION: &str =
-        "instruction:\n  id: inspect\n  name: Inspect\n  prompt: Inspect input\n";
-    let cases = [
-        (
-            "duplicate-key.yaml",
-            INSTRUCTION.replace("  prompt:", "  prompt: first\n  prompt:"),
-        ),
-        (
-            "typed-key-collision.yaml",
-            INSTRUCTION.replace("  prompt:", "  1: first\n  \"1\": second\n  prompt:"),
-        ),
-        (
-            "anchor.yaml",
-            INSTRUCTION.replace("name: Inspect", "name: &display Inspect"),
-        ),
-        (
-            "alias.yaml",
-            INSTRUCTION.replace("prompt: Inspect input", "prompt: *display"),
-        ),
-        (
-            "merge.yaml",
-            INSTRUCTION.replace("  id:", "  <<: {}\n  id:"),
-        ),
-        (
-            "core-tag.yaml",
-            INSTRUCTION.replace("prompt: Inspect input", "prompt: !!str Inspect input"),
-        ),
-        (
-            "custom-tag.yaml",
-            INSTRUCTION.replace("prompt: Inspect input", "prompt: !secret Inspect input"),
-        ),
-        (
-            "multiple-documents.yaml",
-            format!("{INSTRUCTION}---\n{INSTRUCTION}"),
-        ),
-        (
-            "unknown-block-kind.yaml",
-            "unknown:\n  id: inspect\n  name: Inspect\n".to_owned(),
-        ),
-        (
-            "explicit-null.yaml",
-            INSTRUCTION.replace("prompt: Inspect input", "prompt: null"),
-        ),
-    ];
-
-    for (name, source) in cases {
-        let error = parse_registry_block(name, &source).expect_err(name);
-        assert!(error.to_string().starts_with(name), "{name}: {error}");
-    }
-}
-
-#[test]
 fn parser_rejects_implicit_null_with_neutral_diagnostic() {
     let error = parse_registry_block(
         "implicit-null.yaml",

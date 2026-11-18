@@ -112,7 +112,6 @@ struct InitTransaction {
     registry_root: String,
 }
 
-/// Initializes the global Flow configuration authority without replacing existing state.
 pub fn initialize_global_config(registry_root: Option<&str>) -> Result<(), RuntimeError> {
     let home_path = flow_agent_home_path()?;
     initialize_global_config_at(&home_path, registry_root)

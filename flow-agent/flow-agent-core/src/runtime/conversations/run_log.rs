@@ -355,7 +355,6 @@ fn run_log_projection_page_bytes(
         .saturating_add(record_count.saturating_sub(1)))
 }
 
-/// Projects one bounded canonical page of records for one Tool in an addressed run.
 pub fn project_tool_run_log(
     workspace: impl AsRef<Path>,
     conversation_id: &str,

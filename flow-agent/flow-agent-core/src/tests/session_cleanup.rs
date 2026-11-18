@@ -19,6 +19,14 @@ fn inject_runtime_operation_failure(
     ))
 }
 
+fn failed(message: &str) -> Result<(), RuntimeError> {
+    Err(RuntimeError::Protocol(message.to_owned()))
+}
+
+fn stage(fails: bool, message: &str) -> Result<(), RuntimeError> {
+    if fails { failed(message) } else { Ok(()) }
+}
+
 #[test]
 fn controlled_stage_failure_combinations_preserve_every_cause() {
     for (operation_failed, finalization_failed, cleanup_failed) in [
@@ -30,21 +38,9 @@ fn controlled_stage_failure_combinations_preserve_every_cause() {
         (false, true, true),
         (true, true, true),
     ] {
-        let operation = if operation_failed {
-            Err(RuntimeError::Protocol("operation failed".to_owned()))
-        } else {
-            Ok(())
-        };
-        let finalization = if finalization_failed {
-            Err(RuntimeError::Protocol("finalization failed".to_owned()))
-        } else {
-            Ok(())
-        };
-        let cleanup = if cleanup_failed {
-            Err(RuntimeError::Protocol("cleanup failed".to_owned()))
-        } else {
-            Ok(())
-        };
+        let operation = stage(operation_failed, "operation failed");
+        let finalization = stage(finalization_failed, "finalization failed");
+        let cleanup = stage(cleanup_failed, "cleanup failed");
 
         let err = reconcile_controlled_stages(operation, finalization, cleanup)
             .expect_err("the injected stage failure must be returned");
@@ -91,11 +87,7 @@ fn runtime_and_writer_finalization_failures_remain_visible() {
         "negative-write",
         false,
         inject_runtime_operation_failure,
-        |_| {
-            Err(RuntimeError::Protocol(
-                "injected writer finalization failure".to_owned(),
-            ))
-        },
+        |_| failed("injected writer finalization failure"),
         |_| {},
     )
     .expect_err("runtime and finalization failures must be retained");
@@ -123,11 +115,7 @@ fn runtime_finalization_and_real_cleanup_failures_remain_visible() {
         "negative-write",
         false,
         inject_runtime_operation_failure,
-        |_| {
-            Err(RuntimeError::Protocol(
-                "injected writer finalization failure".to_owned(),
-            ))
-        },
+        |_| failed("injected writer finalization failure"),
         |lock| {
             lock.remove().expect("lock file removed");
             fs::create_dir(lock.diagnostic_path()).expect("lock path replaced with a directory");
@@ -173,12 +161,9 @@ fn controlled_cleanup_retains_empty_orphans_and_preserves_active_reservations() 
         empty.lock_path.diagnostic_path().to_owned(),
     ];
 
-    let empty_err = reconcile_controlled_stages::<()>(
-        Err(RuntimeError::Protocol("controlled failure".to_owned())),
-        Ok(()),
-        empty.cleanup(),
-    )
-    .expect_err("operation failure remains visible");
+    let empty_err =
+        reconcile_controlled_stages::<()>(failed("controlled failure"), Ok(()), empty.cleanup())
+            .expect_err("operation failure remains visible");
 
     match empty_err {
         RuntimeError::ControlledStageFailures {
@@ -215,12 +200,9 @@ fn controlled_cleanup_retains_empty_orphans_and_preserves_active_reservations() 
     ];
     let active_lock = active.lock_path.diagnostic_path().to_owned();
 
-    let active_err = reconcile_controlled_stages::<()>(
-        Err(RuntimeError::Protocol("controlled failure".to_owned())),
-        Ok(()),
-        active.cleanup(),
-    )
-    .expect_err("operation failure remains visible");
+    let active_err =
+        reconcile_controlled_stages::<()>(failed("controlled failure"), Ok(()), active.cleanup())
+            .expect_err("operation failure remains visible");
 
     assert!(
         matches!(active_err, RuntimeError::Protocol(message) if message == "controlled failure")

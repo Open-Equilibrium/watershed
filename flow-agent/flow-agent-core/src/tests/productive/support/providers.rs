@@ -17,11 +17,19 @@ pub(in super::super) struct ScriptedProvider {
     pub(in super::super) turns: VecDeque<ProviderTurn>,
 }
 
+impl ScriptedProvider {
+    pub(in super::super) fn new(turns: impl IntoIterator<Item = ProviderTurn>) -> Self {
+        Self {
+            bodies: Vec::new(),
+            turns: turns.into_iter().collect(),
+        }
+    }
+}
+
 pub(in super::super) struct DefinitiveFailureProvider {
     pub(in super::super) bodies: Vec<serde_json::Value>,
 }
 
-/// Decodes a fixed reply, so a broken format reaches the productive path as the decoder reports it.
 pub(in super::super) struct ReplyInvalidProvider {
     pub(in super::super) bodies: Vec<serde_json::Value>,
     pub(in super::super) events: Vec<serde_json::Value>,
@@ -35,6 +43,16 @@ impl ProductiveProvider for ReplyInvalidProvider {
     ) -> Result<ProviderTurn, RuntimeError> {
         self.bodies.push(body.clone());
         decode_responses_turn(&self.events)
+    }
+}
+
+pub(in super::super) fn string_provider_turn(response_id: &str, value: &str) -> ProviderTurn {
+    ProviderTurn {
+        token_usage: None,
+        response_id: response_id.to_owned(),
+        output_text: format!("{{\"type\":\"string\",\"value\":\"{value}\"}}"),
+        retained_items: Vec::new(),
+        tool_calls: Vec::new(),
     }
 }
 

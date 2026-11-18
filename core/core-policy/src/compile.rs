@@ -10,12 +10,9 @@ use std::{
     fmt,
 };
 
-/// Error returned while compiling policy artifacts from a script registry.
 #[derive(Debug)]
 pub enum PolicyCompileError {
-    /// Requested flow reference was missing.
     MissingFlow(String),
-    /// Compiled artifact failed validation.
     InvalidArtifact(PolicyArtifactValidationError),
 }
 
@@ -39,7 +36,6 @@ impl std::error::Error for PolicyCompileError {
     }
 }
 
-/// Compiles the invocation policy for one resolved Flow.
 pub fn compile_policy_artifact(
     registry: &core_script::ResolvedRegistry,
     flow_ref: &str,

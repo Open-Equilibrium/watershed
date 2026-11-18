@@ -5,6 +5,7 @@ use crate::{
     tests::{support::event_timestamp, test_support::expected_stream},
 };
 use proto::{EventEnvelope, EventType};
+use serde_json::{Value, json};
 
 #[derive(Default)]
 pub(in crate::tests) struct CollectingEventSink(pub(in crate::tests) Vec<EventEnvelope>);
@@ -36,7 +37,7 @@ pub(in crate::tests) fn event_line(
     session_id: &str,
     sequence: u64,
     flow_id: Option<&str>,
-    payload: serde_json::Value,
+    payload: Value,
 ) -> String {
     event_line_with_parent(
         event_id, event_type, session_id, sequence, flow_id, None, payload,
@@ -50,7 +51,7 @@ pub(in crate::tests) fn event_line_with_parent(
     sequence: u64,
     flow_id: Option<&str>,
     parent_flow_id: Option<&str>,
-    payload: serde_json::Value,
+    payload: Value,
 ) -> String {
     EventEnvelope {
         flow_id: flow_id.map(str::to_owned),
@@ -69,36 +70,41 @@ pub(in crate::tests) fn event_line_with_parent(
     .expect("event serializes")
 }
 
-pub(in crate::tests) fn flow_started_line(event_id: &str, sequence: u64) -> String {
+fn flow_line(event_id: &str, event_type: EventType, sequence: u64, payload: Value) -> String {
     event_line(
         event_id,
-        EventType::FlowStarted,
+        event_type,
         "meta001",
         sequence,
         Some("flow-001"),
-        serde_json::json!({"flow_definition_id":"smoke-flow"}),
+        payload,
+    )
+}
+
+pub(in crate::tests) fn flow_started_line(event_id: &str, sequence: u64) -> String {
+    flow_line(
+        event_id,
+        EventType::FlowStarted,
+        sequence,
+        json!({"flow_definition_id":"smoke-flow"}),
     )
 }
 
 pub(in crate::tests) fn flow_completed_line(event_id: &str, sequence: u64) -> String {
-    event_line(
+    flow_line(
         event_id,
         EventType::FlowCompleted,
-        "meta001",
         sequence,
-        Some("flow-001"),
-        serde_json::json!({"flow_definition_id":"smoke-flow"}),
+        json!({"flow_definition_id":"smoke-flow"}),
     )
 }
 
 pub(in crate::tests) fn phase_entered_line(event_id: &str, sequence: u64) -> String {
-    event_line(
+    flow_line(
         event_id,
         EventType::PhaseEntered,
-        "meta001",
         sequence,
-        Some("flow-001"),
-        serde_json::json!({
+        json!({
             "instruction_ids": [],
             "iteration": 1,
             "phase_execution_id": "phase-000001",
@@ -111,13 +117,11 @@ pub(in crate::tests) fn phase_entered_line(event_id: &str, sequence: u64) -> Str
 }
 
 pub(in crate::tests) fn phase_completed_line(event_id: &str, sequence: u64) -> String {
-    event_line(
+    flow_line(
         event_id,
         EventType::PhaseCompleted,
-        "meta001",
         sequence,
-        Some("flow-001"),
-        serde_json::json!({
+        json!({
             "iteration": 1,
             "phase_execution_id": "phase-000001",
             "phase_id": "phase",
@@ -128,13 +132,11 @@ pub(in crate::tests) fn phase_completed_line(event_id: &str, sequence: u64) -> S
 }
 
 pub(in crate::tests) fn phase_failed_line(event_id: &str, sequence: u64) -> String {
-    event_line(
+    flow_line(
         event_id,
         EventType::PhaseFailed,
-        "meta001",
         sequence,
-        Some("flow-001"),
-        serde_json::json!({
+        json!({
             "error": "failed",
             "iteration": 1,
             "phase_execution_id": "phase-000001",
@@ -145,13 +147,11 @@ pub(in crate::tests) fn phase_failed_line(event_id: &str, sequence: u64) -> Stri
 }
 
 pub(in crate::tests) fn tool_started_line(event_id: &str, sequence: u64) -> String {
-    event_line(
+    flow_line(
         event_id,
         EventType::ToolStarted,
-        "meta001",
         sequence,
-        Some("flow-001"),
-        serde_json::json!({
+        json!({
             "allowed_parameters": [],
             "tool_id": "tool",
             "tool_kind": "predefined-command",
@@ -161,27 +161,20 @@ pub(in crate::tests) fn tool_started_line(event_id: &str, sequence: u64) -> Stri
 }
 
 pub(in crate::tests) fn tool_failed_line(event_id: &str, sequence: u64) -> String {
-    event_line(
+    flow_line(
         event_id,
         EventType::ToolFailed,
-        "meta001",
         sequence,
-        Some("flow-001"),
-        serde_json::json!({
-            "error": "denied",
-            "tool_id": "tool",
-        }),
+        json!({"error":"denied","tool_id":"tool"}),
     )
 }
 
 pub(in crate::tests) fn tool_completed_line(event_id: &str, sequence: u64) -> String {
-    event_line(
+    flow_line(
         event_id,
         EventType::ToolCompleted,
-        "meta001",
         sequence,
-        Some("flow-001"),
-        serde_json::json!({"exit_code":0,"tool_id":"tool"}),
+        json!({"exit_code":0,"tool_id":"tool"}),
     )
 }
 
@@ -191,13 +184,11 @@ pub(in crate::tests) fn message_delta_line(
     role: &str,
     content_delta: &str,
 ) -> String {
-    event_line(
+    flow_line(
         event_id,
         EventType::MessageDelta,
-        "meta001",
         sequence,
-        Some("flow-001"),
-        serde_json::json!({"content_delta":content_delta,"message_id":"msg-001","role":role}),
+        json!({"content_delta":content_delta,"message_id":"msg-001","role":role}),
     )
 }
 
@@ -206,13 +197,11 @@ pub(in crate::tests) fn message_completed_line(
     sequence: u64,
     role: &str,
 ) -> String {
-    event_line(
+    flow_line(
         event_id,
         EventType::MessageCompleted,
-        "meta001",
         sequence,
-        Some("flow-001"),
-        serde_json::json!({"message_id":"msg-001","role":role}),
+        json!({"message_id":"msg-001","role":role}),
     )
 }
 
@@ -224,7 +213,7 @@ pub(in crate::tests) fn base_event() -> EventEnvelope {
         1,
         "2026-01-01T00:00:00Z",
         "flow-agent-cli",
-        serde_json::json!({"reason":"fixture-start"}),
+        json!({"reason":"fixture-start"}),
     )
 }
 
@@ -239,7 +228,7 @@ pub(in crate::tests) fn flow_id_for_definition(
                 && event
                     .payload
                     .get("flow_definition_id")
-                    .and_then(serde_json::Value::as_str)
+                    .and_then(Value::as_str)
                     == Some(definition_id)
         })
         .and_then(|event| event.flow_id.as_deref())
@@ -254,19 +243,9 @@ pub(in crate::tests) fn session_event_line(
     sequence: u64,
 ) -> String {
     let payload = if event_type == EventType::SessionStarted {
-        serde_json::json!({"reason":"fixture-start"})
+        json!({"reason":"fixture-start"})
     } else {
-        serde_json::json!({})
+        json!({})
     };
-    EventEnvelope::new(
-        event_id,
-        event_type,
-        session_id,
-        sequence,
-        event_timestamp(sequence),
-        "flow-agent-cli",
-        payload,
-    )
-    .canonical_jsonl()
-    .expect("session event serializes")
+    event_line(event_id, event_type, session_id, sequence, None, payload)
 }

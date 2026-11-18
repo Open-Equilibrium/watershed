@@ -14,8 +14,6 @@ pub(super) fn configure_executor_child(
         .map_err(|error| std::io::Error::from_raw_os_error(error.raw_os_error()))
 }
 
-/// Moves a validated Executor image above the protected descriptor range, so that launching it
-/// by descriptor path cannot resolve to a standard stream that the child remaps.
 pub(super) fn duplicate_executor_descriptor(
     executable: &std::fs::File,
 ) -> Result<std::os::fd::OwnedFd, crate::runtime::types::RuntimeError> {
@@ -53,7 +51,6 @@ thread_local! {
     static FORCE_CLEANUP_SURVIVOR: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
-/// Makes the next completed-Executor cleanup report a group that survived its wait.
 #[cfg(all(test, target_os = "macos"))]
 pub(super) fn force_cleanup_survivor_for_test() {
     FORCE_CLEANUP_SURVIVOR.set(true);
@@ -72,14 +69,10 @@ pub(super) fn child_exited_without_reaping(
     .map(|status| status.is_some())
 }
 
-/// How the cleanup of an Executor's process group ended.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum ExecutorCleanup {
-    /// The leader was reaped and no process of its group remained.
     Complete,
-    /// A process of the group outlived the cleanup wait.
     Survived,
-    /// The leader could not be observed, so the cleanup cannot be judged.
     Unobservable,
 }
 
@@ -87,7 +80,6 @@ pub(super) fn terminate_child_bounded(child: &mut std::process::Child) -> Execut
     #[cfg(test)]
     {
         if FORCE_CLEANUP_SURVIVOR.replace(false) {
-            // Ends the real group first, so the injected survivor leaks no process.
             if let Some(process_group) = rustix::process::Pid::from_raw(child.id() as i32) {
                 let _ = rustix::process::kill_process_group(
                     process_group,
@@ -100,8 +92,6 @@ pub(super) fn terminate_child_bounded(child: &mut std::process::Child) -> Execut
         }
     }
     let process_group = rustix::process::Pid::from_raw(child.id() as i32);
-    // Signal the group before reaping its leader. The unreaped leader retains
-    // the numeric PID/PGID, so this signal cannot race with identifier reuse.
     if let Some(process_group) = process_group {
         #[cfg(test)]
         PROCESS_GROUP_CLEANUP_CALLS.set(PROCESS_GROUP_CLEANUP_CALLS.get() + 1);

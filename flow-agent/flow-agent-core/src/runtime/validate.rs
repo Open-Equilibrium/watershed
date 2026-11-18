@@ -10,8 +10,6 @@ use crate::runtime::types::{
 use proto::{EventEnvelope, EventType};
 use std::{collections::BTreeSet, path::Path};
 
-/// Validates public v0 event JSONL canonical bytes, envelope fields, payload
-/// contracts and session lifecycle ordering.
 pub fn validate_protocol_jsonl_text(
     path: &Path,
     text: &str,

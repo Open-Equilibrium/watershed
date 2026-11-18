@@ -1,4 +1,3 @@
-"""Finite file/device operations retained from macos-flow-owned-write-protection-cases.py."""
 import ctypes
 import json
 import mmap
@@ -73,7 +72,6 @@ for row in config["operations"]:
         try:
             result["value"] = xattr(target)
         except OSError as error:
-            # ENODATA on Linux, ENOATTR on Darwin: absence, not unreadability.
             assert error.errno == (93 if sys.platform == "darwin" else 61), error
             result["value"] = None
     results.append(result)

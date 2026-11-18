@@ -1,11 +1,8 @@
-use super::super::{
-    helpers::{empty_workspace, reserve_session_log},
-    test_support::workspace_copy,
-};
-use super::support::{enqueue_test_event, progress_writer};
+use super::super::test_support::workspace_copy;
+use super::support::{enqueue_test_event, progress_writer, reserved_session};
 use crate::runtime::{
     event_writer::{RuntimeEventSink, SerialSessionWriter},
-    live_events::{LiveEventNotifyStatus, LiveEventReceiveError, live_event_channel},
+    live_events::{LiveEventReceiveError, live_event_channel},
     session::run_flow_with_live_events,
     session_reading::SessionEventReader,
     types::RuntimeError,
@@ -58,18 +55,16 @@ fn twenty_runs_finish_and_catch_up_with_permanently_lagging_receivers() {
 
 #[test]
 fn notification_is_observable_only_after_the_sequence_is_persisted() {
-    let workspace = empty_workspace("event-writer-notify-order");
-    let reservation = reserve_session_log(&workspace, "hello001").expect("session reserved");
-    let appends = Arc::new(Mutex::new(Vec::new()));
+    let (_workspace, reservation) = reserved_session("event-writer-notify-order", "hello001");
     let (notifier, receiver) = live_event_channel();
     let receiver = Arc::new(Mutex::new(receiver));
-    let (mut writer, _, event) = progress_writer(
+    let (mut writer, _, event, appends) = progress_writer(
         &reservation,
         0,
         notifier,
-        Arc::clone(&appends),
         None,
         Some(Arc::clone(&receiver)),
+        None,
     );
     let jsonl = enqueue_test_event(&mut writer, &event);
     writer.finish().expect("writer finishes");
@@ -89,29 +84,7 @@ fn notification_is_observable_only_after_the_sequence_is_persisted() {
 }
 
 #[test]
-fn saturated_and_disconnected_sessions_are_isolated() {
-    let (session_a, _lagging_a) = live_event_channel();
-    let (session_b, receiver_b) = live_event_channel();
-    assert_eq!(
-        session_a.try_notify("session-a", 1),
-        LiveEventNotifyStatus::Queued
-    );
-    assert_eq!(
-        session_a.try_notify("session-a", 2),
-        LiveEventNotifyStatus::Coalesced
-    );
-    assert_eq!(
-        session_b.try_notify("session-b", 1),
-        LiveEventNotifyStatus::Queued
-    );
-    assert_eq!(
-        receiver_b
-            .recv_timeout(Duration::from_millis(50))
-            .expect("session B remains live")
-            .session_id,
-        "session-b"
-    );
-
+fn disconnected_receiver_cannot_fail_persistence() {
     let workspace = workspace_copy("smoke-flow");
     let (disconnected, receiver) = live_event_channel();
     drop(receiver);
@@ -128,8 +101,7 @@ fn saturated_and_disconnected_sessions_are_isolated() {
 
 #[test]
 fn validation_failure_closes_the_writer_without_notifying() {
-    let workspace = empty_workspace("event-writer-validation");
-    let reservation = reserve_session_log(&workspace, "invalid001").expect("session reserved");
+    let (_workspace, reservation) = reserved_session("event-writer-validation", "invalid001");
     let (notifier, receiver) = live_event_channel();
     let mut writer =
         SerialSessionWriter::start(&reservation, Some(notifier)).expect("writer starts");

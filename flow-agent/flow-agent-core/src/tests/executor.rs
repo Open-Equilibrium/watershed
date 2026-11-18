@@ -9,10 +9,10 @@ use std::{
     path::Path,
 };
 
-fn private_configuration_workspace(label: &str) -> crate::tests::test_support::TempWorkspace {
+fn private_workspace(label: &str) -> crate::tests::test_support::TempWorkspace {
     let root = crate::tests::helpers::empty_workspace(label);
     fs::set_permissions(&root, fs::Permissions::from_mode(0o700))
-        .expect("synthetic configuration parent is private");
+        .expect("synthetic workspace is private");
     root
 }
 
@@ -30,7 +30,7 @@ fn default_executor_is_the_flow_binary_sibling() {
 
 #[test]
 fn protected_override_round_trips_and_default_removes_only_the_override() {
-    let root = private_configuration_workspace("executor-config-roundtrip");
+    let root = private_workspace("executor-config-roundtrip");
     let config = root.join("executor.json");
     let unrelated = root.join("unrelated");
     fs::write(&unrelated, b"preserved").expect("unrelated file is staged");
@@ -82,7 +82,7 @@ fn protected_override_round_trips_and_default_removes_only_the_override() {
 
 #[test]
 fn executor_override_recovers_an_abandoned_publication_stage() {
-    let root = private_configuration_workspace("executor-config-stage-recovery");
+    let root = private_workspace("executor-config-stage-recovery");
     let config = root.join("executor.json");
     let abandoned = root.join(format!(".executor.{}.{}.tmp", u32::MAX, u64::MAX));
     fs::write(&abandoned, b"incomplete").expect("abandoned stage is reachable after a crash");
@@ -100,7 +100,7 @@ fn executor_override_recovers_an_abandoned_publication_stage() {
 
 #[test]
 fn executor_override_rejects_relative_paths_without_publishing() {
-    let root = private_configuration_workspace("executor-config-relative");
+    let root = private_workspace("executor-config-relative");
     let config = root.join("executor.json");
     let store = ExecutorConfigStore::at(config.clone());
 
@@ -114,7 +114,7 @@ fn executor_override_rejects_relative_paths_without_publishing() {
 
 #[test]
 fn executor_override_rejects_an_oversized_document() {
-    let root = private_configuration_workspace("executor-config-oversized");
+    let root = private_workspace("executor-config-oversized");
     let config = root.join("executor.json");
     fs::write(&config, vec![b' '; EXECUTOR_CONFIG_MAX_BYTES as usize + 1])
         .expect("oversized document is staged");
@@ -129,7 +129,7 @@ fn executor_override_rejects_an_oversized_document() {
 
 #[test]
 fn executor_override_rejects_an_oversized_path_without_publishing() {
-    let root = private_configuration_workspace("executor-config-write-oversized");
+    let root = private_workspace("executor-config-write-oversized");
     let config = root.join("executor.json");
     let oversized = root.join("x".repeat(EXECUTOR_CONFIG_MAX_BYTES as usize));
     let store = ExecutorConfigStore::at(config.clone());
@@ -144,7 +144,7 @@ fn executor_override_rejects_an_oversized_path_without_publishing() {
 
 #[test]
 fn executor_override_creates_a_missing_nested_parent_and_round_trips() {
-    let root = private_configuration_workspace("executor-config-nested-parent");
+    let root = private_workspace("executor-config-nested-parent");
     let config = root
         .join("nested")
         .join("configuration")
@@ -172,7 +172,7 @@ fn executor_override_creates_a_missing_nested_parent_and_round_trips() {
 fn executor_override_publishes_after_a_contended_lock_is_released() {
     use std::{fs::OpenOptions, sync::mpsc, thread, time::Duration};
 
-    let root = private_configuration_workspace("executor-config-lock-release");
+    let root = private_workspace("executor-config-lock-release");
     let config = root.join("executor.json");
     let executable = env::current_exe().expect("test executable has an absolute path");
     let lock_path = root.join(".executor.lock");
@@ -200,7 +200,6 @@ fn executor_override_publishes_after_a_contended_lock_is_released() {
         }
     });
 
-    // The checks below only mean something once configure is at the held lock, not before it starts.
     reached
         .recv_timeout(Duration::from_secs(5))
         .expect("configure reaches the held lock");
@@ -230,7 +229,7 @@ fn executor_override_publishes_after_a_contended_lock_is_released() {
 
 #[test]
 fn executor_override_rejects_invalid_documents() {
-    let root = private_configuration_workspace("executor-config-invalid");
+    let root = private_workspace("executor-config-invalid");
     let config = root.join("executor.json");
     let executable = env::current_exe().expect("test executable has an absolute path");
     let invalid_documents = [
@@ -265,7 +264,7 @@ fn executor_override_rejects_invalid_documents() {
 
 #[test]
 fn executor_override_rejects_unsafe_file_and_parent_objects_without_replacing_them() {
-    let root = private_configuration_workspace("executor-config-unsafe-objects");
+    let root = private_workspace("executor-config-unsafe-objects");
     let executable = env::current_exe().expect("test executable has an absolute path");
 
     let file_parent = root.join("file-parent");
@@ -299,7 +298,7 @@ fn executor_override_rejects_unsafe_file_and_parent_objects_without_replacing_th
 
 #[test]
 fn protected_executor_override_has_private_directory_file_and_lock_modes() {
-    let root = private_configuration_workspace("executor-config-private");
+    let root = private_workspace("executor-config-private");
     let parent = root.join("flow-agent");
     let config = parent.join("executor.json");
     let lock = parent.join(".executor.lock");
@@ -331,7 +330,7 @@ fn protected_executor_override_has_private_directory_file_and_lock_modes() {
 fn executor_override_rejects_a_linked_configuration_file() {
     use std::os::unix::fs::symlink;
 
-    let root = private_configuration_workspace("executor-config-symlink");
+    let root = private_workspace("executor-config-symlink");
     let target = root.join("target.json");
     let config = root.join("executor.json");
     fs::write(&target, b"{}").expect("target is staged");
@@ -353,7 +352,7 @@ fn executor_override_rejects_a_linked_configuration_file() {
 
 #[test]
 fn executor_override_rejects_a_hard_linked_configuration_file() {
-    let root = private_configuration_workspace("executor-config-hardlink");
+    let root = private_workspace("executor-config-hardlink");
     let target = root.join("target.json");
     let config = root.join("executor.json");
     fs::write(&target, b"{}\n").expect("target is staged");

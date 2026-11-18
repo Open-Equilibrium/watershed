@@ -178,7 +178,6 @@ fn waiting_executor(
         .expect("terminal response is canonical"),
     )
     .expect("terminal response is UTF-8");
-    // Parse the entire fixture before read consumes the subsequent Start record.
     let script = format!(
         "{{\n\
          printf '%s' '{preflight}'\n\
@@ -230,7 +229,6 @@ fn wait_until(mut condition: impl FnMut() -> bool, description: &str) {
     }
 }
 
-/// Keeps the Executor's valid answer when a process of its group outlives cleanup.
 #[cfg(target_os = "macos")]
 #[test]
 fn valid_answer_is_kept_when_a_group_outlives_cleanup() {

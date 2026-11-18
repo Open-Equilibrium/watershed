@@ -88,7 +88,6 @@ fn sync_session_stream_parent(parent: &AnchoredDir) -> Result<(), RuntimeError> 
 struct SegmentInventoryWatch {
     #[cfg(target_os = "linux")]
     inner: Option<LinuxSegmentInventoryWatch>,
-    // Set once the watch reports that it is gone; a lost watch is never trusted again.
     #[cfg(target_os = "linux")]
     invalidated: Cell<bool>,
 }
@@ -97,7 +96,6 @@ struct SegmentInventoryWatch {
 struct LinuxSegmentInventoryWatch {
     fd: OwnedFd,
     folded_stem: String,
-    // Only the test hook reads it, to remove the watch.
     #[cfg_attr(not(test), allow(dead_code))]
     descriptor: i32,
 }
@@ -384,7 +382,6 @@ pub struct SessionLogAppender {
     pub(crate) current_ordinal: u64,
     pub(crate) file: fs::File,
     inventory_watch: SegmentInventoryWatch,
-    // Set by any watch change or failed drain, and cleared only by a successful inventory scan.
     inventory_dirty: Cell<bool>,
     pub(crate) limits: SessionStreamLimits,
     sealed_segments: Vec<SealedSessionStreamSegment>,
@@ -446,7 +443,6 @@ impl SessionLogAppender {
         Self::open_inventory(path, EVENT_STREAM_LIMITS, inventory)
     }
 
-    /// Removes the kernel watch, so the next check finds it invalidated.
     #[cfg(all(test, target_os = "linux"))]
     pub(crate) fn remove_inventory_watch_for_test(&self) {
         if let Some(watch) = &self.inventory_watch.inner {
@@ -459,8 +455,6 @@ impl SessionLogAppender {
         Ok(self.total_bytes)
     }
 
-    /// Reads the final `len` bytes of the stream. A record never spans segments, so these bytes
-    /// hold the last record when the writer appended it last.
     pub(crate) fn read_last_bytes(&self, len: u64) -> Result<Vec<u8>, RuntimeError> {
         let (path, end) = match self.sealed_segments.last() {
             Some(segment) if self.current_bytes == 0 => (segment.path.clone(), segment.bytes),
@@ -485,8 +479,6 @@ impl SessionLogAppender {
         segmented_jsonl_path(&self.base_path, self.current_ordinal)
     }
 
-    /// Drains the inventory watch. A failed drain marks the inventory dirty too: the events read
-    /// before the failure are lost, so the next check must scan.
     fn drain_inventory_watch(&self) -> Result<bool, RuntimeError> {
         self.inventory_watch
             .changed(&self.base_path)
@@ -496,7 +488,6 @@ impl SessionLogAppender {
     fn verify_current_segment(&self) -> Result<AnchoredFile, RuntimeError> {
         let expected_segment_count = usize::try_from(self.current_ordinal).unwrap_or(usize::MAX);
         let watch_active = self.inventory_watch.is_active();
-        // `changed` drains the watch, so its result is recorded before any scan can fail.
         if !watch_active || self.drain_inventory_watch()? {
             self.inventory_dirty.set(true);
         }
@@ -662,7 +653,6 @@ impl SessionLogAppender {
 #[cfg(test)]
 static NATIVE_BATCH_LENGTH_ERROR: Mutex<Option<io::ErrorKind>> = Mutex::new(None);
 
-/// Makes the next length read after a failed native batch write fail with `kind`.
 #[cfg(test)]
 pub(crate) fn set_native_batch_length_error_for_test(kind: io::ErrorKind) {
     *NATIVE_BATCH_LENGTH_ERROR
@@ -708,7 +698,6 @@ where
         complete_prefixes.push(bytes.len());
     }
     if let Err(source) = write(file, &bytes) {
-        // Without the length the committed prefix is unknown, so nothing is truncated.
         let current_len = native_batch_len(file).map_err(|length_error| BatchAppendFailure {
             committed_events: None,
             error: RuntimeError::Protocol(format!(

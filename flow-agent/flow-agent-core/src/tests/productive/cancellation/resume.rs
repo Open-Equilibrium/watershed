@@ -6,52 +6,47 @@ use crate::{
     },
 };
 
-#[test]
-fn resume_activates_controlled_cancellation_before_platform_preflight() {
-    fn cancel_during_preflight() -> Result<(), RuntimeError> {
-        assert_eq!(
-            crate::request_productive_interrupt(),
-            crate::ProductiveInterruptAction::Cancel
-        );
-        Err(RuntimeError::ProductiveExecutionUnavailable)
-    }
+fn cancel_during_preflight() {
+    assert_eq!(
+        crate::request_productive_interrupt(),
+        crate::ProductiveInterruptAction::Cancel
+    );
+}
 
-    let workspace = workspace_copy("smoke-flow");
-    write_productive_workspace_config(&workspace);
-    let mut provider = FakeProvider::default();
-    let error = resume_conversation_run_with_provider_and_preflight(
-        &workspace,
-        cancel_during_preflight,
-        &mut provider,
-    )
-    .expect_err("preflight cancellation is controlled");
+fn cancel_then_platform_error() -> Result<(), RuntimeError> {
+    cancel_during_preflight();
+    Err(RuntimeError::ProductiveExecutionUnavailable)
+}
 
-    assert!(matches!(error, RuntimeError::Cancelled), "{error:?}");
-    assert!(provider.bodies.is_empty());
-    assert!(!crate::settle_productive_operation());
+fn cancel_then_preflight_success() -> Result<(), RuntimeError> {
+    cancel_during_preflight();
+    Ok(())
 }
 
 #[test]
-fn resume_reconciles_cancellation_with_workspace_preflight_failure() {
-    fn cancel_during_preflight() -> Result<(), RuntimeError> {
-        assert_eq!(
-            crate::request_productive_interrupt(),
-            crate::ProductiveInterruptAction::Cancel
+fn resume_cancellation_wins_over_preflight_outcome() {
+    for (name, preflight) in [
+        (
+            "platform preflight error",
+            cancel_then_platform_error as fn() -> Result<(), RuntimeError>,
+        ),
+        ("workspace preflight success", cancel_then_preflight_success),
+    ] {
+        let workspace = workspace_copy("smoke-flow");
+        write_productive_workspace_config(&workspace);
+        let mut provider = FakeProvider::default();
+        let error = resume_conversation_run_with_provider_and_preflight(
+            &workspace,
+            preflight,
+            &mut provider,
+        )
+        .expect_err(name);
+
+        assert!(
+            matches!(error, RuntimeError::Cancelled),
+            "{name}: {error:?}"
         );
-        Ok(())
+        assert!(provider.bodies.is_empty(), "{name}");
+        assert!(!crate::settle_productive_operation(), "{name}");
     }
-
-    let workspace = workspace_copy("smoke-flow");
-    write_productive_workspace_config(&workspace);
-    let mut provider = FakeProvider::default();
-    let error = resume_conversation_run_with_provider_and_preflight(
-        &workspace,
-        cancel_during_preflight,
-        &mut provider,
-    )
-    .expect_err("workspace failure reconciles with controlled cancellation");
-
-    assert!(matches!(error, RuntimeError::Cancelled), "{error:?}");
-    assert!(provider.bodies.is_empty());
-    assert!(!crate::settle_productive_operation());
 }

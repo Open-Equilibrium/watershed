@@ -47,21 +47,7 @@ fn help_flags_print_usage() {
 }
 
 #[test]
-fn no_arguments_print_readable_global_usage_error() {
-    assert_global_usage_error(&[]);
-}
-
-#[test]
-fn unknown_commands_print_readable_global_usage_error() {
-    assert_global_usage_error(&["unknown"]);
-}
-
-#[test]
-fn unknown_command_help_is_a_usage_error() {
-    assert_global_usage_error(&["not-a-command", "--help"]);
-}
-
-fn assert_global_usage_error(args: &[&str]) {
+fn global_usage_errors_print_the_full_usage_text() {
     let help = flow_command()
         .arg("--help")
         .output()
@@ -71,17 +57,21 @@ fn assert_global_usage_error(args: &[&str]) {
     let usage = String::from_utf8(help.stdout).expect("help should be UTF-8");
     assert_eq!(usage.lines().count(), 22);
 
-    let output = flow_command()
-        .args(args)
-        .output()
-        .expect("flow binary should run");
+    let cases: [&[&str]; 3] = [&[], &["unknown"], &["not-a-command", "--help"]];
+    for args in cases {
+        let output = flow_command()
+            .args(args)
+            .output()
+            .expect("flow binary should run");
 
-    assert_eq!(output.status.code(), Some(64));
-    assert_eq!(
-        String::from_utf8(output.stderr).expect("stderr should be UTF-8"),
-        format!("error: {usage}")
-    );
-    assert!(output.stdout.is_empty());
+        assert_eq!(output.status.code(), Some(64), "{args:?}");
+        assert_eq!(
+            String::from_utf8(output.stderr).expect("stderr should be UTF-8"),
+            format!("error: {usage}"),
+            "{args:?}"
+        );
+        assert!(output.stdout.is_empty(), "{args:?}");
+    }
 }
 
 #[test]
@@ -100,17 +90,37 @@ fn invalid_command_arguments_print_usage_errors() {
         (vec!["run", "smoke-flow", "--bogus"], "unknown argument"),
         (vec!["sessions", "--bogus"], "usage: flow sessions"),
         (vec!["replay"], "usage: flow replay"),
+        (
+            vec!["tail", "smoke001", "smoke001", "--emit", "human"],
+            "unsupported emit mode",
+        ),
+        (
+            vec!["tail", "smoke001", "smoke001", "--emit"],
+            "missing value for --emit",
+        ),
+        (
+            vec!["tail", "smoke001", "smoke001", "--timeout-ms"],
+            "missing value for --timeout-ms",
+        ),
+        (
+            vec!["tail", "smoke001", "smoke001", "--timeout-ms", "slow"],
+            "invalid --timeout-ms value",
+        ),
+        (
+            vec!["tail", "smoke001", "smoke001", "--bogus"],
+            "unknown argument",
+        ),
     ] {
         let output = flow_command()
             .current_dir(&workspace)
-            .args(args)
+            .args(&args)
             .output()
             .expect("flow binary should run");
 
-        assert_eq!(output.status.code(), Some(64));
+        assert_eq!(output.status.code(), Some(64), "{args:?}");
         let stderr = String::from_utf8(output.stderr).expect("stderr should be UTF-8");
         assert!(stderr.contains(expected), "{stderr}");
-        assert!(output.stdout.is_empty());
+        assert!(output.stdout.is_empty(), "{args:?}");
     }
 }
 
@@ -158,48 +168,6 @@ fn usage_diagnostics_escape_terminal_controls() {
         String::from_utf8(output.stderr).expect("stderr should be UTF-8"),
         "error: FLOW_AGENT_HOME/config.yaml: unknown field: hostile\\n\\u{1b}]0;owned\\u{7}\n"
     );
-}
-
-#[test]
-fn invalid_tail_arguments_print_usage_errors() {
-    let workspace = workspace_copy("smoke-flow");
-    for (args, expected) in [
-        (
-            vec!["tail", "smoke001", "smoke001", "--emit", "human"],
-            "unsupported emit mode",
-        ),
-        (
-            vec!["tail", "smoke001", "smoke001", "--emit"],
-            "missing value for --emit",
-        ),
-        (
-            vec!["tail", "smoke001", "smoke001", "--timeout-ms"],
-            "missing value for --timeout-ms",
-        ),
-        (
-            vec!["tail", "smoke001", "smoke001", "--timeout-ms", "slow"],
-            "invalid --timeout-ms value",
-        ),
-        (
-            vec!["tail", "smoke001", "smoke001", "--bogus"],
-            "unknown argument",
-        ),
-    ] {
-        let output = flow_command()
-            .current_dir(&workspace)
-            .args(args)
-            .output()
-            .expect("flow binary should run");
-
-        assert_eq!(output.status.code(), Some(64), "{expected}");
-        assert!(
-            String::from_utf8(output.stderr)
-                .expect("stderr should be UTF-8")
-                .contains(expected),
-            "{expected}"
-        );
-        assert!(output.stdout.is_empty());
-    }
 }
 
 #[test]

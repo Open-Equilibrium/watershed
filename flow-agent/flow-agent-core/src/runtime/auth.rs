@@ -42,23 +42,16 @@ pub(crate) const MAX_OAUTH_TOKEN_BODY_BYTES: usize = 1024 * 1024;
 pub(crate) const MAX_OAUTH_POLL_INTERVAL_SECONDS: u64 = 60;
 pub(crate) const MAX_OAUTH_EXPIRY_SECONDS: u64 = 86_400;
 
-/// Interactive OpenAI Codex authentication route.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum AuthLoginMode {
-    /// Open the system browser and receive a loopback OAuth callback.
     Browser,
-    /// Present a device code and poll until the operator authorizes it.
     Device,
 }
 
-/// Redacted local authentication status.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AuthStatus {
-    /// Whether Flow Agent currently owns an OpenAI Codex credential record.
     pub authenticated: bool,
-    /// Credential expiry as Unix epoch milliseconds, when authenticated.
     pub expires_epoch_milliseconds: Option<u64>,
-    /// The base URL of the stored OpenAI-compatible key, when one is stored; the key is never reported.
     pub base_url: Option<String>,
 }
 
@@ -80,10 +73,6 @@ pub(crate) enum DevicePoll {
     SlowDown,
 }
 
-/// Performs interactive OpenAI Codex authentication and atomically stores the result.
-///
-/// The callback receives the browser URL or device-code instruction before this function waits
-/// for the operator. It must not persist the message as runtime history.
 pub fn login_openai_codex(
     mode: AuthLoginMode,
     mut present: impl FnMut(&str) -> Result<(), RuntimeError>,
@@ -107,7 +96,6 @@ pub(crate) fn store_login_credential(
     })
 }
 
-/// Returns redacted OpenAI Codex authentication status from Flow Agent's own store.
 pub fn openai_codex_auth_status() -> Result<AuthStatus, RuntimeError> {
     auth_status_from_store(&CredentialStore::platform_default()?)
 }
@@ -121,12 +109,10 @@ pub(crate) fn auth_status_from_store(store: &CredentialStore) -> Result<AuthStat
     })
 }
 
-/// Removes only Flow Agent's local OpenAI Codex credential record.
 pub fn logout_openai_codex() -> Result<bool, RuntimeError> {
     CredentialStore::platform_default()?.logout()
 }
 
-/// Stores an OpenAI-compatible endpoint key with the base URL it was issued for (ADR-0263).
 pub fn login_openai_compatible(base_url: &str, api_key: &str) -> Result<AuthStatus, RuntimeError> {
     let credential = EndpointCredential::new(base_url, api_key)?;
     store_endpoint_credential(&CredentialStore::platform_default()?, credential)
@@ -145,7 +131,6 @@ pub(crate) fn store_endpoint_credential(
     })
 }
 
-/// Returns redacted OpenAI-compatible authentication status from Flow Agent's own store.
 pub fn openai_compatible_auth_status() -> Result<AuthStatus, RuntimeError> {
     endpoint_auth_status_from_store(&CredentialStore::platform_default()?)
 }
@@ -161,7 +146,6 @@ pub(crate) fn endpoint_auth_status_from_store(
     })
 }
 
-/// Removes only Flow Agent's local OpenAI-compatible credential record.
 pub fn logout_openai_compatible() -> Result<bool, RuntimeError> {
     let started = Instant::now();
     CredentialStore::platform_default()?
@@ -187,7 +171,6 @@ pub(crate) fn resolve_openai_compatible_credential() -> Result<ProviderCredentia
         .map(ProviderCredential::OpenAiCompatible)
 }
 
-/// The credential for the provider a productive backend names.
 pub(crate) fn resolve_provider_credential(
     backend: &ExecutionBackend,
 ) -> Result<ProviderCredential, RuntimeError> {

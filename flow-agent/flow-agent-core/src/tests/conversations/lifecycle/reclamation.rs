@@ -17,6 +17,10 @@ use crate::runtime::{
 };
 use std::{cell::Cell, fs, io, path::Path, rc::Rc};
 
+fn conversation_dir(workspace: &Path) -> std::path::PathBuf {
+    crate::tests::helpers::workspace_session_dir(workspace).join("review")
+}
+
 fn directory_has_entry_prefix(path: &Path, prefix: &str) -> bool {
     fs::read_dir(path).expect("directory reads").any(|entry| {
         entry
@@ -50,6 +54,21 @@ fn unpublished_continuation_fixture(label: &str) -> TempWorkspace {
     )
     .expect("unpublished continuation run creates");
     workspace
+}
+
+fn crash_root_construction(workspace: &Path) {
+    set_status_transaction_crash_point(StatusTransactionCrashPoint::RunCreationStagePopulated);
+    let crash = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        create_conversation_run(
+            workspace,
+            "review",
+            "review",
+            "review",
+            REGISTRY_HASH,
+            FLOW_HASH,
+        )
+    }));
+    assert!(crash.is_err(), "construction stops at the injected crash");
 }
 
 #[test]
@@ -102,22 +121,14 @@ fn unpublished_continuation_run_is_reclaimed_without_its_prior_runs() {
     reclaim_unpublished_productive_run(&workspace, "review", "review-2")
         .expect("unpublished continuation run reclaims");
     assert_eq!(sibling_scans.get(), 0);
-    assert!(
-        crate::tests::helpers::workspace_session_dir(&workspace)
-            .join("review/runs/review")
-            .is_dir()
-    );
-    assert!(
-        !crate::tests::helpers::workspace_session_dir(&workspace)
-            .join("review/runs/review-2")
-            .exists()
-    );
+    assert!(conversation_dir(&workspace).join("runs/review").is_dir());
+    assert!(!conversation_dir(&workspace).join("runs/review-2").exists());
 }
 
 #[test]
 fn unpublished_reclamation_syncs_run_removal_before_clearing_its_transaction() {
     let workspace = unpublished_continuation_fixture("unpublished-reclamation-sync-order");
-    let conversation = crate::tests::helpers::workspace_session_dir(&workspace).join("review");
+    let conversation = conversation_dir(&workspace);
     let runs = conversation.join("runs");
     set_directory_sync_error_for_path_for_test(&runs, io::ErrorKind::Other);
 
@@ -150,42 +161,81 @@ fn unpublished_reclamation_is_idempotent_for_absent_conversations_and_runs() {
 }
 
 #[test]
-fn unpublished_reclamation_preserves_published_or_malformed_markers() {
-    let (published_workspace, published_run) =
-        unpublished_productive_run_fixture("unpublished-reclamation-published");
-    fs::write(published_run.join("recovery.jsonl"), b"published\n")
-        .expect("published recovery fixture writes");
-    reclaim_unpublished_productive_run(&published_workspace, "review", "review")
-        .expect("a published run is never reclaimed");
-    assert!(published_run.is_dir());
+fn unpublished_reclamation_retains_every_run_it_cannot_prove_unpublished() {
+    type Mutation = fn(&Path);
+    let cases: [(&str, Mutation, bool); 7] = [
+        (
+            "published",
+            |run| {
+                fs::write(run.join("recovery.jsonl"), b"published\n")
+                    .expect("published recovery fixture writes");
+            },
+            true,
+        ),
+        (
+            "marker-absent",
+            |run| {
+                fs::remove_file(run.join(".unpublished-productive-run"))
+                    .expect("unpublished marker removes");
+            },
+            true,
+        ),
+        (
+            "marker-directory",
+            |run| {
+                let marker = run.join(".unpublished-productive-run");
+                fs::remove_file(&marker).expect("marker file removes");
+                fs::create_dir(&marker).expect("malformed marker directory creates");
+            },
+            false,
+        ),
+        (
+            "committed-events",
+            |run| {
+                fs::write(run.join("events.jsonl"), b"committed\n")
+                    .expect("committed event fixture writes");
+            },
+            false,
+        ),
+        (
+            "unknown-entry",
+            |run| {
+                fs::write(run.join("unexpected"), b"").expect("unknown entry writes");
+            },
+            false,
+        ),
+        (
+            "incomplete",
+            |run| {
+                fs::remove_file(run.join("session.lock")).expect("required entry removes");
+            },
+            false,
+        ),
+        (
+            "invalid-object",
+            |run| {
+                fs::write(run.join("objects/not-a-digest"), b"object")
+                    .expect("invalid object fixture writes");
+            },
+            false,
+        ),
+    ];
 
-    let (malformed_workspace, malformed_run) =
-        unpublished_productive_run_fixture("unpublished-reclamation-marker-directory");
-    let marker = malformed_run.join(".unpublished-productive-run");
-    fs::remove_file(&marker).expect("marker file removes");
-    fs::create_dir(&marker).expect("malformed marker directory creates");
-    assert!(reclaim_unpublished_productive_run(&malformed_workspace, "review", "review").is_err());
-    assert!(malformed_run.is_dir());
+    for (name, mutate, reclaims) in cases {
+        let (workspace, run) =
+            unpublished_productive_run_fixture(&format!("unpublished-reclamation-{name}"));
+        mutate(&run);
 
-    let (unmarked_workspace, unmarked_run) =
-        unpublished_productive_run_fixture("unpublished-reclamation-marker-absent");
-    fs::remove_file(unmarked_run.join(".unpublished-productive-run"))
-        .expect("unpublished marker removes");
-    reclaim_unpublished_productive_run(&unmarked_workspace, "review", "review")
-        .expect("an unmarked run is never reclaimed");
-    assert!(unmarked_run.is_dir());
+        let result = reclaim_unpublished_productive_run(&workspace, "review", "review");
+
+        assert_eq!(result.is_ok(), reclaims, "{name}: {result:?}");
+        assert!(run.is_dir(), "{name}: the run is retained");
+    }
 }
 
 #[test]
-fn unpublished_reclamation_rejects_any_committed_or_ambiguous_state() {
-    let (events_workspace, events_run) =
-        unpublished_productive_run_fixture("unpublished-reclamation-events");
-    fs::write(events_run.join("events.jsonl"), b"committed\n")
-        .expect("committed event fixture writes");
-    assert!(reclaim_unpublished_productive_run(&events_workspace, "review", "review").is_err());
-    assert!(events_run.is_dir());
-
-    let (sibling_workspace, sibling_run) =
+fn unpublished_reclamation_bounds_sibling_scans_before_refusing_a_run() {
+    let (workspace, sibling_run) =
         unpublished_productive_run_fixture("unpublished-reclamation-sibling");
     let sibling_runs = sibling_run.parent().expect("run has a parent");
     for run in ["review-2", "review-3", "review-4"] {
@@ -194,28 +244,10 @@ fn unpublished_reclamation_rejects_any_committed_or_ambiguous_state() {
     let sibling_scans = Rc::new(Cell::new(0));
     let observed_scans = Rc::clone(&sibling_scans);
     set_run_sibling_scan_observer(move || observed_scans.set(observed_scans.get() + 1));
-    assert!(reclaim_unpublished_productive_run(&sibling_workspace, "review", "review").is_err());
+
+    assert!(reclaim_unpublished_productive_run(&workspace, "review", "review").is_err());
     assert_eq!(sibling_scans.get(), 2);
     assert!(sibling_run.is_dir());
-
-    let (unknown_workspace, unknown_run) =
-        unpublished_productive_run_fixture("unpublished-reclamation-unknown-entry");
-    fs::write(unknown_run.join("unexpected"), b"").expect("unknown entry writes");
-    assert!(reclaim_unpublished_productive_run(&unknown_workspace, "review", "review").is_err());
-    assert!(unknown_run.is_dir());
-
-    let (incomplete_workspace, incomplete_run) =
-        unpublished_productive_run_fixture("unpublished-reclamation-incomplete");
-    fs::remove_file(incomplete_run.join("session.lock")).expect("required entry removes");
-    assert!(reclaim_unpublished_productive_run(&incomplete_workspace, "review", "review").is_err());
-    assert!(incomplete_run.is_dir());
-
-    let (object_workspace, object_run) =
-        unpublished_productive_run_fixture("unpublished-reclamation-invalid-object");
-    fs::write(object_run.join("objects/not-a-digest"), b"object")
-        .expect("invalid object fixture writes");
-    assert!(reclaim_unpublished_productive_run(&object_workspace, "review", "review").is_err());
-    assert!(object_run.is_dir());
 }
 
 #[test]
@@ -229,18 +261,14 @@ fn unpublished_reclamation_removes_valid_preheader_objects() {
 
     reclaim_unpublished_productive_run(&workspace, "review", "review")
         .expect("the exact unpublished preheader state reclaims");
-    assert!(
-        !crate::tests::helpers::workspace_session_dir(&workspace)
-            .join("review")
-            .exists()
-    );
+    assert!(!conversation_dir(&workspace).exists());
 }
 
 #[test]
 fn unpublished_root_reclamation_preserves_nonempty_conversation_history() {
     let (workspace, run) =
         unpublished_productive_run_fixture("unpublished-reclamation-nonempty-history");
-    let conversation = crate::tests::helpers::workspace_session_dir(&workspace).join("review");
+    let conversation = conversation_dir(&workspace);
     fs::write(conversation.join("history.jsonl"), b"committed history\n")
         .expect("conversation history fixture writes");
 
@@ -256,7 +284,7 @@ fn unpublished_root_reclamation_preserves_nonempty_conversation_history() {
 fn unpublished_root_reclamation_preserves_known_state_when_conversation_has_unknown_content() {
     let (workspace, run) =
         unpublished_productive_run_fixture("unpublished-reclamation-unknown-conversation-entry");
-    let conversation = crate::tests::helpers::workspace_session_dir(&workspace).join("review");
+    let conversation = conversation_dir(&workspace);
     fs::write(conversation.join("unexpected"), b"foreign content")
         .expect("unknown conversation entry writes");
 
@@ -283,7 +311,7 @@ fn unpublished_root_reclamation_preserves_known_state_when_conversation_has_unkn
 fn unpublished_root_reclamation_retains_recovery_authority_until_cleanup_is_durable() {
     let (workspace, _) =
         unpublished_productive_run_fixture("unpublished-reclamation-root-cleanup-durability");
-    let conversation = crate::tests::helpers::workspace_session_dir(&workspace).join("review");
+    let conversation = conversation_dir(&workspace);
     set_conversation_root_cleanup_observer(|conversation| {
         set_directory_sync_error_for_path_for_test(conversation, io::ErrorKind::Other);
     });
@@ -309,19 +337,8 @@ fn unpublished_root_reclamation_retains_recovery_authority_until_cleanup_is_dura
 #[test]
 fn unpublished_root_reclamation_finishes_crashed_conversation_construction() {
     let workspace = empty_workspace("unpublished-reclamation-crashed-root-construction");
-    set_status_transaction_crash_point(StatusTransactionCrashPoint::RunCreationStagePopulated);
-    let crash = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        create_conversation_run(
-            &workspace,
-            "review",
-            "review",
-            "review",
-            REGISTRY_HASH,
-            FLOW_HASH,
-        )
-    }));
-    assert!(crash.is_err(), "construction stops at the injected crash");
-    let conversation = crate::tests::helpers::workspace_session_dir(&workspace).join("review");
+    crash_root_construction(&workspace);
+    let conversation = conversation_dir(&workspace);
     assert!(conversation.is_dir(), "the partial conversation is durable");
 
     reclaim_unpublished_productive_run(&workspace, "review", "review")
@@ -336,7 +353,7 @@ fn unpublished_root_reclamation_finishes_crashed_conversation_construction() {
 #[test]
 fn unpublished_root_reclamation_finishes_crash_before_lifecycle_marker() {
     let workspace = empty_workspace("unpublished-reclamation-empty-root-construction");
-    let conversation = crate::tests::helpers::workspace_session_dir(&workspace).join("review");
+    let conversation = conversation_dir(&workspace);
     create_unpublished_productive_conversation_run(
         &workspace,
         "setup",
@@ -359,19 +376,8 @@ fn unpublished_root_reclamation_finishes_crash_before_lifecycle_marker() {
 #[test]
 fn crashed_conversation_construction_preserves_unknown_content_fail_closed() {
     let workspace = empty_workspace("unpublished-reclamation-crashed-root-unknown-content");
-    set_status_transaction_crash_point(StatusTransactionCrashPoint::RunCreationStagePopulated);
-    let crash = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        create_conversation_run(
-            &workspace,
-            "review",
-            "review",
-            "review",
-            REGISTRY_HASH,
-            FLOW_HASH,
-        )
-    }));
-    assert!(crash.is_err(), "construction stops at the injected crash");
-    let conversation = crate::tests::helpers::workspace_session_dir(&workspace).join("review");
+    crash_root_construction(&workspace);
+    let conversation = conversation_dir(&workspace);
     let foreign = conversation.join("unexpected");
     fs::write(&foreign, b"foreign content").expect("foreign content writes");
 
@@ -396,19 +402,8 @@ fn crashed_conversation_construction_preserves_unknown_content_fail_closed() {
 #[test]
 fn conversation_lifecycle_retry_survives_crash_during_run_cleanup() {
     let workspace = empty_workspace("conversation-lifecycle-run-cleanup-crash");
-    set_status_transaction_crash_point(StatusTransactionCrashPoint::RunCreationStagePopulated);
-    let construction_crash = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        create_conversation_run(
-            &workspace,
-            "review",
-            "review",
-            "review",
-            REGISTRY_HASH,
-            FLOW_HASH,
-        )
-    }));
-    assert!(construction_crash.is_err());
-    let conversation = crate::tests::helpers::workspace_session_dir(&workspace).join("review");
+    crash_root_construction(&workspace);
+    let conversation = conversation_dir(&workspace);
     set_conversation_lifecycle_cleanup_observer(|_| panic!("injected lifecycle cleanup crash"));
 
     let cleanup_crash = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -453,7 +448,7 @@ fn conversation_lifecycle_retry_survives_crash_during_run_cleanup() {
 fn unpublished_root_reclamation_finishes_crashed_root_teardown() {
     let (workspace, run) =
         unpublished_productive_run_fixture("unpublished-reclamation-crashed-root-teardown");
-    let conversation = crate::tests::helpers::workspace_session_dir(&workspace).join("review");
+    let conversation = conversation_dir(&workspace);
     set_status_transaction_crash_point(StatusTransactionCrashPoint::RunReclamationApplied);
     let crash = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         reclaim_unpublished_productive_run(&workspace, "review", "review")

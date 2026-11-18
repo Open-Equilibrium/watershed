@@ -48,35 +48,29 @@ fn assert_invalid_manifest_does_not_publish(label: &str, line: String, expected_
 }
 
 #[test]
-fn context_manifest_writer_rejects_noncanonical_json_before_publication() {
+fn context_manifest_writer_rejects_invalid_lines_before_publication() {
     let checkpoint = compiled_context_checkpoint("manifest-write-validation", 1);
     let value: serde_json::Value =
         serde_json::from_str(&checkpoint.manifest.line).expect("manifest parses");
     let mut pretty = serde_json::to_string_pretty(&value).expect("manifest pretty-prints");
     pretty.push('\n');
+    let mut mismatched = value.clone();
+    mismatched["ordered_sources"][0]["projection_hash"] = serde_json::json!("0".repeat(64));
+    let mut hash_mismatch = proto::canonical_json(&mismatched).expect("manifest canonicalizes");
+    hash_mismatch.push('\n');
 
-    assert_invalid_manifest_does_not_publish(
-        "manifestnoncanonical001",
-        pretty,
-        "not canonical JSONL",
-    );
+    for (label, line, expected) in [
+        ("manifestnoncanonical001", pretty, "not canonical JSONL"),
+        (
+            "manifesthashmismatch001",
+            hash_mismatch,
+            "projection_hash does not match object_uri",
+        ),
+    ] {
+        assert_invalid_manifest_does_not_publish(label, line, expected);
+    }
 }
 
-#[test]
-fn context_manifest_writer_rejects_projection_hash_mismatch_before_publication() {
-    let checkpoint = compiled_context_checkpoint("manifest-write-validation", 1);
-    let mut value: serde_json::Value =
-        serde_json::from_str(&checkpoint.manifest.line).expect("manifest parses");
-    value["ordered_sources"][0]["projection_hash"] = serde_json::json!("0".repeat(64));
-    let mut line = proto::canonical_json(&value).expect("manifest canonicalizes");
-    line.push('\n');
-
-    assert_invalid_manifest_does_not_publish(
-        "manifesthashmismatch001",
-        line,
-        "projection_hash does not match object_uri",
-    );
-}
 fn overwrite_manifest_prefix(writer: &mut ContextManifestWriter, bytes: &[u8]) {
     let mut file = fs::OpenOptions::new()
         .write(true)
@@ -138,31 +132,48 @@ fn context_manifest_growth_is_visible_through_the_existing_file() {
 }
 
 #[test]
-fn context_manifest_replay_rejects_an_in_place_length_change() {
-    let workspace = empty_workspace("context-manifest-length-change");
-    let reservation =
-        reserve_session_log(&workspace, "manifestlength001").expect("session reserved");
-    let manifest = compiled_context_checkpoint("manifest-length-change", 1);
-    let mut writer = ContextManifestWriter::open(&reservation.context_path)
-        .expect("context manifest writer opens");
-    writer
-        .persist(&reservation.context_path, &manifest)
-        .expect("first manifest persists");
-    writer
-        .appender
-        .file
-        .try_clone()
-        .expect("context manifest handle duplicates")
-        .write_all(b"external\n")
-        .expect("context manifest changes in place");
+fn context_manifest_replay_fails_closed_on_in_place_changes() {
+    type Mutate = fn(&mut ContextManifestWriter);
+    let cases: [(&str, Mutate, &str); 2] = [
+        (
+            "context-manifest-length-change",
+            |writer| {
+                writer
+                    .appender
+                    .file
+                    .try_clone()
+                    .expect("context manifest handle duplicates")
+                    .write_all(b"external\n")
+                    .expect("context manifest changes in place");
+            },
+            "changed outside",
+        ),
+        (
+            "context-manifest-content-change",
+            |writer| overwrite_manifest_prefix(writer, b"["),
+            "invalid context manifest",
+        ),
+    ];
+    for (label, corrupt, expected) in cases {
+        let workspace = empty_workspace(label);
+        let reservation =
+            reserve_session_log(&workspace, "manifestreplay001").expect("session reserved");
+        let manifest = compiled_context_checkpoint(label, 1);
+        let mut writer = ContextManifestWriter::open(&reservation.context_path)
+            .expect("context manifest writer opens");
+        writer
+            .persist(&reservation.context_path, &manifest)
+            .expect("first manifest persists");
+        corrupt(&mut writer);
 
-    let err = writer
-        .persist(&reservation.context_path, &manifest)
-        .expect_err("the replay sync must fail closed");
+        let error = writer
+            .persist(&reservation.context_path, &manifest)
+            .expect_err("the replay must fail closed");
 
-    assert!(err.to_string().contains("changed outside"), "{err}");
-    drop(writer);
-    reservation.release_lock().expect("reservation rolls back");
+        assert!(error.to_string().contains(expected), "{label}: {error}");
+        drop(writer);
+        reservation.release_lock().expect("reservation rolls back");
+    }
 }
 
 fn overwrite_estimator_id_in_place(path: &Path, line: &str) {
@@ -210,31 +221,6 @@ fn persisting_after_same_length_edit_fails_at_finish() {
 }
 
 #[test]
-fn context_manifest_replay_rejects_a_same_length_prefix_change() {
-    let workspace = empty_workspace("context-manifest-content-change");
-    let reservation =
-        reserve_session_log(&workspace, "manifestcontent001").expect("session reserved");
-    let manifest = compiled_context_checkpoint("manifest-content-change", 1);
-    let mut writer = ContextManifestWriter::open(&reservation.context_path)
-        .expect("context manifest writer opens");
-    writer
-        .persist(&reservation.context_path, &manifest)
-        .expect("first manifest persists");
-    overwrite_manifest_prefix(&mut writer, b"[");
-
-    let error = writer
-        .persist(&reservation.context_path, &manifest)
-        .expect_err("same-length prefix changes fail closed");
-
-    assert!(
-        error.to_string().contains("invalid context manifest"),
-        "{error}"
-    );
-    drop(writer);
-    reservation.release_lock().expect("reservation rolls back");
-}
-
-#[test]
 fn context_manifest_writer_rejects_an_invalid_persisted_prefix() {
     let workspace = empty_workspace("context-manifest-invalid-prefix");
     let reservation =
@@ -242,13 +228,9 @@ fn context_manifest_writer_rejects_an_invalid_persisted_prefix() {
     fs::write(reservation.context_path.diagnostic_path(), b"garbage\n")
         .expect("invalid context manifest prefix written");
 
-    let error = match ContextManifestWriter::open(&reservation.context_path) {
-        Ok(writer) => {
-            drop(writer);
-            panic!("an invalid persisted prefix must fail closed");
-        }
-        Err(error) => error,
-    };
+    let error = ContextManifestWriter::open(&reservation.context_path)
+        .err()
+        .expect("an invalid persisted prefix must fail closed");
 
     assert!(
         error.to_string().contains("invalid context manifest"),

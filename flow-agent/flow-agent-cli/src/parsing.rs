@@ -23,7 +23,6 @@ pub(crate) fn parse_args(
     args.into_iter().map(os_string_to_string).collect()
 }
 
-/// Top-level commands dispatched in `dispatch.rs`; an unknown command's help is a usage error.
 const COMMANDS: &[&str] = &[
     "auth",
     "chat",

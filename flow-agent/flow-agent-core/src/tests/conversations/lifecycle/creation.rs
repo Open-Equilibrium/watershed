@@ -1,4 +1,4 @@
-use super::super::super::helpers::{empty_workspace, workspace_store_dir};
+use super::super::super::helpers::{empty_workspace, workspace_session_dir, workspace_store_dir};
 use super::super::recovery_fixtures::published_productive_recovery_fixture;
 use super::super::{FLOW_HASH, REGISTRY_HASH};
 use crate::runtime::{
@@ -8,6 +8,7 @@ use crate::runtime::{
         create_conversation_run_with_model_profile, create_unpublished_productive_conversation_run,
         reclaim_productive_run_creation, set_conversation_root_cleanup_observer,
         set_partial_run_cleanup_observer, set_productive_run_creation_observer,
+        set_run_creation_stage_observer,
     },
     fs_guards::{
         set_directory_sync_error_for_path_for_test, start_directory_sync_trace_for_test,
@@ -15,9 +16,14 @@ use crate::runtime::{
     },
     types::RuntimeError,
 };
-use std::{fs, io, path::Path};
+use std::{
+    fs, io,
+    path::{Path, PathBuf},
+};
 
-use crate::runtime::conversations::set_run_creation_stage_observer;
+fn conversation_dir(workspace: &Path) -> PathBuf {
+    workspace_session_dir(workspace).join("review")
+}
 
 fn create_oversized_model_run(workspace: &Path) -> Result<(), RuntimeError> {
     let oversized_model = "x".repeat(MAX_CONVERSATION_RECORD_BYTES);
@@ -38,6 +44,21 @@ fn create_oversized_model_run(workspace: &Path) -> Result<(), RuntimeError> {
             },
         ),
     )
+}
+
+fn assert_record_failure_with_cleanup(error: &RuntimeError, cleanup_contains: &str) {
+    assert!(
+        matches!(
+            error,
+            RuntimeError::ControlledStageFailures {
+                operation: Some(operation),
+                finalization: None,
+                cleanup: Some(cleanup),
+            } if operation.to_string().contains("conversation record exceeds its byte limit")
+                && cleanup.to_string().contains(cleanup_contains)
+        ),
+        "{error:?}"
+    );
 }
 
 #[test]
@@ -64,7 +85,7 @@ fn run_creation_keeps_staging_writes_bound_after_stage_path_replacement() {
     .expect_err("staging replacement is rejected before publication");
     assert!(
         matches!(
-            fs::symlink_metadata(crate::tests::helpers::workspace_session_dir(&workspace).join("review/runs/review-1")),
+            fs::symlink_metadata(workspace_session_dir(&workspace).join("review/runs/review-1")),
             Err(error) if error.kind() == io::ErrorKind::NotFound
         ),
         "replacement must not be published as the run"
@@ -103,9 +124,9 @@ fn productive_run_creation_syncs_every_new_ancestor_before_returning() {
         home.to_path_buf(),
         workspaces.to_path_buf(),
         store,
-        crate::tests::helpers::workspace_session_dir(&workspace),
-        crate::tests::helpers::workspace_session_dir(&workspace).join("review"),
-        crate::tests::helpers::workspace_session_dir(&workspace).join("review/runs"),
+        workspace_session_dir(&workspace),
+        conversation_dir(&workspace),
+        conversation_dir(&workspace).join("runs"),
     ]
     .map(|path| test_path_key(&path));
     for parent in expected {
@@ -186,11 +207,7 @@ fn productive_run_creation_reclaims_only_the_exact_pre_start_publication() {
     reclaim_productive_run_creation(&workspace, "review", "review", &expected)
         .expect("exact pre-start publication reclaims");
     assert!(!run.exists());
-    assert!(
-        !crate::tests::helpers::workspace_session_dir(&workspace)
-            .join("review")
-            .exists()
-    );
+    assert!(!conversation_dir(&workspace).exists());
 }
 
 #[test]
@@ -209,19 +226,8 @@ fn partial_run_creation_preserves_the_operation_and_cleanup_failures() {
 
     let error = create_oversized_model_run(&workspace)
         .expect_err("record and cleanup failures must both remain visible");
+    assert_record_failure_with_cleanup(&error, "review-1");
 
-    assert!(
-        matches!(
-            &error,
-            RuntimeError::ControlledStageFailures {
-                operation: Some(operation),
-                finalization: None,
-                cleanup: Some(cleanup),
-            } if operation.to_string().contains("conversation record exceeds its byte limit")
-                && cleanup.to_string().contains("review-1")
-        ),
-        "{error:?}"
-    );
     assert_eq!(
         fs::read(
             replacement_path
@@ -254,19 +260,10 @@ fn partial_run_cleanup_preserves_the_marker_validation_error() {
 
     let error = create_oversized_model_run(&workspace)
         .expect_err("record and marker cleanup failures must both remain visible");
-
+    assert_record_failure_with_cleanup(&error, "run-creation identity marker is missing");
     assert!(
-        matches!(
-            &error,
-            RuntimeError::ControlledStageFailures {
-                operation: Some(operation),
-                finalization: None,
-                cleanup: Some(cleanup),
-            } if operation.to_string().contains("conversation record exceeds its byte limit")
-                && cleanup.to_string().contains("run-creation identity marker is missing")
-                && !cleanup.to_string().contains("partial run review-1")
-        ),
-        "{error:?}"
+        !error.to_string().contains("partial run review-1"),
+        "{error}"
     );
 }
 
@@ -307,9 +304,7 @@ fn failed_root_run_creation_removes_the_new_empty_conversation() {
         "{error}"
     );
     assert!(
-        !crate::tests::helpers::workspace_session_dir(&workspace)
-            .join("review")
-            .exists(),
+        !conversation_dir(&workspace).exists(),
         "a failed first run must not leave an empty conversation"
     );
 }
@@ -329,9 +324,8 @@ fn failed_root_run_creation_retains_recovery_authority_until_cleanup_is_durable(
             .contains("directory synchronization failure"),
         "{error}"
     );
-    let conversation = crate::tests::helpers::workspace_session_dir(&workspace).join("review");
     assert!(
-        fs::read_dir(conversation)
+        fs::read_dir(conversation_dir(&workspace))
             .expect("partial conversation reads")
             .any(|entry| entry
                 .expect("partial conversation entry reads")
@@ -361,9 +355,7 @@ fn run_creation_rejects_invalid_flow_definition_id_before_persistence() {
         "{error}"
     );
     assert!(
-        !crate::tests::helpers::workspace_session_dir(&workspace)
-            .join("review")
-            .exists(),
+        !conversation_dir(&workspace).exists(),
         "invalid input must not create a conversation"
     );
 }

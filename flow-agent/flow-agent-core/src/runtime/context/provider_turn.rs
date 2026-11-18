@@ -106,7 +106,6 @@ pub(crate) fn compile_provider_turn_context_with_agent_instructions(
                 serde_json::json!([{"source": "AGENTS.md", "content": agent_instructions}])
             },
         ),
-        // The M1.1 grammar has no Flow-scoped prompt field.
         context_source("active-flow-instructions", serde_json::json!([])),
         phase_instructions,
         tools,

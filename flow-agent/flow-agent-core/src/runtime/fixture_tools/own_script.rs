@@ -105,7 +105,6 @@ pub fn unquote_script_path(value: &str) -> Result<String, RuntimeError> {
             ));
         }
         let path = &value[1..value.len() - 1];
-        // WHY: a quote, backtick, dollar or backslash inside the quotes would end, nest or expand it in sh.
         if path.contains(['\'', '"', '`', '$', '\\']) {
             return Err(RuntimeError::Protocol(
                 "own-script redirection target must be one literal path".to_owned(),
@@ -113,7 +112,6 @@ pub fn unquote_script_path(value: &str) -> Result<String, RuntimeError> {
         }
         return Ok(path.to_owned());
     }
-    // WHY: an unquoted target may contain only plain path characters; any other character is an operator or expansion in sh.
     if value
         .chars()
         .any(|ch| !(ch.is_ascii_alphanumeric() || matches!(ch, '.' | '_' | '-' | '/')))
@@ -245,7 +243,6 @@ pub fn unquote_script_argument(value: &str) -> Result<String, RuntimeError> {
     }
 }
 
-/// Echo text is literal: an operator outside quotes would be a command list in POSIX sh.
 fn has_unquoted_shell_operator(value: &str) -> bool {
     let mut quote = None;
     value.chars().any(|ch| match quote {

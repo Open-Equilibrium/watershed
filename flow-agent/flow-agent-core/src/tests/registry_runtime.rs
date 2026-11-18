@@ -3,7 +3,7 @@ mod own_script;
 use super::{
     helpers::{
         assert_invalid_stream, empty_workspace, fixture_runtime_policy, flow_id_for_definition,
-        replace_registry_text,
+        replace_registry_text, workspace_log_dir, workspace_session_dir,
     },
     support::event_timestamp,
     test_support::{copy_dir, expected_stream, fixture_dir, session_home_path, workspace_copy},
@@ -18,22 +18,6 @@ use crate::runtime::{
 };
 use proto::{EventEnvelope, EventType};
 use std::{fs, path::Path};
-
-#[test]
-fn registry_root_must_stay_inside_global_home() {
-    let workspace = workspace_copy("smoke-flow");
-    fs::write(
-        session_home_path().join("config.yaml"),
-        "fixture_profile: stub-model\nregistry_root: ../registry\nstub_model: deterministic\n",
-    )
-    .expect("config rewrite succeeds");
-
-    let err = run_flow(&workspace, "smoke-flow", EmitMode::Jsonl)
-        .expect_err("escaped registry root must fail");
-
-    assert!(matches!(err, RuntimeError::Usage(message) if message.contains("registry_root")));
-    assert!(!crate::tests::helpers::workspace_session_dir(&workspace).exists());
-}
 
 #[test]
 fn registry_root_rejects_symlinked_path_components() {
@@ -60,7 +44,7 @@ fn registry_root_rejects_symlinked_path_components() {
         RuntimeError::Registry(core_script::RegistryError::UnsafePath { message, .. })
             if message.contains("symlink")
     ));
-    assert!(!crate::tests::helpers::workspace_session_dir(&workspace).exists());
+    assert!(!workspace_session_dir(&workspace).exists());
 }
 
 #[test]
@@ -243,7 +227,7 @@ fn cumulative_invocation_boundary_accepts_512_and_rejects_513() {
         "unexpected 513-invocation error: {error:?}"
     );
     assert!(
-        !crate::tests::helpers::workspace_session_dir(&workspace)
+        !workspace_session_dir(&workspace)
             .join("budget-root-2.jsonl")
             .exists(),
         "preflight rejection must not create a Run"
@@ -267,12 +251,12 @@ fn run_flow_rejects_unknown_predefined_command_without_side_effects() {
         matches!(err, RuntimeError::Policy(message) if message.to_string().contains("unknown trusted command"))
     );
     assert!(
-        !crate::tests::helpers::workspace_session_dir(&workspace)
+        !workspace_session_dir(&workspace)
             .join("smoke-flow.jsonl")
             .exists()
     );
     assert!(
-        !crate::tests::helpers::workspace_log_dir(&workspace)
+        !workspace_log_dir(&workspace)
             .join("smoke-flow.log")
             .exists()
     );

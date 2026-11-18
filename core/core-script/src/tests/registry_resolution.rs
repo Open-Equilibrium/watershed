@@ -15,16 +15,28 @@ use super::{
     true_predicate,
 };
 
+fn identity(id: &str, name: &str) -> BlockIdentity {
+    BlockIdentity {
+        id: id.to_owned(),
+        name: name.to_owned(),
+    }
+}
+
+fn instruction(id: &str, name: &str, prompt: &str) -> RegistryBlock {
+    RegistryBlock::Instruction(InstructionBlock {
+        identity: identity(id, name),
+        prompt: prompt.to_owned(),
+        parameters: Vec::new(),
+    })
+}
+
 #[test]
 fn phase_transitions_reject_non_forward_references() {
     let error = ResolvedRegistry::from_blocks([
         simple_phase_block("draft"),
         simple_phase_block("review"),
         RegistryBlock::Phase(PhaseBlock {
-            identity: BlockIdentity {
-                id: "delivery".to_owned(),
-                name: "Delivery".to_owned(),
-            },
+            identity: identity("delivery", "Delivery"),
             phase_refs: vec!["draft".to_owned(), "review".to_owned()],
             result_from: Some("review".to_owned()),
             transitions: vec![PhaseTransition {
@@ -45,19 +57,13 @@ fn registry_reference_validation_rejects_flow_cycles() {
     let err = ResolvedRegistry::from_blocks([
         simple_phase_block("phase"),
         RegistryBlock::Flow(FlowBlock {
-            identity: BlockIdentity {
-                id: "a".to_owned(),
-                name: "A".to_owned(),
-            },
+            identity: identity("a", "A"),
             phase_refs: vec!["phase".to_owned()],
             subflow_refs: vec!["b".to_owned()],
             transitions: Vec::new(),
         }),
         RegistryBlock::Flow(FlowBlock {
-            identity: BlockIdentity {
-                id: "b".to_owned(),
-                name: "B".to_owned(),
-            },
+            identity: identity("b", "B"),
             phase_refs: vec!["phase".to_owned()],
             subflow_refs: vec!["a".to_owned()],
             transitions: Vec::new(),
@@ -117,10 +123,7 @@ fn registry_reference_validation_rejects_more_than_32_direct_subflows() {
 fn registry_reference_validation_counts_shared_subflow_tails_per_path() {
     let mut blocks = flow_chain_blocks(MAX_FLOW_NESTING_DEPTH);
     blocks.push(RegistryBlock::Flow(FlowBlock {
-        identity: BlockIdentity {
-            id: "zz-parent".to_owned(),
-            name: "Parent".to_owned(),
-        },
+        identity: identity("zz-parent", "Parent"),
         phase_refs: vec!["chain-phase".to_owned()],
         subflow_refs: vec!["flow-000".to_owned()],
         transitions: Vec::new(),
@@ -148,22 +151,8 @@ fn registry_accepts_duplicate_subflow_tails_within_depth() {
 #[test]
 fn registry_rejects_ambiguous_same_kind_id_name_references() {
     let err = ResolvedRegistry::from_blocks([
-        RegistryBlock::Instruction(InstructionBlock {
-            identity: BlockIdentity {
-                id: "alpha".to_owned(),
-                name: "Alpha".to_owned(),
-            },
-            prompt: "first".to_owned(),
-            parameters: Vec::new(),
-        }),
-        RegistryBlock::Instruction(InstructionBlock {
-            identity: BlockIdentity {
-                id: "beta".to_owned(),
-                name: "alpha".to_owned(),
-            },
-            prompt: "second".to_owned(),
-            parameters: Vec::new(),
-        }),
+        instruction("alpha", "Alpha", "first"),
+        instruction("beta", "alpha", "second"),
     ])
     .expect_err("ambiguous same-kind id/name reference rejected");
 
@@ -180,22 +169,8 @@ fn registry_rejects_ambiguous_same_kind_id_name_references() {
 #[test]
 fn registry_rejects_duplicate_ids_and_ids_that_shadow_names() {
     let duplicate_id = ResolvedRegistry::from_blocks([
-        RegistryBlock::Instruction(InstructionBlock {
-            identity: BlockIdentity {
-                id: "same".to_owned(),
-                name: "First".to_owned(),
-            },
-            prompt: "first".to_owned(),
-            parameters: Vec::new(),
-        }),
-        RegistryBlock::Instruction(InstructionBlock {
-            identity: BlockIdentity {
-                id: "same".to_owned(),
-                name: "Second".to_owned(),
-            },
-            prompt: "second".to_owned(),
-            parameters: Vec::new(),
-        }),
+        instruction("same", "First", "first"),
+        instruction("same", "Second", "second"),
     ])
     .expect_err("duplicate block ids must fail");
 
@@ -209,22 +184,8 @@ fn registry_rejects_duplicate_ids_and_ids_that_shadow_names() {
     ));
 
     let id_shadowing_name = ResolvedRegistry::from_blocks([
-        RegistryBlock::Instruction(InstructionBlock {
-            identity: BlockIdentity {
-                id: "first".to_owned(),
-                name: "alias".to_owned(),
-            },
-            prompt: "first".to_owned(),
-            parameters: Vec::new(),
-        }),
-        RegistryBlock::Instruction(InstructionBlock {
-            identity: BlockIdentity {
-                id: "alias".to_owned(),
-                name: "Second".to_owned(),
-            },
-            prompt: "second".to_owned(),
-            parameters: Vec::new(),
-        }),
+        instruction("first", "alias", "first"),
+        instruction("alias", "Second", "second"),
     ])
     .expect_err("ids must not shadow existing names");
 
@@ -240,22 +201,8 @@ fn registry_rejects_duplicate_ids_and_ids_that_shadow_names() {
 #[test]
 fn registry_rejects_normalized_duplicate_names() {
     let err = ResolvedRegistry::from_blocks([
-        RegistryBlock::Instruction(InstructionBlock {
-            identity: BlockIdentity {
-                id: "composed".to_owned(),
-                name: "Café".to_owned(),
-            },
-            prompt: "Inspect".to_owned(),
-            parameters: Vec::new(),
-        }),
-        RegistryBlock::Instruction(InstructionBlock {
-            identity: BlockIdentity {
-                id: "decomposed".to_owned(),
-                name: "Cafe\u{301}".to_owned(),
-            },
-            prompt: "Inspect".to_owned(),
-            parameters: Vec::new(),
-        }),
+        instruction("composed", "Café", "Inspect"),
+        instruction("decomposed", "Cafe\u{301}", "Inspect"),
     ])
     .expect_err("canonically equivalent names are duplicates");
 
@@ -288,10 +235,7 @@ fn registry_refuses_non_nfc_definition_text_instead_of_converting_it() {
                 command_id: "agent-echo".to_owned(),
                 argv,
             },
-            identity: BlockIdentity {
-                id: "echo".to_owned(),
-                name: "Echo".to_owned(),
-            },
+            identity: identity("echo", "Echo"),
             script_body: None,
             script_runtime: None,
             tool_kind: ToolKind::PredefinedCommand,
@@ -299,14 +243,6 @@ fn registry_refuses_non_nfc_definition_text_instead_of_converting_it() {
     };
     let mut body = own_script_tool("decomposed-body", "script:decomposed-body");
     body.script_body = Some(format!("printf '{decomposed}\\n'"));
-    let prompt = RegistryBlock::Instruction(InstructionBlock {
-        identity: BlockIdentity {
-            id: "prompt".to_owned(),
-            name: "Prompt".to_owned(),
-        },
-        prompt: decomposed.to_owned(),
-        parameters: Vec::new(),
-    });
 
     for (field, block) in [
         ("script_body", RegistryBlock::Tool(body)),
@@ -315,7 +251,7 @@ fn registry_refuses_non_nfc_definition_text_instead_of_converting_it() {
             "allowed_values",
             predefined(Vec::new(), vec![decomposed.to_owned()]),
         ),
-        ("prompt", prompt),
+        ("prompt", instruction("prompt", "Prompt", decomposed)),
     ] {
         let error = ResolvedRegistry::from_blocks([block])
             .expect_err("non-NFC definition text is refused, not converted");
@@ -330,7 +266,6 @@ fn registry_refuses_non_nfc_definition_text_instead_of_converting_it() {
 
 #[test]
 fn non_nfc_predicate_literal_under_ref_named_field_is_rejected() {
-    // A reference-named key holding data (a FlowValue object) is data, so its text must be NFC.
     for key in ["target_ref", "result_from"] {
         let mut phase = test_phase();
         phase.output = ValueContract::Map {
@@ -402,20 +337,10 @@ fn resolved_registry_canonicalizes_names_and_parameter_order() {
 
 #[test]
 fn canonicalized_block_names_obey_the_character_limit() {
-    let instruction = |id: &str, name: String| {
-        RegistryBlock::Instruction(InstructionBlock {
-            identity: BlockIdentity {
-                id: id.to_owned(),
-                name,
-            },
-            parameters: Vec::new(),
-            prompt: "Inspect".to_owned(),
-        })
-    };
-
     let at_limit = ResolvedRegistry::from_blocks([instruction(
         "at-limit",
-        "\u{0344}".repeat(MAX_BLOCK_NAME_CHARS / 2),
+        &"\u{0344}".repeat(MAX_BLOCK_NAME_CHARS / 2),
+        "Inspect",
     )])
     .expect("canonical name at the character limit is accepted");
     assert_eq!(
@@ -431,7 +356,8 @@ fn canonicalized_block_names_obey_the_character_limit() {
 
     let error = ResolvedRegistry::from_blocks([instruction(
         "over-limit",
-        "\u{0344}".repeat(MAX_BLOCK_NAME_CHARS),
+        &"\u{0344}".repeat(MAX_BLOCK_NAME_CHARS),
+        "Inspect",
     )])
     .expect_err("canonical name above the character limit is rejected");
     assert!(
@@ -444,33 +370,16 @@ fn canonicalized_block_names_obey_the_character_limit() {
 
 #[test]
 fn registry_rejects_programmatic_invalid_shapes() {
-    let instruction = |id: &str, name: &str| {
-        RegistryBlock::Instruction(InstructionBlock {
-            identity: BlockIdentity {
-                id: id.to_owned(),
-                name: name.to_owned(),
-            },
-            prompt: "Inspect".to_owned(),
-            parameters: Vec::new(),
-        })
-    };
-    let cases = [
-        (
-            instruction("../bad", "Bad"),
-            (|err| matches!(err, RegistryError::InvalidBlockId(id) if id == "../bad"))
-                as fn(RegistryError) -> bool,
-        ),
-        (
-            instruction("empty-name", ""),
-            |err| matches!(err, RegistryError::InvalidBlockName { kind: "instruction", id } if id == "empty-name"),
-        ),
-    ];
+    let err = ResolvedRegistry::from_blocks([instruction("../bad", "Bad", "Inspect")])
+        .expect_err("programmatic blocks must follow registry shape rules");
+    assert!(matches!(err, RegistryError::InvalidBlockId(id) if id == "../bad"));
 
-    for (block, matches_expected_error) in cases {
-        let err = ResolvedRegistry::from_blocks([block])
-            .expect_err("programmatic blocks must follow registry shape rules");
-        assert!(matches_expected_error(err));
-    }
+    let err = ResolvedRegistry::from_blocks([instruction("empty-name", "", "Inspect")])
+        .expect_err("programmatic blocks must follow registry shape rules");
+    assert!(matches!(
+        err,
+        RegistryError::InvalidBlockName { kind: "instruction", id } if id == "empty-name"
+    ));
 }
 
 #[test]
@@ -494,19 +403,9 @@ fn public_registry_validation_checks_path_and_capability_entry_points() {
 #[test]
 fn registry_resolves_normalized_name_references() {
     let registry = ResolvedRegistry::from_blocks([
-        RegistryBlock::Instruction(InstructionBlock {
-            identity: BlockIdentity {
-                id: "inspect".to_owned(),
-                name: "Café".to_owned(),
-            },
-            prompt: "Inspect".to_owned(),
-            parameters: Vec::new(),
-        }),
+        instruction("inspect", "Café", "Inspect"),
         RegistryBlock::Phase(PhaseBlock {
-            identity: BlockIdentity {
-                id: "phase".to_owned(),
-                name: "Phase".to_owned(),
-            },
+            identity: identity("phase", "Phase"),
             instruction_refs: vec!["Cafe\u{301}".to_owned()],
             ..test_phase()
         }),
@@ -524,14 +423,11 @@ fn registry_resolves_normalized_name_references() {
 }
 
 #[test]
-fn registry_rejects_duplicate_child_phase_refs() {
+fn registry_rejects_duplicate_phase_child_and_tool_refs() {
     let err = ResolvedRegistry::from_blocks([
         simple_phase_block("attempt"),
         RegistryBlock::Phase(PhaseBlock {
-            identity: BlockIdentity {
-                id: "phase".to_owned(),
-                name: "Phase".to_owned(),
-            },
+            identity: identity("phase", "Phase"),
             phase_refs: vec!["attempt".to_owned(), "attempt".to_owned()],
             result_from: Some("attempt".to_owned()),
             ..test_phase()
@@ -546,17 +442,11 @@ fn registry_rejects_duplicate_child_phase_refs() {
             id,
         } if id == "phase.attempt"
     ));
-}
 
-#[test]
-fn registry_rejects_duplicate_phase_tool_refs() {
     let err = ResolvedRegistry::from_blocks([
         RegistryBlock::Tool(own_script_tool("echo", "script:echo")),
         RegistryBlock::Phase(PhaseBlock {
-            identity: BlockIdentity {
-                id: "phase".to_owned(),
-                name: "Phase".to_owned(),
-            },
+            identity: identity("phase", "Phase"),
             instruction_refs: Vec::new(),
             tool_refs: vec!["echo".to_owned(), "echo".to_owned()],
             ..test_phase()
@@ -575,23 +465,13 @@ fn registry_rejects_duplicate_phase_tool_refs() {
 
 #[test]
 fn registry_rejects_invalid_composite_phase_references() {
-    let instruction = RegistryBlock::Instruction(InstructionBlock {
-        identity: BlockIdentity {
-            id: "inspect".to_owned(),
-            name: "Inspect".to_owned(),
-        },
-        prompt: "Inspect".to_owned(),
-        parameters: Vec::new(),
-    });
+    let inspect = instruction("inspect", "Inspect", "Inspect");
     let duplicate_instruction = RegistryBlock::Phase(PhaseBlock {
-        identity: BlockIdentity {
-            id: "duplicate-instruction".to_owned(),
-            name: "Duplicate instruction".to_owned(),
-        },
+        identity: identity("duplicate-instruction", "Duplicate instruction"),
         instruction_refs: vec!["inspect".to_owned(), "inspect".to_owned()],
         ..test_phase()
     });
-    let error = ResolvedRegistry::from_blocks([instruction, duplicate_instruction])
+    let error = ResolvedRegistry::from_blocks([inspect, duplicate_instruction])
         .expect_err("duplicate Phase instruction references must fail");
     assert!(matches!(
         error,
@@ -603,10 +483,7 @@ fn registry_rejects_invalid_composite_phase_references() {
 
     let composite = |id: &str, phase_refs: Vec<&str>, result_from: &str| {
         RegistryBlock::Phase(PhaseBlock {
-            identity: BlockIdentity {
-                id: id.to_owned(),
-                name: format!("Phase {id}"),
-            },
+            identity: identity(id, &format!("Phase {id}")),
             phase_refs: phase_refs.into_iter().map(str::to_owned).collect(),
             result_from: Some(result_from.to_owned()),
             ..test_phase()
@@ -640,10 +517,7 @@ fn registry_rejects_composite_transitions_outside_direct_children() {
     };
     let composite = |phase_refs: Vec<&str>, result_from: &str, transition| {
         RegistryBlock::Phase(PhaseBlock {
-            identity: BlockIdentity {
-                id: "parent".to_owned(),
-                name: "Parent".to_owned(),
-            },
+            identity: identity("parent", "Parent"),
             phase_refs: phase_refs.into_iter().map(str::to_owned).collect(),
             result_from: Some(result_from.to_owned()),
             transitions: vec![transition],
@@ -683,10 +557,7 @@ fn registry_rejects_composite_transitions_outside_direct_children() {
         simple_phase_block("source"),
         simple_phase_block("target"),
         RegistryBlock::Phase(PhaseBlock {
-            identity: BlockIdentity {
-                id: "parent".to_owned(),
-                name: "Parent".to_owned(),
-            },
+            identity: identity("parent", "Parent"),
             phase_refs: vec!["source".to_owned(), "target".to_owned()],
             result_from: Some("target".to_owned()),
             transitions: vec![PhaseTransition {
@@ -736,10 +607,7 @@ fn registry_bounds_recursive_phase_graphs() {
         .map(|index| simple_phase_block(&format!("child-{index:03}")))
         .collect::<Vec<_>>();
     blocks.push(RegistryBlock::Phase(PhaseBlock {
-        identity: BlockIdentity {
-            id: "parent".to_owned(),
-            name: "Parent".to_owned(),
-        },
+        identity: identity("parent", "Parent"),
         phase_refs: (0..=MAX_PHASE_FANOUT)
             .map(|index| format!("child-{index:03}"))
             .collect(),
@@ -758,10 +626,10 @@ fn registry_bounds_recursive_phase_graphs() {
         .map(|index| {
             let child = (index < 7).then(|| format!("a-tail-{:02}", index + 1));
             RegistryBlock::Phase(PhaseBlock {
-                identity: BlockIdentity {
-                    id: format!("a-tail-{index:02}"),
-                    name: format!("Shared tail {index:02}"),
-                },
+                identity: identity(
+                    &format!("a-tail-{index:02}"),
+                    &format!("Shared tail {index:02}"),
+                ),
                 phase_refs: child.iter().cloned().collect(),
                 result_from: child,
                 ..test_phase()
@@ -775,10 +643,10 @@ fn registry_bounds_recursive_phase_graphs() {
             "a-tail-00".to_owned()
         };
         RegistryBlock::Phase(PhaseBlock {
-            identity: BlockIdentity {
-                id: format!("b-prefix-{index:02}"),
-                name: format!("Prefix {index:02}"),
-            },
+            identity: identity(
+                &format!("b-prefix-{index:02}"),
+                &format!("Prefix {index:02}"),
+            ),
             phase_refs: vec![child.clone()],
             result_from: Some(child),
             ..test_phase()

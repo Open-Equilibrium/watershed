@@ -27,6 +27,7 @@ fn natural_outcome(raw_status: i32) -> ProcessOutcome {
 
 #[test]
 fn inner_status_requires_one_exact_root_record() {
+    let stopped = ((19_i32 << 8) | 0x7f).to_ne_bytes();
     for bytes in [
         Vec::new(),
         vec![1],
@@ -34,25 +35,15 @@ fn inner_status_requires_one_exact_root_record() {
         vec![1, 2, 3],
         vec![1, 2, 3, 4, 5],
         vec![0; 8],
+        stopped.to_vec(),
     ] {
         assert!(
             apply_inner_status(&mut natural_outcome(0), &bytes).is_err(),
-            "{} status bytes cannot prove one reaped Tool root",
-            bytes.len()
+            "{bytes:?} cannot prove one reaped Tool root"
         );
     }
     apply_inner_status(&mut natural_outcome(0), &0_i32.to_ne_bytes())
         .expect("one complete status record is accepted");
-}
-
-#[test]
-fn stopped_inner_root_status_is_not_a_reaped_tool() {
-    // A stopped root (WIFSTOPPED) keeps its Tool alive; it is never a termination.
-    let stopped = ((19_i32 << 8) | 0x7f).to_ne_bytes();
-    assert!(
-        apply_inner_status(&mut natural_outcome(0), &stopped).is_err(),
-        "a stopped Tool root cannot prove a reaped Tool"
-    );
 }
 
 #[test]
@@ -170,16 +161,8 @@ fn undeclared_descriptors_are_close_on_exec_before_native_launch() {
     rustix::io::fcntl_setfd(&ambient, rustix::io::FdFlags::empty())
         .expect("ambient fixture is inheritable");
     protection::inherit_only(&[declared.as_raw_fd()]).expect("inherited descriptors are isolated");
-    assert!(
-        rustix::io::fcntl_getfd(&ambient)
-            .unwrap()
-            .contains(rustix::io::FdFlags::CLOEXEC)
-    );
-    assert!(
-        !rustix::io::fcntl_getfd(&declared)
-            .unwrap()
-            .contains(rustix::io::FdFlags::CLOEXEC)
-    );
+    assert!(close_on_exec(&ambient));
+    assert!(!close_on_exec(&declared));
 
     #[cfg(target_os = "linux")]
     let directory = "/proc/self/fd";
@@ -200,11 +183,13 @@ fn undeclared_descriptors_are_close_on_exec_before_native_launch() {
 
     protection::inherit_only(&[])
         .expect("the Tool inherits no internal status or protection handles");
-    assert!(
-        rustix::io::fcntl_getfd(&declared)
-            .unwrap()
-            .contains(rustix::io::FdFlags::CLOEXEC)
-    );
+    assert!(close_on_exec(&declared));
+}
+
+fn close_on_exec(descriptor: impl rustix::fd::AsFd) -> bool {
+    rustix::io::fcntl_getfd(descriptor)
+        .unwrap()
+        .contains(rustix::io::FdFlags::CLOEXEC)
 }
 
 #[test]
@@ -213,58 +198,52 @@ fn bounded_output_classifies_each_stream_and_preserves_its_exact_prefix() {
         return;
     }
     for (script, classification, stdout, stderr) in [
-        (
-            "printf abcd; printf wxyz >&2",
-            None,
-            b"abcd".as_slice(),
-            b"wxyz".as_slice(),
-        ),
+        ("printf abcd; printf wxyz >&2", None, "abcd", "wxyz"),
         (
             "printf abcde; while :; do :; done",
             Some(Classification::StdoutCapExceeded),
-            b"abcd".as_slice(),
-            b"".as_slice(),
+            "abcd",
+            "",
         ),
         (
             "printf vwxyz >&2; while :; do :; done",
             Some(Classification::StderrCapExceeded),
-            b"".as_slice(),
-            b"vwxy".as_slice(),
+            "",
+            "vwxy",
         ),
         (
             "trap '' TERM; printf abcde; printf vwxyz >&2; while :; do :; done",
             Some(Classification::StdoutStderrCapExceeded),
-            b"abcd".as_slice(),
-            b"vwxy".as_slice(),
+            "abcd",
+            "vwxy",
         ),
-        // A descendant exceeds a cap only after the root exits successfully.
         (
             "(/bin/sleep 0.2; printf abcde) & exit 0",
             Some(Classification::StdoutCapExceeded),
-            b"abcd".as_slice(),
-            b"".as_slice(),
+            "abcd",
+            "",
         ),
         (
             "(/bin/sleep 0.2; printf vwxyz >&2) & exit 0",
             Some(Classification::StderrCapExceeded),
-            b"".as_slice(),
-            b"vwxy".as_slice(),
+            "",
+            "vwxy",
         ),
     ] {
         let outcome = run_bounded(shell(script), 2_000, 4, 4, Vec::new(), Vec::new(), None)
             .expect("bounded direct-child supervision completes");
         assert_eq!(outcome.classification, classification, "{script}");
-        assert_eq!(outcome.stdout, stdout, "{script}");
-        assert_eq!(outcome.stderr, stderr, "{script}");
+        assert_eq!(outcome.stdout, stdout.as_bytes(), "{script}");
+        assert_eq!(outcome.stderr, stderr.as_bytes(), "{script}");
         let result = tool_result(&outcome);
         assert_eq!(result.classification, classification);
         assert_eq!(
             proto::decode_executor_stream_v0(&result.stdout_base64).unwrap(),
-            stdout
+            stdout.as_bytes()
         );
         assert_eq!(
             proto::decode_executor_stream_v0(&result.stderr_base64).unwrap(),
-            stderr
+            stderr.as_bytes()
         );
     }
 }
@@ -274,7 +253,6 @@ fn output_drain_timeout_preserves_prefixes_after_root_exit() {
     if crate::tests::run_isolated("WATERSHED_EXECUTOR_DRAIN_PREFIX_CHILD") {
         return;
     }
-    // The finite-lived descendant holds both pipes beyond the drain deadline.
     let outcome = run_bounded(
         shell("printf abcd; printf wxyz >&2; /bin/sleep 10 & exit 0"),
         2_000,

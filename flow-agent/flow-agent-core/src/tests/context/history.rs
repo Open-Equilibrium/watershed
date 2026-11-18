@@ -1,4 +1,4 @@
-use super::support::{test_profile, tier_zero};
+use super::support::{test_profile, tier_zero, total_source_bytes};
 use crate::runtime::{
     context::{
         ContextHistory, ContextOmissionCounts, bounded_context_array_source, compile_context,
@@ -8,6 +8,18 @@ use crate::runtime::{
     types::{MAX_FLOW_EVENTS, MAX_SESSION_OBJECT_BYTES, RuntimeError},
 };
 use proto::{EventEnvelope, EventType};
+
+fn envelope(sequence: u64, event_type: EventType, payload: serde_json::Value) -> EventEnvelope {
+    EventEnvelope::new(
+        format!("evt-{sequence}"),
+        event_type,
+        "context-history-001",
+        sequence,
+        "2026-01-01T00:00:00Z",
+        "flow-agent-cli",
+        payload,
+    )
+}
 
 #[test]
 fn context_history_selects_the_latest_interaction_and_omits_it_whole() {
@@ -20,20 +32,11 @@ fn context_history_selects_the_latest_interaction_and_omits_it_whole() {
     .into_iter()
     .enumerate()
     .map(|(index, (event_type, message_id))| {
-        let sequence = index as u64 + 1;
         let mut payload = serde_json::json!({"message_id":message_id,"role":"assistant"});
         if event_type == EventType::MessageDelta {
             payload["content_delta"] = serde_json::json!(message_id);
         }
-        EventEnvelope::new(
-            format!("evt-{sequence}"),
-            event_type,
-            "context001",
-            sequence,
-            "2026-01-01T00:00:00Z",
-            "flow-agent-cli",
-            payload,
-        )
+        envelope(index as u64 + 1, event_type, payload)
     })
     .collect::<Vec<_>>();
     let mut history = ContextHistory::default();
@@ -47,14 +50,7 @@ fn context_history_selects_the_latest_interaction_and_omits_it_whole() {
     assert_eq!(omitted.tier_2, 1);
 
     let mandatory = tier_zero("turn");
-    let mandatory_bytes = mandatory
-        .iter()
-        .map(|source| {
-            context_source_bytes(source)
-                .expect("mandatory source serializes")
-                .len()
-        })
-        .sum::<usize>();
+    let mandatory_bytes = total_source_bytes(&mandatory);
     let recent_bytes = context_source_bytes(&recent)
         .expect("recent interaction serializes")
         .len();
@@ -91,34 +87,23 @@ fn context_history_selects_the_latest_interaction_and_omits_it_whole() {
 
 #[test]
 fn recovery_context_round_trips_active_state_and_rejects_invalid_snapshots() {
-    let event = |sequence, event_type, payload| {
-        EventEnvelope::new(
-            format!("evt-{sequence}"),
-            event_type,
-            "context-recovery-001",
-            sequence,
-            "2026-01-01T00:00:00Z",
-            "flow-agent-cli",
-            payload,
-        )
-    };
     let mut history = ContextHistory::default();
-    history.record(&event(
+    history.record(&envelope(
         1,
         EventType::MessageDelta,
         serde_json::json!({"message_id":"message-1","content_delta":"hello"}),
     ));
-    history.record(&event(
+    history.record(&envelope(
         2,
         EventType::MessageCompleted,
         serde_json::json!({"message_id":"message-1","role":"assistant"}),
     ));
-    history.record(&event(
+    history.record(&envelope(
         3,
         EventType::MessageDelta,
         serde_json::json!({"message_id":"message-2","content_delta":"pending"}),
     ));
-    history.record(&event(
+    history.record(&envelope(
         4,
         EventType::ToolStarted,
         serde_json::json!({"tool_id":"tool-1"}),
@@ -151,7 +136,7 @@ fn recovery_context_round_trips_active_state_and_rejects_invalid_snapshots() {
         EventType::ToolTimedOut,
     ] {
         let mut terminal = restored.clone();
-        terminal.record(&event(
+        terminal.record(&envelope(
             5,
             event_type,
             serde_json::json!({"tool_id":"tool-1"}),
@@ -162,60 +147,57 @@ fn recovery_context_round_trips_active_state_and_rejects_invalid_snapshots() {
         );
     }
 
-    let invalid = [
-        (
-            br#"{"completed_interactions":0,"latest_completed":{"deltas":[],"payload":{},"sequence":1},"pending_deltas":{},"unresolved_tools":[]}"#.as_slice(),
-            "completed interaction without a count",
-        ),
-        (
-            br#"{"completed_interactions":1,"latest_completed":null,"pending_deltas":{},"unresolved_tools":[]}"#.as_slice(),
-            "completed interaction count without an interaction",
-        ),
-        (
-            br#"{"completed_interactions":2,"latest_completed":{"deltas":[],"payload":{},"sequence":1},"pending_deltas":{},"unresolved_tools":[]}"#.as_slice(),
-            "completed interaction count exceeds the cumulative event count",
-        ),
-        (
-            br#"{"completed_interactions":1,"latest_completed":{"deltas":[],"payload":{},"sequence":0},"pending_deltas":{},"unresolved_tools":[]}"#.as_slice(),
-            "invalid event sequence",
-        ),
-        (
-            br#"{"completed_interactions":0,"latest_completed":null,"pending_deltas":{},"unresolved_tools":[],"unknown":true}"#.as_slice(),
-            "unknown field",
-        ),
-    ];
-    for (bytes, expected) in invalid {
-        assert!(
-            ContextHistory::from_recovery_bytes(bytes, 1)
-                .err()
-                .expect("invalid recovery snapshot is rejected")
-                .to_string()
-                .contains(expected),
-            "expected recovery error containing {expected}"
-        );
-    }
     let over_budget = format!(
         "{{\"completed_interactions\":{},\"latest_completed\":{{\"deltas\":[],\"payload\":{{}},\"sequence\":{}}},\"pending_deltas\":{{}},\"unresolved_tools\":[]}}",
         MAX_FLOW_EVENTS + 1,
         MAX_FLOW_EVENTS + 1,
     );
-    assert!(
-        ContextHistory::from_recovery_bytes(over_budget.as_bytes(), u64::MAX)
-            .err()
-            .expect("an over-budget recovery count is rejected")
-            .to_string()
-            .contains("completed interaction count exceeds event budget")
-    );
-    assert!(
-        ContextHistory::from_recovery_bytes(
-            b"{ \"completed_interactions\":0,\"latest_completed\":null,\"pending_deltas\":{},\"unresolved_tools\":[]}",
+    let invalid = [
+        (
+            br#"{"completed_interactions":0,"latest_completed":{"deltas":[],"payload":{},"sequence":1},"pending_deltas":{},"unresolved_tools":[]}"#.as_slice(),
+            1,
+            "completed interaction without a count",
+        ),
+        (
+            br#"{"completed_interactions":1,"latest_completed":null,"pending_deltas":{},"unresolved_tools":[]}"#.as_slice(),
+            1,
+            "completed interaction count without an interaction",
+        ),
+        (
+            br#"{"completed_interactions":2,"latest_completed":{"deltas":[],"payload":{},"sequence":1},"pending_deltas":{},"unresolved_tools":[]}"#.as_slice(),
+            1,
+            "completed interaction count exceeds the cumulative event count",
+        ),
+        (
+            br#"{"completed_interactions":1,"latest_completed":{"deltas":[],"payload":{},"sequence":0},"pending_deltas":{},"unresolved_tools":[]}"#.as_slice(),
+            1,
+            "invalid event sequence",
+        ),
+        (
+            br#"{"completed_interactions":0,"latest_completed":null,"pending_deltas":{},"unresolved_tools":[],"unknown":true}"#.as_slice(),
+            1,
+            "unknown field",
+        ),
+        (
+            b"{ \"completed_interactions\":0,\"latest_completed\":null,\"pending_deltas\":{},\"unresolved_tools\":[]}".as_slice(),
             0,
-        )
-        .err()
-        .expect("non-canonical recovery snapshot is rejected")
-        .to_string()
-        .contains("canonical JSON")
-    );
+            "canonical JSON",
+        ),
+        (
+            over_budget.as_bytes(),
+            u64::MAX,
+            "completed interaction count exceeds event budget",
+        ),
+    ];
+    for (bytes, cumulative_event_count, expected) in invalid {
+        let error = ContextHistory::from_recovery_bytes(bytes, cumulative_event_count)
+            .err()
+            .expect("invalid recovery snapshot is rejected");
+        assert!(
+            error.to_string().contains(expected),
+            "expected recovery error containing {expected}: {error}"
+        );
+    }
 }
 
 #[test]
@@ -246,13 +228,9 @@ fn recovery_context_enforces_object_size_and_complete_interaction_boundaries() {
     );
 
     let mut history = ContextHistory::default();
-    history.record(&EventEnvelope::new(
-        "evt-1",
-        EventType::MessageCompleted,
-        "context-boundary-001",
+    history.record(&envelope(
         1,
-        "2026-01-01T00:00:00Z",
-        "flow-agent-cli",
+        EventType::MessageCompleted,
         serde_json::json!({"message_id":"message-1","role":"assistant"}),
     ));
     let (recent, omitted) = history
@@ -271,36 +249,23 @@ fn recovery_context_enforces_object_size_and_complete_interaction_boundaries() {
 }
 
 #[test]
-fn recovery_context_size_fallback_preserves_pending_message_deltas() {
-    let event = |sequence, event_type, message_id, content_delta: Option<String>| {
-        let mut payload = serde_json::json!({"message_id":message_id});
-        if let Some(content_delta) = content_delta {
-            payload["content_delta"] = serde_json::Value::String(content_delta);
-        }
-        EventEnvelope::new(
-            format!("evt-{sequence}"),
-            event_type,
-            "context-recovery-fallback-001",
-            sequence,
-            "2026-01-01T00:00:00Z",
-            "flow-agent-cli",
-            payload,
-        )
-    };
+fn recovery_context_size_fallback_drops_completed_deltas_and_keeps_pending_ones() {
     let object_limit = usize::try_from(MAX_SESSION_OBJECT_BYTES).expect("object limit fits usize");
     let mut history = ContextHistory::default();
-    history.record(&event(
+    history.record(&envelope(
         1,
         EventType::MessageDelta,
-        "completed",
-        Some("x".repeat(object_limit)),
+        serde_json::json!({"message_id":"completed","content_delta":"x".repeat(object_limit)}),
     ));
-    history.record(&event(2, EventType::MessageCompleted, "completed", None));
-    history.record(&event(
+    history.record(&envelope(
+        2,
+        EventType::MessageCompleted,
+        serde_json::json!({"message_id":"completed","role":"assistant"}),
+    ));
+    history.record(&envelope(
         3,
         EventType::MessageDelta,
-        "pending",
-        Some("pending-content".to_owned()),
+        serde_json::json!({"message_id":"pending","content_delta":"pending-content"}),
     ));
 
     let object = history
@@ -312,51 +277,6 @@ fn recovery_context_size_fallback_preserves_pending_message_deltas() {
         restored.pending_deltas["pending"][0]["content_delta"],
         "pending-content"
     );
-
-    let mut oversized_pending = ContextHistory::default();
-    oversized_pending.record(&event(
-        1,
-        EventType::MessageDelta,
-        "pending",
-        Some("x".repeat(object_limit)),
-    ));
-    assert!(
-        oversized_pending
-            .recovery_object()
-            .expect_err("oversized pending state must fail closed")
-            .to_string()
-            .contains("object byte limit")
-    );
-}
-
-#[test]
-fn recovery_object_drops_oversized_completed_deltas() {
-    let object_limit = usize::try_from(MAX_SESSION_OBJECT_BYTES).expect("object limit fits usize");
-    let mut history = ContextHistory::default();
-    history.record(&EventEnvelope::new(
-        "evt-1",
-        EventType::MessageDelta,
-        "context-recovery-completed-deltas-001",
-        1,
-        "2026-01-01T00:00:00Z",
-        "flow-agent-cli",
-        serde_json::json!({"message_id":"completed","content_delta":"x".repeat(object_limit)}),
-    ));
-    history.record(&EventEnvelope::new(
-        "evt-2",
-        EventType::MessageCompleted,
-        "context-recovery-completed-deltas-001",
-        2,
-        "2026-01-01T00:00:00Z",
-        "flow-agent-cli",
-        serde_json::json!({"message_id":"completed","role":"assistant"}),
-    ));
-
-    let object = history
-        .recovery_object()
-        .expect("oversized completed deltas are omitted from the snapshot");
-    let restored =
-        ContextHistory::from_recovery_bytes(&object.bytes, 2).expect("snapshot restores");
     let (sequence, payload, deltas) = restored
         .latest_completed
         .expect("the completed interaction is kept");
@@ -366,4 +286,18 @@ fn recovery_object_drops_oversized_completed_deltas() {
         serde_json::json!({"message_id":"completed","role":"assistant"})
     );
     assert!(deltas.is_empty());
+
+    let mut oversized_pending = ContextHistory::default();
+    oversized_pending.record(&envelope(
+        1,
+        EventType::MessageDelta,
+        serde_json::json!({"message_id":"pending","content_delta":"x".repeat(object_limit)}),
+    ));
+    assert!(
+        oversized_pending
+            .recovery_object()
+            .expect_err("oversized pending state must fail closed")
+            .to_string()
+            .contains("object byte limit")
+    );
 }

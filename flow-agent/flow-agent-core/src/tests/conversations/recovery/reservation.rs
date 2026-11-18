@@ -6,48 +6,96 @@ use super::super::recovery_fixtures::{
     write_terminal_recovery_snapshot_with_parent_and_prior_event_count,
 };
 use super::super::{FLOW_HASH, REGISTRY_HASH, create_review_run, entry, write_terminal_run};
+use super::review_run_dir;
 use crate::runtime::{
     context::ContextHistory,
     conversations::{
-        ConversationEntryType, ProductiveRecoveryWriter, StatusTransactionCrashPoint,
-        append_conversation_entry, append_productive_run_checkpoint, conversation_status_page,
-        create_conversation_run, create_unpublished_productive_conversation_run,
-        read_conversation_continuation_definition, read_conversation_history,
-        reclaim_unpublished_productive_run, reserve_conversation_continuation,
-        reserve_conversation_run_recovery, reserve_new_conversation_run,
-        set_status_transaction_crash_point,
+        ConversationEntry, ConversationEntryType, ProductiveRecoveryWriter,
+        StatusTransactionCrashPoint, append_conversation_entry, append_productive_run_checkpoint,
+        conversation_status_page, create_conversation_run,
+        create_unpublished_productive_conversation_run, read_conversation_continuation_definition,
+        read_conversation_history, reclaim_unpublished_productive_run,
+        reserve_conversation_continuation, reserve_conversation_run_recovery,
+        reserve_new_conversation_run, set_status_transaction_crash_point,
     },
     session_authority::set_session_ownership_release_failure_for_test,
     types::RuntimeError,
 };
-use std::fs;
+use std::{fs, path::Path};
+
+fn create_flow_run(workspace: &Path, conversation_id: &str, run_session_id: &str) {
+    create_conversation_run(
+        workspace,
+        conversation_id,
+        run_session_id,
+        "review-flow",
+        REGISTRY_HASH,
+        FLOW_HASH,
+    )
+    .expect("conversation run is created");
+}
+
+fn continued_entry(
+    workspace: &Path,
+    entry_id: &str,
+    parent_entry_id: &str,
+    run_session_id: &str,
+) -> ConversationEntry {
+    let mut continued = entry(entry_id, Some(parent_entry_id), run_session_id, 2);
+    continued.recovery_snapshot_hash =
+        write_terminal_recovery_snapshot_with_parent_and_prior_event_count(
+            workspace,
+            "review",
+            run_session_id,
+            Some(parent_entry_id),
+            2,
+        );
+    continued
+}
+
+fn append_checkpoint(
+    workspace: &Path,
+    run_session_id: &str,
+    parent: Option<&ConversationEntry>,
+    timestamp: &str,
+) {
+    let parent_entry_id = parent.map(|entry| entry.entry_id.as_str());
+    let snapshot = write_terminal_recovery_snapshot_with_parent(
+        workspace,
+        "review",
+        run_session_id,
+        parent_entry_id,
+    );
+    append_productive_run_checkpoint(
+        workspace,
+        "review",
+        run_session_id,
+        parent_entry_id,
+        &snapshot,
+        2,
+        timestamp,
+    )
+    .expect("checkpoint appends");
+}
+
+fn last_history_entry(workspace: &Path) -> ConversationEntry {
+    read_conversation_history(workspace, "review")
+        .expect("history reads")
+        .pop()
+        .expect("history has an entry")
+}
+
 #[test]
 fn active_continuation_serializes_run_publication() {
     let workspace = empty_workspace("conversation-active-continuation");
-    let registry_hash = REGISTRY_HASH;
-    let flow_hash = FLOW_HASH;
-    create_conversation_run(
-        &workspace,
-        "review",
-        "review",
-        "review-flow",
-        registry_hash,
-        flow_hash,
-    )
-    .expect("root Run is created");
+    create_flow_run(&workspace, "review", "review");
     write_terminal_run(&workspace, "review", "review");
     write_terminal_recovery_fixture(&workspace, "review", "review", "root");
 
     let first = reserve_conversation_continuation(&workspace, "review", None)
         .expect("first continuation reserves the Conversation");
-    let error = match reserve_conversation_continuation(&workspace, "review", None) {
-        Ok(reservation) => {
-            reservation
-                .release()
-                .expect("unexpected continuation releases");
-            panic!("a second continuation cannot overlap the first")
-        }
-        Err(error) => error,
+    let Err(error) = reserve_conversation_continuation(&workspace, "review", None) else {
+        panic!("a second continuation cannot overlap the first")
     };
     assert!(matches!(error, RuntimeError::ActiveSession { .. }));
     assert!(
@@ -55,31 +103,11 @@ fn active_continuation_serializes_run_publication() {
             .join("review")
             .is_dir()
     );
-    assert!(
-        !crate::tests::helpers::workspace_session_dir(&workspace)
-            .join("review/runs/review-2")
-            .exists()
-    );
+    assert!(!review_run_dir(&workspace, "review-2").exists());
 
-    create_conversation_run(
-        &workspace,
-        first.conversation_id(),
-        first.run_session_id(),
-        "review-flow",
-        registry_hash,
-        flow_hash,
-    )
-    .expect("reserved continuation Run is created");
+    create_flow_run(&workspace, first.conversation_id(), first.run_session_id());
     write_terminal_run(&workspace, "review", "review-2");
-    let mut continued = entry("continued", Some("root"), "review-2", 2);
-    continued.recovery_snapshot_hash =
-        write_terminal_recovery_snapshot_with_parent_and_prior_event_count(
-            &workspace,
-            "review",
-            "review-2",
-            Some("root"),
-            2,
-        );
+    let continued = continued_entry(&workspace, "continued", "root", "review-2");
     append_conversation_entry(&workspace, "review", &continued)
         .expect("reserved continuation history appends");
     first.release().expect("first continuation releases");
@@ -94,36 +122,12 @@ fn active_continuation_serializes_run_publication() {
 #[test]
 fn one_id_continuation_rolls_back_a_cut_history_append_and_continues_from_its_predecessor() {
     let workspace = empty_workspace("conversation-continuation-cut-history");
-    create_conversation_run(
-        &workspace,
-        "review",
-        "review",
-        "review-flow",
-        REGISTRY_HASH,
-        FLOW_HASH,
-    )
-    .expect("root Run is created");
+    create_flow_run(&workspace, "review", "review");
     write_terminal_run(&workspace, "review", "review");
     write_terminal_recovery_fixture(&workspace, "review", "review", "root");
-    create_conversation_run(
-        &workspace,
-        "review",
-        "review-2",
-        "review-flow",
-        REGISTRY_HASH,
-        FLOW_HASH,
-    )
-    .expect("continued Run is created");
+    create_flow_run(&workspace, "review", "review-2");
     write_terminal_run(&workspace, "review", "review-2");
-    let mut continued = entry("continued", Some("root"), "review-2", 2);
-    continued.recovery_snapshot_hash =
-        write_terminal_recovery_snapshot_with_parent_and_prior_event_count(
-            &workspace,
-            "review",
-            "review-2",
-            Some("root"),
-            2,
-        );
+    let continued = continued_entry(&workspace, "continued", "root", "review-2");
     set_status_transaction_crash_point(StatusTransactionCrashPoint::CanonicalMutationApplied);
     append_conversation_entry(&workspace, "review", &continued)
         .expect_err("the crash point leaves the history append recorded");
@@ -154,15 +158,7 @@ fn one_id_continuation_rolls_back_a_cut_history_append_and_continues_from_its_pr
 #[test]
 fn continuation_reclaims_an_unpublished_run_left_by_an_interrupted_continuation() {
     let workspace = empty_workspace("conversation-continuation-reclaims-unpublished");
-    create_conversation_run(
-        &workspace,
-        "review",
-        "review",
-        "review-flow",
-        REGISTRY_HASH,
-        FLOW_HASH,
-    )
-    .expect("root Run is created");
+    create_flow_run(&workspace, "review", "review");
     write_terminal_run(&workspace, "review", "review");
     write_terminal_recovery_fixture(&workspace, "review", "review", "root");
     set_status_transaction_crash_point(StatusTransactionCrashPoint::RunCreationApplied);
@@ -224,48 +220,29 @@ fn unpublished_recovery_header_error_reclaims_only_the_preheader_run() {
     );
     reclaim_unpublished_productive_run(&workspace, "review", "review")
         .expect("preheader recovery error is reclaimed");
-    assert!(
-        !crate::tests::helpers::workspace_session_dir(&workspace)
-            .join("review")
-            .exists()
-    );
+    assert!(!review_run_dir(&workspace, "review").exists());
 }
 
 #[test]
-fn productive_recovery_reserves_a_durable_header_before_the_first_event() {
-    let (workspace, run, _) =
-        published_productive_recovery_fixture("productive-recovery-empty-event-prefix");
-    assert_eq!(
-        fs::metadata(run.join("events.jsonl"))
-            .expect("event stream metadata reads")
-            .len(),
-        0
-    );
+fn productive_recovery_reservation_recovers_an_empty_or_cut_off_event_prefix() {
+    for (name, prefix) in [("empty", ""), ("cut-off", "{\"event_id\":")] {
+        let (workspace, run, _) =
+            published_productive_recovery_fixture(&format!("productive-recovery-{name}-prefix"));
+        fs::write(run.join("events.jsonl"), prefix).expect("event prefix writes");
 
-    let reservation = reserve_conversation_run_recovery(&workspace, "review", "review")
-        .expect("the durable empty event prefix remains exactly recoverable");
-    reservation
-        .release()
-        .expect("recovery reservation releases");
-}
-
-#[test]
-fn productive_recovery_reservation_drops_an_incomplete_final_event_line() {
-    let (workspace, run, _) =
-        published_productive_recovery_fixture("productive-recovery-cut-off-event");
-    fs::write(run.join("events.jsonl"), b"{\"event_id\":").expect("cut-off event line writes");
-
-    let reservation = reserve_conversation_run_recovery(&workspace, "review", "review")
-        .expect("the reservation drops the uncommitted cut-off line under its lease");
-    reservation
-        .release()
-        .expect("recovery reservation releases");
-    assert_eq!(
-        fs::metadata(run.join("events.jsonl"))
-            .expect("event stream metadata reads")
-            .len(),
-        0
-    );
+        let reservation = reserve_conversation_run_recovery(&workspace, "review", "review")
+            .expect("the reservation drops any uncommitted event bytes under its lease");
+        reservation
+            .release()
+            .expect("recovery reservation releases");
+        assert_eq!(
+            fs::metadata(run.join("events.jsonl"))
+                .expect("event stream metadata reads")
+                .len(),
+            0,
+            "{name}"
+        );
+    }
 }
 
 #[test]
@@ -283,44 +260,17 @@ fn run_recovery_reservation_accepts_a_multi_segment_event_prefix() {
 fn continuation_reservation_selects_latest_or_explicit_entry_without_erasing_descendants() {
     let workspace = empty_workspace("conversation-continuation-reservation");
     let definition_id = "review-flow";
-    let registry_hash = REGISTRY_HASH;
-    let flow_hash = FLOW_HASH;
     for run_id in ["review", "review-2", "review-3"] {
-        create_conversation_run(
-            &workspace,
-            "review",
-            run_id,
-            definition_id,
-            registry_hash,
-            flow_hash,
-        )
-        .expect("conversation run is created");
+        create_flow_run(&workspace, "review", run_id);
         write_terminal_run(&workspace, "review", run_id);
     }
     let mut root = entry("root", None, "review", 2);
     root.recovery_snapshot_hash = write_terminal_recovery_snapshot(&workspace, "review", "review");
     append_conversation_entry(&workspace, "review", &root).expect("root appends");
 
-    let mut left = entry("left", Some("root"), "review-2", 2);
-    left.recovery_snapshot_hash =
-        write_terminal_recovery_snapshot_with_parent_and_prior_event_count(
-            &workspace,
-            "review",
-            "review-2",
-            Some("root"),
-            2,
-        );
+    let left = continued_entry(&workspace, "left", "root", "review-2");
     append_conversation_entry(&workspace, "review", &left).expect("left appends");
-
-    let mut right = entry("right", Some("root"), "review-3", 2);
-    right.recovery_snapshot_hash =
-        write_terminal_recovery_snapshot_with_parent_and_prior_event_count(
-            &workspace,
-            "review",
-            "review-3",
-            Some("root"),
-            2,
-        );
+    let right = continued_entry(&workspace, "right", "root", "review-3");
     append_conversation_entry(&workspace, "review", &right).expect("right appends");
 
     let latest = reserve_conversation_continuation(&workspace, "review", None)
@@ -351,14 +301,9 @@ fn continuation_reservation_selects_latest_or_explicit_entry_without_erasing_des
         ["root", "left", "right"]
     );
     set_session_ownership_release_failure_for_test(true);
-    let error = match reserve_conversation_continuation(&workspace, "review", Some("missing")) {
-        Ok(reservation) => {
-            reservation
-                .release()
-                .expect("unexpected reservation releases");
-            panic!("an unknown branch point must fail before a run is created")
-        }
-        Err(error) => error,
+    let Err(error) = reserve_conversation_continuation(&workspace, "review", Some("missing"))
+    else {
+        panic!("an unknown branch point must fail before a run is created")
     };
     set_session_ownership_release_failure_for_test(false);
     assert_eq!(error.exit_code(), 65);
@@ -376,11 +321,7 @@ fn continuation_reservation_selects_latest_or_explicit_entry_without_erasing_des
         .expect("continuation leases are released after selection failure")
         .release()
         .expect("retry releases");
-    assert!(
-        !crate::tests::helpers::workspace_session_dir(&workspace)
-            .join("review/runs/review-4")
-            .exists()
-    );
+    assert!(!review_run_dir(&workspace, "review-4").exists());
 }
 
 #[test]
@@ -388,14 +329,8 @@ fn continuation_without_a_committed_entry_uses_runtime_exit_class() {
     let workspace = empty_workspace("conversation-no-committed-entry");
     create_review_run(&workspace);
 
-    let error = match reserve_conversation_continuation(&workspace, "review", None) {
-        Ok(reservation) => {
-            reservation
-                .release()
-                .expect("unexpected reservation releases");
-            panic!("conversation without a committed entry must not continue")
-        }
-        Err(error) => error,
+    let Err(error) = reserve_conversation_continuation(&workspace, "review", None) else {
+        panic!("conversation without a committed entry must not continue")
     };
 
     assert_eq!(error.exit_code(), 65);
@@ -414,15 +349,7 @@ fn continuation_without_a_committed_entry_uses_runtime_exit_class() {
 #[test]
 fn continuation_reads_only_the_selected_terminal_recovery_snapshot() {
     let workspace = empty_workspace("conversation-compact-recovery");
-    create_conversation_run(
-        &workspace,
-        "review",
-        "review",
-        "review-flow",
-        REGISTRY_HASH,
-        FLOW_HASH,
-    )
-    .expect("conversation run is created");
+    create_flow_run(&workspace, "review", "review");
     write_terminal_recovery_fixture(&workspace, "review", "review", "root");
     write_terminal_run(&workspace, "review", "review");
 
@@ -447,58 +374,14 @@ fn continuation_reads_only_the_selected_terminal_recovery_snapshot() {
 #[test]
 fn productive_continuation_checkpoint_links_to_its_selected_parent() {
     let workspace = empty_workspace("productive-continuation-checkpoint");
-    let registry_hash = REGISTRY_HASH;
-    let flow_hash = FLOW_HASH;
-    create_conversation_run(
-        &workspace,
-        "review",
-        "review",
-        "review-flow",
-        registry_hash,
-        flow_hash,
-    )
-    .expect("root run is created");
+    create_flow_run(&workspace, "review", "review");
     write_terminal_run(&workspace, "review", "review");
-    append_productive_run_checkpoint(
-        &workspace,
-        "review",
-        "review",
-        None,
-        &write_terminal_recovery_snapshot(&workspace, "review", "review"),
-        2,
-        "2026-07-30T12:00:01Z",
-    )
-    .expect("root checkpoint appends");
-    let root = read_conversation_history(&workspace, "review")
-        .expect("root history reads")
-        .pop()
-        .expect("root entry");
+    append_checkpoint(&workspace, "review", None, "2026-07-30T12:00:01Z");
+    let root = last_history_entry(&workspace);
 
-    create_conversation_run(
-        &workspace,
-        "review",
-        "review-2",
-        "review-flow",
-        registry_hash,
-        flow_hash,
-    )
-    .expect("continuation run is created");
+    create_flow_run(&workspace, "review", "review-2");
     write_terminal_run(&workspace, "review", "review-2");
-    append_productive_run_checkpoint(
-        &workspace,
-        "review",
-        "review-2",
-        Some(&root.entry_id),
-        &write_terminal_recovery_snapshot_with_parent(
-            &workspace,
-            "review",
-            "review-2",
-            Some(&root.entry_id),
-        ),
-        2,
-        "2026-07-30T12:00:01Z",
-    )
-    .expect("continuation checkpoint appends");
+    append_checkpoint(&workspace, "review-2", Some(&root), "2026-07-30T12:00:01Z");
 
     let history = read_conversation_history(&workspace, "review").expect("history reads");
     assert_eq!(
@@ -511,55 +394,16 @@ fn productive_continuation_checkpoint_links_to_its_selected_parent() {
 #[test]
 fn continuation_rejects_a_history_parent_not_bound_by_the_recovery_snapshot() {
     let workspace = empty_workspace("conversation-recovery-parent-graft");
-    let registry_hash = REGISTRY_HASH;
-    let flow_hash = FLOW_HASH;
     for run_id in ["review", "review-2", "review-3"] {
-        create_conversation_run(
-            &workspace,
-            "review",
-            run_id,
-            "review-flow",
-            registry_hash,
-            flow_hash,
-        )
-        .expect("conversation run is created");
+        create_flow_run(&workspace, "review", run_id);
         write_terminal_run(&workspace, "review", run_id);
     }
 
-    append_productive_run_checkpoint(
-        &workspace,
-        "review",
-        "review",
-        None,
-        &write_terminal_recovery_snapshot(&workspace, "review", "review"),
-        2,
-        "2026-07-30T12:00:01Z",
-    )
-    .expect("root checkpoint appends");
-    let root = read_conversation_history(&workspace, "review")
-        .expect("root history reads")
-        .pop()
-        .expect("root entry");
+    append_checkpoint(&workspace, "review", None, "2026-07-30T12:00:01Z");
+    let root = last_history_entry(&workspace);
 
-    append_productive_run_checkpoint(
-        &workspace,
-        "review",
-        "review-2",
-        Some(&root.entry_id),
-        &write_terminal_recovery_snapshot_with_parent(
-            &workspace,
-            "review",
-            "review-2",
-            Some(&root.entry_id),
-        ),
-        2,
-        "2026-07-30T12:00:02Z",
-    )
-    .expect("alternate checkpoint appends");
-    let alternate = read_conversation_history(&workspace, "review")
-        .expect("alternate history reads")
-        .pop()
-        .expect("alternate entry");
+    append_checkpoint(&workspace, "review-2", Some(&root), "2026-07-30T12:00:02Z");
+    let alternate = last_history_entry(&workspace);
 
     append_productive_run_checkpoint(
         &workspace,
@@ -576,16 +420,13 @@ fn continuation_rejects_a_history_parent_not_bound_by_the_recovery_snapshot() {
         "2026-07-30T12:00:03Z",
     )
     .expect("grafted checkpoint appends");
-    let grafted = read_conversation_history(&workspace, "review")
-        .expect("grafted history reads")
-        .pop()
-        .expect("grafted entry");
+    let grafted = last_history_entry(&workspace);
 
-    let error =
-        match reserve_conversation_continuation(&workspace, "review", Some(&grafted.entry_id)) {
-            Ok(_) => panic!("history and recovery parents must agree"),
-            Err(error) => error,
-        };
+    let Err(error) =
+        reserve_conversation_continuation(&workspace, "review", Some(&grafted.entry_id))
+    else {
+        panic!("history and recovery parents must agree")
+    };
     assert!(error.to_string().contains("parent"), "{error}");
 }
 
@@ -621,14 +462,8 @@ fn productive_reservation_surfaces_skipped_candidate_cleanup_failure() {
     set_session_ownership_release_failure_for_test(true);
     let result = reserve_new_conversation_run(&workspace, "review");
     set_session_ownership_release_failure_for_test(false);
-    let error = match result {
-        Ok(reservation) => {
-            reservation
-                .release()
-                .expect("unexpected reservation releases");
-            panic!("skipped candidate cleanup failure must be reported")
-        }
-        Err(error) => error,
+    let Err(error) = result else {
+        panic!("skipped candidate cleanup failure must be reported")
     };
     assert!(
         error
@@ -646,8 +481,6 @@ fn productive_reservation_surfaces_skipped_candidate_cleanup_failure() {
 #[test]
 fn productive_reservation_reclaims_an_unpublished_preheader_root_run() {
     let workspace = empty_workspace("productive-reservation-reclaims-preheader-run");
-    let registry_hash = REGISTRY_HASH;
-    let flow_hash = FLOW_HASH;
 
     let first = reserve_new_conversation_run(&workspace, "review").expect("first reservation");
     create_unpublished_productive_conversation_run(
@@ -655,8 +488,8 @@ fn productive_reservation_reclaims_an_unpublished_preheader_root_run() {
         first.conversation_id(),
         first.run_session_id(),
         "review",
-        registry_hash,
-        flow_hash,
+        REGISTRY_HASH,
+        FLOW_HASH,
     )
     .expect("unpublished productive run creates");
     first.release().expect("first reservation releases");
@@ -677,8 +510,6 @@ fn productive_reservation_reclaims_an_unpublished_preheader_root_run() {
 #[test]
 fn productive_reservation_keeps_an_active_unpublished_run() {
     let workspace = empty_workspace("productive-reservation-keeps-active-preheader-run");
-    let registry_hash = REGISTRY_HASH;
-    let flow_hash = FLOW_HASH;
 
     let first = reserve_new_conversation_run(&workspace, "review").expect("first reservation");
     create_unpublished_productive_conversation_run(
@@ -686,8 +517,8 @@ fn productive_reservation_keeps_an_active_unpublished_run() {
         first.conversation_id(),
         first.run_session_id(),
         "review",
-        registry_hash,
-        flow_hash,
+        REGISTRY_HASH,
+        FLOW_HASH,
     )
     .expect("unpublished productive run creates");
 

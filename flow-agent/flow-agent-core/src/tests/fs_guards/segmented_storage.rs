@@ -3,8 +3,9 @@ use crate::runtime::{
     conversations::read_anchored_jsonl,
     digest::sha256_hex,
     fs_guards::{
-        for_each_segmented_jsonl_line, read_anchored_file_with_limit, segmented_jsonl_files,
-        segmented_jsonl_path, with_segmented_jsonl_discovery_metrics_for_test,
+        AnchoredFile, for_each_segmented_jsonl_line, read_anchored_file_with_limit,
+        segmented_jsonl_files, segmented_jsonl_path,
+        with_segmented_jsonl_discovery_metrics_for_test,
     },
     segmented_appender::SessionLogAppender,
     session_store::open_runtime_dir,
@@ -13,7 +14,7 @@ use crate::runtime::{
         RuntimeError, SessionStreamLimits,
     },
 };
-use std::fs;
+use std::{fs, path::Path};
 
 #[test]
 fn conversation_segment_discovery_has_constant_inventory_memory_and_one_pass() {
@@ -51,32 +52,22 @@ fn segmented_stream_consumers_reject_high_ordinals_and_rollback_preserves_foreig
         let workspace = empty_workspace(&format!("high-ordinal-{label}"));
         let reservation =
             reserve_session_log(&workspace, "segmenthigh001").expect("session reserved");
-        let base = if context {
-            &reservation.context_path
+        let (base, limits) = if context {
+            (&reservation.context_path, CONTEXT_MANIFEST_STREAM_LIMITS)
         } else {
-            &reservation.session_path
-        };
-        let limits = if context {
-            CONTEXT_MANIFEST_STREAM_LIMITS
-        } else {
-            EVENT_STREAM_LIMITS
+            (&reservation.session_path, EVENT_STREAM_LIMITS)
         };
         let high = segmented_jsonl_path(base, limits.max_segments + 1)
             .expect("high segment path resolves");
         fs::write(high.diagnostic_path(), b"\n").expect("high segment fixture writes");
 
-        let results = if context {
-            vec![
-                for_each_segmented_jsonl_line(base, CONTEXT_MANIFEST_STREAM_LIMITS, |_| Ok(()))
-                    .map(|_| ()),
-            ]
+        let result = if context {
+            for_each_segmented_jsonl_line(base, limits, |_| Ok(())).map(drop)
         } else {
-            vec![SessionLogAppender::open(base).map(|_| ())]
+            SessionLogAppender::open(base).map(drop)
         };
-        for result in results {
-            let err = result.expect_err("high ordinal must not be omitted");
-            assert!(err.to_string().contains("segment count"), "{label}: {err}");
-        }
+        let err = result.expect_err("high ordinal must not be omitted");
+        assert!(err.to_string().contains("segment count"), "{label}: {err}");
 
         let alias = segmented_jsonl_path(base, 3)
             .expect("alias path resolves")
@@ -112,32 +103,12 @@ fn rotated_stream_segments_and_objects_reject_hardlinks() {
         fs::write(&target, b"linked bytes\n").expect("hardlink target written");
 
         let result = match kind {
-            "event" => {
-                fs::write(reservation.session_path.diagnostic_path(), b"{}\n")
-                    .expect("base event segment completed");
-                let segment = segmented_jsonl_path(&reservation.session_path, 2)
-                    .expect("segment path resolves");
-                fs::hard_link(&target, segment.diagnostic_path()).expect("event segment linked");
-                for_each_segmented_jsonl_line(
-                    &reservation.session_path,
-                    EVENT_STREAM_LIMITS,
-                    |_| Ok(()),
-                )
-                .map(|_| ())
-            }
-            "context" => {
-                fs::write(reservation.context_path.diagnostic_path(), b"{}\n")
-                    .expect("base context segment completed");
-                let segment = segmented_jsonl_path(&reservation.context_path, 2)
-                    .expect("segment path resolves");
-                fs::hard_link(&target, segment.diagnostic_path()).expect("context segment linked");
-                for_each_segmented_jsonl_line(
-                    &reservation.context_path,
-                    CONTEXT_MANIFEST_STREAM_LIMITS,
-                    |_| Ok(()),
-                )
-                .map(|_| ())
-            }
+            "event" => linked_segment_read(&reservation.session_path, EVENT_STREAM_LIMITS, &target),
+            "context" => linked_segment_read(
+                &reservation.context_path,
+                CONTEXT_MANIFEST_STREAM_LIMITS,
+                &target,
+            ),
             "object" => {
                 let sessions = open_runtime_dir(&workspace, "sessions")
                     .expect("session object directory opens")
@@ -161,89 +132,73 @@ fn rotated_stream_segments_and_objects_reject_hardlinks() {
     }
 }
 
+fn linked_segment_read(
+    base: &AnchoredFile,
+    limits: SessionStreamLimits,
+    target: &Path,
+) -> Result<(), RuntimeError> {
+    fs::write(base.diagnostic_path(), b"{}\n").expect("base segment completed");
+    let segment = segmented_jsonl_path(base, 2).expect("segment path resolves");
+    fs::hard_link(target, segment.diagnostic_path()).expect("segment linked");
+    for_each_segmented_jsonl_line(base, limits, |_| Ok(())).map(|_| ())
+}
+
 #[test]
-fn segmented_stream_rejects_invalid_ordinal_layouts() {
-    for (label, ordinals, expected) in [
-        (
-            "event-segment-invalid-ordinal",
-            vec![0],
-            "invalid segmented JSONL ordinal",
-        ),
+fn segmented_stream_rejects_invalid_layouts_and_reserved_names() {
+    use std::{ffi::OsString, os::unix::ffi::OsStringExt as _};
+
+    let mut cases: Vec<(&str, Vec<OsString>, &str)> = vec![
         (
             "event-segment-base-ordinal",
-            vec![1],
+            vec!["segmentinvalid001.000001.jsonl".into()],
             "invalid segmented JSONL ordinal",
         ),
-        ("event-segment-gap", vec![3], "non-contiguous"),
+        (
+            "event-segment-gap",
+            vec!["segmentinvalid001.000003.jsonl".into()],
+            "non-contiguous",
+        ),
         (
             "event-segment-count",
-            (2..=EVENT_STREAM_LIMITS.max_segments + 1).collect::<Vec<_>>(),
+            (2..=EVENT_STREAM_LIMITS.max_segments + 1)
+                .map(|ordinal| format!("segmentinvalid001.{ordinal:06}.jsonl").into())
+                .collect(),
             "segment count",
         ),
-    ] {
-        let workspace = empty_workspace(label);
+        (
+            "short-reserved-ordinal",
+            vec!["segmentinvalid001.abcdef.jsonl".into()],
+            "malformed",
+        ),
+        (
+            "long-reserved-ordinal",
+            vec!["segmentinvalid001.1000000.jsonl".into()],
+            "malformed",
+        ),
+    ];
+    if cfg!(target_os = "linux") {
+        cases.push((
+            "non-utf8-reserved-name",
+            vec![OsString::from_vec(b"segmentinvalid001.\xff.jsonl".to_vec())],
+            "malformed",
+        ));
+    }
+    for (label, names, expected) in cases {
+        let workspace = empty_workspace(&format!("segment-invalid-{label}"));
         let reservation =
             reserve_session_log(&workspace, "segmentinvalid001").expect("session reserved");
-        for ordinal in ordinals {
-            let segment = reservation
-                .session_path
-                .parent
-                .file(format!("segmentinvalid001.{ordinal:06}.jsonl"));
+        for name in names {
+            let segment = reservation.session_path.parent.file(name);
             fs::write(segment.diagnostic_path(), b"\n").expect("invalid segment fixture writes");
         }
 
         let err = segmented_jsonl_files(&reservation.session_path, EVENT_STREAM_LIMITS)
             .expect_err("invalid segment layout is rejected");
-        assert!(err.to_string().contains(expected), "{err}");
+        assert!(err.to_string().contains(expected), "{label}: {err}");
         reservation.release_lock().expect("reservation rolls back");
         drop(reservation);
         fs::remove_dir_all(workspace).expect("invalid segment workspace removed");
     }
-}
-
-#[test]
-fn segmented_stream_rejects_malformed_reserved_names() {
-    for suffix in [".00002.jsonl", ".abcdef.jsonl", ".1000000.jsonl"] {
-        let workspace = empty_workspace(&format!(
-            "segment-malformed-name-{}",
-            suffix.replace('.', "-")
-        ));
-        let reservation =
-            reserve_session_log(&workspace, "segmentmalformed001").expect("session reserved");
-        let malformed = reservation
-            .session_path
-            .parent
-            .file(format!("segmentmalformed001{suffix}"));
-        fs::write(malformed.diagnostic_path(), b"omitted\n")
-            .expect("malformed reserved-name fixture writes");
-
-        let err = segmented_jsonl_files(&reservation.session_path, EVENT_STREAM_LIMITS)
-            .expect_err("malformed reserved segment name is rejected");
-        assert!(err.to_string().contains("malformed"), "{suffix}: {err}");
-        reservation.release_lock().expect("reservation rolls back");
-    }
-}
-
-// Linux is the only target here whose filesystems accept arbitrary bytes in names.
-#[cfg(target_os = "linux")]
-#[test]
-fn segmented_stream_rejects_non_utf8_reserved_names() {
-    use std::{ffi::OsString, os::unix::ffi::OsStringExt as _};
-
-    let workspace = empty_workspace("segment-non-utf8-reserved-name");
-    let reservation =
-        reserve_session_log(&workspace, "segmentnonutf001").expect("session reserved");
-    let malformed = reservation
-        .session_path
-        .parent
-        .file(OsString::from_vec(b"segmentnonutf001.\xff.jsonl".to_vec()));
-    fs::write(malformed.diagnostic_path(), b"omitted\n")
-        .expect("non-UTF-8 reserved-name fixture writes");
-
-    let err = segmented_jsonl_files(&reservation.session_path, EVENT_STREAM_LIMITS)
-        .expect_err("non-UTF-8 reserved segment name is rejected");
-    assert!(err.to_string().contains("malformed"), "{err}");
-    reservation.release_lock().expect("reservation rolls back");
 }
 
 #[test]
@@ -347,51 +302,30 @@ fn segmented_stream_callbacks_do_not_observe_bytes_beyond_total_limit() {
 }
 
 #[test]
-fn segmented_stream_callbacks_reject_unterminated_non_final_segment() {
-    let workspace = empty_workspace("segment-callback-non-final-lf");
-    let reservation =
-        reserve_session_log(&workspace, "segmentboundary001").expect("session reserved");
-    fs::write(reservation.session_path.diagnostic_path(), b"{}")
-        .expect("unterminated base segment written");
-    let second = segmented_jsonl_path(&reservation.session_path, 2).expect("segment path resolves");
-    fs::write(second.diagnostic_path(), b"{}\n").expect("second segment written");
+fn segmented_stream_callbacks_reject_empty_or_unterminated_non_final_segment() {
+    for (label, base_bytes) in [("unterminated", &b"{}"[..]), ("empty", &b""[..])] {
+        let workspace = empty_workspace(&format!("segment-callback-non-final-{label}"));
+        let reservation =
+            reserve_session_log(&workspace, "segmentboundary001").expect("session reserved");
+        fs::write(reservation.session_path.diagnostic_path(), base_bytes)
+            .expect("non-final base segment written");
+        let second =
+            segmented_jsonl_path(&reservation.session_path, 2).expect("segment path resolves");
+        fs::write(second.diagnostic_path(), b"{}\n").expect("second segment written");
 
-    let mut visited = Vec::new();
-    let stream_err =
-        for_each_segmented_jsonl_line(&reservation.session_path, EVENT_STREAM_LIMITS, |line| {
-            visited.push(line.to_owned());
-            Ok(())
-        })
-        .expect_err("streaming reader rejects the non-final boundary");
+        let mut visited = Vec::new();
+        let stream_err =
+            for_each_segmented_jsonl_line(&reservation.session_path, EVENT_STREAM_LIMITS, |line| {
+                visited.push(line.to_owned());
+                Ok(())
+            })
+            .expect_err("streaming reader rejects the non-final boundary");
 
-    assert!(
-        stream_err.to_string().contains("must end with LF"),
-        "{stream_err}"
-    );
-    assert!(visited.is_empty());
-    reservation.release_lock().expect("reservation rolls back");
-}
-
-#[test]
-fn segmented_stream_callbacks_reject_empty_non_final_segment() {
-    let workspace = empty_workspace("segment-callback-empty-non-final");
-    let reservation = reserve_session_log(&workspace, "segmentempty001").expect("session reserved");
-    fs::write(reservation.session_path.diagnostic_path(), b"").expect("empty base segment written");
-    let second = segmented_jsonl_path(&reservation.session_path, 2).expect("segment path resolves");
-    fs::write(second.diagnostic_path(), b"{}\n").expect("second segment written");
-
-    let mut visited = Vec::new();
-    let stream_err =
-        for_each_segmented_jsonl_line(&reservation.session_path, EVENT_STREAM_LIMITS, |line| {
-            visited.push(line.to_owned());
-            Ok(())
-        })
-        .expect_err("streaming reader rejects the empty non-final segment");
-
-    assert!(
-        stream_err.to_string().contains("must end with LF"),
-        "{stream_err}"
-    );
-    assert!(visited.is_empty());
-    reservation.release_lock().expect("reservation rolls back");
+        assert!(
+            stream_err.to_string().contains("must end with LF"),
+            "{label}: {stream_err}"
+        );
+        assert!(visited.is_empty(), "{label}");
+        reservation.release_lock().expect("reservation rolls back");
+    }
 }

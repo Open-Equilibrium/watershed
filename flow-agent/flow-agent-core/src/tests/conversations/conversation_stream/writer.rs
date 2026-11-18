@@ -15,16 +15,11 @@ fn conversation_rotation_budget() {
         usize::try_from(MAX_CONVERSATION_SEGMENT_BYTES).unwrap() / maximum_stored_record;
     let remainder = usize::try_from(MAX_CONVERSATION_SEGMENT_BYTES).unwrap()
         - full_records * maximum_stored_record;
-    let padded_value = |canonical_bytes: usize| {
-        let empty = proto::canonical_json(&serde_json::json!({"padding": ""})).unwrap();
-        assert!(canonical_bytes >= empty.len());
-        serde_json::json!({"padding": "x".repeat(canonical_bytes - empty.len())})
-    };
     for _ in 0..full_records {
-        append_jsonl(&stream, &padded_value(MAX_CONVERSATION_RECORD_BYTES))
+        append_jsonl(&stream, &padded_json_value(MAX_CONVERSATION_RECORD_BYTES))
             .expect("maximum record appends");
     }
-    append_jsonl(&stream, &padded_value(remainder - 1)).expect("segment fills exactly");
+    append_jsonl(&stream, &padded_json_value(remainder - 1)).expect("segment fills exactly");
     assert_eq!(
         fs::metadata(&stream).unwrap().len(),
         MAX_CONVERSATION_SEGMENT_BYTES

@@ -51,7 +51,6 @@ pub(super) fn ancestors(objects: &[ExecutorProtectedObjectV0]) -> Vec<String> {
     for object in objects {
         for ancestor in Path::new(&object.path).ancestors().skip(1) {
             if ancestor != Path::new("/") {
-                // Protocol validation has already required UTF-8 absolute paths.
                 paths.insert(
                     ancestor
                         .to_str()
@@ -68,8 +67,6 @@ pub(super) fn borrow_descriptor(descriptor: i32) -> Result<BorrowedFd<'static>, 
     if descriptor < 3 {
         return Err("invalid inherited descriptor".to_owned());
     }
-    // SAFETY: the one-shot protocol supplies inherited descriptors; callers
-    // immediately validate each borrow and never close it during its use.
     Ok(unsafe { BorrowedFd::borrow_raw(descriptor) })
 }
 

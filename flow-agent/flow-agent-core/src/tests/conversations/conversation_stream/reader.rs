@@ -152,72 +152,63 @@ fn conversation_stream_reader_rejects_malformed_inventory_and_framing() {
     let workspace = empty_workspace("conversation-stream-validation");
     let cases = workspace.join("stream-cases");
     fs::create_dir_all(&cases).expect("case root is created");
+    let case = |name: &str| {
+        let directory = cases.join(name);
+        fs::create_dir(&directory).expect("case directory is created");
+        directory
+    };
 
-    let missing_dir = cases.join("missing");
-    fs::create_dir(&missing_dir).expect("missing case directory is created");
-    assert!(read_jsonl::<serde_json::Value>(&missing_dir.join("records.jsonl")).is_err());
+    assert!(read_jsonl::<serde_json::Value>(&case("missing").join("records.jsonl")).is_err());
 
-    let wrong_name_dir = cases.join("wrong-name");
-    fs::create_dir(&wrong_name_dir).expect("wrong-name case directory is created");
-    fs::write(wrong_name_dir.join("records.txt"), b"{}\n").expect("fixture writes");
-    assert!(read_jsonl::<serde_json::Value>(&wrong_name_dir.join("records.txt")).is_err());
+    let wrong_name = case("wrong-name");
+    fs::write(wrong_name.join("records.txt"), b"{}\n").expect("fixture writes");
+    assert!(read_jsonl::<serde_json::Value>(&wrong_name.join("records.txt")).is_err());
 
-    let invalid_ordinal_dir = cases.join("invalid-ordinal");
-    fs::create_dir(&invalid_ordinal_dir).expect("invalid ordinal case directory is created");
-    fs::write(invalid_ordinal_dir.join("records.jsonl"), b"{}\n").expect("fixture writes");
-    fs::write(invalid_ordinal_dir.join("records.2.jsonl"), b"{}\n").expect("fixture writes");
-    assert!(read_jsonl::<serde_json::Value>(&invalid_ordinal_dir.join("records.jsonl")).is_err());
+    let invalid_ordinal = case("invalid-ordinal");
+    fs::write(invalid_ordinal.join("records.jsonl"), b"{}\n").expect("fixture writes");
+    fs::write(invalid_ordinal.join("records.2.jsonl"), b"{}\n").expect("fixture writes");
+    assert!(read_jsonl::<serde_json::Value>(&invalid_ordinal.join("records.jsonl")).is_err());
 
-    let gap_dir = cases.join("gap");
-    fs::create_dir(&gap_dir).expect("gap case directory is created");
-    fs::write(gap_dir.join("records.jsonl"), b"{}\n").expect("fixture writes");
-    fs::write(gap_dir.join("records.000003.jsonl"), b"{}\n").expect("fixture writes");
-    assert!(read_jsonl::<serde_json::Value>(&gap_dir.join("records.jsonl")).is_err());
+    let gap = case("gap");
+    fs::write(gap.join("records.jsonl"), b"{}\n").expect("fixture writes");
+    fs::write(gap.join("records.000003.jsonl"), b"{}\n").expect("fixture writes");
+    assert!(read_jsonl::<serde_json::Value>(&gap.join("records.jsonl")).is_err());
 
-    let empty_non_final_dir = cases.join("empty-non-final");
-    fs::create_dir(&empty_non_final_dir).expect("empty non-final directory is created");
-    fs::write(empty_non_final_dir.join("records.jsonl"), "").expect("empty base writes");
-    fs::write(empty_non_final_dir.join("records.000002.jsonl"), b"{}\n")
+    let empty_non_final = case("empty-non-final");
+    fs::write(empty_non_final.join("records.jsonl"), "").expect("empty base writes");
+    fs::write(empty_non_final.join("records.000002.jsonl"), b"{}\n")
         .expect("second segment writes");
-    assert!(read_jsonl::<serde_json::Value>(&empty_non_final_dir.join("records.jsonl")).is_err());
+    assert!(read_jsonl::<serde_json::Value>(&empty_non_final.join("records.jsonl")).is_err());
 
-    let non_file_dir = cases.join("non-file");
-    fs::create_dir(&non_file_dir).expect("non-file case directory is created");
-    fs::create_dir(non_file_dir.join("records.jsonl")).expect("directory fixture is created");
-    assert!(read_jsonl::<serde_json::Value>(&non_file_dir.join("records.jsonl")).is_err());
+    let non_file = case("non-file");
+    fs::create_dir(non_file.join("records.jsonl")).expect("directory fixture is created");
+    assert!(read_jsonl::<serde_json::Value>(&non_file.join("records.jsonl")).is_err());
 
-    let oversized_dir = cases.join("oversized-segment");
-    fs::create_dir(&oversized_dir).expect("oversized case directory is created");
-    let oversized = OpenOptions::new()
+    let sparse_path = case("oversized-segment").join("records.jsonl");
+    OpenOptions::new()
         .create_new(true)
         .write(true)
-        .open(oversized_dir.join("records.jsonl"))
-        .expect("sparse fixture opens");
-    oversized
+        .open(&sparse_path)
+        .expect("sparse fixture opens")
         .set_len(MAX_CONVERSATION_SEGMENT_BYTES + 1)
         .expect("sparse fixture grows");
-    drop(oversized);
-    assert!(read_jsonl::<serde_json::Value>(&oversized_dir.join("records.jsonl")).is_err());
+    assert!(read_jsonl::<serde_json::Value>(&sparse_path).is_err());
 
     for (name, bytes) in [
         ("crlf", b"{}\r\n".as_slice()),
         ("unterminated", b"{}".as_slice()),
         ("noncanonical", b"{\"b\":1,\"a\":2}\n".as_slice()),
     ] {
-        let directory = cases.join(name);
-        fs::create_dir(&directory).expect("framing case directory is created");
-        let path = directory.join("records.jsonl");
+        let path = case(name).join("records.jsonl");
         fs::write(&path, bytes).expect("framing fixture writes");
         assert!(read_jsonl::<serde_json::Value>(&path).is_err());
     }
 
-    let oversized_record_dir = cases.join("oversized-record");
-    fs::create_dir(&oversized_record_dir).expect("oversized record directory is created");
     let mut oversized_record = vec![b' '; MAX_CONVERSATION_RECORD_BYTES + 1];
     oversized_record.push(b'\n');
-    let oversized_record_path = oversized_record_dir.join("records.jsonl");
-    fs::write(&oversized_record_path, oversized_record).expect("oversized record writes");
-    assert!(read_jsonl::<serde_json::Value>(&oversized_record_path).is_err());
+    let oversized_path = case("oversized-record").join("records.jsonl");
+    fs::write(&oversized_path, oversized_record).expect("oversized record writes");
+    assert!(read_jsonl::<serde_json::Value>(&oversized_path).is_err());
 }
 
 #[test]

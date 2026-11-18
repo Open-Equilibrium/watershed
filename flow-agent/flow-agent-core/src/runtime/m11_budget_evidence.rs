@@ -15,59 +15,38 @@ const RSS_FIXTURE_BYTES: usize = 4 * 1024 * 1024;
 const RSS_TOUCH_STRIDE_BYTES: usize = 4096;
 const RSS_ACCOUNTING_TOLERANCE_BYTES: u64 = 512 * 1024;
 
-/// One fixed M1.1 performance-evidence workload.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct M11BudgetWorkload {
-    /// Exact workload identifier from the evidence matrix.
     pub id: M11BudgetWorkloadId,
 }
 
 impl M11BudgetWorkload {
-    /// Stable external name used by the report and child-process protocol.
     pub const fn name(self) -> &'static str {
         self.id.name()
     }
 }
 
-/// The finite identities of the M1.1 observational workloads.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum M11BudgetWorkloadId {
-    /// Resident-memory accounting fixture.
     RssDetectionFixture,
-    /// Four sequential no-op Tool launches.
     RunnerFourNoopLaunches,
-    /// Ready process-group termination.
     RunnerTermination,
-    /// Ready Tool cancellation.
     RunnerCancellation,
-    /// Concurrent stdout and stderr caps.
     RunnerDualStreamCaps,
-    /// Maximum Tool-definition transaction.
     AuthoringMaxDefinitionTransaction,
-    /// Empty global Flow home initialization.
     AuthoringInit,
-    /// Maximum registry validation.
     AuthoringMaxRegistryValidate,
-    /// Bounded Conversation status page.
     ConversationStatusPage,
-    /// Bounded Run Log projection page.
     RunLogProjectionPage,
-    /// One Conversation replay quantum.
     ConversationReplayQuantum,
-    /// Full Run streaming replay.
     ConversationFullRunStreamingReplay,
-    /// One Conversation history validation quantum.
     ConversationHistoryValidationQuantum,
-    /// Eight synchronized Run Log appends.
     RunLogEightSyncAppends,
-    /// Protected inventory with 512 single-link files and 32 cross-root hardlinks.
     ProtectedInventory512Files,
-    /// Protected inventory with 16,384 single-link files and 32 cross-root hardlinks.
     ProtectedInventory16384Files,
 }
 
 impl M11BudgetWorkloadId {
-    /// Stable external name from the approved evidence matrix.
     pub const fn name(self) -> &'static str {
         match self {
             Self::RssDetectionFixture => "rss_detection_fixture",
@@ -102,7 +81,6 @@ impl TryFrom<&str> for M11BudgetWorkloadId {
     }
 }
 
-/// Validates that the Linux RSS probe detects its fixed touched allocation.
 pub fn validate_m11_rss_measurement(
     id: M11BudgetWorkloadId,
     peak_growth_bytes: Option<u64>,
@@ -120,7 +98,6 @@ pub fn validate_m11_rss_measurement(
     Ok(())
 }
 
-/// Returns the exact input contract used by one observational workload.
 pub fn m11_budget_workload_inputs(id: M11BudgetWorkloadId) -> serde_json::Value {
     use crate::runtime::{
         authoring::{DEFAULT_REGISTRY_ROOT, registry_directory},
@@ -234,7 +211,6 @@ pub fn m11_budget_workload_inputs(id: M11BudgetWorkloadId) -> serde_json::Value 
     }
 }
 
-/// The exact finite set of observational workloads selected for M1.1.
 pub const M11_BUDGET_WORKLOADS: [M11BudgetWorkload; 16] = [
     M11BudgetWorkload {
         id: M11BudgetWorkloadId::RssDetectionFixture,
@@ -286,22 +262,15 @@ pub const M11_BUDGET_WORKLOADS: [M11BudgetWorkload; 16] = [
     },
 ];
 
-/// One measured workload result returned to the benchmark-only report harness.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct M11BudgetOutcome {
-    /// Product work elapsed time; fixture preparation is excluded.
     pub elapsed: Duration,
-    /// Fixed number of logical operations performed.
     pub operations: u64,
-    /// Exact product input bytes represented by the fixture.
     pub input_bytes: u64,
-    /// Exact canonical or raw output bytes produced by the workload.
     pub output_bytes: u64,
-    /// Optimizer-resistant result checksum.
     pub checksum: u64,
 }
 
-/// Runs one exact M1.1 observational workload in an otherwise empty temporary root.
 pub fn run_m11_budget_workload(
     id: M11BudgetWorkloadId,
     temp_root: &Path,

@@ -85,7 +85,6 @@ fn completed(request: &str, mode: &str) -> String {
 }
 
 fn hold_escaped_probe_output(executable: &Path) {
-    // The child must not remain in the controller-killed Executor process group.
     assert_ne!(
         unsafe { setsid() },
         -1,

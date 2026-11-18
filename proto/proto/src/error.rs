@@ -1,27 +1,14 @@
 use crate::{JSON_NESTING_LIMIT_V0, PROTOCOL_VERSION_V0, metadata::EventMetadataError};
 use std::fmt;
 
-/// Error returned by canonical JSON and JSONL serialization.
 #[derive(Debug)]
 pub enum CanonicalJsonError {
-    /// JSON serialization failed before canonicalization.
     Serialize(serde_json::Error),
-    /// Event failed stream-independent v0 envelope or payload validation.
     InvalidEvent(EventValidationError),
-    /// Event payload was not a JSON object.
     NonObjectPayload,
-    /// Envelope used a protocol version other than v0.
-    UnsupportedProtocolVersion {
-        /// Version string found in the envelope.
-        protocol_version: String,
-    },
-    /// A JSON value reached the exclusive v0 container-nesting limit.
+    UnsupportedProtocolVersion { protocol_version: String },
     JsonNestingLimitExceeded,
-    /// Object keys collided after Unicode NFC normalization.
-    DuplicateNormalizedObjectKey {
-        /// Normalized duplicate key.
-        key: String,
-    },
+    DuplicateNormalizedObjectKey { key: String },
 }
 
 impl fmt::Display for CanonicalJsonError {
@@ -58,7 +45,6 @@ impl std::error::Error for CanonicalJsonError {
     }
 }
 
-/// Invalid field in one complete v0 event envelope.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct EventValidationError {
     field: String,
@@ -66,12 +52,10 @@ pub struct EventValidationError {
 }
 
 impl EventValidationError {
-    /// Returns the invalid envelope or payload field.
     pub fn field(&self) -> &str {
         &self.field
     }
 
-    /// Returns the stable requirement violated by the field.
     pub const fn requirement(&self) -> &'static str {
         self.requirement
     }

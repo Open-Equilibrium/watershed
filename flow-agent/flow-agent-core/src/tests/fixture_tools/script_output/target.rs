@@ -1,8 +1,6 @@
 use super::super::super::helpers::empty_workspace;
 use crate::runtime::fixture_tools::compile_own_script_operations;
-use crate::runtime::{
-    fixture_tools::anchored_workspace_write_path, fs_guards::with_anchored_replacement_temp,
-};
+use crate::runtime::fs_guards::with_anchored_replacement_temp;
 use std::fs;
 
 #[test]
@@ -14,9 +12,7 @@ fn publish_stays_bound_to_the_opened_target_directory() {
     fs::create_dir(workspace.join("out")).expect("output directory created");
     fs::write(workspace.join("out/result.txt"), "old").expect("original output written");
     fs::write(outside.join("result.txt"), "outside").expect("outside output written");
-    let target = anchored_workspace_write_path(&workspace, "out/result.txt", true)
-        .expect("target resolves")
-        .expect("target parent exists");
+    let target = super::result_target(&workspace);
     let moved_output = workspace.join("out-opened");
 
     with_anchored_replacement_temp(&target, None, |temp, mut file| {

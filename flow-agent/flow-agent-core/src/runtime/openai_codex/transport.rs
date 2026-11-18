@@ -11,12 +11,9 @@ use std::sync::atomic::AtomicBool;
 
 const MAX_PROVIDER_ERROR_BODY_BYTES: usize = 64 * 1024;
 
-/// How one Responses request authenticates, and what must end its stream.
 #[derive(Clone, Copy)]
 pub(crate) enum ResponsesAuth<'a> {
-    /// The ChatGPT subscription: account routing headers; the `[DONE]` sentinel ends the stream.
     Subscription(&'a crate::runtime::oauth_credential::CredentialRecord),
-    /// An OpenAI-compatible endpoint key: bearer only; the terminal event ends the stream.
     ApiKey(&'a str),
 }
 
@@ -25,7 +22,6 @@ impl ResponsesAuth<'_> {
         matches!(self, Self::Subscription(_))
     }
 
-    /// The subscription reply runs to its `[DONE]` sentinel; an endpoint reply ends at its terminal event.
     fn decoder(self) -> SseDecoder {
         if self.requires_done_sentinel() {
             SseDecoder::default()
@@ -69,7 +65,6 @@ pub(crate) async fn request_responses_with_client_async(
 ) -> Result<ProviderTurn, RuntimeError> {
     let turn = send_responses_request(client, endpoint, auth, body, deadlines, cancelled).await;
     match auth {
-        // A provider may echo the credential it received in an error; it must not reach Run Logs.
         ResponsesAuth::ApiKey(key) => turn.map_err(|error| error.without_secret(key)),
         ResponsesAuth::Subscription(credential) => {
             turn.map_err(|error| error.without_secret(&credential.access))

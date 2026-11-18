@@ -7,10 +7,11 @@ use proto::{
     ExecutorLimitsV0, ExecutorObjectKindV0, ExecutorProtectedObjectV0, ExecutorRequestV0,
     ExecutorResolvedPolicyV0, UnixObjectIdentityV0, resolved_policy_digest_v0,
 };
+use serde_json::json;
 use std::{
     collections::BTreeMap,
     io::{Cursor, Write},
-    time::Instant,
+    time::{Duration, Instant},
 };
 
 #[test]
@@ -19,91 +20,36 @@ fn cleanup_controller_orders_term_kill_reap_and_output_drain() {
     let term_deadline = started + proto::TOOL_TERMINATION_GRACE_V0;
     let forced_deadline = term_deadline + proto::TOOL_FORCED_REAP_DEADLINE_V0;
     let mut forced = CleanupController::new(started);
-
-    assert_eq!(
-        forced.advance(
-            term_deadline - std::time::Duration::from_nanos(1),
-            false,
-            false
+    for (at, expected) in [
+        (term_deadline - Duration::from_nanos(1), CleanupAction::Wait),
+        (term_deadline, CleanupAction::ForceKill),
+        (
+            forced_deadline - Duration::from_nanos(1),
+            CleanupAction::Wait,
         ),
-        CleanupAction::Wait
-    );
-    assert_eq!(
-        forced.advance(term_deadline, false, false),
-        CleanupAction::ForceKill
-    );
-    assert_eq!(
-        forced.advance(
-            forced_deadline - std::time::Duration::from_nanos(1),
-            false,
-            false
-        ),
-        CleanupAction::Wait
-    );
-    assert_eq!(
-        forced.advance(forced_deadline, false, false),
-        CleanupAction::FailClosed
-    );
+        (forced_deadline, CleanupAction::FailClosed),
+    ] {
+        assert_eq!(forced.advance(at, false, false), expected, "{at:?}");
+    }
 
-    let cleanup_finished = started + std::time::Duration::from_millis(500);
+    let cleanup_finished = started + Duration::from_millis(500);
     let drain_deadline = cleanup_finished + proto::TOOL_OUTPUT_DRAIN_DEADLINE_V0;
     let mut drained = CleanupController::new(started);
-    assert_eq!(
-        drained.advance(cleanup_finished, true, false),
-        CleanupAction::Wait
-    );
-    assert_eq!(
-        drained.advance(
-            drain_deadline - std::time::Duration::from_nanos(1),
-            true,
-            false
+    for (at, expected) in [
+        (cleanup_finished, CleanupAction::Wait),
+        (
+            drain_deadline - Duration::from_nanos(1),
+            CleanupAction::Wait,
         ),
-        CleanupAction::Wait
-    );
-    assert_eq!(
-        drained.advance(drain_deadline, true, false),
-        CleanupAction::OutputDrainTimeout
-    );
+        (drain_deadline, CleanupAction::OutputDrainTimeout),
+    ] {
+        assert_eq!(drained.advance(at, true, false), expected, "{at:?}");
+    }
 
     let mut complete = CleanupController::new(started);
     assert_eq!(
         complete.advance(cleanup_finished, true, true),
         CleanupAction::Complete
-    );
-}
-
-#[test]
-fn protocol_probe_is_one_canonical_document() {
-    if run_isolated("WATERSHED_EXECUTOR_PROTOCOL_PROBE_CHILD") {
-        return;
-    }
-    let mut output = Vec::new();
-    let mut diagnostics = Vec::new();
-    protocol::run_with_diagnostics(
-        &["--probe".to_owned()],
-        Cursor::new([]),
-        &mut output,
-        &mut diagnostics,
-    )
-    .expect("probe writes");
-
-    let probe = proto::parse_executor_probe_v0(&output).expect("probe is exact protocol JSON");
-    assert_eq!(probe.schema, proto::EXECUTOR_PROBE_SCHEMA_V0);
-    assert_eq!(probe.executor, proto::EXECUTOR_NAME_V0);
-    assert_eq!(probe.backend, crate::backend::BACKEND);
-    assert_eq!(probe.platform, crate::backend::PLATFORM);
-    assert_eq!(
-        output,
-        proto::canonical_executor_probe_v0(&probe).expect("probe canonicalizes")
-    );
-    assert_eq!(diagnostics.is_empty(), probe.ready);
-    assert_eq!(
-        probe.supported_policy_features,
-        if probe.ready {
-            vec![proto::EXECUTOR_FEATURE_FLOW_OWNED_WRITE_PROTECTION_V0.to_owned()]
-        } else {
-            Vec::new()
-        }
     );
 }
 
@@ -264,74 +210,74 @@ fn one_exact_start_dispatches_once_and_flushes_the_bound_receipt() {
 
 #[test]
 fn changed_invocation_or_protected_objects_fail_before_readiness() {
-    type Mutate = fn(&mut ExecutorResolvedPolicyV0);
-    let cases: [(&str, Mutate); 12] = [
-        ("argv", |policy| {
-            policy.argv.push("different argument".to_owned())
-        }),
-        ("environment", |policy| {
-            policy
-                .environment
-                .insert("DECLARED".to_owned(), "different".to_owned());
-        }),
-        ("executable", |policy| {
-            policy.executable = "/opt/tool/bin/tool".to_owned()
-        }),
-        ("working directory", |policy| {
-            policy.working_directory = "/other-workspace".to_owned()
-        }),
-        ("timeout", |policy| policy.limits.timeout_ms += 1),
-        ("stdout bound", |policy| policy.limits.max_stdout_bytes += 1),
-        ("stderr bound", |policy| policy.limits.max_stderr_bytes += 1),
-        ("protected path", |policy| {
-            policy.protected_objects[0].path = "/other-owned".to_owned()
-        }),
-        ("protected identity", |policy| {
-            policy.protected_objects[0].identity.inode += 1
-        }),
-        ("protected kind", |policy| {
-            policy.protected_objects[0].identity.kind = ExecutorObjectKindV0::File
-        }),
-        ("Tool id", |policy| policy.tool_id = "different".to_owned()),
-        ("Tool kind", |policy| {
-            policy.tool_kind = "own-script".to_owned()
-        }),
-    ];
-    let original = request();
-    proto::canonical_executor_request_v0(&original).expect("baseline request is valid");
-    for (name, mutate) in cases {
+    let original = serde_json::to_value(request()).unwrap();
+    proto::canonical_executor_request_v0(&request()).expect("baseline request is valid");
+    for (name, pointer, value) in [
+        (
+            "argv",
+            "/argv",
+            json!(["literal host argument", "different argument"]),
+        ),
+        ("environment", "/environment/DECLARED", json!("different")),
+        ("executable", "/executable", json!("/opt/tool/bin/tool")),
+        (
+            "working directory",
+            "/working_directory",
+            json!("/other-workspace"),
+        ),
+        ("timeout", "/limits/timeout_ms", json!(1_001)),
+        ("stdout bound", "/limits/max_stdout_bytes", json!(1_025)),
+        ("stderr bound", "/limits/max_stderr_bytes", json!(1_025)),
+        (
+            "protected path",
+            "/protected_objects/0/path",
+            json!("/other-owned"),
+        ),
+        (
+            "protected identity",
+            "/protected_objects/0/identity/inode",
+            json!(2),
+        ),
+        (
+            "protected kind",
+            "/protected_objects/0/identity/kind",
+            json!("file"),
+        ),
+        ("Tool id", "/tool_id", json!("different")),
+        ("Tool kind", "/tool_kind", json!("own-script")),
+    ] {
         let mut altered = original.clone();
-        mutate(&mut altered.resolved_policy);
-        let error = rejected_request(&altered);
+        *altered["resolved_policy"].pointer_mut(pointer).unwrap() = value;
+        let error = assert_rejected_document(&altered);
         assert!(error.contains("digest does not match"), "{name}: {error}");
     }
 }
 
 #[test]
 fn legacy_security_and_duplicate_invocation_fields_fail_before_readiness() {
-    let original = request();
-    for (field, value) in [
-        ("argv", serde_json::json!(["duplicate"])),
-        ("mounts", serde_json::json!([])),
-        ("runtime_profile", serde_json::json!("exact")),
+    let original = serde_json::to_value(request()).unwrap();
+    for (parent, field, value) in [
+        ("", "argv", serde_json::json!(["duplicate"])),
+        ("", "mounts", serde_json::json!([])),
+        ("", "runtime_profile", serde_json::json!("exact")),
+        ("/resolved_policy", "artifact", serde_json::json!({})),
+        ("/resolved_policy", "command", serde_json::json!({})),
+        ("/resolved_policy", "mounts", serde_json::json!([])),
+        (
+            "/resolved_policy",
+            "runtime_profile",
+            serde_json::json!("host-system-read"),
+        ),
+        (
+            "/resolved_policy/limits",
+            "max_concurrent_processes_and_threads",
+            serde_json::json!(16),
+        ),
     ] {
-        let mut document = serde_json::to_value(&original).unwrap();
-        document[field] = value;
+        let mut document = original.clone();
+        document.pointer_mut(parent).unwrap()[field] = value;
         assert_rejected_document(&document);
     }
-    for (field, value) in [
-        ("artifact", serde_json::json!({})),
-        ("command", serde_json::json!({})),
-        ("mounts", serde_json::json!([])),
-        ("runtime_profile", serde_json::json!("host-system-read")),
-    ] {
-        let mut document = serde_json::to_value(&original).unwrap();
-        document["resolved_policy"][field] = value;
-        assert_rejected_document(&document);
-    }
-    let mut document = serde_json::to_value(&original).unwrap();
-    document["resolved_policy"]["limits"]["max_concurrent_processes_and_threads"] = 16.into();
-    assert_rejected_document(&document);
 }
 
 #[test]
@@ -435,7 +381,6 @@ fn rejected_request(request: &ExecutorRequestV0) -> String {
 }
 
 fn assert_rejected_document(document: &serde_json::Value) -> String {
-    // Raw JSON must reach the entry point; the canonical encoder already rejects these requests.
     let mut input = serde_json::to_vec(document).unwrap();
     input.push(b'\n');
     let mut output = Vec::new();

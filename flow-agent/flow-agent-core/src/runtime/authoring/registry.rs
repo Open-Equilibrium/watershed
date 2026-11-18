@@ -103,7 +103,6 @@ fn observe_create_post_validation() {
     });
 }
 
-/// Creates one validated registry block without overwriting an existing definition.
 pub fn create_global_registry_block(block: RegistryBlock) -> Result<PathBuf, RuntimeError> {
     let home_path = flow_agent_home_path()?;
     create_global_registry_block_at(&home_path, block)
@@ -185,7 +184,6 @@ pub(in crate::runtime) fn create_global_registry_block_at(
     Ok(file.diagnostic_path().to_owned())
 }
 
-/// Validates either a selected Flow closure or every block in the configured registry.
 pub fn validate_global_registry(flow_reference: Option<&str>) -> Result<(), RuntimeError> {
     let home_path = flow_agent_home_path()?;
     validate_global_registry_at(&home_path, flow_reference)

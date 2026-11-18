@@ -97,41 +97,30 @@ fn run_input_rejects_noncanonical_duplicate_unknown_and_oversized_sources() {
     ));
 }
 
-#[test]
-fn run_input_enforces_the_protocol_value_count_limit() {
+fn typed_container(kind: &str, entries: usize) -> String {
     let value = serde_json::json!({"type": "boolean", "value": true});
-    let at_limit = canonical_input(serde_json::json!({
-        "type": "list",
-        "value": vec![value.clone(); 1_023],
-    }));
-    parse_flow_run_input(&at_limit).expect("1,024 typed values are accepted");
-
-    let over_limit = canonical_input(serde_json::json!({
-        "type": "list",
-        "value": vec![value.clone(); 1_024],
-    }));
-    let error = parse_flow_run_input(&over_limit).expect_err("1,025 typed values are rejected");
-    assert!(error.to_string().contains("1024 values"), "{error}");
-
-    let typed_map = |entries| {
+    let payload = if kind == "list" {
+        serde_json::Value::Array(vec![value; entries])
+    } else {
         serde_json::Value::Object(
             (0..entries)
                 .map(|index| (format!("key-{index:04}"), value.clone()))
                 .collect(),
         )
     };
-    let at_limit = canonical_input(serde_json::json!({
-        "type": "map",
-        "value": typed_map(1_023),
-    }));
-    parse_flow_run_input(&at_limit).expect("1,024 mapped values are accepted");
+    canonical_input(serde_json::json!({"type": kind, "value": payload}))
+}
 
-    let over_limit = canonical_input(serde_json::json!({
-        "type": "map",
-        "value": typed_map(1_024),
-    }));
-    let error = parse_flow_run_input(&over_limit).expect_err("1,025 mapped values are rejected");
-    assert!(error.to_string().contains("1024 values"), "{error}");
+#[test]
+fn run_input_enforces_the_protocol_value_count_limit() {
+    for kind in ["list", "map"] {
+        parse_flow_run_input(&typed_container(kind, 1_023))
+            .unwrap_or_else(|error| panic!("{kind}: 1,024 values are accepted: {error}"));
+
+        let error = parse_flow_run_input(&typed_container(kind, 1_024))
+            .expect_err("1,025 values are rejected");
+        assert!(error.to_string().contains("1024 values"), "{kind}: {error}");
+    }
 }
 
 #[test]

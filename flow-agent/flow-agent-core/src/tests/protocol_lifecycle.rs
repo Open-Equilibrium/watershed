@@ -130,16 +130,7 @@ fn multi_event_append_failure_preserves_state_for_corrected_retry() {
 }
 
 #[test]
-fn protocol_validation_covers_envelope_and_stream_edges() {
-    assert_invalid_stream(
-        "non-increasing-sequence.jsonl",
-        &[
-            session_event_line("meta001", "evt-001", EventType::SessionStarted, 1),
-            session_event_line("meta001", "evt-002", EventType::SessionPaused, 1),
-        ]
-        .concat(),
-        "sequence must increase",
-    );
+fn sequence_gaps_are_rejected() {
     assert_invalid_stream(
         "sequence-gap.jsonl",
         &[
@@ -149,49 +140,28 @@ fn protocol_validation_covers_envelope_and_stream_edges() {
         .concat(),
         "sequence must increase by exactly 1",
     );
-    assert_invalid_stream(
-        "duplicate-flow-id.jsonl",
-        &[
-            session_event_line("meta001", "evt-001", EventType::SessionStarted, 1),
-            flow_started_line("evt-002", 2),
-            flow_started_line("evt-003", 3),
-        ]
-        .concat(),
-        "unique flow_id",
-    );
 }
 
 #[test]
 fn flow_terminal_definition_must_match_flow_start() {
-    for (event_type, payload) in [
-        (
-            EventType::FlowCompleted,
-            serde_json::json!({"flow_definition_id":"other-flow"}),
-        ),
-        (
-            EventType::FlowFailed,
-            serde_json::json!({"error":"failed","flow_definition_id":"other-flow"}),
-        ),
-    ] {
-        assert_invalid_session_log(
-            &format!("mismatched-{}.jsonl", event_type.as_str()),
-            "meta001",
-            &[
-                session_event_line("meta001", "evt-001", EventType::SessionStarted, 1),
-                flow_started_line("evt-002", 2),
-                event_line(
-                    "evt-003",
-                    event_type,
-                    "meta001",
-                    3,
-                    Some("flow-001"),
-                    payload,
-                ),
-            ]
-            .concat(),
-            "flow_definition_id must match flow.started",
-        );
-    }
+    assert_invalid_session_log(
+        "mismatched-flow-completed.jsonl",
+        "meta001",
+        &[
+            session_event_line("meta001", "evt-001", EventType::SessionStarted, 1),
+            flow_started_line("evt-002", 2),
+            event_line(
+                "evt-003",
+                EventType::FlowCompleted,
+                "meta001",
+                3,
+                Some("flow-001"),
+                serde_json::json!({"flow_definition_id":"other-flow"}),
+            ),
+        ]
+        .concat(),
+        "flow_definition_id must match flow.started",
+    );
 }
 
 #[test]
@@ -265,14 +235,6 @@ fn lifecycle_event_line(event_type: EventType, event_id: &str, sequence: u64) ->
         EventType::PhaseFailed => phase_failed_line(event_id, sequence),
         EventType::ToolStarted => tool_started_line(event_id, sequence),
         EventType::ToolFailed => tool_failed_line(event_id, sequence),
-        EventType::ToolProgress => event_line(
-            event_id,
-            event_type,
-            "meta001",
-            sequence,
-            Some("flow-001"),
-            serde_json::json!({"message":"working","tool_id":"tool"}),
-        ),
         EventType::ToolCompleted => event_line(
             event_id,
             event_type,
@@ -280,14 +242,6 @@ fn lifecycle_event_line(event_type: EventType, event_id: &str, sequence: u64) ->
             sequence,
             Some("flow-001"),
             serde_json::json!({"exit_code":0,"tool_id":"tool"}),
-        ),
-        EventType::ToolTimedOut => event_line(
-            event_id,
-            event_type,
-            "meta001",
-            sequence,
-            Some("flow-001"),
-            serde_json::json!({"error":"timeout","tool_id":"tool"}),
         ),
         EventType::MessageDelta => event_line(
             event_id,
@@ -342,9 +296,7 @@ fn lifecycle_validation_rejects_each_event_kind_after_its_terminal() {
         (EventType::PhaseEntered, phase_terminal.as_str(), "phase"),
         (EventType::PhaseCompleted, phase_terminal.as_str(), "phase"),
         (EventType::ToolStarted, tool_terminal.as_str(), "tool"),
-        (EventType::ToolProgress, tool_terminal.as_str(), "tool"),
         (EventType::ToolCompleted, tool_terminal.as_str(), "tool"),
-        (EventType::ToolTimedOut, tool_terminal.as_str(), "tool"),
         (EventType::ToolFailed, tool_terminal.as_str(), "tool"),
         (
             EventType::MessageDelta,

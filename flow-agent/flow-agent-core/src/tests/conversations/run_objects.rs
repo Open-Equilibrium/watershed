@@ -15,11 +15,26 @@ use std::{
     cell::Cell,
     fs::{self},
     io::Write,
-    path::Path,
+    path::{Path, PathBuf},
     rc::Rc,
     sync::{Arc, Barrier},
     thread,
 };
+
+fn context_object(bytes: &[u8]) -> ContextObject {
+    ContextObject {
+        digest: sha256_hex(bytes),
+        bytes: bytes.to_vec(),
+    }
+}
+
+fn object_uri(digest: &str) -> String {
+    format!("session-object:sha256:{digest}")
+}
+
+fn objects_dir(workspace: &Path) -> PathBuf {
+    workspace_session_dir(workspace).join("review/runs/review-1/objects")
+}
 
 #[test]
 fn run_object_store_rejects_an_intermediate_runs_link_without_touching_its_target() {
@@ -50,14 +65,8 @@ fn run_object_store_rejects_an_intermediate_runs_link_without_touching_its_targe
 fn shared_run_object_store_reuses_and_accounts_persisted_objects() {
     let workspace = empty_workspace("run-object-store-boundedness");
     create_review_run(&workspace);
-    let first = ContextObject {
-        digest: sha256_hex(b"first"),
-        bytes: b"first".to_vec(),
-    };
-    let second = ContextObject {
-        digest: sha256_hex(b"second"),
-        bytes: b"second".to_vec(),
-    };
+    let first = context_object(b"first");
+    let second = context_object(b"second");
     let first_owner = RunObjectStore::open(&workspace, "review", "review-1")
         .expect("run object store opens once");
     let second_owner = first_owner.clone();
@@ -85,8 +94,7 @@ fn shared_run_object_store_reuses_and_accounts_persisted_objects() {
             object_count: 2,
         }
     );
-    let objects = crate::tests::helpers::workspace_session_dir(&workspace)
-        .join("review/runs/review-1/objects");
+    let objects = objects_dir(&workspace);
     assert_eq!(fs::read(objects.join(first.digest)).unwrap(), first.bytes);
     assert_eq!(fs::read(objects.join(second.digest)).unwrap(), second.bytes);
 }
@@ -105,10 +113,7 @@ fn shared_run_object_store_admits_only_one_final_slot() {
             let store = store.clone();
             let barrier = Arc::clone(&barrier);
             thread::spawn(move || {
-                let object = ContextObject {
-                    digest: sha256_hex(&bytes),
-                    bytes,
-                };
+                let object = context_object(&bytes);
                 barrier.wait();
                 store.persist(&[object]).map_err(|error| error.to_string())
             })
@@ -129,12 +134,9 @@ fn shared_run_object_store_admits_only_one_final_slot() {
         1
     );
     assert_eq!(
-        fs::read_dir(
-            crate::tests::helpers::workspace_session_dir(&workspace)
-                .join("review/runs/review-1/objects")
-        )
-        .expect("object directory reads")
-        .count(),
+        fs::read_dir(objects_dir(&workspace))
+            .expect("object directory reads")
+            .count(),
         1
     );
 }
@@ -143,11 +145,8 @@ fn shared_run_object_store_admits_only_one_final_slot() {
 fn reopened_run_object_store_preserves_usage_and_verifies_object_integrity() {
     let workspace = empty_workspace("run-object-store-reopen");
     create_review_run(&workspace);
-    let object = ContextObject {
-        digest: sha256_hex(b"durable object"),
-        bytes: b"durable object".to_vec(),
-    };
-    let uri = format!("session-object:sha256:{}", object.digest);
+    let object = context_object(b"durable object");
+    let uri = object_uri(&object.digest);
     let store =
         RunObjectStore::open(&workspace, "review", "review-1").expect("run object store opens");
     store
@@ -169,9 +168,7 @@ fn reopened_run_object_store_preserves_usage_and_verifies_object_integrity() {
         .persist(std::slice::from_ref(&object))
         .expect("reopened inventory verifies the existing object");
 
-    let object_path = crate::tests::helpers::workspace_session_dir(&workspace)
-        .join("review/runs/review-1/objects")
-        .join(&object.digest);
+    let object_path = objects_dir(&workspace).join(&object.digest);
     fs::write(&object_path, b"tampered objct").expect("fixture tampers with equal-length bytes");
     let error = reopened
         .read(&uri)
@@ -191,10 +188,7 @@ fn reopened_run_object_store_preserves_usage_and_verifies_object_integrity() {
 fn reopened_run_object_store_closes_after_existing_object_verification_fails() {
     let workspace = empty_workspace("run-object-store-corrupt-reopen");
     create_review_run(&workspace);
-    let object = ContextObject {
-        digest: sha256_hex(b"durable object"),
-        bytes: b"durable object".to_vec(),
-    };
+    let object = context_object(b"durable object");
     let store =
         RunObjectStore::open(&workspace, "review", "review-1").expect("run object store opens");
     store
@@ -202,9 +196,7 @@ fn reopened_run_object_store_closes_after_existing_object_verification_fails() {
         .expect("object persists");
     drop(store);
 
-    let object_path = crate::tests::helpers::workspace_session_dir(&workspace)
-        .join("review/runs/review-1/objects")
-        .join(&object.digest);
+    let object_path = objects_dir(&workspace).join(&object.digest);
     fs::write(&object_path, b"tampered objct").expect("fixture tampers with equal-length bytes");
     let reopened = RunObjectStore::open(&workspace, "review", "review-1")
         .expect("run object store reopens from its durable inventory");
@@ -222,14 +214,9 @@ fn reopened_run_object_store_closes_after_existing_object_verification_fails() {
 fn failed_prefix_repair_sync_closes_the_object_store() {
     let workspace = empty_workspace("run-object-prefix-sync-failure");
     create_review_run(&workspace);
-    let object = ContextObject {
-        digest: sha256_hex(b"durable object"),
-        bytes: b"durable object".to_vec(),
-    };
-    let uri = format!("session-object:sha256:{}", object.digest);
-    let object_path = workspace_session_dir(&workspace)
-        .join("review/runs/review-1/objects")
-        .join(&object.digest);
+    let object = context_object(b"durable object");
+    let uri = object_uri(&object.digest);
+    let object_path = objects_dir(&workspace).join(&object.digest);
     fs::write(&object_path, &object.bytes[..7]).expect("fixture leaves an interrupted prefix");
     let store =
         RunObjectStore::open(&workspace, "review", "review-1").expect("the object store opens");
@@ -244,10 +231,7 @@ fn failed_prefix_repair_sync_closes_the_object_store() {
             .contains("injected conversation file synchronization failure"),
         "{error}"
     );
-    let unpublished = ContextObject {
-        digest: sha256_hex(b"unpublished object"),
-        bytes: b"unpublished object".to_vec(),
-    };
+    let unpublished = context_object(b"unpublished object");
     assert!(
         store
             .persist(std::slice::from_ref(&unpublished))
@@ -322,22 +306,16 @@ fn read_with_object_growth<T>(
 fn existing_run_object_reuse_bounds_reads_after_open_growth() {
     let workspace = empty_workspace("run-object-reuse-growth");
     create_review_run(&workspace);
-    let object = ContextObject {
-        digest: sha256_hex(b"durable object"),
-        bytes: b"durable object".to_vec(),
-    };
-    let unpublished = ContextObject {
-        digest: sha256_hex(b"unpublished object"),
-        bytes: b"unpublished object".to_vec(),
-    };
-    let uri = format!("session-object:sha256:{}", object.digest);
+    let object = context_object(b"durable object");
+    let unpublished = context_object(b"unpublished object");
+    let uri = object_uri(&object.digest);
     let store =
         RunObjectStore::open(&workspace, "review", "review-1").expect("the object store opens");
     store
         .persist(std::slice::from_ref(&object))
         .expect("the object persists");
     let before = store.usage_snapshot().expect("initial usage reads");
-    let objects = workspace_session_dir(&workspace).join("review/runs/review-1/objects");
+    let objects = objects_dir(&workspace);
     let object_path = objects.join(&object.digest);
 
     let (result, retained) =
@@ -394,12 +372,8 @@ fn run_object_reader_rejects_growth_sentinel_and_remains_retryable() {
     let workspace = empty_workspace("run-object-read-growth");
     create_review_run(&workspace);
     let limit = usize::try_from(MAX_SESSION_OBJECT_BYTES).expect("the object bound fits usize");
-    let boundary_bytes = vec![b'x'; limit];
-    let boundary = ContextObject {
-        digest: sha256_hex(&boundary_bytes),
-        bytes: boundary_bytes,
-    };
-    let boundary_uri = format!("session-object:sha256:{}", boundary.digest);
+    let boundary = context_object(&vec![b'x'; limit]);
+    let boundary_uri = object_uri(&boundary.digest);
     let store =
         RunObjectStore::open(&workspace, "review", "review-1").expect("the object store opens");
     store
@@ -416,10 +390,8 @@ fn run_object_reader_rejects_growth_sentinel_and_remains_retryable() {
     future_bytes.push(b'!');
     let future_digest = sha256_hex(&future_bytes);
     drop(future_bytes);
-    let future_uri = format!("session-object:sha256:{future_digest}");
-    let future_path = workspace_session_dir(&workspace)
-        .join("review/runs/review-1/objects")
-        .join(&future_digest);
+    let future_uri = object_uri(&future_digest);
+    let future_path = objects_dir(&workspace).join(&future_digest);
     fs::write(&future_path, &boundary.bytes)
         .expect("the future-digest fixture is short during metadata admission");
     let store = RunObjectStore::open(&workspace, "review", "review-1")
@@ -455,10 +427,7 @@ fn run_object_reader_rejects_growth_sentinel_and_remains_retryable() {
             .expect("a valid read still succeeds")
             == boundary.bytes
     );
-    let retry = ContextObject {
-        digest: sha256_hex(b"retry"),
-        bytes: b"retry".to_vec(),
-    };
+    let retry = context_object(b"retry");
     store
         .persist(std::slice::from_ref(&retry))
         .expect("read failures do not close persistence");

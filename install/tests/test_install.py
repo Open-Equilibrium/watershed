@@ -22,6 +22,12 @@ PROBE_DOCUMENT = (
     '"ready":true,"schema":"flow-executor-probe-v0",'
     '"supported_policy_features":["flow-owned-write-protection"]}'
 )
+SOURCE = INSTALLER.read_text(encoding="utf-8")
+DECLARATIONS = SOURCE.partition("\nprefix=")[0]
+EXIT_TRAP = "\nsignal_exit() {" + SOURCE.partition("\nsignal_exit() {")[2].partition("\ntrap cleanup EXIT")[0]
+METADATA = "metadata() {" + SOURCE.partition("\nmetadata() {")[2].partition('\ncase "$0" in')[0]
+SOURCE_CHECKS = "validate_source() {" + SOURCE.partition("\nvalidate_source() {")[2].partition("\nflow_source_name=")[0]
+READINESS_CREATION = '    creation_pending=1\n' + SOURCE.partition('    creation_pending=1\n')[2].partition('    installer_group=')[0]
 
 
 @unittest.skipUnless(
@@ -31,16 +37,12 @@ PROBE_DOCUMENT = (
 class PrefixInstallerTest(unittest.TestCase):
     @unittest.skipUnless(sys.platform == "darwin", "requires Darwin ACL metadata")
     def test_macos_acl_admission_checks_held_source_and_directory_metadata(self):
-        source = INSTALLER.read_text(encoding="utf-8")
-        declarations = source.partition("\nprefix=")[0]
-        metadata = "metadata() {" + source.partition("\nmetadata() {")[2].partition('\ncase "$0" in')[0]
-        bundle_checks = 'exec 3<"$bundle"' + source.partition('exec 3<"$bundle"')[2].partition("\nreadiness_owner=$current_owner")[0]
-        source_checks = "validate_source() {" + source.partition("\nvalidate_source() {")[2].partition("\nflow_source_name=")[0]
-        bin_checks = 'exec 6<"$bin"' + source.partition('exec 6<"$bin"')[2].partition("\n# The working directory")[0]
+        bundle_checks = 'exec 3<"$bundle"' + SOURCE.partition('exec 3<"$bundle"')[2].partition("\nreadiness_owner=$current_owner")[0]
+        bin_checks = 'exec 6<"$bin"' + SOURCE.partition('exec 6<"$bin"')[2].partition('\ncd "$bin" || fail')[0]
         admission = (
-            declarations + "\nhost=Darwin\ndescriptor_root=/dev/fd\n" + metadata +
+            DECLARATIONS + "\nhost=Darwin\ndescriptor_root=/dev/fd\n" + METADATA +
             '\nbundle=$1\nbin=$2\nimage=$3\nmarker=$4\n' + bundle_checks +
-            "\n" + source_checks + '\nexec 4<"$image"\nvalidate_source /dev/fd/4 "$image"\n' +
+            "\n" + SOURCE_CHECKS + '\nexec 4<"$image"\nvalidate_source /dev/fd/4 "$image"\n' +
             bin_checks + '\n: > "$marker"\n'
         )
         owner = subprocess.check_output(["/usr/bin/id", "-un"], text=True).strip()
@@ -93,13 +95,9 @@ class PrefixInstallerTest(unittest.TestCase):
 
     @unittest.skipUnless(sys.platform == "darwin", "requires Darwin ACL metadata")
     def test_macos_inherited_staging_acl_is_checked_before_publication(self):
-        source = INSTALLER.read_text(encoding="utf-8")
-        declarations = source.partition("\nprefix=")[0]
-        declarations += "\nsignal_exit() {" + source.partition("\nsignal_exit() {")[2].partition("\ntrap cleanup EXIT")[0]
-        metadata = "metadata() {" + source.partition("\nmetadata() {")[2].partition('\ncase "$0" in')[0]
-        source_checks = "validate_source() {" + source.partition("\nvalidate_source() {")[2].partition("\nflow_source_name=")[0]
-        binding_checks = "verify_bundle_binding() {" + source.partition("\nverify_bundle_binding() {")[2].partition("\nverify_bundle_binding\nverify_bin_binding\n")[0]
-        staging = source.partition("\nverify_bundle_binding\nverify_bin_binding\n")[2].partition('\n/bin/ln -- "$flow_stage"')[0]
+        declarations, metadata, source_checks = DECLARATIONS + EXIT_TRAP, METADATA, SOURCE_CHECKS
+        binding_checks = "verify_bundle_binding() {" + SOURCE.partition("\nverify_bundle_binding() {")[2].partition("\nverify_bundle_binding\nverify_bin_binding\n")[0]
+        staging = SOURCE.partition("\nverify_bundle_binding\nverify_bin_binding\n")[2].partition('\n/bin/ln -- "$flow_stage"')[0]
         owner = subprocess.check_output(["/usr/bin/id", "-un"], text=True).strip()
         cases = [
             ("everyone allow write,file_inherit,directory_inherit,only_inherit", False),
@@ -120,7 +118,6 @@ class PrefixInstallerTest(unittest.TestCase):
                 bin_path.mkdir(mode=0o755)
                 staging_body = staging
                 if entry == "stage-file-only":
-                    # The directory grant is inactive, but its new file inherits mutation.
                     staging_body = staging.replace('stage_admitted=1\n',
                         'stage_admitted=1\n/bin/chmod +a "everyone allow write,file_inherit,only_inherit" "$stage_directory"\n', 1)
                 else:
@@ -146,11 +143,8 @@ class PrefixInstallerTest(unittest.TestCase):
 
     @unittest.skipUnless(sys.platform == "darwin", "requires Darwin ACL metadata")
     def test_macos_staging_control_acl_is_private_before_channel_creation(self):
-        source = INSTALLER.read_text(encoding="utf-8")
-        declarations = source.partition("\nprefix=")[0]
-        declarations += "\nsignal_exit() {" + source.partition("\nsignal_exit() {")[2].partition("\ntrap cleanup EXIT")[0]
-        metadata = "metadata() {" + source.partition("\nmetadata() {")[2].partition('\ncase "$0" in')[0]
-        creation = '\ncreation_pending=1\n' + source.partition(
+        declarations, metadata = DECLARATIONS + EXIT_TRAP, METADATA
+        creation = '\ncreation_pending=1\n' + SOURCE.partition(
             '\ncreation_pending=1\n')[2].partition('stage_admitted=1')[0] + 'stage_admitted=1\n'
         for fault in (False, True):
             with self.subTest(normalization_failure=fault), tempfile.TemporaryDirectory() as temporary:
@@ -180,13 +174,7 @@ class PrefixInstallerTest(unittest.TestCase):
 
     @unittest.skipUnless(sys.platform == "darwin", "requires Darwin ACL metadata")
     def test_macos_readiness_directory_hardens_safe_inherited_acl_before_use(self):
-        source = INSTALLER.read_text(encoding="utf-8")
-        declarations = source.partition("\nprefix=")[0]
-        declarations += "\nsignal_exit() {" + source.partition("\nsignal_exit() {")[2].partition("\ntrap cleanup EXIT")[0]
-        metadata = "metadata() {" + source.partition("\nmetadata() {")[2].partition('\ncase "$0" in')[0]
-        creation = '    creation_pending=1\n' + source.partition(
-            '    creation_pending=1\n')[2].partition(
-            '    installer_group=')[0]
+        declarations, metadata = DECLARATIONS + EXIT_TRAP, METADATA
         libc = ctypes.CDLL(None, use_errno=True)
         libc.acl_get_fd_np.argtypes = [ctypes.c_int, ctypes.c_int]
         libc.acl_get_fd_np.restype = ctypes.c_void_p
@@ -228,7 +216,7 @@ class PrefixInstallerTest(unittest.TestCase):
                     declarations + "\nhost=Darwin\ndescriptor_root=/dev/fd\n" + metadata +
                     '\nreadiness_config=$1\nmarker=$2\ncurrent_owner=$(/usr/bin/id -u)\n'
                     'readiness_owner=$current_owner\nreadiness_group=$(/usr/bin/id -g)\n' +
-                    creation + '\n: > "$marker"\n'
+                    READINESS_CREATION + '\n: > "$marker"\n'
                 )
                 result = subprocess.run(
                     ["/bin/sh", "-c", admission, "readiness-admission", str(root / "readiness"),
@@ -241,15 +229,10 @@ class PrefixInstallerTest(unittest.TestCase):
 
     @unittest.skipUnless(sys.platform == "darwin", "requires Darwin ACL metadata")
     def test_macos_acl_rejection_cleanup_preserves_foreign_entries(self):
-        source = INSTALLER.read_text(encoding="utf-8")
-        declarations = source.partition("\nprefix=")[0]
-        declarations += "\nsignal_exit() {" + source.partition("\nsignal_exit() {")[2].partition("\ntrap cleanup EXIT")[0]
-        metadata = "metadata() {" + source.partition("\nmetadata() {")[2].partition('\ncase "$0" in')[0]
-        cleanup = "stop_readiness() {" + source.partition("\nstop_readiness() {")[2].partition("\nsignal_exit() {")[0]
-        stage = source.partition("\nverify_bundle_binding\nverify_bin_binding\n")[2].partition('\n/bin/ln -- "$flow_stage"')[0]
-        readiness = '    creation_pending=1\n' + source.partition(
-            '    creation_pending=1\n')[2].partition(
-            '    installer_group=')[0]
+        declarations, metadata = DECLARATIONS + EXIT_TRAP, METADATA
+        cleanup = "stop_readiness() {" + SOURCE.partition("\nstop_readiness() {")[2].partition("\nsignal_exit() {")[0]
+        stage = SOURCE.partition("\nverify_bundle_binding\nverify_bin_binding\n")[2].partition('\n/bin/ln -- "$flow_stage"')[0]
+        readiness = READINESS_CREATION
         for kind in ("stage", "stage-linked", "readiness"):
             with self.subTest(kind=kind), tempfile.TemporaryDirectory() as temporary:
                 root = pathlib.Path(temporary)
@@ -268,7 +251,6 @@ class PrefixInstallerTest(unittest.TestCase):
                     'readiness_control=$1/control\nreadiness_inner_control=$1/inner-control\ntrap cleanup EXIT\n'
                 )
                 if kind.startswith("stage"):
-                    # A synthetic peer entry appears during the inherited unsafe interval.
                     body = stage.replace('stage_created=1\n', 'stage_created=1\nprintf foreign > "$flow_stage"\n', 1)
                     foreign = root / "stage" / "flow"
                     if kind == "stage-linked":
@@ -293,7 +275,7 @@ class PrefixInstallerTest(unittest.TestCase):
 
     @unittest.skipUnless(sys.platform == "darwin", "requires Darwin ACL metadata")
     def test_macos_acl_prerequisite_and_held_descriptor_errors_fail_closed(self):
-        declarations = INSTALLER.read_text(encoding="utf-8").partition("\nprefix=")[0]
+        declarations = DECLARATIONS
         owner = subprocess.check_output(["/usr/bin/id", "-un"], text=True).strip()
         cases = ["missing-bridge", "closed-descriptor"]
         if os.geteuid() != 0:
@@ -329,7 +311,7 @@ class PrefixInstallerTest(unittest.TestCase):
                     self.assertIn(b"unsafe or unavailable macOS ACL: opened image", result.stderr)
 
     def test_release_admission_matches_runtime(self):
-        declarations, separator, _ = INSTALLER.read_text(encoding="utf-8").partition("\nprefix=")
+        declarations, separator, _ = SOURCE.partition("\nprefix=")
         self.assertTrue(separator, "installer declarations must precede installation")
         cases = [
             ("Linux", "x86_64", f"ID={a}ubuntu{a}\nVERSION_ID={b}24.04{b}\n", True)
@@ -424,17 +406,13 @@ class PrefixInstallerTest(unittest.TestCase):
             journal = root / "supervision"
             journal.touch(mode=0o600)
             os.chown(journal, user.pw_uid, user.pw_gid)
-            source = (bundle / "install.sh").read_text(encoding="utf-8")
             boundary = '    IFS= read -r request || exit 1\n'
-            self.assertEqual(source.count(boundary), 1)
             observation = (
                 '    readiness_terminal=$(/bin/ps -o tty= -p "$$") || exit 1\n'
                 f'    printf "%s|%s|%s|%s\\n" "$role" "$(/usr/bin/id -u)" '
                 f'"$readiness_pgid" "$readiness_terminal" >> {shlex.quote(str(journal))}\n'
             ).replace("'", "'\"'\"'")
-            (bundle / "install.sh").write_text(
-                source.replace(boundary, observation + boundary), encoding="utf-8"
-            )
+            self.inject(bundle, boundary, observation + boundary)
         return bundle
 
     def readiness_environment(self):
@@ -505,22 +483,21 @@ class PrefixInstallerTest(unittest.TestCase):
             self.assert_privileged_supervision(bundle)
         return result
 
+    def inject(self, bundle: pathlib.Path, anchor: str, replacement: str):
+        installer = bundle / "install.sh"
+        source = installer.read_text(encoding="utf-8")
+        self.assertEqual(source.count(anchor), 1, anchor)
+        installer.write_text(source.replace(anchor, replacement), encoding="utf-8")
+        installer.chmod(0o755)
+
     def pause_installer_after_validation(
         self, bundle: pathlib.Path, marker: pathlib.Path, release: pathlib.Path
     ):
-        installer = bundle / "install.sh"
-        source = installer.read_text(encoding="utf-8")
         boundary = "trap 'signal_exit 143' TERM\n\n"
-        self.assertEqual(source.count(boundary), 1)
-        barrier = (
+        self.inject(bundle, boundary, boundary + (
             f": > {shlex.quote(str(marker))}\n"
             f"while [ ! -e {shlex.quote(str(release))} ]; do /bin/sleep 0.01; done\n"
-        )
-        installer.write_text(
-            source.replace(boundary, boundary + barrier),
-            encoding="utf-8",
-        )
-        installer.chmod(0o755)
+        ))
 
     def wait_for_installer_marker(
         self, process: subprocess.Popen, marker: pathlib.Path
@@ -534,6 +511,21 @@ class PrefixInstallerTest(unittest.TestCase):
         process.kill()
         self.fail("installer did not reach the post-validation boundary")
 
+    def start_paused_installer(self, root: pathlib.Path, bundle: pathlib.Path, *args: str):
+        validated, release = root / "validated", root / "release"
+        self.pause_installer_after_validation(bundle, validated, release)
+        unrelated_cwd = root / "unrelated-cwd"
+        unrelated_cwd.mkdir(exist_ok=True)
+        process = subprocess.Popen(
+            ["/bin/sh", str(bundle / "install.sh"), "--prefix", str(root / "prefix"), *args],
+            cwd=unrelated_cwd,
+            env={"PATH": ""},
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        self.wait_for_installer_marker(process, validated)
+        return process, release
+
     def test_standard_and_opt_out_install_from_any_cwd_with_empty_path(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = pathlib.Path(temporary)
@@ -543,8 +535,12 @@ class PrefixInstallerTest(unittest.TestCase):
             installed = self.install(bundle, standard)
             self.assertEqual(installed.returncode, 0, installed.stderr)
             self.assertEqual(installed.stderr, b"")
-            self.assertTrue((standard / "bin" / "flow").is_file())
-            self.assertTrue((standard / "bin" / "flow-executor").is_file())
+            for name in ("flow", "flow-executor"):
+                metadata = (standard / "bin" / name).lstat()
+                self.assertTrue(stat.S_ISREG(metadata.st_mode), name)
+                self.assertEqual(metadata.st_nlink, 1)
+                self.assertEqual(metadata.st_uid, os.geteuid())
+                self.assertEqual(metadata.st_mode & 0o022, 0)
 
             opt_out = root / "opt-out"
             installed = self.install(bundle, opt_out, "--no-default-executor")
@@ -702,11 +698,8 @@ class PrefixInstallerTest(unittest.TestCase):
                 with self.subTest(boundary=boundary.strip(), signals=sequence), tempfile.TemporaryDirectory() as temporary:
                     root = pathlib.Path(temporary)
                     bundle = self.bundle(root)
-                    installer = bundle / "install.sh"
-                    source = installer.read_text(encoding="utf-8")
-                    self.assertEqual(source.count(boundary), 1)
                     interruption = "".join(f'/bin/kill -{number} "$$"\n' for number in sequence)
-                    installer.write_text(source.replace(boundary, interruption + boundary), encoding="utf-8")
+                    self.inject(bundle, boundary, interruption + boundary)
                     prefix = root / "prefix"
 
                     result = self.install(bundle, prefix, *options)
@@ -714,23 +707,6 @@ class PrefixInstallerTest(unittest.TestCase):
                     self.assertEqual(result.returncode, 128 + getattr(signal, "SIG" + sequence[0]), result.stderr)
                     self.assertEqual(result.stdout, b"")
                     self.assertEqual(list((prefix / "bin").iterdir()), [], result.stderr)
-
-    def test_installed_files_are_regular_executable_siblings(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            root = pathlib.Path(temporary)
-            bundle = self.bundle(root)
-            prefix = root / "prefix"
-
-            installed = self.install(bundle, prefix)
-
-            self.assertEqual(installed.returncode, 0, installed.stderr)
-            for name in ("flow", "flow-executor"):
-                path = prefix / "bin" / name
-                metadata = path.lstat()
-                self.assertTrue(stat.S_ISREG(metadata.st_mode))
-                self.assertEqual(metadata.st_nlink, 1)
-                self.assertEqual(metadata.st_uid, os.geteuid())
-                self.assertEqual(metadata.st_mode & 0o022, 0)
 
     def test_failed_readiness_rolls_back_every_published_artifact(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -794,22 +770,8 @@ class PrefixInstallerTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             root = pathlib.Path(temporary)
             bundle = self.bundle(root)
-            validated = root / "validated"
-            release = root / "release"
             executed = root / "substituted-flow-ran"
-            self.pause_installer_after_validation(bundle, validated, release)
-            prefix = root / "prefix"
-            unrelated_cwd = root / "unrelated-cwd"
-            unrelated_cwd.mkdir()
-            process = subprocess.Popen(
-                ["/bin/sh", str(bundle / "install.sh"), "--prefix", str(prefix)],
-                cwd=unrelated_cwd,
-                env={"PATH": ""},
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-            )
-
-            self.wait_for_installer_marker(process, validated)
+            process, release = self.start_paused_installer(root, bundle)
             bundle.rename(root / "original-bundle")
             replacement = self.bundle(root)
             (replacement / "flow").write_text(
@@ -825,33 +787,14 @@ class PrefixInstallerTest(unittest.TestCase):
             self.assertNotEqual(process.returncode, 0, stderr)
             self.assertIn(b"installer bundle path changed during installation", stderr)
             self.assertFalse(executed.exists())
-            self.assertEqual(list((prefix / "bin").iterdir()), [])
+            self.assertEqual(list((root / "prefix" / "bin").iterdir()), [])
 
     def test_replacing_validated_target_directory_fails_without_publication(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = pathlib.Path(temporary)
             bundle = self.bundle(root)
-            validated = root / "validated"
-            release = root / "release"
-            self.pause_installer_after_validation(bundle, validated, release)
+            process, release = self.start_paused_installer(root, bundle, "--no-default-executor")
             prefix = root / "prefix"
-            unrelated_cwd = root / "unrelated-cwd"
-            unrelated_cwd.mkdir()
-            process = subprocess.Popen(
-                [
-                    "/bin/sh",
-                    str(bundle / "install.sh"),
-                    "--prefix",
-                    str(prefix),
-                    "--no-default-executor",
-                ],
-                cwd=unrelated_cwd,
-                env={"PATH": ""},
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-            )
-
-            self.wait_for_installer_marker(process, validated)
             original_bin = root / "original-bin"
             (prefix / "bin").rename(original_bin)
             (prefix / "bin").mkdir(mode=0o755)
@@ -868,17 +811,7 @@ class PrefixInstallerTest(unittest.TestCase):
             with self.subTest(name=name), tempfile.TemporaryDirectory() as temporary:
                 root = pathlib.Path(temporary)
                 bundle = self.bundle(root)
-                validated = root / "validated"
-                release = root / "release"
-                self.pause_installer_after_validation(bundle, validated, release)
-                prefix = root / "prefix"
-                process = subprocess.Popen(
-                    ["/bin/sh", str(bundle / "install.sh"), "--prefix", str(prefix)],
-                    cwd=root, env={"PATH": ""},
-                    stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                )
-
-                self.wait_for_installer_marker(process, validated)
+                process, release = self.start_paused_installer(root, bundle)
                 original = root / "original-artifact"
                 (bundle / name).rename(original)
                 shutil.copy2(original, bundle / name)
@@ -888,90 +821,36 @@ class PrefixInstallerTest(unittest.TestCase):
 
                 self.assertEqual(process.returncode, 1, stderr)
                 self.assertIn(f"{name} bundle artifact changed during installation".encode(), stderr)
-                self.assertEqual(list((prefix / "bin").iterdir()), [])
+                self.assertEqual(list((root / "prefix" / "bin").iterdir()), [])
 
-    def test_signal_at_each_publication_boundary_rolls_back(self):
-        boundaries = (
-            (
-                '/bin/ln -- "$flow_stage" "$flow_target" || fail \'cannot publish flow\'\n',
-                "--no-default-executor",
-            ),
-            (
-                '/bin/ln -- "$executor_stage" "$executor_target" || fail \'cannot publish flow-executor\'\n',
-                None,
-            ),
-        )
-        for publication, opt_out in boundaries:
-            with self.subTest(publication=publication), tempfile.TemporaryDirectory() as temporary:
-                root = pathlib.Path(temporary)
-                bundle = self.bundle(root)
-                installer = bundle / "install.sh"
-                source = installer.read_text(encoding="utf-8")
-                self.assertEqual(source.count(publication), 1)
-                installer.write_text(
-                    source.replace(
-                        publication,
-                        publication + '/bin/kill -TERM "$$"\n',
-                    ),
-                    encoding="utf-8",
-                )
-                installer.chmod(0o755)
-                prefix = root / "prefix"
-
-                args = (opt_out,) if opt_out else ()
-                installed = self.install(bundle, prefix, *args)
-
-                self.assertEqual(installed.returncode, 128 + signal.SIGTERM, installed.stderr)
-                self.assertEqual(list((prefix / "bin").iterdir()), [])
-
-    def test_signal_at_commit_boundary_is_all_or_nothing(self):
+    def test_signal_at_each_publication_and_commit_boundary_is_all_or_nothing(self):
+        flow = '/bin/ln -- "$flow_stage" "$flow_target" || fail \'cannot publish flow\'\n'
+        executor = '/bin/ln -- "$executor_stage" "$executor_target" || fail \'cannot publish flow-executor\'\n'
         commit = "installation_committed=1\n"
-        cases = (
-            ("before", f'/bin/kill -TERM "$$"\n{commit}', ()),
-            (
-                "after",
-                f'{commit}/bin/kill -TERM "$$"\n',
-                ("flow", "flow-executor"),
-            ),
-        )
-        for side, injected, expected in cases:
-            with self.subTest(side=side), tempfile.TemporaryDirectory() as temporary:
+        kill = '/bin/kill -TERM "$$"\n'
+        for anchor, replacement, options, published in (
+            (flow, flow + kill, ("--no-default-executor",), ()),
+            (executor, executor + kill, (), ()),
+            (commit, kill + commit, (), ()),
+            (commit, commit + kill, (), ("flow", "flow-executor")),
+        ):
+            with self.subTest(replacement=replacement), tempfile.TemporaryDirectory() as temporary:
                 root = pathlib.Path(temporary)
                 bundle = self.bundle(root)
-                installer = bundle / "install.sh"
-                source = installer.read_text(encoding="utf-8")
-                self.assertEqual(source.count(commit), 1)
-                installer.write_text(
-                    source.replace(commit, injected),
-                    encoding="utf-8",
-                )
-                installer.chmod(0o755)
+                self.inject(bundle, anchor, replacement)
                 prefix = root / "prefix"
 
-                installed = self.install(bundle, prefix)
+                installed = self.install(bundle, prefix, *options)
 
                 self.assertEqual(installed.returncode, 128 + signal.SIGTERM, installed.stderr)
-                self.assertEqual(
-                    tuple(sorted(path.name for path in (prefix / "bin").iterdir())),
-                    expected,
-                )
+                self.assertEqual(tuple(sorted(path.name for path in (prefix / "bin").iterdir())), published)
 
     def test_signal_during_failure_cleanup_does_not_interrupt_rollback(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = pathlib.Path(temporary)
             bundle = self.bundle(root)
-            installer = bundle / "install.sh"
-            source = installer.read_text(encoding="utf-8")
             first_removal = '            /bin/rm -f -- "$executor_target" || :\n'
-            self.assertEqual(source.count(first_removal), 1)
-            installer.write_text(
-                source.replace(
-                    first_removal,
-                    first_removal + '            /bin/kill -TERM "$$"\n',
-                ),
-                encoding="utf-8",
-            )
-            installer.chmod(0o755)
+            self.inject(bundle, first_removal, first_removal + '            /bin/kill -TERM "$$"\n')
             (bundle / "flow").write_text("#!/bin/sh\nexit 65\n", encoding="utf-8")
             (bundle / "flow").chmod(0o755)
             prefix = root / "prefix"
@@ -989,11 +868,7 @@ class PrefixInstallerTest(unittest.TestCase):
                 bundle = self.bundle(root)
                 marker = root / "checker-started"
                 (bundle / "flow").write_text(f"#!/bin/sh\n: > {shlex.quote(str(marker))}\n", encoding="utf-8")
-                installer = bundle / "install.sh"
-                source = installer.read_text(encoding="utf-8")
-                self.assertEqual(source.count(boundary), 1)
-                installer.write_text(source.replace(boundary,
-                    '    /bin/kill -TERM "$$"\n' + boundary), encoding="utf-8")
+                self.inject(bundle, boundary, '    /bin/kill -TERM "$$"\n' + boundary)
                 prefix = root / "prefix"
                 started = time.monotonic()
 
@@ -1167,8 +1042,6 @@ class PrefixInstallerTest(unittest.TestCase):
                     else:
                         self.fail(f"readiness descendant {descendant} survived cleanup")
                 finally:
-                    # A failed fixture expires after its finite sleep; saved
-                    # descendant numbers cannot safely authorize rescue signals.
                     if process.poll() is None:
                         process.kill()
                     try:

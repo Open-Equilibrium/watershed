@@ -177,7 +177,6 @@ impl ConversationWriterBackend {
     }
 
     fn sync_streams(&mut self) -> Result<(), RuntimeError> {
-        // Both streams sync even when one fails, so acknowledged events keep their final sync.
         let mut failures = Vec::new();
         if let Err(error) =
             sync_anchored_stream_with(&mut self.contexts_appender, &self.contexts_file)
@@ -334,7 +333,6 @@ impl SerialEventBackend for ConversationWriterBackend {
     }
 
     fn wait_timeout(&self, now: Instant) -> Duration {
-        // WHY: a stopped or failed writer never syncs, so its expired deadline must not spin the worker.
         if self.stopped || self.pending_error.is_some() {
             return EVENT_WRITER_DIRTY_SYNC_INTERVAL;
         }

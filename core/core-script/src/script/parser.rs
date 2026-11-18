@@ -83,10 +83,6 @@ pub(super) fn deserialize_registry_block(
     }
 }
 
-/// Parses one Safe-YAML document into a configuration model.
-///
-/// The target type owns its structural field contract. Registry callers must use
-/// [`crate::parse_registry_block`], which also validates flattened registry fields.
 pub fn parse_safe_yaml_config<T>(source_name: &str, source: &str) -> Result<T, RegistryError>
 where
     T: serde::de::DeserializeOwned,

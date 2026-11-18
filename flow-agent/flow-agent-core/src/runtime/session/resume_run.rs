@@ -16,7 +16,6 @@ use crate::runtime::{
 };
 use std::path::Path;
 
-/// Resumes one exactly addressed productive run without repeating completed external work.
 pub fn resume_conversation_run(
     workspace: impl AsRef<Path>,
     conversation_id: &str,
@@ -37,7 +36,6 @@ pub fn resume_conversation_run(
     )
 }
 
-/// Resumes one exactly addressed productive run with committed-event notifications.
 pub fn resume_conversation_run_with_live_events(
     workspace: impl AsRef<Path>,
     conversation_id: &str,
@@ -60,7 +58,6 @@ pub fn resume_conversation_run_with_live_events(
     Ok(output)
 }
 
-/// Resumes a productive run after binding a guard to its loaded backend.
 pub fn resume_conversation_run_with_execution_activation<G>(
     workspace: impl AsRef<Path>,
     conversation_id: &str,

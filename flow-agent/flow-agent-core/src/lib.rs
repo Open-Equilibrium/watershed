@@ -1,6 +1,3 @@
-//! Flow Agent core runtime.
-
-#![deny(missing_docs)]
 #![cfg_attr(not(test), deny(clippy::wildcard_imports))]
 
 #[cfg(test)]

@@ -1,14 +1,14 @@
 use super::super::super::{helpers::empty_workspace, test_support::TempWorkspace};
 use super::super::{REQUEST_HASH, recovery_fixtures::standard_review_recovery_writer};
+use super::{
+    commit_intent, commit_result, open_recovery_snapshot, provider_intent, review_run_dir,
+    tool_intent,
+};
 use crate::runtime::{
     context::ContextHistory,
-    conversations::{
-        ProductiveRecoveryWriter, append_run_attempt_intent, append_run_attempt_result,
-        set_conversation_file_sync_error_for_path_for_test,
-    },
+    conversations::{ProductiveRecoveryWriter, set_conversation_file_sync_error_for_path_for_test},
     run_attempts::{
         ProductiveRecovery, RunAttemptIntent, RunAttemptKind, RunAttemptOutcome, RunAttemptResult,
-        ToolEnforcementExpectation,
     },
 };
 use std::{
@@ -35,55 +35,6 @@ fn completed_provider_result(attempt_id: &str, timestamp: &str) -> RunAttemptRes
 }
 
 #[test]
-fn exact_recovery_promotes_a_completed_attempt_without_redispatch() {
-    let workspace = empty_workspace("conversation-completed-attempt-recovery");
-    let request_hash = REQUEST_HASH;
-    standard_review_recovery_writer(&workspace, None, &ContextHistory::default());
-    append_run_attempt_intent(
-        &workspace,
-        "review",
-        "review-1",
-        &RunAttemptIntent {
-            attempt_id: "provider-000001".to_owned(),
-            attempt_kind: RunAttemptKind::Provider,
-            expected_enforcement: None,
-            request_hash: request_hash.to_owned(),
-            tool_id: None,
-            timestamp: "2026-01-01T00:00:00Z".to_owned(),
-        },
-    )
-    .expect("provider intent commits");
-    let result = completed_provider_result("provider-000001", "2026-01-01T00:00:00Z");
-    append_run_attempt_result(&workspace, "review", "review-1", &result)
-        .expect("provider terminal result commits");
-    let recovery_path = crate::tests::helpers::workspace_session_dir(&workspace)
-        .join("review/runs/review-1/recovery.jsonl");
-    let header_len = fs::metadata(&recovery_path)
-        .expect("recovery metadata reads")
-        .len();
-
-    let mut resumed = ProductiveRecoveryWriter::open_for_resume(&workspace, "review", "review-1")
-        .expect("recovery snapshot opens");
-    let recovered = resumed
-        .recover_attempt(
-            RunAttemptKind::Provider,
-            "provider-000001",
-            request_hash,
-            None,
-        )
-        .expect("completed attempt is safe to recover")
-        .expect("completed attempt is returned");
-
-    assert_eq!(recovered, result);
-    assert!(
-        fs::metadata(recovery_path)
-            .expect("promoted recovery metadata reads")
-            .len()
-            > header_len
-    );
-}
-
-#[test]
 fn productive_recovery_rejects_cross_ledger_attempt_conflicts() {
     let workspace = empty_workspace("conversation-recovery-attempt-conflict");
     let mut recovery =
@@ -93,33 +44,16 @@ fn productive_recovery_rejects_cross_ledger_attempt_conflicts() {
         .record_attempt(None, REQUEST_HASH, &recorded)
         .expect("recovery attempt record commits");
     drop(recovery);
-    append_run_attempt_intent(
+    commit_intent(&workspace, &provider_intent(&recorded.attempt_id));
+    commit_result(
         &workspace,
-        "review",
-        "review-1",
-        &RunAttemptIntent {
-            attempt_id: recorded.attempt_id.clone(),
-            attempt_kind: RunAttemptKind::Provider,
-            expected_enforcement: None,
-            request_hash: REQUEST_HASH.to_owned(),
-            tool_id: None,
-            timestamp: "2026-01-01T00:00:00Z".to_owned(),
-        },
-    )
-    .expect("provider intent commits");
-    append_run_attempt_result(
-        &workspace,
-        "review",
-        "review-1",
         &RunAttemptResult {
             timestamp: "2026-01-01T00:00:02Z".to_owned(),
             ..recorded
         },
-    )
-    .expect("conflicting provider result commits independently");
+    );
 
-    let mut resumed = ProductiveRecoveryWriter::open_for_resume(&workspace, "review", "review-1")
-        .expect("individually valid recovery ledgers open");
+    let mut resumed = open_recovery_snapshot(&workspace);
     let error = resumed
         .recover_attempt(
             RunAttemptKind::Provider,
@@ -142,8 +76,7 @@ fn productive_recovery_writer_closes_after_an_ambiguous_append() {
     let workspace = empty_workspace("conversation-recovery-ambiguous-append");
     let mut recovery =
         standard_review_recovery_writer(&workspace, None, &ContextHistory::default());
-    let recovery_path = crate::tests::helpers::workspace_session_dir(&workspace)
-        .join("review/runs/review-1/recovery.jsonl");
+    let recovery_path = review_run_dir(&workspace, "review-1").join("recovery.jsonl");
     set_conversation_file_sync_error_for_path_for_test(&recovery_path, io::ErrorKind::Other);
 
     recovery
@@ -165,8 +98,7 @@ fn productive_recovery_writer_closes_after_an_ambiguous_append() {
     );
     drop(recovery);
 
-    let mut resumed = ProductiveRecoveryWriter::open_for_resume(&workspace, "review", "review-1")
-        .expect("a new writer reconciles the visible boundary");
+    let mut resumed = open_recovery_snapshot(&workspace);
     resumed
         .transition_boundary("flow-000001", "review-phase", Some("summary-phase"))
         .expect("the reconciled boundary replays exactly once");
@@ -182,25 +114,15 @@ fn productive_recovery_writer_closes_after_an_ambiguous_append() {
 #[test]
 fn productive_recovery_round_trips_every_committed_boundary() {
     let workspace = empty_workspace("conversation-recovery-round-trip");
-    let request_hash = REQUEST_HASH;
     let root_input = core_script::FlowValue::String("review this project".to_owned());
     let history = ContextHistory::default();
     let mut recovery = standard_review_recovery_writer(&workspace, Some(&root_input), &history);
-    let intent = RunAttemptIntent {
-        attempt_id: "provider-000001".to_owned(),
-        attempt_kind: RunAttemptKind::Provider,
-        expected_enforcement: None,
-        request_hash: request_hash.to_owned(),
-        tool_id: None,
-        timestamp: "2026-01-01T00:00:00Z".to_owned(),
-    };
+    let intent = provider_intent("provider-000001");
     let result = completed_provider_result(&intent.attempt_id, "2026-01-01T00:00:01Z");
-    append_run_attempt_intent(&workspace, "review", "review-1", &intent)
-        .expect("provider intent commits");
-    append_run_attempt_result(&workspace, "review", "review-1", &result)
-        .expect("provider result commits");
+    commit_intent(&workspace, &intent);
+    commit_result(&workspace, &result);
     recovery
-        .record_attempt(None, request_hash, &result)
+        .record_attempt(None, REQUEST_HASH, &result)
         .expect("attempt boundary commits");
     let phase_result = core_script::FlowValue::Map(BTreeMap::from([(
         "approved".to_owned(),
@@ -230,8 +152,7 @@ fn productive_recovery_round_trips_every_committed_boundary() {
         .expect("terminal snapshot hash is available")
         .to_owned();
 
-    let mut resumed = ProductiveRecoveryWriter::open_for_resume(&workspace, "review", "review-1")
-        .expect("recovery snapshot opens");
+    let mut resumed = open_recovery_snapshot(&workspace);
     assert_eq!(
         resumed.terminal_snapshot_hash(),
         Some(snapshot_hash.as_str())
@@ -241,7 +162,7 @@ fn productive_recovery_round_trips_every_committed_boundary() {
             .recover_attempt(
                 RunAttemptKind::Provider,
                 "provider-000001",
-                request_hash,
+                REQUEST_HASH,
                 None,
             )
             .expect("attempt replays"),
@@ -288,22 +209,8 @@ fn complete_recovery_fixture(name: &str, extra_completed_attempt: bool) -> Compl
     let history = ContextHistory::default();
     let mut recovery = standard_review_recovery_writer(&workspace, None, &history);
     let provider_result = completed_provider_result("provider-000001", "2026-07-30T12:00:01Z");
-    append_run_attempt_intent(
-        &workspace,
-        "review",
-        "review-1",
-        &RunAttemptIntent {
-            attempt_id: provider_result.attempt_id.clone(),
-            attempt_kind: RunAttemptKind::Provider,
-            expected_enforcement: None,
-            request_hash: request_hash.clone(),
-            tool_id: None,
-            timestamp: "2026-07-30T12:00:00Z".to_owned(),
-        },
-    )
-    .expect("provider intent commits");
-    append_run_attempt_result(&workspace, "review", "review-1", &provider_result)
-        .expect("provider result commits");
+    commit_intent(&workspace, &provider_intent(&provider_result.attempt_id));
+    commit_result(&workspace, &provider_result);
     recovery
         .record_attempt(None, &request_hash, &provider_result)
         .expect("provider recovery commits");
@@ -330,28 +237,19 @@ fn complete_recovery_fixture(name: &str, extra_completed_attempt: bool) -> Compl
     drop(recovery);
 
     if extra_completed_attempt {
-        let extra_hash = "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd";
-        append_run_attempt_intent(
+        commit_intent(
             &workspace,
-            "review",
-            "review-1",
             &RunAttemptIntent {
-                attempt_id: "provider-000002".to_owned(),
-                attempt_kind: RunAttemptKind::Provider,
-                expected_enforcement: None,
-                request_hash: extra_hash.to_owned(),
-                tool_id: None,
-                timestamp: "2026-07-30T12:00:02Z".to_owned(),
+                request_hash:
+                    "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+                        .to_owned(),
+                ..provider_intent("provider-000002")
             },
-        )
-        .expect("extra provider intent commits");
-        append_run_attempt_result(
+        );
+        commit_result(
             &workspace,
-            "review",
-            "review-1",
             &completed_provider_result("provider-000002", "2026-07-30T12:00:03Z"),
-        )
-        .expect("extra provider result commits");
+        );
     }
 
     CompleteRecoveryFixture {
@@ -363,9 +261,7 @@ fn complete_recovery_fixture(name: &str, extra_completed_attempt: bool) -> Compl
 }
 
 fn replay_provider_and_phase(fixture: &CompleteRecoveryFixture) -> ProductiveRecoveryWriter {
-    let mut recovery =
-        ProductiveRecoveryWriter::open_for_resume(&fixture.workspace, "review", "review-1")
-            .expect("complete recovery opens");
+    let mut recovery = open_recovery_snapshot(&fixture.workspace);
     recovery
         .recover_attempt(
             RunAttemptKind::Provider,
@@ -404,9 +300,7 @@ fn productive_recovery_rejects_every_replayed_boundary_divergence() {
     let fixture = complete_recovery_fixture("conversation-recovery-divergence-matrix", false);
 
     for boundary in ["phase", "transition", "flow", "terminal"] {
-        let mut recovery =
-            ProductiveRecoveryWriter::open_for_resume(&fixture.workspace, "review", "review-1")
-                .expect("complete recovery opens");
+        let mut recovery = open_recovery_snapshot(&fixture.workspace);
         let error = match boundary {
             "phase" => recovery.phase_boundary(
                 "flow-000001",
@@ -427,9 +321,7 @@ fn productive_recovery_rejects_every_replayed_boundary_divergence() {
         assert!(error.to_string().contains("different boundary"), "{error}");
     }
 
-    let mut recovery =
-        ProductiveRecoveryWriter::open_for_resume(&fixture.workspace, "review", "review-1")
-            .expect("complete recovery opens");
+    let mut recovery = open_recovery_snapshot(&fixture.workspace);
     let error = recovery
         .recover_attempt(
             RunAttemptKind::Tool,
@@ -440,9 +332,7 @@ fn productive_recovery_rejects_every_replayed_boundary_divergence() {
         .expect_err("attempt identity divergence fails closed");
     assert!(error.to_string().contains("diverged"), "{error}");
 
-    let mut recovery =
-        ProductiveRecoveryWriter::open_for_resume(&fixture.workspace, "review", "review-1")
-            .expect("complete recovery opens");
+    let mut recovery = open_recovery_snapshot(&fixture.workspace);
     recovery
         .recover_attempt(
             RunAttemptKind::Provider,
@@ -463,9 +353,7 @@ fn productive_recovery_rejects_every_replayed_boundary_divergence() {
         .expect_err("Phase identity divergence fails closed");
     assert!(error.to_string().contains("diverged"), "{error}");
 
-    let mut recovery =
-        ProductiveRecoveryWriter::open_for_resume(&fixture.workspace, "review", "review-1")
-            .expect("complete recovery opens");
+    let mut recovery = open_recovery_snapshot(&fixture.workspace);
     recovery
         .recover_attempt(
             RunAttemptKind::Provider,
@@ -522,22 +410,7 @@ fn productive_recovery_round_trips_a_tool_attempt_on_every_platform() {
     let request_hash = REQUEST_HASH;
     let mut recovery =
         standard_review_recovery_writer(&workspace, None, &ContextHistory::default());
-    append_run_attempt_intent(
-        &workspace,
-        "review",
-        "review-1",
-        &RunAttemptIntent {
-            attempt_id: "tool-000001".to_owned(),
-            attempt_kind: RunAttemptKind::Tool,
-            expected_enforcement: Some(ToolEnforcementExpectation {
-                applied_policy_digest: "0".repeat(64),
-            }),
-            request_hash: request_hash.to_owned(),
-            tool_id: Some("inspect".to_owned()),
-            timestamp: "2026-07-30T12:00:00Z".to_owned(),
-        },
-    )
-    .expect("Tool intent commits");
+    commit_intent(&workspace, &tool_intent("tool-000001", "inspect"));
     let result = RunAttemptResult {
         attempt_id: "tool-000001".to_owned(),
         attempt_kind: RunAttemptKind::Tool,
@@ -554,31 +427,14 @@ fn productive_recovery_round_trips_a_tool_attempt_on_every_platform() {
             "tool_result": {"type": "string", "value": "inspected"}
         })),
     };
-    append_run_attempt_result(&workspace, "review", "review-1", &result)
-        .expect("Tool result commits");
+    commit_result(&workspace, &result);
     let second_result = RunAttemptResult {
         attempt_id: "tool-000002".to_owned(),
         timestamp: "2026-07-30T12:00:03Z".to_owned(),
         ..result.clone()
     };
-    append_run_attempt_intent(
-        &workspace,
-        "review",
-        "review-1",
-        &RunAttemptIntent {
-            attempt_id: second_result.attempt_id.clone(),
-            attempt_kind: RunAttemptKind::Tool,
-            expected_enforcement: Some(ToolEnforcementExpectation {
-                applied_policy_digest: "0".repeat(64),
-            }),
-            request_hash: request_hash.to_owned(),
-            tool_id: Some("inspect".to_owned()),
-            timestamp: "2026-07-30T12:00:02Z".to_owned(),
-        },
-    )
-    .expect("second Tool intent commits");
-    append_run_attempt_result(&workspace, "review", "review-1", &second_result)
-        .expect("second Tool result commits");
+    commit_intent(&workspace, &tool_intent("tool-000002", "inspect"));
+    commit_result(&workspace, &second_result);
     let cancelled_result = RunAttemptResult {
         attempt_id: "tool-000003".to_owned(),
         outcome: RunAttemptOutcome::Cancelled,
@@ -590,24 +446,8 @@ fn productive_recovery_round_trips_a_tool_attempt_on_every_platform() {
         })),
         ..result.clone()
     };
-    append_run_attempt_intent(
-        &workspace,
-        "review",
-        "review-1",
-        &RunAttemptIntent {
-            attempt_id: cancelled_result.attempt_id.clone(),
-            attempt_kind: RunAttemptKind::Tool,
-            expected_enforcement: Some(ToolEnforcementExpectation {
-                applied_policy_digest: "0".repeat(64),
-            }),
-            request_hash: request_hash.to_owned(),
-            tool_id: Some("inspect".to_owned()),
-            timestamp: "2026-07-30T12:00:03Z".to_owned(),
-        },
-    )
-    .expect("cancelled Tool intent commits");
-    append_run_attempt_result(&workspace, "review", "review-1", &cancelled_result)
-        .expect("cancelled Tool result commits without its recovery record");
+    commit_intent(&workspace, &tool_intent("tool-000003", "inspect"));
+    commit_result(&workspace, &cancelled_result);
     recovery
         .record_attempt(Some("inspect"), request_hash, &result)
         .expect("Tool recovery record commits");
@@ -616,8 +456,7 @@ fn productive_recovery_round_trips_a_tool_attempt_on_every_platform() {
         .expect("second Tool recovery record commits");
     drop(recovery);
 
-    let mut resumed = ProductiveRecoveryWriter::open_for_resume(&workspace, "review", "review-1")
-        .expect("Tool recovery opens");
+    let mut resumed = open_recovery_snapshot(&workspace);
     assert_eq!(
         resumed
             .recover_attempt(
@@ -723,66 +562,89 @@ fn productive_recovery_rejects_a_new_attempt_after_terminal_replay() {
     assert!(error.to_string().contains("recorded boundary"), "{error}");
 }
 
-#[test]
-fn productive_recovery_rejects_a_new_attempt_before_completed_work_is_replayed() {
-    let (workspace, _, _) =
-        header_only_recovery_with_completed_attempt("conversation-recovery-before-completed");
-    let mut recovery = ProductiveRecoveryWriter::open_for_resume(&workspace, "review", "review-1")
-        .expect("header-only recovery opens");
-
-    let error = recovery
-        .recover_attempt(
-            RunAttemptKind::Provider,
-            "provider-000002",
-            "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
-            None,
-        )
-        .expect_err("outstanding completed work must be replayed before new work");
-    assert!(error.to_string().contains("unreplayed"), "{error}");
-}
-
 fn header_only_recovery_with_completed_attempt(
     name: &str,
 ) -> (TempWorkspace, ContextHistory, RunAttemptResult) {
     let workspace = empty_workspace(name);
     let history = ContextHistory::default();
     standard_review_recovery_writer(&workspace, None, &history);
-    append_run_attempt_intent(
-        &workspace,
-        "review",
-        "review-1",
-        &RunAttemptIntent {
-            attempt_id: "provider-000001".to_owned(),
-            attempt_kind: RunAttemptKind::Provider,
-            expected_enforcement: None,
-            request_hash: REQUEST_HASH.to_owned(),
-            tool_id: None,
-            timestamp: "2026-08-16T12:00:00Z".to_owned(),
-        },
-    )
-    .expect("provider intent commits");
+    commit_intent(&workspace, &provider_intent("provider-000001"));
     let result = completed_provider_result("provider-000001", "2026-08-16T12:00:01Z");
-    append_run_attempt_result(&workspace, "review", "review-1", &result)
-        .expect("provider result commits");
+    commit_result(&workspace, &result);
     (workspace, history, result)
 }
 
 #[test]
-fn live_recovery_requires_exactly_once_completed_attempts_before_terminal() {
+fn completed_attempt_must_replay_before_any_later_boundary() {
+    let new_attempt_hash =
+        "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd";
+    let phase_result = core_script::FlowValue::Boolean(true);
+    for boundary in ["attempt", "phase", "transition", "flow", "terminal"] {
+        let (workspace, history, completed) = header_only_recovery_with_completed_attempt(
+            &format!("conversation-recovery-before-completed-{boundary}"),
+        );
+        let path = review_run_dir(&workspace, "review-1").join("recovery.jsonl");
+        let before = fs::read(&path).expect("recovery snapshot reads");
+        let mut recovery = open_recovery_snapshot(&workspace);
+
+        let error = match boundary {
+            "attempt" => recovery
+                .recover_attempt(
+                    RunAttemptKind::Provider,
+                    "provider-000002",
+                    new_attempt_hash,
+                    None,
+                )
+                .map(drop),
+            "phase" => recovery.phase_boundary(
+                "flow-000001",
+                "phase-000001",
+                "review-phase",
+                1,
+                &phase_result,
+                true,
+            ),
+            "transition" => {
+                recovery.transition_boundary("flow-000001", "review-phase", Some("summary-phase"))
+            }
+            "flow" => recovery.flow_boundary("flow-000001", Some(&phase_result)),
+            _ => recovery.terminal_boundary(&history, false, 0),
+        }
+        .expect_err("a later boundary must wait for the completed attempt");
+        assert!(
+            error.to_string().contains("unreplayed"),
+            "{boundary}: {error}"
+        );
+        assert_eq!(
+            fs::read(&path).expect("recovery snapshot reads"),
+            before,
+            "{boundary}"
+        );
+
+        let mut reopened = open_recovery_snapshot(&workspace);
+        assert_eq!(
+            reopened
+                .recover_attempt(
+                    RunAttemptKind::Provider,
+                    "provider-000001",
+                    REQUEST_HASH,
+                    None,
+                )
+                .expect("completed attempt recovers"),
+            Some(completed),
+            "{boundary}"
+        );
+    }
+}
+
+#[test]
+fn completed_attempt_recovers_exactly_once_and_then_terminal_commits() {
     let (workspace, history, result) =
         header_only_recovery_with_completed_attempt("conversation-live-terminal-unconsumed");
-    let path = crate::tests::helpers::workspace_session_dir(&workspace)
-        .join("review/runs/review-1/recovery.jsonl");
+    let path = review_run_dir(&workspace, "review-1").join("recovery.jsonl");
     let before = fs::read(&path).expect("recovery snapshot reads");
-    let mut recovery = ProductiveRecoveryWriter::open_for_resume(&workspace, "review", "review-1")
-        .expect("header-only recovery opens");
+    let mut recovery = open_recovery_snapshot(&workspace);
 
-    let error = recovery
-        .terminal_boundary(&history, false, 0)
-        .expect_err("terminal creation must reject unconsumed completed work");
-
-    assert!(error.to_string().contains("unreplayed"), "{error}");
-    assert_eq!(fs::read(&path).expect("recovery snapshot reads"), before);
     assert_eq!(
         recovery
             .recover_attempt(
@@ -795,6 +657,10 @@ fn live_recovery_requires_exactly_once_completed_attempts_before_terminal() {
         Some(result)
     );
     let once = fs::read(&path).expect("recovery snapshot reads");
+    assert!(
+        once.len() > before.len(),
+        "recovering a completed attempt promotes it into the snapshot"
+    );
 
     let error = recovery
         .recover_attempt(
@@ -813,63 +679,6 @@ fn live_recovery_requires_exactly_once_completed_attempts_before_terminal() {
 }
 
 #[test]
-fn structural_boundary_rejects_before_an_unrecorded_completed_attempt() {
-    let phase_result = core_script::FlowValue::Boolean(true);
-    for boundary in ["phase", "transition", "flow"] {
-        let (workspace, _history, completed) = header_only_recovery_with_completed_attempt(
-            &format!("conversation-recovery-structural-{boundary}"),
-        );
-        let path = crate::tests::helpers::workspace_session_dir(&workspace)
-            .join("review/runs/review-1/recovery.jsonl");
-        let before = fs::read(&path).expect("recovery snapshot reads");
-        let mut recovery =
-            ProductiveRecoveryWriter::open_for_resume(&workspace, "review", "review-1")
-                .expect("header-only recovery opens");
-
-        let error = match boundary {
-            "phase" => recovery.phase_boundary(
-                "flow-000001",
-                "phase-000001",
-                "review-phase",
-                1,
-                &phase_result,
-                true,
-            ),
-            "transition" => {
-                recovery.transition_boundary("flow-000001", "review-phase", Some("summary-phase"))
-            }
-            _ => recovery.flow_boundary("flow-000001", Some(&phase_result)),
-        }
-        .expect_err("a structural boundary must wait for the completed attempt");
-
-        assert!(
-            error.to_string().contains("unreplayed"),
-            "{boundary}: {error}"
-        );
-        assert_eq!(
-            fs::read(&path).expect("recovery snapshot reads"),
-            before,
-            "{boundary}"
-        );
-        let mut reopened =
-            ProductiveRecoveryWriter::open_for_resume(&workspace, "review", "review-1")
-                .expect("recovery reopens");
-        assert_eq!(
-            reopened
-                .recover_attempt(
-                    RunAttemptKind::Provider,
-                    "provider-000001",
-                    REQUEST_HASH,
-                    None,
-                )
-                .expect("completed attempt recovers"),
-            Some(completed),
-            "{boundary}"
-        );
-    }
-}
-
-#[test]
 fn productive_recovery_truncates_only_an_uncommitted_tail_and_rejects_divergence() {
     let workspace = empty_workspace("conversation-recovery-truncated-tail");
     let mut recovery =
@@ -885,8 +694,7 @@ fn productive_recovery_truncates_only_an_uncommitted_tail_and_rejects_divergence
             false,
         )
         .expect("Phase boundary commits");
-    let path = crate::tests::helpers::workspace_session_dir(&workspace)
-        .join("review/runs/review-1/recovery.jsonl");
+    let path = review_run_dir(&workspace, "review-1").join("recovery.jsonl");
     let committed = fs::metadata(&path).expect("recovery metadata reads").len();
     OpenOptions::new()
         .append(true)
@@ -895,8 +703,7 @@ fn productive_recovery_truncates_only_an_uncommitted_tail_and_rejects_divergence
         .write_all(b"{\"record_type\":\"phase\"")
         .expect("uncommitted tail writes");
 
-    let mut resumed = ProductiveRecoveryWriter::open_for_resume(&workspace, "review", "review-1")
-        .expect("uncommitted tail is truncated");
+    let mut resumed = open_recovery_snapshot(&workspace);
     assert_eq!(
         fs::metadata(path).expect("truncated metadata reads").len(),
         committed

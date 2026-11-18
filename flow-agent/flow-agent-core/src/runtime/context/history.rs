@@ -42,7 +42,6 @@ pub fn event_payload_id<'a>(event: &'a EventEnvelope, field: &str) -> Option<&'a
 
 impl ContextHistory {
     pub(crate) fn recovery_object(&self) -> Result<ContextObject, RuntimeError> {
-        // WHY: completed deltas that alone exceed the limit always fall back, so skip building them.
         let with_completed_deltas = if self.completed_deltas_fit_object_limit()? {
             Some(self.recovery_bytes(true)?)
         } else {
@@ -63,13 +62,10 @@ impl ContextHistory {
         })
     }
 
-    /// Whether the completed deltas' canonical bytes alone fit the object limit. Each delta is
-    /// canonicalized separately and the scan stops at the limit, so the oversized array is never built.
     fn completed_deltas_fit_object_limit(&self) -> Result<bool, RuntimeError> {
         let Some((_, _, deltas)) = &self.latest_completed else {
             return Ok(true);
         };
-        // WHY: canonical JSON embeds the deltas array verbatim as "[" items joined by "," "]".
         let mut total = 2u64;
         for (index, delta) in deltas.iter().enumerate() {
             let canonical = proto::canonical_json(delta).map_err(|error| {

@@ -39,11 +39,6 @@ pub(crate) fn ensure_in_memory_replay_output_limit(
     Ok(())
 }
 
-/// Validated, append-only reader for one authoritative session log.
-///
-/// Each read is bounded by the per-segment and per-session event-data limits. The reader
-/// ignores an incomplete final JSONL line as an uncommitted append, rejects mutation of an
-/// already observed event, and leaves cursor advancement to the caller.
 pub struct SessionEventReader {
     observed_current_segment_bytes: u64,
     observed_segment_count: usize,
@@ -60,7 +55,6 @@ impl SessionEventReader {
         self.path.diagnostic_path()
     }
 
-    /// Opens a session's validated log boundary without reading event payloads yet.
     pub fn open(workspace: impl AsRef<Path>, session_id: &str) -> Result<Self, RuntimeError> {
         if !proto::is_valid_session_id(session_id) {
             return Err(RuntimeError::Usage(format!(
@@ -101,7 +95,6 @@ impl SessionEventReader {
         })
     }
 
-    /// Opens one validated run log owned by the addressed conversation.
     pub fn open_conversation_run(
         workspace: impl AsRef<Path>,
         conversation_id: &str,
@@ -165,12 +158,6 @@ impl SessionEventReader {
         })
     }
 
-    /// Reads every complete committed event whose sequence is greater than `cursor`.
-    ///
-    /// The caller must advance `cursor` only after successfully processing each returned
-    /// event. Repeating this call is safe after a processing failure. The returned canonical
-    /// records are bounded in memory; use [`Self::visit_verified_after`] for larger
-    /// callback-streamed reads.
     #[cfg(test)]
     pub(crate) fn read_after(&mut self, cursor: u64) -> Result<Vec<EventEnvelope>, RuntimeError> {
         let mut output_bytes = 0usize;
@@ -184,11 +171,6 @@ impl SessionEventReader {
         Ok(events)
     }
 
-    /// Verifies the complete authoritative log while visiting a bounded committed range.
-    ///
-    /// Segments are validated one at a time. `visit` receives each event and its canonical
-    /// JSONL record only when its sequence is in `(cursor, through_sequence]`; the reader's
-    /// append-only state advances only after the complete authoritative scan succeeds.
     pub fn visit_verified_after(
         &mut self,
         cursor: u64,
@@ -336,11 +318,6 @@ impl SessionEventReader {
         self.read_incremental_after_with(cursor, &mut || {})
     }
 
-    /// Visits only the newly appended complete suffix after an initial verified read.
-    ///
-    /// The callback receives committed events in `(cursor, through_sequence]` with their
-    /// canonical JSONL records. Call [`Self::visit_verified_after`] after the producer closes
-    /// to verify the complete authoritative log before treating delivery as final.
     pub fn visit_incremental_after(
         &mut self,
         cursor: u64,
@@ -406,7 +383,6 @@ impl SessionEventReader {
                 .as_deref()
                 .expect("session readers always validate one session"),
         );
-        // Errors and unwinds leave an empty cache for the next verified replay.
         let mut validation = std::mem::replace(&mut self.validation, empty_validation);
         let mut discovered_bytes = 0u64;
         let mut current_segment_count = self.observed_segment_count;

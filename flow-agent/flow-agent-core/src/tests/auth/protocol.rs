@@ -93,13 +93,12 @@ fn oauth_response_shapes_are_unambiguous() {
 
 #[test]
 fn oauth_credentials_derive_account_from_the_distinct_id_token() {
-    let body = serde_json::to_vec(&serde_json::json!({
-        "access_token": "opaque-access-token",
-        "id_token": jwt_with_account("id-token-account"),
-        "expires_in": 1,
-        "refresh_token": "refresh"
-    }))
-    .expect("token JSON");
+    let body = token_body_with_id(
+        "opaque-access-token",
+        &jwt_with_account("id-token-account"),
+        "refresh",
+        1.into(),
+    );
 
     let credential = parse_token_body(&body, 10).expect("distinct token response");
 
@@ -210,169 +209,125 @@ fn oauth_loopback_waits_for_a_callback_on_an_inherited_nonblocking_stream() {
 }
 
 #[test]
-fn oauth_loopback_callback_respects_an_absolute_deadline() {
-    let listener = TcpListener::bind("127.0.0.1:0").expect("loopback binds");
-    let address = listener.local_addr().expect("loopback address");
-    let client = thread::spawn(move || {
-        let mut stream = TcpStream::connect(address).expect("loopback connects");
-        stream.write_all(b"G").expect("partial callback writes");
-        thread::sleep(Duration::from_millis(200));
-        // A complete callback after the 25 ms cutoff must be refused, so only the absolute
-        // deadline (not EOF or the 5 s budget) can explain the rejection. A late write may fail.
-        let _ = stream
-            .write_all(b"ET /auth/callback?state=s&code=c HTTP/1.1\r\nHost: localhost\r\n\r\n");
-    });
-    let (mut stream, _) = listener.accept().expect("callback accepts");
+fn oauth_loopback_callback_is_bounded_by_its_absolute_and_connection_deadlines() {
+    for (absolute, connection) in [
+        (Duration::from_millis(25), Duration::from_secs(5)),
+        (Duration::from_secs(5), Duration::from_millis(25)),
+    ] {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("loopback binds");
+        let address = listener.local_addr().expect("loopback address");
+        let client = thread::spawn(move || {
+            let mut stream = TcpStream::connect(address).expect("loopback connects");
+            for byte in b"GET /auth/callback?code=c&state=s HTTP/1.1\r\nHost: localhost\r\n\r\n" {
+                if stream.write_all(&[*byte]).is_err() {
+                    break;
+                }
+                thread::sleep(Duration::from_millis(5));
+            }
+        });
+        let (mut stream, _) = listener.accept().expect("callback accepts");
 
-    assert!(
-        read_loopback_callback_until(
-            &mut stream,
-            "s",
-            Instant::now() + Duration::from_millis(25),
-            Duration::from_secs(5),
-        )
-        .is_err()
-    );
-    client.join().expect("slow callback client completes");
+        assert!(
+            read_loopback_callback_until(&mut stream, "s", Instant::now() + absolute, connection,)
+                .is_err(),
+            "absolute {absolute:?}, connection {connection:?}"
+        );
+        client.join().expect("slow callback client completes");
+    }
 }
 
-#[test]
-fn oauth_loopback_callback_limits_a_slow_drip_request() {
-    let listener = TcpListener::bind("127.0.0.1:0").expect("loopback binds");
-    let address = listener.local_addr().expect("loopback address");
-    let client = thread::spawn(move || {
-        let mut stream = TcpStream::connect(address).expect("loopback connects");
-        for byte in b"GET /auth/callback?code=c&state=s HTTP/1.1\r\nHost: localhost\r\n\r\n" {
-            if stream.write_all(&[*byte]).is_err() {
-                break;
-            }
-            thread::sleep(Duration::from_millis(5));
-        }
-    });
-    let (mut stream, _) = listener.accept().expect("callback accepts");
-
+fn assert_limit(
+    label: &str,
+    limit: usize,
+    body: impl Fn(usize) -> Vec<u8>,
+    accepts: impl Fn(&[u8]) -> bool,
+) {
+    assert!(accepts(&body(limit)), "{label} at its limit must parse");
     assert!(
-        read_loopback_callback_until(
-            &mut stream,
-            "s",
-            Instant::now() + Duration::from_secs(5),
-            Duration::from_millis(25),
-        )
-        .is_err()
+        !accepts(&body(limit + 1)),
+        "{label} one byte over its limit must be rejected"
     );
-    client.join().expect("slow callback client completes");
+}
+
+fn device_authorization_body(field: &str, size: usize) -> Vec<u8> {
+    let mut value = serde_json::json!({
+        "device_auth_id": "d",
+        "interval": 1,
+        "user_code": "u",
+        "verification_uri": "v",
+    });
+    value[field] = serde_json::Value::String("x".repeat(size));
+    serde_json::to_vec(&value).expect("device JSON")
 }
 
 #[test]
 fn oauth_verifier_field_budget() {
-    let accepted = format!(
-        r#"{{"authorization_code":"c","code_verifier":"{}"}}"#,
-        "v".repeat(MAX_OAUTH_FIELD_BYTES)
+    assert_limit(
+        "code_verifier",
+        MAX_OAUTH_FIELD_BYTES,
+        |size| {
+            serde_json::to_vec(&serde_json::json!({
+                "authorization_code": "c",
+                "code_verifier": "v".repeat(size),
+            }))
+            .expect("device poll JSON")
+        },
+        |body| parse_device_poll_body(body).is_ok(),
     );
-    assert!(parse_device_poll_body(accepted.as_bytes()).is_ok());
-    let rejected = format!(
-        r#"{{"authorization_code":"c","code_verifier":"{}"}}"#,
-        "v".repeat(MAX_OAUTH_FIELD_BYTES + 1)
-    );
-    assert!(parse_device_poll_body(rejected.as_bytes()).is_err());
 }
 
 #[test]
 fn oauth_device_authorization_field_budgets() {
     for field in ["device_auth_id", "user_code", "verification_uri"] {
-        device_field_budget(field);
-    }
-}
-
-fn device_field_budget(field: &str) {
-    for (size, accepted) in [
-        (MAX_OAUTH_FIELD_BYTES, true),
-        (MAX_OAUTH_FIELD_BYTES + 1, false),
-    ] {
-        let mut value = serde_json::json!({
-            "device_auth_id": "d",
-            "interval": 1,
-            "user_code": "u",
-            "verification_uri": "v",
-        });
-        value[field] = serde_json::Value::String("x".repeat(size));
-        assert_eq!(
-            parse_device_authorization_body(&serde_json::to_vec(&value).expect("device JSON"))
-                .is_ok(),
-            accepted,
-            "{field} {size}"
+        assert_limit(
+            field,
+            MAX_OAUTH_FIELD_BYTES,
+            |size| device_authorization_body(field, size),
+            |body| parse_device_authorization_body(body).is_ok(),
         );
     }
 }
 
 #[test]
 fn oauth_account_id_field_budget() {
-    let accepted = token_body(
-        &jwt_with_account(&"a".repeat(MAX_OAUTH_FIELD_BYTES)),
-        "r",
-        1.into(),
+    assert_limit(
+        "account id",
+        MAX_OAUTH_FIELD_BYTES,
+        |size| token_body(&jwt_with_account(&"a".repeat(size)), "r", 1.into()),
+        |body| parse_token_body(body, 0).is_ok(),
     );
-    assert!(parse_token_body(&accepted, 0).is_ok());
-    let rejected = token_body(
-        &jwt_with_account(&"a".repeat(MAX_OAUTH_FIELD_BYTES + 1)),
-        "r",
-        1.into(),
-    );
-    assert!(parse_token_body(&rejected, 0).is_err());
 }
 
 #[test]
 fn oauth_access_and_id_jwt_token_field_budget() {
-    access_or_id_field_budget(true);
-    access_or_id_field_budget(false);
+    let account_jwt = jwt_with_account("a");
+    let tail = &account_jwt[account_jwt.find('.').expect("dot")..];
+    assert_limit(
+        "access token",
+        MAX_OAUTH_SECRET_BYTES,
+        |size| token_body_with_id(&"a".repeat(size), &account_jwt, "r", 1.into()),
+        |body| parse_token_body(body, 0).is_ok(),
+    );
+    assert_limit(
+        "ID token",
+        MAX_OAUTH_SECRET_BYTES,
+        |size| {
+            let id = format!("{}{tail}", "h".repeat(size - tail.len()));
+            token_body_with_id("access", &id, "r", 1.into())
+        },
+        |body| parse_token_body(body, 0).is_ok(),
+    );
 }
 
 #[test]
 fn oauth_refresh_token_field_budget() {
     let id_token = jwt_with_account("a");
-    for (size, accepted) in [
-        (MAX_OAUTH_SECRET_BYTES, true),
-        (MAX_OAUTH_SECRET_BYTES + 1, false),
-    ] {
-        assert_eq!(
-            parse_token_body(
-                &token_body_with_id("access", &id_token, &"r".repeat(size), 1.into()),
-                0
-            )
-            .is_ok(),
-            accepted,
-            "refresh token size {size}"
-        );
-    }
-}
-
-fn access_or_id_field_budget(access: bool) {
-    let account_jwt = jwt_with_account("a");
-    for (size, accepted) in [
-        (MAX_OAUTH_SECRET_BYTES, true),
-        (MAX_OAUTH_SECRET_BYTES + 1, false),
-    ] {
-        let fixed = format!(
-            ".{}",
-            &account_jwt[account_jwt.find('.').expect("dot") + 1..]
-        );
-        let sized_token = format!("{}{}", "h".repeat(size - fixed.len()), fixed);
-        let (access_token, id_token) = if access {
-            ("a".repeat(size), account_jwt.clone())
-        } else {
-            ("access".to_owned(), sized_token)
-        };
-        assert_eq!(
-            parse_token_body(
-                &token_body_with_id(&access_token, &id_token, "r", 1.into()),
-                0
-            )
-            .is_ok(),
-            accepted,
-            "{} size {size}",
-            if access { "access token" } else { "ID token" }
-        );
-    }
+    assert_limit(
+        "refresh token",
+        MAX_OAUTH_SECRET_BYTES,
+        |size| token_body_with_id("access", &id_token, &"r".repeat(size), 1.into()),
+        |body| parse_token_body(body, 0).is_ok(),
+    );
 }
 
 #[test]

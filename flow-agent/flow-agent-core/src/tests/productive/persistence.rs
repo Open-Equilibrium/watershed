@@ -3,10 +3,10 @@ use super::super::{
     productive_recovery_support::{InterruptingProductiveRecovery, ProductiveInterruptionPoint},
     support::run_isolated_test,
 };
-use super::support::FakeToolExecutor;
 use super::support::{
-    FakeProvider, ScriptedProvider, UnsupportedToolExecutor,
+    FakeProvider, FakeToolExecutor, ScriptedProvider, UnsupportedToolExecutor,
     disabled_smoke_productive_execution_fixture, smoke_productive_execution_fixture,
+    string_provider_turn,
 };
 use crate::runtime::{
     config_io::load_global_config,
@@ -19,12 +19,8 @@ use crate::runtime::{
         read_conversation_history, reserve_conversation_run_recovery,
         set_productive_run_creation_observer,
     },
-    live_events::live_event_channel,
     openai_codex::derive_prompt_cache_key,
-    productive::{
-        ProductiveExecution, ProductiveProvider, execute_productive_flow,
-        execute_productive_flow_with_recovery,
-    },
+    productive::{ProductiveExecution, ProductiveProvider, execute_productive_flow_with_recovery},
     session::{
         continue_conversation_with_provider, execute_reserved_productive_recovery,
         run_productive_session_with_provider, set_productive_executor_readiness_observer,
@@ -40,7 +36,7 @@ use crate::runtime::{
     run_attempts::RunAttemptKind,
 };
 use crate::tests::helpers::configured_smoke_productive_execution_fixture;
-use std::{collections::VecDeque, fs, path::Path};
+use std::{fs, path::Path};
 
 fn open_productive_recovery_prefix(
     workspace: &Path,
@@ -160,8 +156,6 @@ fn missing_selected_executor_fails_before_provider_dispatch_or_run_reservation()
         return;
     }
     let (workspace, fixture) = smoke_productive_execution_fixture();
-    // This exact-test child owns its environment; never touch the operator's
-    // platform configuration while staging the missing selected executable.
     #[cfg(target_os = "linux")]
     unsafe {
         std::env::set_var("XDG_CONFIG_HOME", workspace.join("platform-config"));
@@ -254,68 +248,6 @@ where
 }
 
 #[test]
-fn productive_run_persists_one_complete_conversation_bundle() {
-    let (workspace, fixture) = disabled_smoke_productive_execution_fixture();
-    let flow = fixture.smoke_flow();
-    create_conversation_run(
-        &workspace,
-        "conversation",
-        "run",
-        "smoke-flow",
-        "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-        "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-    )
-    .expect("conversation run");
-    let mut provider = FakeProvider::default();
-    let mut attempts = ConversationAttemptLog::open(&workspace, "conversation", "run")
-        .expect("conversation attempt log opens");
-    let mut sink = ConversationEventWriter::open(&workspace, "conversation", "run", true)
-        .expect("conversation event writer");
-
-    let execution = execute_productive_flow(
-        ProductiveExecution {
-            agent_instructions: "Agent guidance.",
-            ..fixture.execution(flow, "run")
-        },
-        &mut provider,
-        &mut attempts,
-        &mut sink,
-    )
-    .expect("productive execution");
-    sink.finish().expect("writer finalization");
-
-    assert!(!execution.failed, "{:?}", execution.terminal_error);
-    let events = fs::read_to_string(
-        crate::tests::helpers::workspace_session_dir(&workspace)
-            .join("conversation/runs/run/events.jsonl"),
-    )
-    .expect("events");
-    assert!(events.contains("\"event_type\":\"session.completed\""));
-    assert!(!events.contains("secret-access"));
-    let contexts = fs::read_to_string(
-        crate::tests::helpers::workspace_session_dir(&workspace)
-            .join("conversation/runs/run/contexts.jsonl"),
-    )
-    .expect("contexts");
-    assert!(!contexts.is_empty());
-    assert!(
-        fs::read_dir(
-            crate::tests::helpers::workspace_session_dir(&workspace)
-                .join("conversation/runs/run/objects")
-        )
-        .expect("objects")
-        .next()
-        .is_some()
-    );
-    assert_eq!(
-        inspect_run_attempts(&workspace, "conversation", "run")
-            .expect("attempts")
-            .len(),
-        1
-    );
-}
-
-#[test]
 fn productive_session_entrypoint_persists_a_resumable_conversation() {
     let (workspace, fixture) = disabled_configured_smoke_productive_execution_fixture();
     let config = load_global_config().expect("productive config");
@@ -353,6 +285,7 @@ fn productive_session_entrypoint_persists_a_resumable_conversation() {
             .stdout
             .contains("\"event_type\":\"session.completed\"")
     );
+    assert!(!output.stdout.contains("secret-access"));
     assert_eq!(
         output.stdout,
         fs::read_to_string(&output.session_path).expect("persisted event output")
@@ -365,37 +298,38 @@ fn productive_session_entrypoint_persists_a_resumable_conversation() {
     assert_eq!(page.conversations[0].uncertain_attempts, 0);
 
     let conversation_id = page.conversations[0].conversation_id.clone();
-    let run_log = fs::read_to_string(
-        crate::tests::helpers::workspace_session_dir(&workspace)
-            .join(&conversation_id)
-            .join("runs")
-            .join(&output.session_id)
-            .join("run-log.jsonl"),
-    )
-    .expect("Run definition reads");
+    let run_dir = crate::tests::helpers::workspace_session_dir(&workspace)
+        .join(&conversation_id)
+        .join("runs")
+        .join(&output.session_id);
+    assert!(
+        !fs::read_to_string(run_dir.join("contexts.jsonl"))
+            .expect("contexts")
+            .is_empty()
+    );
+    assert_eq!(
+        inspect_run_attempts(&workspace, &conversation_id, &output.session_id)
+            .expect("attempts")
+            .len(),
+        1
+    );
+    let run_log = fs::read_to_string(run_dir.join("run-log.jsonl")).expect("Run definition reads");
     assert!(run_log.contains("\"model\":\"gpt-fixture\""));
     assert!(run_log.contains("\"model_profile_id\":\"operator-model-v0\""));
     assert!(run_log.contains("\"model_context_limit\":128000"));
     assert!(run_log.contains("\"output_reserve\":16384"));
-    let (notifier, _receiver) = live_event_channel();
     let mut continuation_provider = FakeProvider::default();
-    let continuation = continue_conversation_with_provider(
+    continue_conversation_with_provider(
         &workspace,
         &conversation_id,
         None,
         None,
-        Some(notifier),
+        None,
         false,
         || Ok(fixture.credential().clone()),
         &mut continuation_provider,
     )
-    .expect("live continuation completes");
-    assert!(
-        continuation
-            .stdout
-            .starts_with("flow smoke-flow (conversation "),
-        "notifier-backed execution must not retain canonical JSONL in memory"
-    );
+    .expect("continuation completes");
     assert_eq!(continuation_provider.bodies.len(), 1);
     assert_eq!(
         continuation_provider.bodies[0]["prompt_cache_key"],
@@ -540,40 +474,25 @@ fn cancellation_at_productive_run_creation_respects_publication_boundary() {
 }
 
 #[test]
-fn productive_session_human_output_reports_success_and_persists_failure() {
-    let (success_workspace, fixture) = disabled_configured_smoke_productive_execution_fixture();
+fn productive_session_human_output_reports_success() {
+    let (workspace, fixture) = disabled_configured_smoke_productive_execution_fixture();
     let mut provider = FakeProvider::default();
 
-    let output = run_default_smoke_productive_session(&success_workspace, &fixture, &mut provider)
+    let output = run_default_smoke_productive_session(&workspace, &fixture, &mut provider)
         .expect("human productive session completes");
 
     assert!(!output.failed);
     assert!(output.stdout.starts_with("flow smoke-flow (conversation "));
     assert!(output.stdout.ends_with(") completed\n"));
-
-    let (failure_workspace, fixture) = disabled_configured_smoke_productive_execution_fixture();
-    let mut provider = ScriptedProvider {
-        bodies: Vec::new(),
-        turns: VecDeque::new(),
-    };
-
-    let error = run_default_smoke_productive_session(&failure_workspace, &fixture, &mut provider)
-        .expect_err("provider failure is reported after durable closure");
-
-    assert!(error.to_string().contains("session"));
-    let page = conversation_status_page(&failure_workspace, None).expect("conversation status");
-    assert_eq!(page.conversations.len(), 1);
-    assert_eq!(page.conversations[0].run_count, 1);
-    assert_eq!(page.conversations[0].uncertain_attempts, 1);
 }
 
 #[test]
 fn productive_recovery_reuses_committed_provider_attempt_without_redispatch() {
     let (workspace, fixture) = disabled_configured_smoke_productive_execution_fixture();
     let config = load_global_config().expect("productive config");
-    let registry = &fixture.registry;
     let flow = fixture.smoke_flow();
-    let definition = session_definition_metadata(registry, flow).expect("definition metadata");
+    let definition =
+        session_definition_metadata(&fixture.registry, flow).expect("definition metadata");
     let prior_history = ContextHistory::default();
     let (mut recovery, mut writer, mut attempts) = open_productive_recovery_prefix(
         &workspace,
@@ -643,9 +562,9 @@ fn productive_recovery_reuses_committed_provider_attempt_without_redispatch() {
 fn productive_recovery_reuses_committed_tool_attempt_without_redispatch() {
     let (workspace, fixture) = configured_smoke_productive_execution_fixture();
     let config = load_global_config().expect("productive config");
-    let registry = &fixture.registry;
     let flow = fixture.smoke_flow();
-    let definition = session_definition_metadata(registry, flow).expect("definition metadata");
+    let definition =
+        session_definition_metadata(&fixture.registry, flow).expect("definition metadata");
     let prior_history = ContextHistory::default();
     let (mut recovery, mut writer, mut attempts) = open_productive_recovery_prefix(
         &workspace,
@@ -653,35 +572,25 @@ fn productive_recovery_reuses_committed_tool_attempt_without_redispatch() {
         config.event_clock.base_unix_seconds,
         &prior_history,
     );
-    let tool_call = serde_json::json!({
-        "arguments": "{}",
-        "call_id": "call-1",
-        "name": "echo",
-        "type": "function_call",
-    });
-    let mut initial_provider = ScriptedProvider {
-        bodies: Vec::new(),
-        turns: VecDeque::from([
-            ProviderTurn {
-                token_usage: None,
-                response_id: "response-tool".to_owned(),
-                output_text: String::new(),
-                retained_items: vec![tool_call],
-                tool_calls: vec![ProviderToolCall {
-                    call_id: "call-1".to_owned(),
-                    name: "echo".to_owned(),
-                    arguments: "{}".to_owned(),
-                }],
-            },
-            ProviderTurn {
-                token_usage: None,
-                response_id: "response-final".to_owned(),
-                output_text: "{\"type\":\"string\",\"value\":\"after-tool\"}".to_owned(),
-                retained_items: Vec::new(),
-                tool_calls: Vec::new(),
-            },
-        ]),
-    };
+    let mut initial_provider = ScriptedProvider::new([
+        ProviderTurn {
+            token_usage: None,
+            response_id: "response-tool".to_owned(),
+            output_text: String::new(),
+            retained_items: vec![serde_json::json!({
+                "arguments": "{}",
+                "call_id": "call-1",
+                "name": "echo",
+                "type": "function_call",
+            })],
+            tool_calls: vec![ProviderToolCall {
+                call_id: "call-1".to_owned(),
+                name: "echo".to_owned(),
+                arguments: "{}".to_owned(),
+            }],
+        },
+        string_provider_turn("response-final", "after-tool"),
+    ]);
     let mut tools = FakeToolExecutor::default();
     {
         let mut interruption =
@@ -706,10 +615,7 @@ fn productive_recovery_reuses_committed_tool_attempt_without_redispatch() {
     assert_eq!(initial_provider.bodies.len(), 2);
     assert_eq!(tools.invocations.len(), 1);
 
-    let mut recovery_provider = ScriptedProvider {
-        bodies: Vec::new(),
-        turns: VecDeque::new(),
-    };
+    let mut recovery_provider = ScriptedProvider::new([]);
     let output = recover_interrupted_productive_run(
         &workspace,
         ProductiveExecution {

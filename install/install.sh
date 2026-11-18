@@ -48,8 +48,6 @@ release_supported() {
 validate_acl() {
     [ "$host" = Darwin ] || return 0
     [ -x /usr/bin/osascript ] || fail 'macOS ACL admission requires /usr/bin/osascript with JavaScript and Objective-C support'
-    # Query the held object on stdin. Darwin ACLs have at most 128 ordered entries;
-    # only earlier matching/everyone denies neutralize untrusted mutation grants.
     /usr/bin/osascript -l JavaScript -e '
 ObjC.import("Foundation");
 ObjC.bindFunction("acl_get_fd_np", ["void *", ["int", "int"]]);
@@ -189,8 +187,6 @@ metadata() {
     if [ "$host" = Darwin ]; then
         case "$3" in
             /dev/fd/[3-9])
-                # Pathname stat sees the descriptor device, not the held object.
-                # BSD stat without a file operand uses fstat on standard input.
                 /usr/bin/stat -f "$2" < "$3"
                 ;;
             *) /usr/bin/stat -L -f "$2" "$3" ;;
@@ -201,7 +197,6 @@ metadata() {
 }
 
 matches_descriptor() {
-    # Shell -ef compares Darwin's descriptor device instead of its held object.
     path_identity=$(metadata '%d:%i' '%d:%i' "$1") || return 1
     descriptor_identity=$(metadata '%d:%i' '%d:%i' "$2") || return 1
     [ "$path_identity" = "$descriptor_identity" ]
@@ -262,7 +257,6 @@ validate_source() {
     [ -f "$source_path" ] || fail "missing regular bundle artifact: $source_name"
     [ ! -L "$source_name" ] && matches_descriptor "$source_name" "$source_path" \
         || fail "bundle artifact changed during installation: $source_name"
-    # Darwin's descriptor device does not expose the held file's execute access.
     [ -x "$source_name" ] || fail "bundle artifact is not executable: $source_name"
     source_links=$(metadata '%h' '%l' "$source_path") || fail 'cannot inspect bundle artifact'
     [ "$source_links" -eq 1 ] || fail "hard-linked bundle artifact is unsafe: $source_name"
@@ -307,8 +301,6 @@ bin_owner=$(metadata '%u' '%u' "$bin_fd") || fail 'cannot inspect installation b
 [ "$bin_owner" -eq "$current_owner" ] || fail 'installation bin directory is not owned by the installer administrator'
 validate_acl "$bin_fd" 'installation bin directory'
 
-# The working directory anchors publication and rollback on both native hosts;
-# Darwin's descriptor filesystem does not support traversing directory entries.
 cd "$bin" || fail 'cannot enter installation bin directory'
 matches_descriptor . "$bin_fd" || fail 'installation bin path changed during installation'
 flow_target=./flow
@@ -334,7 +326,6 @@ pending_signal_status=
 readiness_control=$stage_directory/readiness-control
 readiness_inner_control=$stage_directory/readiness-inner-control
 readiness_scanner=/usr/bin/pgrep
-# Every signal is issued by a live member of its own admitted group.
 readiness_shell='
     set +e
     trap ":" HUP INT TERM PIPE
@@ -419,7 +410,6 @@ readiness_shell='
     kill -s KILL -- "-$readiness_pgid" 2>/dev/null
 '
 wait_for_readiness_status() {
-    # Request six seconds of sleep for the five-second checker and reporting.
     readiness_attempts=60
     while [ ! -e "$readiness_status_file" ] && [ ! -L "$readiness_status_file" ]; do
         [ "$readiness_attempts" -gt 0 ] || return 1
@@ -441,8 +431,6 @@ wait_for_readiness_status() {
 stop_readiness() {
     [ "$readiness_active" -eq 1 ] || return 0
     exec 7>&- 8>&-
-    # Readiness is the sole installer background job, including a fork interrupted
-    # before its process number could be assigned. No saved number is signaled.
     wait 2>/dev/null || :
     readiness_active=0
 }
@@ -476,7 +464,6 @@ cleanup() {
     fi
 }
 signal_exit() {
-    # Settle mkdir's result and ownership before honoring the first interrupt.
     pending_signal_status=${pending_signal_status:-$1}
     [ "${creation_pending:-0}" -ne 1 ] || return 0
     trap '' HUP INT TERM
@@ -591,14 +578,12 @@ if [ "$install_executor" -eq 1 ]; then
         "$readiness_config" "$flow_target" "$readiness_status_file" \
         "$readiness_inner_control" "$installer_pgid" "$readiness_scanner" "$readiness_shell" "$@"
     if [ "$host" = Darwin ]; then
-        # macOS /bin/sh gives each background job its own group without a terminal.
         set -m
     else
         set -- /usr/bin/setsid "$@"
     fi
     trap ':' PIPE
     readiness_active=1
-    # Open the reader while the inherited RDWR anchor still prevents an open hang.
     "$@" <"$readiness_control" 7>&- 8>&- &
     exec 7>&-
     printf '%s\n' start >&8 || :

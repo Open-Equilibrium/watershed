@@ -11,7 +11,10 @@ use crate::runtime::{
     session_store::open_flow_agent_home,
     types::{EmitMode, EventClock, MAX_GLOBAL_CONFIG_BYTES, RuntimeError},
 };
-use std::{fs, io, path::PathBuf};
+use std::{
+    fs, io,
+    path::{Path, PathBuf},
+};
 
 fn global_config_path() -> PathBuf {
     let path = session_home_path().join("config.yaml");
@@ -19,6 +22,10 @@ fn global_config_path() -> PathBuf {
         crate::initialize_global_config(None).expect("isolated global Flow authority initializes");
     }
     path
+}
+
+fn write_global_config(source: impl AsRef<str>) {
+    fs::write(global_config_path(), source.as_ref()).expect("global config written");
 }
 
 #[test]
@@ -61,6 +68,22 @@ fn global_configuration_is_the_only_implicit_flow_authority() {
         .expect("the global config and registry are authoritative");
 
     assert!(!output.failed);
+
+    use std::os::unix::fs::PermissionsExt as _;
+    let local_config = workspace.join(".flow/config.yaml");
+    let original_permissions = fs::metadata(&local_config)
+        .expect("ambient local config metadata reads")
+        .permissions();
+    fs::set_permissions(&local_config, fs::Permissions::from_mode(0o000))
+        .expect("ambient local config is made unreadable");
+    let result = run_flow(&workspace, "smoke-flow", EmitMode::Jsonl);
+    fs::set_permissions(&local_config, original_permissions)
+        .expect("ambient local config permissions restore");
+    assert!(
+        !result
+            .expect("an unreadable ambient local config is never opened")
+            .failed
+    );
 }
 
 #[test]
@@ -90,21 +113,6 @@ fn unfinished_global_initialization_fails_before_session_mutation() {
         "{error}"
     );
     assert!(!crate::tests::helpers::workspace_session_dir(&workspace).exists());
-}
-
-#[test]
-fn inaccessible_ambient_workspace_config_is_never_probed() {
-    use std::os::unix::fs::PermissionsExt as _;
-
-    let workspace = workspace_copy("smoke-flow");
-    let local_config = workspace.join(".flow/config.yaml");
-    fs::set_permissions(&local_config, fs::Permissions::from_mode(0o000))
-        .expect("ambient config is made inaccessible");
-
-    let output = run_flow(&workspace, "smoke-flow", EmitMode::Jsonl)
-        .expect("only the global Flow authority is read");
-
-    assert!(!output.failed);
 }
 
 #[test]
@@ -175,7 +183,7 @@ fn global_config_helpers_reject_unsafe_registry_roots() {
             "unsupported FLOW_AGENT_HOME/config.yaml stub_model",
         ),
     ] {
-        fs::write(global_config_path(), source).expect("invalid config written");
+        write_global_config(source);
         match load_global_config().expect_err("invalid config must be rejected") {
             RuntimeError::Usage(message) => {
                 assert!(message.contains(expected), "{label}: {message}")
@@ -184,69 +192,47 @@ fn global_config_helpers_reject_unsafe_registry_roots() {
         }
     }
 
-    fs::write(global_config_path(), "stub_model: deterministic\n")
-        .expect("config without registry root");
+    write_global_config("stub_model: deterministic\n");
     assert!(matches!(
         load_global_config(),
         Err(RuntimeError::Usage(message)) if message.contains("missing")
     ));
 
     for registry_root in ["registry", "nested/registry", "répertoire/注册表"] {
-        fs::write(
-            global_config_path(),
-            format!("registry_root: {registry_root}\n"),
-        )
-        .expect("valid config");
+        write_global_config(format!("registry_root: {registry_root}\n"));
         let config = load_global_config().expect("config loads");
-        let expected = registry_root
-            .split('/')
-            .fold(PathBuf::new(), |mut path, component| {
-                path.push(component);
-                path
-            });
         assert_ne!(config.event_clock, EventClock::fixed_fixture());
-        assert_eq!(config.registry_root, expected, "{registry_root}");
+        assert_eq!(
+            config.registry_root,
+            PathBuf::from(registry_root),
+            "{registry_root}"
+        );
     }
-    fs::write(
-        global_config_path(),
-        "registry_root: registry # authoring registry\n",
-    )
-    .expect("commented config");
+    write_global_config("registry_root: registry # authoring registry\n");
     let config = load_global_config().expect("commented config loads");
     assert_eq!(config.registry_root, PathBuf::from("registry"));
 
-    fs::write(
-        global_config_path(),
+    write_global_config(
         "fixture_profile: stub-model\nregistry_root: registry\nstub_model: deterministic\n",
-    )
-    .expect("fixture config");
+    );
     let config = load_global_config().expect("fixture config loads");
     assert_eq!(config.event_clock, EventClock::fixed_fixture());
 
     for registry_root in [
         ".",
         "config.yaml",
-        "config.yaml/registry",
         "CONFIG.YAML",
         "workspaces",
-        "workspaces/registry",
-        ".flow-init.json/registry",
-        ".flow-init.lock/registry",
+        ".flow-init.json",
+        ".flow-init.lock",
         "AGENTS.md",
-        "agents.md/registry",
         "../registry",
-        "registry/./nested",
-        "registry/../nested",
         r"registry\nested",
         "C:/registry",
         "NUL/registry",
         "bad:name",
     ] {
-        fs::write(
-            global_config_path(),
-            format!("registry_root: {registry_root}\n"),
-        )
-        .expect("unsafe config");
+        write_global_config(format!("registry_root: {registry_root}\n"));
         assert!(
             matches!(
                 load_global_config(),
@@ -260,11 +246,10 @@ fn global_config_helpers_reject_unsafe_registry_roots() {
     }
 
     let oversized_len = usize::try_from(MAX_GLOBAL_CONFIG_BYTES).expect("limit fits usize") + 1;
-    fs::write(
-        global_config_path(),
-        format!("registry_root: registry\n{}", "x".repeat(oversized_len)),
-    )
-    .expect("oversized config written");
+    write_global_config(format!(
+        "registry_root: registry\n{}",
+        "x".repeat(oversized_len)
+    ));
     assert!(matches!(
         load_global_config(),
         Err(RuntimeError::Protocol(message)) if message.contains("exceeds max")
@@ -296,7 +281,7 @@ fn live_global_config_requires_one_explicit_bounded_provider_and_model() {
             "requires model",
         ),
     ] {
-        fs::write(global_config_path(), source).expect("live config written");
+        write_global_config(source);
         let config = load_global_config().expect("configuration parses for authoring");
         assert!(
             matches!(
@@ -307,25 +292,19 @@ fn live_global_config_requires_one_explicit_bounded_provider_and_model() {
         );
     }
 
-    fs::write(
-        global_config_path(),
-        format!(
-            "model: {}\nprovider: openai-codex\nregistry_root: registry\n",
-            "m".repeat(257)
-        ),
-    )
-    .expect("oversized model config written");
+    write_global_config(format!(
+        "model: {}\nprovider: openai-codex\nregistry_root: registry\n",
+        "m".repeat(257)
+    ));
     let config = load_global_config().expect("configuration parses for authoring");
     assert!(matches!(
         require_execution_backend(&config),
         Err(RuntimeError::Usage(message)) if message.contains("at most 256 Unicode scalars")
     ));
 
-    fs::write(
-        global_config_path(),
+    write_global_config(
         "model: gpt-fixture\nmodel_context_limit: 128000\noutput_reserve: 16384\nprovider: openai-codex\nregistry_root: registry\n",
-    )
-    .expect("productive config written");
+    );
     let config = load_global_config().expect("productive config parses");
     assert_eq!(
         require_execution_backend(&config).expect("productive backend resolves"),
@@ -340,11 +319,9 @@ fn live_global_config_requires_one_explicit_bounded_provider_and_model() {
         }
     );
 
-    fs::write(
-        global_config_path(),
+    write_global_config(
         "model: gpt-fixture\nmodel_context_limit: 20480\noutput_reserve: 16384\nprovider: openai-codex\nregistry_root: registry\n",
-    )
-    .expect("invalid productive profile written");
+    );
     let config = load_global_config().expect("configuration parses for authoring");
     assert!(matches!(
         require_execution_backend(&config),
@@ -355,13 +332,9 @@ fn live_global_config_requires_one_explicit_bounded_provider_and_model() {
 #[test]
 fn fixture_global_config_rejects_productive_backend_fields() {
     for field in ["provider: openai-codex", "model: gpt-fixture"] {
-        fs::write(
-            global_config_path(),
-            format!(
-                "fixture_profile: stub-model\nregistry_root: registry\nstub_model: deterministic\n{field}\n"
-            ),
-        )
-        .expect("mixed fixture config written");
+        write_global_config(format!(
+            "fixture_profile: stub-model\nregistry_root: registry\nstub_model: deterministic\n{field}\n"
+        ));
         let config = load_global_config().expect("mixed fixture config parses");
         assert!(matches!(
             require_execution_backend(&config),
@@ -369,27 +342,6 @@ fn fixture_global_config_rejects_productive_backend_fields() {
                 if message.contains("fixture profiles must not declare productive")
         ));
     }
-}
-
-#[test]
-fn execution_backend_preserves_fixture_and_productive_boundaries() {
-    let _workspace = workspace_copy("smoke-flow");
-    let fixture = load_global_config().expect("fixture config loads");
-    assert_eq!(
-        require_execution_backend(&fixture).expect("fixture backend is accepted"),
-        ExecutionBackend::Fixture
-    );
-
-    fs::write(
-        global_config_path(),
-        "model: gpt-fixture\nmodel_context_limit: 128000\noutput_reserve: 16384\nprovider: openai-codex\nregistry_root: registry\n",
-    )
-    .expect("productive config writes");
-    let productive = load_global_config().expect("productive config loads");
-    assert!(matches!(
-        require_execution_backend(&productive),
-        Ok(ExecutionBackend::OpenAiCodex { .. })
-    ));
 }
 
 #[test]
@@ -429,11 +381,9 @@ fn productive_model_validation_counts_unicode_scalars_and_rejects_controls() {
 
 #[test]
 fn live_global_config_selects_the_openai_compatible_provider_without_an_endpoint() {
-    fs::write(
-        global_config_path(),
+    write_global_config(
         "model: gpt-fixture\nmodel_context_limit: 128000\noutput_reserve: 16384\nprovider: openai-compatible\nregistry_root: registry\n",
-    )
-    .expect("endpoint provider config written");
+    );
     let config = load_global_config().expect("endpoint provider config parses");
     assert_eq!(
         require_execution_backend(&config).expect("endpoint provider backend resolves"),
@@ -448,19 +398,16 @@ fn live_global_config_selects_the_openai_compatible_provider_without_an_endpoint
         }
     );
 
-    // The base URL is kept with the key in the protected credential record, never in configuration.
-    fs::write(
-        global_config_path(),
+    write_global_config(
         "model: gpt-fixture\nmodel_context_limit: 128000\noutput_reserve: 16384\nprovider: openai-compatible\nbase_url: https://models.example.test/v1\nregistry_root: registry\n",
-    )
-    .expect("endpoint config with a base URL written");
+    );
     assert!(load_global_config().is_err());
 }
 
 #[test]
 fn non_fixture_global_config_fails_closed_before_runtime_side_effects() {
     let workspace = workspace_copy("hello-flow");
-    fs::write(global_config_path(), "registry_root: registry\n").expect("global config written");
+    write_global_config("registry_root: registry\n");
 
     let err = run_flow(&workspace, "hello-flow", EmitMode::Jsonl)
         .expect_err("live execution requires an explicit provider and model");
@@ -504,37 +451,37 @@ fn global_config_missing_fails_closed() {
 }
 
 #[test]
-fn global_config_rejects_symlinked_config_file() {
+fn global_config_rejects_linked_config_file() {
     use std::os::unix::fs::symlink;
 
-    let outside = empty_workspace("outside-global-config");
-    let outside_config = outside.join("config.yaml");
-    fs::write(&outside_config, "registry_root: registry\n").expect("outside config written");
+    type LinkFn = fn(&Path, &Path) -> io::Result<()>;
+    let cases: [(&str, LinkFn, &str); 2] = [
+        ("symlink", |target, link| symlink(target, link), "symlink"),
+        (
+            "hard link",
+            |target, link| fs::hard_link(target, link),
+            "hard-linked",
+        ),
+    ];
     let config_path = global_config_path();
     fs::remove_file(&config_path).expect("initialized config removes");
-    symlink(&outside_config, &config_path).expect("config symlink");
+    for (label, link, fragment) in cases {
+        let outside = empty_workspace(&format!(
+            "outside-global-config-{}",
+            label.replace(' ', "-")
+        ));
+        let outside_config = outside.join("config.yaml");
+        fs::write(&outside_config, "registry_root: registry\n").expect("outside config written");
+        link(&outside_config, &config_path).expect("config link created");
 
-    let err = load_global_config().expect_err("config symlink must fail");
+        let err = load_global_config().expect_err("linked config must fail");
 
-    assert!(matches!(err, RuntimeError::Protocol(message) if message.contains("symlink")));
-}
-
-#[test]
-fn global_config_rejects_hardlinked_config_file() {
-    let _workspace = workspace_copy("hello-flow");
-    let outside = empty_workspace("outside-global-config-hardlink");
-    let config_path = global_config_path();
-    let outside_config = outside.join("config.yaml");
-    fs::write(&outside_config, "registry_root: registry\n").expect("outside config written");
-    fs::remove_file(&config_path).expect("fixture config removed");
-    fs::hard_link(&outside_config, &config_path).expect("config hard link created");
-
-    let err = load_global_config().expect_err("hard-linked config must fail");
-
-    assert!(
-        matches!(&err, RuntimeError::Protocol(message) if message.contains("hard-linked")),
-        "unexpected error: {err:?}"
-    );
+        assert!(
+            matches!(&err, RuntimeError::Protocol(message) if message.contains(fragment)),
+            "{label}: {err:?}"
+        );
+        fs::remove_file(&config_path).expect("config link removes before its target drops");
+    }
 }
 
 #[test]

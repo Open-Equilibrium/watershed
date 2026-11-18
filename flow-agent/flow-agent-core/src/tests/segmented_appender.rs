@@ -1,11 +1,19 @@
-use super::helpers::{
-    canonical_context_manifest_line, empty_workspace, fill_event_segments_to_final_byte,
-    reserve_session_log,
+use super::{
+    event_writer::support::{assert_error_contains, reserved_session},
+    helpers::{
+        canonical_context_manifest_line, empty_workspace, fill_event_segments_to_final_byte,
+    },
 };
 use crate::runtime::{
     context_persistence::ContextManifestWriter,
-    fs_guards::{segmented_jsonl_files, segmented_jsonl_path, set_directory_sync_error_for_test},
-    segmented_appender::{EventLogAppender, SessionLogAppender},
+    fs_guards::{
+        AnchoredFile, segmented_jsonl_files, segmented_jsonl_path,
+        set_directory_sync_error_for_test,
+    },
+    segmented_appender::{
+        EventLogAppender, SessionLogAppender, append_native_event_batch_with,
+        set_native_batch_length_error_for_test,
+    },
     types::{
         CONTEXT_MANIFEST_STREAM_LIMITS, EVENT_STREAM_LIMITS, MAX_CANONICAL_EVENT_BYTES,
         MAX_SESSION_SEGMENT_BYTES,
@@ -16,12 +24,21 @@ use std::{
     io::{self, Write},
 };
 
+fn write_full_base_segment(base: &AnchoredFile) {
+    let mut full_segment =
+        vec![b'x'; usize::try_from(MAX_SESSION_SEGMENT_BYTES).expect("segment size fits")];
+    *full_segment.last_mut().expect("segment is nonempty") = b'\n';
+    fs::write(base.diagnostic_path(), full_segment)
+        .expect("base segment reaches the rotation boundary");
+}
+
 #[test]
 fn event_appender_rejects_a_leaf_replaced_while_open() {
     for force_rotation in [false, true] {
-        let workspace = empty_workspace(&format!("event-writer-replaced-leaf-{force_rotation}"));
-        let reservation =
-            reserve_session_log(&workspace, "replacedleaf001").expect("session reserved");
+        let (_workspace, reservation) = reserved_session(
+            &format!("event-writer-replaced-leaf-{force_rotation}"),
+            "replacedleaf001",
+        );
         let second = segmented_jsonl_path(&reservation.session_path, 2).expect("segment path");
         let path = reservation.session_path.diagnostic_path();
         let replacement = path.with_extension("replacement");
@@ -38,7 +55,7 @@ fn event_appender_rejects_a_leaf_replaced_while_open() {
             .append(path, b"lost event\n")
             .expect_err("the unlinked writer must fail closed");
 
-        assert!(err.to_string().contains("unlinked while open"), "{err}");
+        assert_error_contains(&err, "unlinked while open");
         assert_eq!(
             fs::read(path).expect("replacement remains"),
             b"replacement\n"
@@ -50,8 +67,7 @@ fn event_appender_rejects_a_leaf_replaced_while_open() {
 
 #[test]
 fn event_appender_rejects_a_canonical_path_replaced_while_handle_remains_linked() {
-    let workspace = empty_workspace("event-writer-relinked-handle");
-    let reservation = reserve_session_log(&workspace, "relinked001").expect("session reserved");
+    let (_workspace, reservation) = reserved_session("event-writer-relinked-handle", "relinked001");
     let path = reservation.session_path.diagnostic_path();
     let moved = path.with_extension("moved");
     let mut appender = SessionLogAppender::open(&reservation.session_path).expect("appender opens");
@@ -62,7 +78,7 @@ fn event_appender_rejects_a_canonical_path_replaced_while_handle_remains_linked(
         .append(path, b"lost event\n")
         .expect_err("replaced canonical segment must fail closed");
 
-    assert!(err.to_string().contains("identity changed"), "{err}");
+    assert_error_contains(&err, "identity changed");
     assert_eq!(fs::read(&moved).expect("moved segment remains"), b"");
     assert_eq!(
         fs::read(path).expect("replacement segment remains"),
@@ -74,8 +90,8 @@ fn event_appender_rejects_a_canonical_path_replaced_while_handle_remains_linked(
 
 #[test]
 fn event_appender_rejects_an_in_place_length_change() {
-    let workspace = empty_workspace("event-writer-length-change");
-    let reservation = reserve_session_log(&workspace, "lengthchange001").expect("session reserved");
+    let (_workspace, reservation) =
+        reserved_session("event-writer-length-change", "lengthchange001");
     let path = reservation.session_path.diagnostic_path();
     let mut appender = SessionLogAppender::open(&reservation.session_path).expect("appender opens");
     appender
@@ -89,7 +105,7 @@ fn event_appender_rejects_an_in_place_length_change() {
         .append(path, b"lost event\n")
         .expect_err("the stale writer must fail closed");
 
-    assert!(err.to_string().contains("changed outside"), "{err}");
+    assert_error_contains(&err, "changed outside");
     assert_eq!(
         fs::read(path).expect("external bytes remain"),
         b"external\n"
@@ -100,8 +116,8 @@ fn event_appender_rejects_an_in_place_length_change() {
 
 #[test]
 fn event_appender_rejects_a_sealed_segment_length_change() {
-    let workspace = empty_workspace("event-writer-sealed-length-change");
-    let reservation = reserve_session_log(&workspace, "sealedchange001").expect("session reserved");
+    let (_workspace, reservation) =
+        reserved_session("event-writer-sealed-length-change", "sealedchange001");
     let base = reservation.session_path.diagnostic_path();
     fs::write(base, b"first\n").expect("base segment writes");
     let second = segmented_jsonl_path(&reservation.session_path, 2).expect("segment path");
@@ -118,26 +134,19 @@ fn event_appender_rejects_a_sealed_segment_length_change() {
     let len_error = appender
         .len(base)
         .expect_err("stale aggregate length must fail closed");
-    assert!(
-        len_error.to_string().contains("changed outside"),
-        "{len_error}"
-    );
+    assert_error_contains(&len_error, "changed outside");
     let sync_error = appender
         .sync(base)
         .expect_err("stale stream synchronization must fail closed");
-    assert!(
-        sync_error.to_string().contains("changed outside"),
-        "{sync_error}"
-    );
+    assert_error_contains(&sync_error, "changed outside");
     drop(appender);
     reservation.release_lock().expect("reservation rolls back");
 }
 
 #[test]
 fn event_appender_rejects_a_length_change_during_inventory() {
-    let workspace = empty_workspace("event-writer-inventory-length-change");
-    let reservation =
-        reserve_session_log(&workspace, "inventorychange001").expect("session reserved");
+    let (_workspace, reservation) =
+        reserved_session("event-writer-inventory-length-change", "inventorychange001");
 
     let error = match SessionLogAppender::open_after_inventory_for_test(
         &reservation.session_path,
@@ -154,7 +163,7 @@ fn event_appender_rejects_a_length_change_during_inventory() {
         Err(error) => error,
     };
 
-    assert!(error.to_string().contains("changed outside"), "{error}");
+    assert_error_contains(&error, "changed outside");
     assert_eq!(
         fs::read(reservation.session_path.diagnostic_path()).expect("external bytes remain"),
         b"external\n"
@@ -164,9 +173,10 @@ fn event_appender_rejects_a_length_change_during_inventory() {
 
 #[test]
 fn event_appender_rejects_a_same_length_replacement_during_inventory() {
-    let workspace = empty_workspace("event-writer-inventory-identity-change");
-    let reservation =
-        reserve_session_log(&workspace, "inventoryidentity001").expect("session reserved");
+    let (_workspace, reservation) = reserved_session(
+        "event-writer-inventory-identity-change",
+        "inventoryidentity001",
+    );
     let path = reservation.session_path.diagnostic_path();
     let moved = path.with_extension("moved");
 
@@ -181,7 +191,7 @@ fn event_appender_rejects_a_same_length_replacement_during_inventory() {
         Err(error) => error,
     };
 
-    assert!(error.to_string().contains("identity changed"), "{error}");
+    assert_error_contains(&error, "identity changed");
     assert_eq!(fs::read(path).expect("replacement remains"), b"");
     assert_eq!(fs::read(&moved).expect("inventoried segment remains"), b"");
     reservation.simulate_abrupt_termination();
@@ -189,14 +199,11 @@ fn event_appender_rejects_a_same_length_replacement_during_inventory() {
 
 #[test]
 fn event_appender_rejects_a_same_length_replacement_during_rotation() {
-    let workspace = empty_workspace("event-writer-rotation-identity-change");
-    let reservation =
-        reserve_session_log(&workspace, "rotationidentity001").expect("session reserved");
-    let mut full_segment =
-        vec![b'x'; usize::try_from(MAX_SESSION_SEGMENT_BYTES).expect("segment size fits")];
-    *full_segment.last_mut().expect("segment is nonempty") = b'\n';
-    fs::write(reservation.session_path.diagnostic_path(), full_segment)
-        .expect("base segment reaches the rotation boundary");
+    let (_workspace, reservation) = reserved_session(
+        "event-writer-rotation-identity-change",
+        "rotationidentity001",
+    );
+    write_full_base_segment(&reservation.session_path);
     let mut appender = SessionLogAppender::open(&reservation.session_path).expect("appender opens");
     let next = segmented_jsonl_path(&reservation.session_path, 2).expect("next segment path");
     let moved = next.diagnostic_path().with_extension("moved");
@@ -208,7 +215,7 @@ fn event_appender_rejects_a_same_length_replacement_during_rotation() {
         })
         .expect_err("same-length rotation replacement must fail closed");
 
-    assert!(error.to_string().contains("identity changed"), "{error}");
+    assert_error_contains(&error, "identity changed");
     assert_eq!(
         fs::read(next.diagnostic_path()).expect("replacement remains"),
         b""
@@ -218,52 +225,34 @@ fn event_appender_rejects_a_same_length_replacement_during_rotation() {
     reservation.simulate_abrupt_termination();
 }
 
-// The inotify watch that makes a clean inventory cheap is Linux-only.
 #[cfg(target_os = "linux")]
 #[test]
-fn event_appender_keeps_rejecting_an_unexpected_sibling_after_a_failed_scan() {
-    let workspace = empty_workspace("event-writer-sticky-inventory");
-    let reservation =
-        reserve_session_log(&workspace, "stickyinventory001").expect("session reserved");
+fn event_appender_fails_closed_on_inventory_drift_and_a_lost_watch() {
+    let (_workspace, reservation) =
+        reserved_session("event-writer-inventory-drift", "inventorydrift001");
     let appender = SessionLogAppender::open(&reservation.session_path).expect("appender opens");
     let sibling = segmented_jsonl_path(&reservation.session_path, 2).expect("sibling path");
     fs::write(sibling.diagnostic_path(), b"\n").expect("unexpected sibling writes");
+    let path = reservation.session_path.diagnostic_path();
 
     for check in 1..=2 {
         let error = appender
-            .len(reservation.session_path.diagnostic_path())
+            .len(path)
             .expect_err("an unexpected sibling must fail every length check");
         assert!(
             error.to_string().contains("segment inventory changed"),
             "check {check}: {error}"
         );
     }
-    drop(appender);
-    reservation.release_lock().expect("reservation rolls back");
-}
-
-#[cfg(target_os = "linux")]
-#[test]
-fn event_appender_rescans_after_its_inventory_watch_is_lost() {
-    let workspace = empty_workspace("event-writer-lost-watch");
-    let reservation = reserve_session_log(&workspace, "lostwatch001").expect("session reserved");
-    let appender = SessionLogAppender::open(&reservation.session_path).expect("appender opens");
     appender.remove_inventory_watch_for_test();
-
     let error = appender
-        .len(reservation.session_path.diagnostic_path())
+        .len(path)
         .expect_err("a lost watch fails the check that finds it");
-    assert!(error.to_string().contains("was invalidated"), "{error}");
-
-    let sibling = segmented_jsonl_path(&reservation.session_path, 2).expect("sibling path");
-    fs::write(sibling.diagnostic_path(), b"\n").expect("unexpected sibling writes");
+    assert_error_contains(&error, "was invalidated");
     let error = appender
-        .len(reservation.session_path.diagnostic_path())
+        .len(path)
         .expect_err("an unexpected sibling must keep failing after the watch is lost");
-    assert!(
-        error.to_string().contains("segment inventory changed"),
-        "{error}"
-    );
+    assert_error_contains(&error, "segment inventory changed");
     drop(appender);
     reservation.release_lock().expect("reservation rolls back");
 }
@@ -271,9 +260,10 @@ fn event_appender_rescans_after_its_inventory_watch_is_lost() {
 #[test]
 fn event_appender_rejects_unterminated_segment_boundaries() {
     for non_final in [false, true] {
-        let workspace = empty_workspace(&format!("event-writer-unterminated-{non_final}"));
-        let reservation =
-            reserve_session_log(&workspace, "unterminated001").expect("session reserved");
+        let (_workspace, reservation) = reserved_session(
+            &format!("event-writer-unterminated-{non_final}"),
+            "unterminated001",
+        );
         fs::write(reservation.session_path.diagnostic_path(), b"{}")
             .expect("unterminated segment writes");
         if non_final {
@@ -287,7 +277,7 @@ fn event_appender_rejects_unterminated_segment_boundaries() {
             Err(error) => error,
         };
 
-        assert!(error.to_string().contains("must end with LF"), "{error}");
+        assert_error_contains(&error, "must end with LF");
         assert_eq!(
             fs::read(reservation.session_path.diagnostic_path())
                 .expect("unterminated segment remains"),
@@ -299,9 +289,8 @@ fn event_appender_rejects_unterminated_segment_boundaries() {
 
 #[test]
 fn event_appender_rotates_before_crossing_the_segment_limit() {
-    let workspace = empty_workspace("event-segment-rotation");
-    let reservation =
-        reserve_session_log(&workspace, "segmentrotation001").expect("session reserved");
+    let (_workspace, reservation) =
+        reserved_session("event-segment-rotation", "segmentrotation001");
     let mut appender = SessionLogAppender::open(&reservation.session_path).expect("appender opens");
     let record = vec![b'x'; MAX_CANONICAL_EVENT_BYTES];
     let records_in_first_segment =
@@ -344,13 +333,9 @@ fn event_appender_rotates_before_crossing_the_segment_limit() {
 
 #[test]
 fn rotated_segment_checkpoint_requires_directory_sync() {
-    let workspace = empty_workspace("event-segment-directory-sync");
-    let reservation = reserve_session_log(&workspace, "segmentsync001").expect("session reserved");
-    let mut full_segment =
-        vec![b'x'; usize::try_from(MAX_SESSION_SEGMENT_BYTES).expect("size fits")];
-    *full_segment.last_mut().expect("segment is nonempty") = b'\n';
-    fs::write(reservation.session_path.diagnostic_path(), full_segment)
-        .expect("base segment reaches the rotation boundary");
+    let (_workspace, reservation) =
+        reserved_session("event-segment-directory-sync", "segmentsync001");
+    write_full_base_segment(&reservation.session_path);
     let mut appender = SessionLogAppender::open(&reservation.session_path).expect("appender opens");
     appender
         .append(reservation.session_path.diagnostic_path(), b"next\n")
@@ -376,8 +361,7 @@ fn rotated_segment_checkpoint_requires_directory_sync() {
 
 #[test]
 fn event_and_manifest_appenders_enforce_distinct_segment_caps() {
-    let workspace = empty_workspace("stream-segment-caps");
-    let reservation = reserve_session_log(&workspace, "segmentcaps001").expect("session reserved");
+    let (_workspace, reservation) = reserved_session("stream-segment-caps", "segmentcaps001");
     fill_event_segments_to_final_byte(&reservation.session_path);
     let mut appender = SessionLogAppender::open(&reservation.session_path).expect("appender opens");
 
@@ -399,7 +383,7 @@ fn event_and_manifest_appenders_enforce_distinct_segment_caps() {
     .expect("segment path resolves");
     assert!(!excess.diagnostic_path().exists());
 
-    let manifest_line = canonical_context_manifest_line(None);
+    let manifest_line = canonical_context_manifest_line();
     for ordinal in 1..=CONTEXT_MANIFEST_STREAM_LIMITS.max_segments {
         let path = segmented_jsonl_path(&reservation.context_path, ordinal)
             .expect("manifest segment path resolves");
@@ -409,4 +393,39 @@ fn event_and_manifest_appenders_enforce_distinct_segment_caps() {
         .expect("five context-manifest segments remain valid");
     drop(appender);
     reservation.release_lock().expect("reservation rolls back");
+}
+
+#[test]
+fn unknown_length_after_failed_write_keeps_the_written_prefix() {
+    let workspace = empty_workspace("native-batch-unknown-length");
+    let path = workspace.join("events.jsonl");
+    let mut file = fs::OpenOptions::new()
+        .create(true)
+        .read(true)
+        .append(true)
+        .open(&path)
+        .expect("events file opens");
+    let events: [&[u8]; 2] = [b"first\n", b"second\n"];
+    set_native_batch_length_error_for_test(io::ErrorKind::Other);
+    let mut cleaned = false;
+
+    let failure = append_native_event_batch_with(
+        &mut file,
+        &path,
+        0,
+        &events,
+        |file, bytes| {
+            file.write_all(&bytes[..b"first\nsec".len()])?;
+            Err(io::Error::other("injected write failure"))
+        },
+        |_, _| {
+            cleaned = true;
+            Ok(())
+        },
+    )
+    .expect_err("the failed write is reported");
+
+    assert_eq!(failure.committed_events, None);
+    assert!(!cleaned, "an unknown length must not truncate the file");
+    assert_eq!(fs::read(&path).expect("events file reads"), b"first\nsec");
 }

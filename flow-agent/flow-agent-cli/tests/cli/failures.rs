@@ -5,7 +5,7 @@ use super::{
 use std::ffi::OsString;
 
 #[test]
-fn negative_cli_fails_without_side_effects() {
+fn negative_cli_fails_without_side_effects_and_replays_the_same_stream() {
     let workspace = workspace_copy("negative");
     let output = flow_command()
         .current_dir(&workspace)
@@ -15,23 +15,12 @@ fn negative_cli_fails_without_side_effects() {
 
     assert_eq!(output.status.code(), Some(65));
     assert!(output.stderr.is_empty());
+    let expected = expected_stream("negative", "negative-write.jsonl");
     assert_eq!(
         String::from_utf8(output.stdout).expect("stdout should be UTF-8"),
-        expected_stream("negative", "negative-write.jsonl")
+        expected
     );
     assert!(!workspace.join("out/forbidden.txt").exists());
-}
-
-#[test]
-fn replay_and_tail_failed_sessions_exit_with_failed_status() {
-    let workspace = workspace_copy("negative");
-    let run_output = flow_command()
-        .current_dir(&workspace)
-        .args(["run", "negative-write", "--emit", "jsonl"])
-        .output()
-        .expect("flow binary should run");
-    assert_eq!(run_output.status.code(), Some(65));
-    assert!(run_output.stderr.is_empty());
 
     for command in ["replay", "tail"] {
         let output = flow_command()
@@ -48,10 +37,10 @@ fn replay_and_tail_failed_sessions_exit_with_failed_status() {
 
         assert_eq!(output.status.code(), Some(65), "{command}");
         assert!(output.stderr.is_empty(), "{command}");
-        assert!(
-            String::from_utf8(output.stdout)
-                .expect("stdout should be UTF-8")
-                .contains("\"event_type\":\"session.failed\"")
+        assert_eq!(
+            String::from_utf8(output.stdout).expect("stdout should be UTF-8"),
+            expected,
+            "{command}"
         );
     }
 }

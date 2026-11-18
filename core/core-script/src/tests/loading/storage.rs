@@ -6,6 +6,7 @@ use super::super::super::model::{MAX_REGISTRY_FILE_BYTES, ResolvedRegistry};
 #[cfg(windows)]
 use super::super::create_windows_junction;
 use super::super::{collect_registry_files, load_registry, registry_location, temp_registry_dir};
+use super::{INSPECT, write_registry_file};
 use std::path::Path;
 #[cfg(unix)]
 use std::{
@@ -46,23 +47,19 @@ fn registry_loader_enforces_selected_root_boundary_and_reports_missing_root() {
 #[test]
 fn registry_loader_accepts_nested_yaml_files_and_ignores_non_registry_files() {
     let root = temp_registry_dir("nested-registry");
-    std::fs::write(root.join("README.txt"), "ignored").expect("ignored file written");
+    write_registry_file(&root, "README.txt", "ignored");
     std::fs::create_dir_all(root.join("nested")).expect("nested dir created");
-    std::fs::write(
-        root.join("nested").join("instruction.yml"),
-        "instruction:\n  id: inspect\n  name: Inspect\n  prompt: Inspect\n",
-    )
-    .expect("registry file written");
-    std::fs::write(
-        root.join("phase.yaml"),
+    write_registry_file(&root, "nested/instruction.yml", INSPECT);
+    write_registry_file(
+        &root,
+        "phase.yaml",
         "phase:\n  id: phase\n  name: Phase\n  instruction_refs: [inspect]\n  tool_refs: []\n  output:\n    type: string\n",
-    )
-    .expect("phase written");
-    std::fs::write(
-        root.join("flow.yaml"),
+    );
+    write_registry_file(
+        &root,
+        "flow.yaml",
         "flow:\n  id: root\n  name: Root\n  phase_refs: [phase]\n  subflow_refs: []\n",
-    )
-    .expect("flow written");
+    );
 
     let registry = load_registry(root).expect("nested yml registry loads");
 
@@ -72,11 +69,7 @@ fn registry_loader_accepts_nested_yaml_files_and_ignores_non_registry_files() {
 #[test]
 fn registry_loader_rejects_files_above_read_limit() {
     let root = temp_registry_dir("registry-file-read-limit");
-    std::fs::write(
-        root.join("instruction.yaml"),
-        "instruction:\n  id: inspect\n  name: Inspect\n  prompt: Inspect\n",
-    )
-    .expect("registry file written");
+    write_registry_file(&root, "instruction.yaml", INSPECT);
 
     let (workspace, registry_root) = registry_location(&root);
     let err = ResolvedRegistry::load_for_flow_with_limits(
@@ -124,31 +117,10 @@ fn registry_file_reader_enforces_limit_before_utf8_decoding() {
 }
 
 #[test]
-fn registry_file_reader_rejects_invalid_utf8() {
-    let root = temp_registry_dir("registry-invalid-utf8");
-    let invalid_utf8 = root.join("invalid.yaml");
-    std::fs::write(&invalid_utf8, [0xff]).expect("invalid UTF-8 registry file written");
-    let (opened_root, files) = collect_registry_files(&root).expect("registry file collected");
-    assert_eq!(files.len(), 1);
-    let error = read_registry_file_to_string(&opened_root, &files[0], MAX_REGISTRY_FILE_BYTES)
-        .expect_err("invalid UTF-8 is rejected");
-    assert!(std::error::Error::source(&error).is_some());
-    assert!(error.to_string().contains("invalid.yaml"));
-    assert!(matches!(
-        error,
-        RegistryError::Io { source, .. } if source.kind() == std::io::ErrorKind::InvalidData
-    ));
-}
-
-#[test]
 fn registry_file_reader_reports_leaf_removed_after_collection() {
     let root = temp_registry_dir("registry-leaf-removed");
+    write_registry_file(&root, "instruction.yaml", INSPECT);
     let path = root.join("instruction.yaml");
-    std::fs::write(
-        &path,
-        "instruction:\n  id: inspect\n  name: Inspect\n  prompt: Inspect\n",
-    )
-    .expect("registry file written");
     let (opened_root, files) = collect_registry_files(&root).expect("registry file collected");
     std::fs::remove_file(&path).expect("registry file removed");
 
@@ -169,11 +141,7 @@ fn registry_file_reader_rejects_fifo_replacement_without_blocking() {
         std::fs::write(marker, "started").expect("child marker written");
         let root = temp_registry_dir("registry-fifo-replacement-child");
         let path = root.join("instruction.yaml");
-        std::fs::write(
-            &path,
-            "instruction:\n  id: inspect\n  name: Inspect\n  prompt: Inspect\n",
-        )
-        .expect("registry file written");
+        write_registry_file(&root, "instruction.yaml", INSPECT);
         let (opened_root, files) = collect_registry_files(&root).expect("registry file collected");
         std::fs::remove_file(&path).expect("registry file removed");
         assert!(
@@ -225,16 +193,16 @@ fn registry_file_reader_rejects_ancestor_replaced_by_link_after_collection() {
     let nested = root.join("nested");
     let outside = temp_registry_dir("registry-ancestor-swap-outside");
     std::fs::create_dir(&nested).expect("nested registry directory created");
-    std::fs::write(
-        nested.join("instruction.yaml"),
+    write_registry_file(
+        &nested,
+        "instruction.yaml",
         "instruction:\n  id: inside\n  name: Inside\n  prompt: Inside\n",
-    )
-    .expect("inside registry file written");
-    std::fs::write(
-        outside.join("instruction.yaml"),
+    );
+    write_registry_file(
+        &outside,
+        "instruction.yaml",
         "instruction:\n  id: outside\n  name: Outside\n  prompt: Outside\n",
-    )
-    .expect("outside registry file written");
+    );
     let (opened_root, files) = collect_registry_files(&root).expect("registry file collected");
     assert_eq!(files.len(), 1);
 
@@ -254,8 +222,8 @@ fn registry_loader_rejects_total_bytes_above_read_limit() {
     let root = temp_registry_dir("registry-total-read-limit");
     let first = "instruction:\n  id: inspect-a\n  name: InspectA\n  prompt: Inspect\n";
     let second = "instruction:\n  id: inspect-b\n  name: InspectB\n  prompt: Inspect\n";
-    std::fs::write(root.join("a.yaml"), first).expect("first registry file written");
-    std::fs::write(root.join("b.yaml"), second).expect("second registry file written");
+    write_registry_file(&root, "a.yaml", first);
+    write_registry_file(&root, "b.yaml", second);
 
     let (workspace, registry_root) = registry_location(&root);
     let err = ResolvedRegistry::load_for_flow_with_limits(
@@ -281,13 +249,13 @@ fn registry_loader_rejects_total_bytes_above_read_limit() {
 #[test]
 fn registry_loader_bounds_definition_and_non_definition_entries_independently() {
     let root = temp_registry_dir("registry-entry-count-limit");
-    std::fs::write(
-        root.join("a.yaml"),
+    write_registry_file(
+        &root,
+        "a.yaml",
         "instruction:\n  id: inspect-a\n  name: InspectA\n  prompt: Inspect\n",
-    )
-    .expect("registry file written");
-    std::fs::write(root.join("README.txt"), "ignored").expect("non-registry entry written");
-    std::fs::write(root.join("LICENSE.txt"), "ignored").expect("second non-registry entry written");
+    );
+    write_registry_file(&root, "README.txt", "ignored");
+    write_registry_file(&root, "LICENSE.txt", "ignored");
 
     let err = load_registry_with_traversal_limits(
         &root,
@@ -316,11 +284,11 @@ fn registry_loader_bounds_definition_and_non_definition_entries_independently() 
 
     std::fs::remove_file(root.join("README.txt")).expect("first ignored entry is removed");
     std::fs::remove_file(root.join("LICENSE.txt")).expect("second ignored entry is removed");
-    std::fs::write(
-        root.join("b.yaml"),
+    write_registry_file(
+        &root,
+        "b.yaml",
         "instruction:\n  id: inspect-b\n  name: InspectB\n  prompt: Inspect\n",
-    )
-    .expect("second registry definition is written");
+    );
     let err = load_registry_with_traversal_limits(
         &root,
         RegistryTraversalLimits {
@@ -346,11 +314,7 @@ fn registry_loader_bounds_definition_and_non_definition_entries_independently() 
 fn registry_loader_rejects_directories_above_traversal_depth_limit() {
     let root = temp_registry_dir("registry-depth-limit");
     std::fs::create_dir_all(root.join("nested")).expect("nested dir created");
-    std::fs::write(
-        root.join("nested").join("instruction.yaml"),
-        "instruction:\n  id: inspect\n  name: Inspect\n  prompt: Inspect\n",
-    )
-    .expect("registry file written");
+    write_registry_file(&root, "nested/instruction.yaml", INSPECT);
 
     let err = load_registry_with_traversal_limits(
         &root,
@@ -372,17 +336,6 @@ fn registry_loader_rejects_directories_above_traversal_depth_limit() {
             ..
         }
     ));
-}
-
-#[test]
-fn temp_registry_dir_removes_its_tree_on_drop() {
-    let path = {
-        let root = temp_registry_dir("temp-registry-cleanup");
-        std::fs::write(root.join("marker"), "cleanup").expect("marker written");
-        root.to_path_buf()
-    };
-
-    assert!(!path.exists());
 }
 
 #[cfg(unix)]

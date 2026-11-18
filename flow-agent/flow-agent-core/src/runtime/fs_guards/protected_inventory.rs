@@ -3,7 +3,6 @@ use crate::runtime::types::RuntimeError;
 use cap_fs_ext::MetadataExt as _;
 use std::collections::{BTreeMap, BTreeSet};
 
-/// Inspect names and metadata only, while cooperating publishers cannot change names.
 pub(crate) fn verify_protected_aliases(
     roots: &[AnchoredDir],
     images: &[(&super::AnchoredFile, &std::fs::File)],
@@ -117,10 +116,8 @@ pub(crate) fn verify_protected_aliases(
         }
         let parent = name.parent.identity()?;
         let parent_identity = (parent.device, parent.inode);
-        // Traversed parents already contributed every direct-child name.
         let new_name = !directories.contains(&parent_identity)
             && selected_names.insert((parent_identity, &name.leaf));
-        // Case- or normalization-insensitive lookups let two spellings name one entry.
         if new_name && metadata.nlink() > 1 && !is_exact_entry(name)? {
             return Err(RuntimeError::Protocol(format!(
                 "{} protected image name does not match its directory entry exactly",

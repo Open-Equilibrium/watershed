@@ -1,4 +1,4 @@
-use super::{Fixture, assert_success, limits};
+use super::{Fixture, limits};
 use serde_json::{Value, json};
 use std::fs;
 
@@ -77,14 +77,7 @@ pub fn npm_lifecycle(kind: &str) {
         let request = fixture.request(
             "export TMPDIR=$PWD; export npm_config_cache=$PWD/cache; export npm_config_userconfig=$PWD/user-npmrc; export npm_config_globalconfig=$PWD/global-npmrc; exec npm --offline --no-audit --no-fund run build",
             limits(16 * 1024, 16 * 1024, 15_000));
-        if guarded {
-            let mut running = fixture.spawn(&request);
-            running.ready(&request);
-            running.start(&request);
-            assert_success(&running.completed(&request));
-        } else {
-            fixture.baseline(&request, &[]);
-        }
+        fixture.execute(&request, guarded);
         for (path, expected) in [
             ("prebuild", "ok"),
             ("artifact", "built"),
@@ -147,14 +140,7 @@ fn shell_compiles_and_runs_a_native_writer_under_the_guard() {
             "set -eu\nexport TMPDIR=$PWD\n{compile}\n./generated artifact built\nstatus=0\n./generated \"$1/AGENTS.md\" changed || status=$?\nprintf '%s' \"$status\" > writer-result"
         );
         let request = fixture.request(&script, limits(4096, 4096, 15_000));
-        if guarded {
-            let mut running = fixture.spawn(&request);
-            running.ready(&request);
-            running.start(&request);
-            assert_success(&running.completed(&request));
-        } else {
-            fixture.baseline(&request, &[]);
-        }
+        fixture.execute(&request, guarded);
         assert_eq!(
             fs::read(fixture.project.join("artifact")).unwrap(),
             b"built"

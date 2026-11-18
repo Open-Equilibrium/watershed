@@ -9,8 +9,6 @@ use tokio::{runtime::Runtime, sync::Semaphore};
 
 const SYSTEM_LOOKUP_CAPACITY: usize = 32;
 
-// Static ownership avoids Runtime::drop waiting for stalled system DNS at command
-// completion or process exit. Only admitted jobs reach the blocking pool.
 static NETWORK_RUNTIME: OnceLock<Result<Runtime, io::Error>> = OnceLock::new();
 static LOOKUP_SLOTS: OnceLock<Arc<Semaphore>> = OnceLock::new();
 
@@ -75,7 +73,6 @@ impl Resolve for SystemResolver {
             let slot = slots.acquire_owned().await?;
             let addresses = runtime()?
                 .spawn_blocking(move || {
-                    // Cancellation drops the waiting future, never this job's slot.
                     let _slot = slot;
                     #[cfg(test)]
                     if let Some(lookup) = lookup {

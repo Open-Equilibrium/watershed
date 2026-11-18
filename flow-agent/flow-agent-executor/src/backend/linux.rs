@@ -69,8 +69,6 @@ pub(super) fn command(
         "/",
         "/",
     ]);
-    // Mount points anchor protected ancestors without making unrelated siblings
-    // read-only. Protected objects are overlaid last, never loosened by a child bind.
     for ancestor in protection::ancestors(objects) {
         command.arg("--bind").arg(&ancestor).arg(&ancestor);
     }
@@ -84,7 +82,6 @@ pub(super) fn command(
     }
     #[cfg(coverage)]
     if let Some(pattern) = std::env::var_os("LLVM_PROFILE_FILE") {
-        // Instrumented CI builds write their report outside the protected inventory.
         command.args(["--setenv", "LLVM_PROFILE_FILE"]).arg(pattern);
     }
     command

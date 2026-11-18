@@ -29,8 +29,6 @@ fn retain_remap_destination(target: i32, minimum: i32) -> std::io::Result<Option
     #[cfg(target_os = "macos")]
     const F_DUPFD_CLOEXEC: i32 = 67;
 
-    // The raw slot may be closed concurrently, so it cannot be borrowed as an
-    // AsFd. Duplicate atomically with CLOEXEC, outside the remap destinations.
     let retained = unsafe { c_fcntl(target, F_DUPFD_CLOEXEC, minimum) };
     if retained >= 0 {
         Ok(Some(unsafe { OwnedFd::from_raw_fd(retained) }))
@@ -136,8 +134,6 @@ pub(super) fn preflight_one_shot_with_deadline(
         .zip(&request.resolved_policy.protected_objects)
         .map(|(source, object)| (source.as_raw_fd(), object.descriptor as i32))
         .collect::<Vec<_>>();
-    // Keep every currently free destination slot occupied until spawn has
-    // allocated its stdio and error channels. This is bounded by the wire schema.
     let last_target = remaps.iter().map(|(_, target)| *target).max().unwrap_or(2);
     let mut reservations = Vec::new();
     loop {
@@ -174,9 +170,6 @@ pub(super) fn preflight_one_shot_with_deadline(
         command.pre_exec(move || {
             configure_executor_child(expected_parent)?;
             for (&(source, target), original) in remaps.iter().zip(&originals) {
-                // A parent thread can close an occupied slot after reservation.
-                // Only replace a pipe/socket retained before spawn allocated its
-                // channels. Holding the duplicate prevents object recycling.
                 if let Some(current) = retain_remap_destination(target, high_base)? {
                     let stat = rustix::fs::fstat(&current)?;
                     let kind = rustix::fs::FileType::from_raw_mode(stat.st_mode);
@@ -371,7 +364,6 @@ pub(super) fn preflight_one_shot_with_deadline(
             return before_executor_deadline(hard_deadline, now, || outcome)
                 .ok_or_else(|| invalid_response("Executor preflight timed out"));
         }
-        // Exit can follow the output poll; retain stdout until its final frame is drained.
         if rejected_code.is_none() && stdout_eof {
             return Err(invalid_response(
                 "Executor exited without a complete preflight response",
@@ -381,7 +373,6 @@ pub(super) fn preflight_one_shot_with_deadline(
     }
 }
 
-/// A terminal Executor answer and whether cleanup of its process group was left unknown.
 pub(super) struct StartedExecutor {
     pub(super) response: proto::ExecutorResponseV0,
     pub(super) cleanup_unknown: bool,
@@ -413,7 +404,6 @@ fn start_one_shot_with_deadlines(
         &mut cleanup_unknown,
     );
     match result {
-        // A surviving group keeps only a Completed answer; any other outcome fails stop as before.
         Ok(response) if cleanup_unknown => match response {
             proto::ExecutorResponseV0::Completed { .. } => Ok(StartedExecutor {
                 response,
@@ -425,7 +415,6 @@ fn start_one_shot_with_deadlines(
             response,
             cleanup_unknown: false,
         }),
-        // Without a valid answer to keep, a survivor still fails stop.
         Err(_) if cleanup_unknown => std::process::abort(),
         Err(error) => Err(error),
     }

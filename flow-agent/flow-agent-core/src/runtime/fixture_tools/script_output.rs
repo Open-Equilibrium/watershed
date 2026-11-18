@@ -107,8 +107,6 @@ fn replace_script_output_atomically_checked(
                     source,
                 },
             )?;
-            // Keep the created file open through capability-relative publication. A peer with
-            // write access to this exact directory can already replace the destination itself.
 
             ensure_script_output_target_available(path)?;
             #[cfg(test)]

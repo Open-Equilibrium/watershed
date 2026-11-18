@@ -17,7 +17,6 @@ use crate::runtime::{
 };
 use std::path::Path;
 
-/// Continues the latest committed entry, or branches from one explicitly selected entry.
 pub fn continue_conversation(
     workspace: impl AsRef<Path>,
     conversation_id: &str,
@@ -35,7 +34,6 @@ pub fn continue_conversation(
     )
 }
 
-/// Continues a conversation with bounded committed-event notifications.
 pub fn continue_conversation_with_live_events(
     workspace: impl AsRef<Path>,
     conversation_id: &str,
@@ -55,7 +53,6 @@ pub fn continue_conversation_with_live_events(
     Ok(output)
 }
 
-/// Continues a conversation after binding a guard to its loaded productive backend.
 pub fn continue_conversation_with_execution_activation<G>(
     workspace: impl AsRef<Path>,
     conversation_id: &str,
