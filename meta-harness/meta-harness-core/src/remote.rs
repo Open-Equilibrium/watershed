@@ -1,8 +1,3 @@
-//! A client of the Meta-Harness service (ADR-0215, ADR-0297): the same host, projects, threads
-//! and Git as the core offers, reached over the service's WebSocket. A lost connection fails the
-//! calls it left unanswered, which are never sent again, ends its streams, and the next call
-//! connects anew, reading the connection file again when the client was made from it.
-
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -25,39 +20,29 @@ use crate::config::{Change, Current, LogEntry, Proposal};
 use crate::hosts::{Access, ClientKind, HostList};
 use crate::util::{IDLE, TIMEOUT, lock};
 use crate::{
-    Automation, Context, GitActionRequest, GitProgress, GitStatus, Lineage, LineageChanges,
-    LocalServer, ModelChoice, Permissions, Provider, PullRequestDetail, Refs, RequestId,
-    ResolvedPullRequest, Snapshot, StartThread, Statistics, ThreadEvent, ThreadSummary, Turn,
-    UsageLimits, Watch,
+    Arrival, Automation, Context, GitActionRequest, GitProgress, GitStatus, HostProject, Landing,
+    Lineage, LineageChanges, LocalServer, ModelChoice, MoveCheck, MoveFinish, MovePackage,
+    MoveRecord, Permissions, Provider, PullRequestDetail, Refs, RequestId, ResolvedPullRequest,
+    Snapshot, StartThread, Statistics, ThreadEvent, ThreadSummary, Turn, UsageLimits, Watch,
 };
 
-/// Items a stream holds for a reader that falls behind; past that the stream ends, as a
-/// thread's own subscription does (ADR-0272, ADR-0290).
 const BACKLOG: usize = 4096;
 
-/// The failure of a call that a lost connection left unanswered. The service may have run it, so
-/// it is not sent again.
 const LOST_CALL: &str =
     "Meta-Harness closed the connection before it answered; the call was not sent again";
 
-/// How the errors of a lost or missing connection start (see [`connection_lost`]).
 const CONNECTION_ERRORS: [&str; 3] = [
     "Meta-Harness closed the connection",
     "Meta-Harness is not running",
     "Could not reach Meta-Harness",
 ];
 
-/// Whether `error`, from a call or a stream of this client, says the connection to Meta-Harness is
-/// lost or missing, so that a later attempt may succeed. Any other error came from Meta-Harness
-/// itself or from its connection file, and a later attempt would get it again.
 pub fn connection_lost(error: &str) -> bool {
     CONNECTION_ERRORS
         .iter()
         .any(|start| error.starts_with(start))
 }
 
-/// The error of a service that refuses this client's API version, which names the version the
-/// service speaks. It is not a lost connection: a later attempt would be refused again.
 fn refused_version(response: &Response<Option<Vec<u8>>>) -> String {
     let speaks = match response
         .headers()
@@ -73,7 +58,6 @@ fn refused_version(response: &Response<Option<Vec<u8>>>) -> String {
     )
 }
 
-/// Where the service is.
 #[derive(Clone)]
 enum Endpoint {
     Fixed { url: String, token: String },
@@ -112,7 +96,6 @@ enum Waiter {
     },
 }
 
-/// One open connection.
 struct Link {
     out: mpsc::UnboundedSender<Message>,
     waiters: Arc<Mutex<Option<HashMap<u64, Waiter>>>>,
@@ -125,15 +108,12 @@ struct Inner {
     next: AtomicU64,
 }
 
-/// A connection to the Meta-Harness service on this host.
 #[derive(Clone)]
 pub struct Host {
     inner: Arc<Inner>,
 }
 
 impl Host {
-    /// Connects to the service whose data folder is `home`, through its connection file;
-    /// `client` names this client in the configuration log.
     pub async fn connect(home: &Path, client: &str) -> Result<Self, String> {
         Self::open(
             Endpoint::File(home.join(crate::service::CONNECTION_FILE)),
@@ -142,7 +122,6 @@ impl Host {
         .await
     }
 
-    /// Connects to the service at `url` with `token`.
     pub async fn connect_to(url: &str, token: &str, client: &str) -> Result<Self, String> {
         Self::open(
             Endpoint::Fixed {
@@ -167,7 +146,6 @@ impl Host {
         Ok(host)
     }
 
-    /// The open connection, connecting again when the last one was lost.
     async fn link(&self) -> Result<Arc<Link>, String> {
         let mut slot = self.inner.link.lock().await;
         if let Some(link) = slot.as_ref()
@@ -188,7 +166,6 @@ impl Host {
             .await
             .map_err(|_| format!("Could not reach Meta-Harness at {url}: it did not answer in time."))?
             .map_err(|e| match e {
-                // A service that stopped without removing its connection file.
                 tokio_tungstenite::tungstenite::Error::Io(io)
                     if io.kind() == std::io::ErrorKind::ConnectionRefused =>
                 {
@@ -198,14 +175,11 @@ impl Host {
                          is service.log in the data folder."
                     )
                 }
-                // A service of another API version refuses this client, naming its version.
                 tokio_tungstenite::tungstenite::Error::Http(response)
                     if response.status() == StatusCode::UPGRADE_REQUIRED =>
                 {
                     refused_version(&response)
                 }
-                // A service that no longer knows this device's token refuses it; a later attempt
-                // would be refused again, so the device must be paired again.
                 tokio_tungstenite::tungstenite::Error::Http(response)
                     if response.status() == StatusCode::UNAUTHORIZED =>
                 {
@@ -226,15 +200,11 @@ impl Host {
                     break;
                 }
             }
-            // The last handle is gone: closing the sink ends the connection for the reader too.
             let _ = sink.close().await;
         });
         let read = waiters.clone();
-        // Held weakly, so dropping every handle of this client closes the connection.
         let cancel = out.downgrade();
         tokio::spawn(async move {
-            // Any frame, a pong included, comes at least every PING from a service that is there;
-            // one silent for IDLE is gone, though its socket never closed.
             while let Ok(Some(Ok(frame))) = tokio::time::timeout(IDLE, frames.next()).await {
                 if let Message::Text(text) = frame
                     && let Ok(reply) = serde_json::from_str::<Reply>(&text)
@@ -242,8 +212,6 @@ impl Host {
                     deliver(&read, &cancel, reply);
                 }
             }
-            // The connection is gone: its writer closes the socket, every waiting call fails and
-            // every stream ends.
             writer.abort();
             for (_, waiter) in lock(&read).take().into_iter().flatten() {
                 match waiter {
@@ -272,6 +240,10 @@ impl Host {
             Waiter::Call(answer),
             &api::Request::Call { id, call },
         )?;
+        let _waiter = WaiterGuard {
+            link: link.clone(),
+            id,
+        };
         let value = answered.await.map_err(|_| LOST_CALL.to_owned())??;
         serde_json::from_value(value)
             .map_err(|e| format!("Meta-Harness answered unexpectedly: {e}"))
@@ -302,33 +274,76 @@ impl Host {
         Ok((first, stream))
     }
 
-    /// What the service runs.
     pub async fn status(&self) -> Result<api::Status, String> {
         self.call(Call::Host(HostCall::Status)).await
     }
 
-    /// The providers T3 offers, with their models.
     pub async fn providers(&self) -> Result<Vec<Provider>, String> {
         self.call(Call::Host(HostCall::Providers)).await
     }
 
-    /// The name T3 shows for this host.
     pub async fn environment_name(&self) -> Result<String, String> {
         self.call(Call::Host(HostCall::EnvironmentName)).await
     }
 
-    /// The writer model (ADR-0294), if one is set.
+    pub async fn environment_machine(&self) -> Result<String, String> {
+        self.call(Call::Host(HostCall::EnvironmentMachine)).await
+    }
+
+    pub async fn environment_id(&self) -> Result<String, String> {
+        self.call(Call::Host(HostCall::EnvironmentId)).await
+    }
+
+    pub async fn projects(&self) -> Result<Vec<HostProject>, String> {
+        self.call(Call::Host(HostCall::Projects)).await
+    }
+
+    pub async fn preflight(&self, root: &str, branch: &str) -> Result<Landing, String> {
+        self.call(Call::Host(HostCall::Preflight {
+            root: root.to_owned(),
+            branch: branch.to_owned(),
+        }))
+        .await
+    }
+
+    pub async fn move_status(&self, transfer: &str) -> Result<Arrival, String> {
+        self.call(Call::Host(HostCall::MoveStatus {
+            transfer: transfer.to_owned(),
+        }))
+        .await
+    }
+
+    pub async fn move_abort(&self, transfer: &str) -> Result<Arrival, String> {
+        self.call(Call::Host(HostCall::MoveAbort {
+            transfer: transfer.to_owned(),
+        }))
+        .await
+    }
+
+    pub async fn add_project(&self, root: &str) -> Result<HostProject, String> {
+        self.call(Call::Host(HostCall::AddProject {
+            root: root.to_owned(),
+        }))
+        .await
+    }
+
+    pub async fn clone_project(&self, remote_url: &str, path: &str) -> Result<HostProject, String> {
+        self.call(Call::Host(HostCall::CloneProject {
+            remote_url: remote_url.to_owned(),
+            path: path.to_owned(),
+        }))
+        .await
+    }
+
     pub async fn writer_model(&self) -> Result<Option<ModelChoice>, String> {
         self.call(Call::Host(HostCall::WriterModel)).await
     }
 
-    /// Sets the writer model.
     pub async fn set_writer_model(&self, choice: &ModelChoice) -> Result<(), String> {
         self.call(Call::Host(HostCall::SetWriterModel(choice.clone())))
             .await
     }
 
-    /// The T3 project for the folder `root`, created when T3 has none yet.
     pub async fn project(&self, root: &Path) -> Result<Project, String> {
         let project = Project {
             host: self.clone(),
@@ -338,12 +353,10 @@ impl Host {
         Ok(project)
     }
 
-    /// The current configuration revision.
     pub async fn config(&self) -> Result<Current, String> {
         self.call(Call::Config(ConfigCall::Current)).await
     }
 
-    /// Proposes `changes` and returns the proposal's number; nothing changes before approval.
     pub async fn propose(&self, summary: &str, changes: Vec<Change>) -> Result<u64, String> {
         self.call(Call::Config(ConfigCall::Propose {
             summary: summary.to_owned(),
@@ -352,66 +365,51 @@ impl Host {
         .await
     }
 
-    /// Proposes going back to `revision`.
     pub async fn propose_revert(&self, revision: u64) -> Result<u64, String> {
         self.call(Call::Config(ConfigCall::Revert(revision))).await
     }
 
-    /// The proposals that wait for a decision.
     pub async fn pending(&self) -> Result<Vec<Proposal>, String> {
         self.call(Call::Config(ConfigCall::Pending)).await
     }
 
-    /// Approves proposal `number`; the service writes the new revision into the harness homes.
     pub async fn approve(&self, number: u64) -> Result<Current, String> {
         self.call(Call::Config(ConfigCall::Approve(number))).await
     }
 
-    /// Rejects proposal `number`.
     pub async fn reject(&self, number: u64) -> Result<(), String> {
         self.call(Call::Config(ConfigCall::Reject(number))).await
     }
 
-    /// The configuration log, oldest first.
     pub async fn log(&self) -> Result<Vec<LogEntry>, String> {
         self.call(Call::Config(ConfigCall::Log)).await
     }
 
-    /// Turns remote access on at `port` (`meta remote on`), answering where it listens.
     pub async fn remote_on(&self, port: u16) -> Result<RemoteStatus, String> {
         self.call(Call::Remote(RemoteCall::On { port })).await
     }
 
-    /// Turns remote access off (`meta remote off`).
     pub async fn remote_off(&self) -> Result<(), String> {
         self.call(Call::Remote(RemoteCall::Off)).await
     }
 
-    /// Where the remote listener answers, while it is on.
     pub async fn remote_status(&self) -> Result<Option<RemoteStatus>, String> {
         self.call(Call::Remote(RemoteCall::Status)).await
     }
 
-    /// A pairing code for a new client of `kind`, valid for five minutes, which gives a host
-    /// client `access` (`meta invite`).
     pub async fn invite(&self, kind: ClientKind, access: Access) -> Result<String, String> {
         self.call(Call::Invite { kind, access }).await
     }
 
-    /// A pairing code from this host's T3 Code, which another host's link redeems (ADR-0288).
     pub async fn t3_pairing(&self) -> Result<String, String> {
         self.call(Call::Hosts(HostsCall::T3Pairing)).await
     }
 
-    /// Revokes the client named `name`, whose token is refused from its next connection on.
     pub async fn revoke_client(&self, name: &str) -> Result<(), String> {
         self.call(Call::Hosts(HostsCall::Revoke(name.to_owned())))
             .await
     }
 
-    /// Links the host at `address` (`ws://…`) with `code` from its `meta invite --host`, at
-    /// `access` or the level the other host allows, and answers the linked host's name and level
-    /// (`meta host add`).
     pub async fn host_add(
         &self,
         address: &str,
@@ -426,25 +424,30 @@ impl Host {
         .await
     }
 
-    /// Unlinks the host named `name` (`meta host remove`) and answers the name this host paired
-    /// under at that host, which its `meta host revoke` names.
     pub async fn host_remove(&self, name: &str) -> Result<String, String> {
         self.call(Call::Hosts(HostsCall::Remove(name.to_owned())))
             .await
     }
 
-    /// The hosts this one links to and the clients paired with it (`meta host list`).
     pub async fn hosts(&self) -> Result<HostList, String> {
         self.call(Call::Hosts(HostsCall::List)).await
     }
 
-    /// Turns agents from other hosts on or off (`meta host agents`).
     pub async fn host_agents(&self, on: bool) -> Result<(), String> {
         self.call(Call::Hosts(HostsCall::Agents(on))).await
     }
 }
 
-/// The request for a WebSocket handshake to `url` that carries `headers`.
+#[cfg(test)]
+impl Host {
+    pub(crate) async fn waiting(&self) -> usize {
+        let slot = self.inner.link.lock().await;
+        slot.as_ref()
+            .and_then(|link| lock(&link.waiters).as_ref().map(HashMap::len))
+            .unwrap_or(0)
+    }
+}
+
 pub(crate) fn handshake(url: &str, headers: &[(&'static str, &str)]) -> Result<Request, String> {
     let version = api::API_VERSION.to_string();
     let mut request = url
@@ -462,8 +465,6 @@ pub(crate) fn handshake(url: &str, headers: &[(&'static str, &str)]) -> Result<R
     Ok(request)
 }
 
-/// Refuses an address that is not `ws://…`, the form `meta invite` prints. Every caller that links
-/// or pairs with a host checks it here, so each one gives the same refusal.
 pub fn check_address(address: &str) -> Result<(), String> {
     if address.starts_with("ws://") {
         Ok(())
@@ -472,9 +473,6 @@ pub fn check_address(address: &str) -> Result<(), String> {
     }
 }
 
-/// Pairs this client with the remote listener at `address` (`ws://…`), using `code`, a pairing code
-/// that the other side issued. Answers the other side's name, the token this client uses from now
-/// on and the access it was paired at (ADR-0299, ADR-0300).
 pub async fn pair(address: &str, code: &str, client: &str) -> Result<api::Pairing, String> {
     check_address(address)?;
     let request = handshake(
@@ -485,7 +483,6 @@ pub async fn pair(address: &str, code: &str, client: &str) -> Result<api::Pairin
         .await
         .map_err(|_| format!("Meta-Harness at {address} did not answer in time."))?
         .map_err(|e| match e {
-            // The refusal says why in its body, such as a code that is wrong or used.
             tokio_tungstenite::tungstenite::Error::Http(response) => refusal(&response),
             e => format!("Could not reach Meta-Harness at {address}: {e}"),
         })?;
@@ -506,7 +503,6 @@ pub async fn pair(address: &str, code: &str, client: &str) -> Result<api::Pairin
     serde_json::from_str(&answer).map_err(|e| format!("Meta-Harness answered unexpectedly: {e}"))
 }
 
-/// The reason a service gave for refusing a handshake, from its body.
 fn refusal(response: &Response<Option<Vec<u8>>>) -> String {
     let body = response.body().as_deref().unwrap_or_default();
     let reason = String::from_utf8_lossy(body).trim().to_owned();
@@ -565,7 +561,6 @@ fn deliver(
                 Some(Waiter::Stream { items, .. }) => items.try_send(item).is_err(),
                 _ => false,
             };
-            // A reader that fell behind, or left, ends the stream.
             if full {
                 waiters.remove(&id);
                 let text = serde_json::to_string(&api::Request::Cancel { cancel: id })
@@ -581,7 +576,19 @@ fn deliver(
     }
 }
 
-/// The items of a stream. Dropped, it tells the service to stop sending them.
+struct WaiterGuard {
+    link: Arc<Link>,
+    id: u64,
+}
+
+impl Drop for WaiterGuard {
+    fn drop(&mut self) {
+        if let Some(waiters) = lock(&self.link.waiters).as_mut() {
+            waiters.remove(&self.id);
+        }
+    }
+}
+
 pub struct Stream<T> {
     receiver: mpsc::Receiver<Value>,
     id: u64,
@@ -590,8 +597,6 @@ pub struct Stream<T> {
 }
 
 impl<T: DeserializeOwned> Stream<T> {
-    /// The next item; `None` once the stream ended, also when the connection was lost or the
-    /// reader fell too far behind.
     pub async fn recv(&mut self) -> Option<T> {
         let value = self.receiver.recv().await?;
         serde_json::from_value(value).ok()
@@ -611,7 +616,6 @@ impl<T> Drop for Stream<T> {
     }
 }
 
-/// A project on the service's host.
 #[derive(Clone)]
 pub struct Project {
     host: Host,
@@ -628,18 +632,20 @@ impl Project {
             .await
     }
 
-    /// The project's threads.
     pub async fn threads(&self) -> Result<Vec<ThreadSummary>, String> {
         self.call(ProjectCall::Threads).await
     }
 
-    /// Starts a thread with its first prompt.
     pub async fn start(&self, start: StartThread) -> Result<Thread, String> {
         let id: String = self.call(ProjectCall::Start(start)).await?;
         Ok(self.thread(id))
     }
 
-    /// Opens the thread `id`.
+    pub async fn move_in(&self, package: MovePackage) -> Result<Thread, String> {
+        let id: String = self.call(ProjectCall::MoveIn(package)).await?;
+        Ok(self.thread(id))
+    }
+
     pub async fn open(&self, id: &str) -> Result<Thread, String> {
         self.call::<()>(ProjectCall::Open(id.to_owned())).await?;
         Ok(self.thread(id.to_owned()))
@@ -653,7 +659,6 @@ impl Project {
         }
     }
 
-    /// Git for the project folder.
     pub fn git(&self) -> Git {
         Git {
             host: self.host.clone(),
@@ -661,13 +666,11 @@ impl Project {
         }
     }
 
-    /// Whether `thread` is the only thread in its worktree.
     pub async fn only_thread_in_worktree(&self, thread: &ThreadSummary) -> Result<bool, String> {
         self.call(ProjectCall::OnlyThreadInWorktree(thread.clone()))
             .await
     }
 
-    /// Deletes `thread`, and its worktree with `worktree`.
     pub async fn delete(&self, thread: &ThreadSummary, worktree: bool) -> Result<(), String> {
         self.call(ProjectCall::Delete {
             thread: thread.clone(),
@@ -676,7 +679,6 @@ impl Project {
         .await
     }
 
-    /// Archives or restores the thread `thread`.
     pub async fn archive(&self, thread: &str, archived: bool) -> Result<(), String> {
         self.call(ProjectCall::Archive {
             thread: thread.to_owned(),
@@ -686,7 +688,6 @@ impl Project {
     }
 }
 
-/// A thread on the service's host.
 #[derive(Clone)]
 pub struct Thread {
     host: Host,
@@ -709,12 +710,10 @@ impl Thread {
         (self.root.clone(), self.id.clone())
     }
 
-    /// T3's thread id.
     pub fn id(&self) -> &str {
         &self.id
     }
 
-    /// Git for the thread's worktree, else its project folder, as it is at each call.
     pub fn git(&self) -> Git {
         let (root, id) = self.names();
         Git {
@@ -723,20 +722,17 @@ impl Thread {
         }
     }
 
-    /// The current snapshot and the events after it, with no gap between them (ADR-0290).
     pub async fn subscribe(&self) -> Result<(Snapshot, Stream<ThreadEvent>), String> {
         let (root, id) = self.names();
         self.host.stream(api::Stream::Subscribe { root, id }).await
     }
 
-    /// The thread's local servers, kept current.
     pub async fn servers(&self) -> Result<Watch<Vec<LocalServer>>, String> {
         let (root, id) = self.names();
         let (first, stream) = self.host.stream(api::Stream::Servers { root, id }).await?;
         Ok(Watch::from_stream(first, stream))
     }
 
-    /// The thread's automations, kept current.
     pub async fn automations(&self) -> Result<Watch<Vec<Automation>>, String> {
         let (root, id) = self.names();
         let (first, stream) = self
@@ -746,7 +742,6 @@ impl Thread {
         Ok(Watch::from_stream(first, stream))
     }
 
-    /// Wakes when the thread's lineage may have changed.
     pub async fn lineage_changes(&self) -> Result<LineageChanges, String> {
         let (root, id) = self.names();
         let ((), stream) = self
@@ -757,7 +752,6 @@ impl Thread {
     }
 }
 
-/// Calls without arguments that read a thread.
 macro_rules! reads {
     ($($(#[$doc:meta])* $name:ident: $call:ident -> $out:ty;)*) => {
         impl Thread {
@@ -769,38 +763,59 @@ macro_rules! reads {
 }
 
 reads! {
-    /// Its title.
     title: Title -> String;
-    /// Its own worktree, if it has one.
     worktree: Worktree -> Option<PathBuf>;
-    /// Whether T3 ended its stream for good.
     ended: Ended -> bool;
-    /// The thread as it is now.
     snapshot: Snapshot -> Snapshot;
-    /// Its turns, oldest first.
     turns: Turns -> Vec<Turn>;
-    /// Its statistics.
     statistics: Statistics -> Statistics;
-    /// Its latest context window use.
     context: Context -> Option<Context>;
-    /// Its model.
     model: Model -> Option<ModelChoice>;
-    /// T3's record of it.
     record: Record -> Value;
-    /// Stops the running turn.
     stop: Stop -> ();
-    /// The usage limits of its provider.
     usage_limits: UsageLimits -> Option<UsageLimits>;
-    /// Its lineage.
     lineage: Lineage -> Lineage;
-    /// Merges this fork back into its source.
     merge_back: MergeBack -> ();
-    /// Disconnects it from its parent.
     disconnect: Disconnect -> ();
 }
 
 impl Thread {
-    /// Sends `text`, as a steer with `steer` while a turn runs.
+    pub async fn move_check(&self) -> Result<MoveCheck, String> {
+        self.call(ThreadCall::MoveCheck).await
+    }
+
+    pub async fn move_out(
+        &self,
+        transfer: &str,
+        target_address: &str,
+        target_name: &str,
+        target_environment: &str,
+        commit: bool,
+        message: Option<String>,
+    ) -> Result<MovePackage, String> {
+        self.call(ThreadCall::MoveOut {
+            transfer: transfer.to_owned(),
+            target_address: target_address.to_owned(),
+            target_name: target_name.to_owned(),
+            target_environment: target_environment.to_owned(),
+            commit,
+            message,
+        })
+        .await
+    }
+
+    pub async fn move_finish(&self, transfer: &str, finish: MoveFinish) -> Result<(), String> {
+        self.call(ThreadCall::MoveFinish {
+            transfer: transfer.to_owned(),
+            finish,
+        })
+        .await
+    }
+
+    pub async fn move_record(&self) -> Result<Option<MoveRecord>, String> {
+        self.call(ThreadCall::MoveRecord).await
+    }
+
     pub async fn send(&self, text: &str, steer: bool) -> Result<(), String> {
         self.call(ThreadCall::Send {
             text: text.to_owned(),
@@ -809,7 +824,6 @@ impl Thread {
         .await
     }
 
-    /// The diff from turn `from` to turn `to`.
     pub async fn diff(
         &self,
         from: u64,
@@ -824,7 +838,6 @@ impl Thread {
         .await
     }
 
-    /// Reverts to before turn `turn`.
     pub async fn revert(&self, turn: u64, restore_files: bool) -> Result<String, String> {
         self.call(ThreadCall::Revert {
             turn,
@@ -833,27 +846,22 @@ impl Thread {
         .await
     }
 
-    /// Forks the thread after turn `turn` and returns the fork's id.
     pub async fn fork(&self, turn: u64) -> Result<String, String> {
         self.call(ThreadCall::Fork(turn)).await
     }
 
-    /// Sets what the agent may do without asking.
     pub async fn set_permissions(&self, permissions: Permissions) -> Result<(), String> {
         self.call(ThreadCall::SetPermissions(permissions)).await
     }
 
-    /// Sets the model.
     pub async fn set_model(&self, model: &ModelChoice) -> Result<(), String> {
         self.call(ThreadCall::SetModel(model.clone())).await
     }
 
-    /// Sends the queued turn `turn` now.
     pub async fn send_queued_now(&self, turn: u64) -> Result<(), String> {
         self.call(ThreadCall::SendQueuedNow(turn)).await
     }
 
-    /// Changes the text of the queued turn `turn`.
     pub async fn edit_queued(&self, turn: u64, text: &str) -> Result<(), String> {
         self.call(ThreadCall::EditQueued {
             turn,
@@ -862,12 +870,10 @@ impl Thread {
         .await
     }
 
-    /// Cancels the queued turn `turn`.
     pub async fn cancel_queued(&self, turn: u64) -> Result<(), String> {
         self.call(ThreadCall::CancelQueued(turn)).await
     }
 
-    /// Answers an approval request with `decision`.
     pub async fn respond(&self, request: &RequestId, decision: &str) -> Result<(), String> {
         self.call(ThreadCall::Respond {
             request: request.0.clone(),
@@ -876,7 +882,6 @@ impl Thread {
         .await
     }
 
-    /// Answers a question request.
     pub async fn answer(
         &self,
         request: &RequestId,
@@ -889,12 +894,10 @@ impl Thread {
         .await
     }
 
-    /// Dismisses a request.
     pub async fn dismiss(&self, request: &RequestId) -> Result<(), String> {
         self.call(ThreadCall::Dismiss(request.0.clone())).await
     }
 
-    /// Points the thread at `branch` and, if given, `worktree`.
     pub async fn set_branch(&self, branch: &str, worktree: Option<&Path>) -> Result<(), String> {
         self.call(ThreadCall::SetBranch {
             branch: branch.to_owned(),
@@ -903,12 +906,10 @@ impl Thread {
         .await
     }
 
-    /// Stops the local server `pid` on `port`.
     pub async fn stop_server(&self, pid: u32, port: u16) -> Result<(), String> {
         self.call(ThreadCall::StopServer { pid, port }).await
     }
 
-    /// Pauses or resumes the automation `id`.
     pub async fn set_automation_enabled(&self, id: &str, enabled: bool) -> Result<(), String> {
         self.call(ThreadCall::SetAutomationEnabled {
             id: id.to_owned(),
@@ -917,19 +918,16 @@ impl Thread {
         .await
     }
 
-    /// Runs the automation `id` now.
     pub async fn run_automation_now(&self, id: &str) -> Result<(), String> {
         self.call(ThreadCall::RunAutomationNow(id.to_owned())).await
     }
 
-    /// Stops the subagent thread `subagent`.
     pub async fn stop_subagent(&self, subagent: &str) -> Result<(), String> {
         self.call(ThreadCall::StopSubagent(subagent.to_owned()))
             .await
     }
 }
 
-/// Git for a checkout on the service's host.
 #[derive(Clone)]
 pub struct Git {
     host: Host,
@@ -946,12 +944,10 @@ impl Git {
             .await
     }
 
-    /// The checkout's status.
     pub async fn status(&self) -> Result<GitStatus, String> {
         self.call(GitCall::Status).await
     }
 
-    /// Each new status of the checkout.
     pub async fn watch(&self) -> Result<Stream<GitStatus>, String> {
         let ((), stream) = self
             .host
@@ -960,7 +956,6 @@ impl Git {
         Ok(stream)
     }
 
-    /// A page of refs matching `query`.
     pub async fn refs(&self, query: &str, cursor: u64, limit: u64) -> Result<Refs, String> {
         self.call(GitCall::Refs {
             query: query.to_owned(),
@@ -970,27 +965,22 @@ impl Git {
         .await
     }
 
-    /// Switches to `name`.
     pub async fn switch(&self, name: &str) -> Result<(), String> {
         self.call(GitCall::Switch(name.to_owned())).await
     }
 
-    /// Creates and switches to the branch `name`.
     pub async fn create_branch(&self, name: &str) -> Result<(), String> {
         self.call(GitCall::CreateBranch(name.to_owned())).await
     }
 
-    /// Makes the folder a repository.
     pub async fn init(&self) -> Result<(), String> {
         self.call(GitCall::Init).await
     }
 
-    /// Pulls, answering T3's title and description.
     pub async fn pull(&self) -> Result<(String, String), String> {
         self.call(GitCall::Pull).await
     }
 
-    /// Runs a stacked action and reports its progress.
     pub async fn run(&self, request: GitActionRequest) -> Result<Stream<GitProgress>, String> {
         let ((), stream) = self
             .host
@@ -1002,17 +992,14 @@ impl Git {
         Ok(stream)
     }
 
-    /// The branch's changes against its base.
     pub async fn branch_diff(&self, ignore_whitespace: bool) -> Result<String, String> {
         self.call(GitCall::BranchDiff(ignore_whitespace)).await
     }
 
-    /// The uncommitted changes.
     pub async fn uncommitted_diff(&self, ignore_whitespace: bool) -> Result<String, String> {
         self.call(GitCall::UncommittedDiff(ignore_whitespace)).await
     }
 
-    /// Resolves a pull request reference.
     pub async fn resolve_pull_request(
         &self,
         reference: &str,
@@ -1021,7 +1008,6 @@ impl Git {
             .await
     }
 
-    /// Checks out a pull request, in a new worktree with `worktree`.
     pub async fn check_out_pull_request(
         &self,
         reference: &str,
@@ -1034,7 +1020,6 @@ impl Git {
         .await
     }
 
-    /// Publishes the repository.
     pub async fn publish(
         &self,
         provider: &str,
@@ -1049,12 +1034,10 @@ impl Git {
         .await
     }
 
-    /// The pull request `number` with its checks.
     pub async fn pull_request(&self, number: u64) -> Result<PullRequestDetail, String> {
         self.call(GitCall::PullRequest(number)).await
     }
 
-    /// Runs a pull request action such as merging.
     pub async fn run_pull_request_action(
         &self,
         number: u64,
@@ -1069,7 +1052,6 @@ impl Git {
         .await
     }
 
-    /// The branch and worktree of a pull request's checkout.
     pub async fn pull_request_worktree(
         &self,
         reference: &str,

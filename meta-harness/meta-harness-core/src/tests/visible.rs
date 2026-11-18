@@ -10,8 +10,6 @@ fn keeps_windows_line_ends_and_writes_out_other_carriage_returns() {
 
 #[test]
 fn never_shows_two_texts_alike() {
-    // A literal marker would read like a hidden character: `<U+200B>` in a shell command is two
-    // redirections, around a file named `U+200B`.
     let literal = visible("printf x <U+200B>keys");
     assert_eq!(literal, "printf x <U+003C>U+200B>keys");
     assert_ne!(literal, visible("printf x \u{200B}keys"));
@@ -20,7 +18,6 @@ fn never_shows_two_texts_alike() {
 
 #[test]
 fn writes_out_every_kind_of_character_that_hides_or_reorders_text() {
-    // One character from each range `hides` names; each is shown as its code point.
     for character in [
         '\u{AD}',
         '\u{34F}',

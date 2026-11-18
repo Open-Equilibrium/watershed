@@ -1,10 +1,4 @@
 #!/usr/bin/env python3
-"""A deterministic ACP agent for the T3 contract tests; no model and no account.
-
-The first prompt line that is a script line decides, up to any tag T3 appends to it:
-"append <text>" appends <text> to contract.txt in the session's folder through one tool call and answers "Appended."; "ask" asks permission for an
-edit and answers "Approved." or "Declined."; "stream <n>" answers in <n> chunks of 16 bytes;
-"wait" runs until T3 cancels it; anything else answers "Done."."""
 import json
 import os
 import sys
@@ -85,10 +79,10 @@ for raw in sys.stdin:
         cancelled[sid].clear()
         text = "".join(p.get("text", "") for p in params.get("prompt", []) if p.get("type") == "text")
         lines = [line.split("<")[0].strip() for line in text.splitlines()]
-        script = next((line for line in lines if line.startswith(("append ", "stream ")) or line in ("ask", "wait")), "")
+        handoff = "Imported conversation history from the previous host" in text
+        script = "" if handoff else next((line for line in lines if line.startswith(("append ", "stream ")) or line in ("ask", "wait")), "")
         threading.Thread(target=prompt, args=(mid, sid, script)).start()
     elif method == "session/cancel":
         cancelled[params["sessionId"]].set()
     elif mid is not None:
-        # Optional ACP methods (set_mode, set_model ...): accepted without effect.
         send({"jsonrpc": "2.0", "id": mid, "result": {}})

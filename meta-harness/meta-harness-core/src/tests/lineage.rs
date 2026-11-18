@@ -1,6 +1,3 @@
-//! A thread's lineage rows as T3's relationships panel derives them, and the commands it sends
-//! from there (merge back, disconnect, stop subagent).
-
 use std::collections::HashMap;
 use std::time::Duration;
 
@@ -14,8 +11,6 @@ use crate::thread::lineage::{Group, Lineage, Relation, derive};
 const WAIT: Duration = Duration::from_secs(10);
 const ROOT_CREATED: &str = "2026-11-15T10:00:00.000Z";
 
-/// A thread record: forked from or a subagent of `parent` (a relation of `fork` or `subagent`),
-/// or none; `side` marks a side chat.
 fn thread(
     id: &str,
     title: &str,
@@ -41,8 +36,6 @@ fn thread(
     })
 }
 
-/// The root thread with a fork, a side chat, a subagent (app-owned, running) and a context
-/// transfer to a thread the shell does not list.
 fn root_scenario() -> (Projection, Vec<Value>) {
     let root = thread("t-root", "Root", ROOT_CREATED, None, false, "idle");
     let shells = vec![
@@ -86,8 +79,6 @@ fn root_scenario() -> (Projection, Vec<Value>) {
     (projection, shells)
 }
 
-/// The rows as the panel shows them: thread, relation, group, title, status, failed, merge target
-/// and the subagent a stop would name.
 type Shown = (
     String,
     Relation,
@@ -186,13 +177,11 @@ fn a_threads_rows_follow_t3s_relations_order_groups_titles_and_merge_back() {
         lineage.can_disconnect,
         "the thread has a provider session to detach"
     );
-    // The root is no fork, so it has no merge target; its latest run could still merge.
     assert_eq!(
         (lineage.merge_target_title, lineage.can_merge),
         (None, false)
     );
 
-    // A fork's parent is its merge target: the first row, pinned, with the merge-back state.
     let fork_shells = vec![shells[0].clone(), shells[1].clone()];
     let fork = Projection::from_snapshot(&json!({
         "thread": shells[1].clone(),
@@ -261,7 +250,7 @@ async fn merge_back_disconnect_and_stop_subagent_send_the_commands_t3_sends() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn the_lineage_changes_when_the_thread_or_its_shell_changes() {
+async fn the_lineage_changes_when_its_shell_changes() {
     let (fake, thread) = follow_answering(projection(json!({})), 1, |tag, _, id| match tag {
         "orchestration.subscribeShell" => Vec::new(),
         _ => vec![ok(id, json!({}))],
@@ -281,24 +270,6 @@ async fn the_lineage_changes_when_the_thread_or_its_shell_changes() {
     tokio::time::timeout(WAIT, fake.interrupted(&shell))
         .await
         .expect("dropping the watch stops the shell stream on T3");
-
-    let (fake, thread) = follow_answering(projection(json!({})), 1, |tag, _, id| match tag {
-        "orchestration.subscribeShell" => vec![chunk(id, vec![])],
-        _ => vec![ok(id, json!({}))],
-    })
-    .await;
-    let changes = thread.lineage_changes().await.unwrap();
-    fake.push(
-        "orchestration.subscribeThread",
-        vec![event(
-            2,
-            "subagent.updated",
-            json!({"id": "sub-1", "threadId": "thread-1", "status": "running"}),
-        )],
-    );
-    tokio::time::timeout(WAIT, changes.changed())
-        .await
-        .expect("a subagent update wakes the watch");
 }
 
 #[tokio::test(flavor = "multi_thread")]

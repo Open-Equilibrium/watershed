@@ -1,145 +1,101 @@
-//! Meta-Harness's API: the messages its service and clients exchange as JSON text frames over one
-//! WebSocket (ADR-0185, ADR-0297). A client sends `{"id", "call"}` for one answer, `{"id",
-//! "stream"}` for an answer followed by items, and `{"cancel": id}` to end a stream. The service
-//! answers `{"id", "ok"}` or `{"id", "error"}`, then sends a stream's `{"id", "item"}` frames and
-//! finally `{"id", "end": null}`.
-//!
-//! Every thread call names the project and the thread, so a client that reconnects goes on without
-//! opening its threads again.
-
 use serde::{Deserialize, Serialize};
 
 use crate::config::Change;
+use crate::host_move::{MoveFinish, MovePackage};
 use crate::hosts::{Access, ClientKind};
 use crate::{GitActionRequest, ModelChoice, Permissions, StartThread, ThreadSummary};
 
-/// The header a client names itself with; the configuration log records it (ADR-0298).
 pub const CLIENT_HEADER: &str = "meta-harness-client";
 
-/// The header a client names its API version with. A service of another version, or a client that
-/// names none, is refused at the handshake, since it would misread the frames.
 pub const API_HEADER: &str = "meta-harness-api";
 
-/// The header that asks the remote listener to pair a new client with the pairing code it names
-/// (ADR-0299).
 pub const PAIRING_HEADER: &str = "meta-harness-pairing";
 
-/// The header that makes a host's connection a tunnel to its T3 server (ADR-0288).
 pub const TUNNEL_HEADER: &str = "meta-harness-tunnel";
 
-/// The API version this build speaks: the calls, streams and frames below.
 pub const API_VERSION: u32 = 1;
 
-/// The frame a service answers a pairing with: its name, the token the client presents from now on
-/// (ADR-0299) and the highest access level the client may ask a link for (ADR-0300). A service that
-/// names no level gives `auto`.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct Pairing {
-    /// The service's name for itself, which the client keeps as the host's name.
     pub name: String,
-    /// The token the client presents from now on.
     pub token: String,
-    /// The access the client was paired at.
     #[serde(default)]
     pub access: Access,
 }
 
-/// A call with one answer.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum Call {
-    /// The host's T3 Code server.
     Host(HostCall),
-    /// Remote access to this service; answered only on this computer (ADR-0299).
     Remote(RemoteCall),
-    /// A pairing code for a new device or host, answered only on this computer (ADR-0299). A host's
-    /// access is the highest level its agents get here (ADR-0300); a device ignores it.
-    Invite { kind: ClientKind, access: Access },
-    /// The other hosts this one links to and the clients paired with it (ADR-0285).
+    Invite {
+        kind: ClientKind,
+        access: Access,
+    },
     Hosts(HostsCall),
-    /// A project, by its folder.
     Project {
-        /// The project folder.
         root: String,
-        /// What to do.
         call: ProjectCall,
     },
-    /// A thread of a project.
     Thread {
-        /// The project folder.
         root: String,
-        /// T3's thread id.
         id: String,
-        /// What to do.
         call: ThreadCall,
     },
-    /// Git for a checkout.
     Git {
-        /// Whose checkout.
         checkout: Checkout,
-        /// What to do.
         call: GitCall,
     },
-    /// The central configuration (ADR-0298).
     Config(ConfigCall),
 }
 
-/// A call to the host.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum HostCall {
     Status,
     Providers,
     EnvironmentName,
+    EnvironmentMachine,
+    EnvironmentId,
     WriterModel,
     SetWriterModel(ModelChoice),
+    Projects,
+    CloneProject { remote_url: String, path: String },
+    AddProject { root: String },
+    MoveStatus { transfer: String },
+    MoveAbort { transfer: String },
+    Preflight { root: String, branch: String },
 }
 
-/// A call to the remote listener.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum RemoteCall {
-    /// Listens on the tailnet at `port`, from now on and after each start.
     On { port: u16 },
-    /// Stops listening there.
     Off,
-    /// Where it listens, if it does.
     Status,
 }
 
-/// A call to the hosts this one links to.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum HostsCall {
-    /// A pairing code from this host's T3 Code, which another host's link redeems. The only call
-    /// a host's token may make (ADR-0288).
     T3Pairing,
-    /// Revokes the client named so: its token is refused from its next connection on (ADR-0299).
     Revoke(String),
-    /// Links the host at `address` with `code` from its `meta invite --host`, at `access`
-    /// (ADR-0285, ADR-0288). Answers the linked host's name.
     Add {
         address: String,
         code: String,
-        /// The level asked for; `None` takes the level the other host allows.
         access: Option<Access>,
     },
-    /// The hosts this one links to and the clients paired with it.
     List,
-    /// Unlinks the host named so.
     Remove(String),
-    /// Turns agents from other hosts on or off (ADR-0300).
     Agents(bool),
 }
 
-/// A call to a project.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum ProjectCall {
     Threads,
-    /// Starts a thread and answers its id.
     Start(StartThread),
-    /// Checks the thread exists and answers nothing.
+    MoveIn(MovePackage),
     Open(String),
     OnlyThreadInWorktree(ThreadSummary),
     Delete {
@@ -152,7 +108,6 @@ pub(crate) enum ProjectCall {
     },
 }
 
-/// A call to a thread.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum ThreadCall {
@@ -215,19 +170,29 @@ pub(crate) enum ThreadCall {
     MergeBack,
     Disconnect,
     StopSubagent(String),
+    MoveCheck,
+    MoveOut {
+        transfer: String,
+        target_address: String,
+        target_name: String,
+        target_environment: String,
+        commit: bool,
+        message: Option<String>,
+    },
+    MoveFinish {
+        transfer: String,
+        finish: MoveFinish,
+    },
+    MoveRecord,
 }
 
-/// Whose checkout a Git call works in.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum Checkout {
-    /// The project folder.
     Project(String),
-    /// The thread's worktree, else its project folder, as it is when the call arrives.
     Thread { root: String, id: String },
 }
 
-/// A Git call.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum GitCall {
@@ -262,49 +227,47 @@ pub(crate) enum GitCall {
     PullRequestWorktree(String),
 }
 
-/// A configuration call (ADR-0298).
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum ConfigCall {
-    /// The current revision and its configuration blocks.
     Current,
-    /// Proposes changes to the current revision and answers the proposal's number.
     Propose {
         summary: String,
         changes: Vec<Change>,
     },
-    /// Proposes going back to the blocks of an earlier revision.
     Revert(u64),
-    /// The proposals that wait for a decision.
     Pending,
     Approve(u64),
     Reject(u64),
-    /// The whole log, oldest first.
     Log,
 }
 
-/// A call answered by a first value and then items.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum Stream {
-    /// The thread's snapshot, then its events (ADR-0290).
-    Subscribe { root: String, id: String },
-    /// The thread's local servers, then each change.
-    Servers { root: String, id: String },
-    /// The thread's automations, then each change.
-    Automations { root: String, id: String },
-    /// Nothing, then an item whenever the thread's lineage may have changed.
-    LineageChanges { root: String, id: String },
-    /// Nothing, then each Git status.
+    Subscribe {
+        root: String,
+        id: String,
+    },
+    Servers {
+        root: String,
+        id: String,
+    },
+    Automations {
+        root: String,
+        id: String,
+    },
+    LineageChanges {
+        root: String,
+        id: String,
+    },
     GitWatch(Checkout),
-    /// Nothing, then the stacked action's progress.
     GitRun {
         checkout: Checkout,
         request: GitActionRequest,
     },
 }
 
-/// A frame a client sends.
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(untagged)]
 pub(crate) enum Request {
@@ -313,7 +276,6 @@ pub(crate) enum Request {
     Cancel { cancel: u64 },
 }
 
-/// A frame the service sends.
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(untagged)]
 pub(crate) enum Reply {
@@ -323,17 +285,11 @@ pub(crate) enum Reply {
     End { id: u64, end: () },
 }
 
-/// What `meta status` shows of a running service.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct Status {
-    /// The T3 Code release the service runs.
     pub t3_version: String,
-    /// The service's process id.
     pub pid: u32,
-    /// The current configuration revision.
     pub revision: u64,
-    /// Whether the harness homes hold that revision; false after a failed write that is not yet
-    /// repaired by a write that succeeds. Absent in an older service's status, which is reconciled.
     #[serde(default = "reconciled_when_absent")]
     pub reconciled: bool,
 }
@@ -342,14 +298,10 @@ fn reconciled_when_absent() -> bool {
     true
 }
 
-/// Where the remote listener answers, while it is on.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct RemoteStatus {
-    /// The port it listens on.
     pub port: u16,
-    /// Each address, as `ws://<ip>:<port>`, which a host or device names to reach it.
     pub addresses: Vec<String>,
-    /// Why remote access is on but does not listen yet, such as a port that another program holds.
     pub waiting: Option<String>,
 }
 

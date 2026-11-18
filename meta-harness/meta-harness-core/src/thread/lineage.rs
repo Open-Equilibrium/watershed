@@ -1,6 +1,3 @@
-//! A thread's lineage as T3 0.1.9's relationships panel derives it: forks, side chats, subagents
-//! and context transfers, with the merge target and the provider session (ADR-0280).
-
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -12,84 +9,50 @@ use tokio::task::JoinHandle;
 use super::Thread;
 use crate::t3::{Projection, millis};
 
-/// How a row's thread relates to the thread the panel shows.
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Relation {
-    /// Context transferred between the two threads.
     ContextTransfer,
-    /// A subagent this thread started.
     Subagent,
-    /// The thread that started this one as a subagent.
     ParentAgent,
-    /// A fork this thread started.
     Fork,
-    /// The thread this one forked from.
     ParentThread,
-    /// A side chat of this thread.
     SideChat,
 }
 
-/// The section of the panel a row sits in.
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Group {
-    /// Forks, the parent and transfers: listed at once.
     Related,
-    /// Subagents that still run or wait.
     Active,
-    /// Subagents that ended: listed under "Previous agents".
     Previous,
-    /// Side chats.
     SideChats,
 }
 
-/// One related thread.
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct LineageRow {
-    /// T3's thread id.
     pub thread: String,
-    /// How it relates.
     pub relation: Relation,
-    /// Where it sits.
     pub group: Group,
-    /// Its title; subagent titles read as T3 shows them.
     pub title: String,
-    /// Its status, as T3 reports it.
     pub status: Option<String>,
-    /// The status in T3's words.
     pub status_label: String,
-    /// Whether it failed.
     pub failed: bool,
-    /// When a subagent started, in milliseconds since the Unix epoch; set only while its elapsed
-    /// time is known.
     pub started_ms: Option<u64>,
-    /// When a finished subagent ended; `None` while it runs.
     pub ended_ms: Option<u64>,
-    /// Whether it is the thread this one merges back into.
     pub merge_target: bool,
-    /// The subagent a stop would end, when T3 offers one.
     pub stop_subagent: Option<String>,
 }
 
-/// The lineage the panel shows.
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct Lineage {
-    /// The related threads, in T3's order.
     pub rows: Vec<LineageRow>,
-    /// Subagents and active rows that run.
     pub running: usize,
-    /// Side chats that run.
     pub side_chats_running: usize,
-    /// Whether the provider session can be disconnected.
     pub can_disconnect: bool,
-    /// The title of the merge target, when there is one.
     pub merge_target_title: Option<String>,
-    /// Whether the thread has a finished run to merge back.
     pub merge_ready: bool,
-    /// Whether "Merge back" can run now.
     pub can_merge: bool,
 }
 
-/// The lineage, and the thread ids whose titles T3 must still give.
 #[derive(Debug)]
 pub(crate) struct Derived {
     pub lineage: Lineage,
@@ -111,8 +74,6 @@ struct Edge {
     status: Option<String>,
 }
 
-/// Derives the lineage of `projection`'s thread from the thread `shells` of its family, with the
-/// `titles` T3 gave for threads the shells do not list.
 pub(crate) fn derive(
     projection: &Projection,
     shells: &[Value],
@@ -120,7 +81,6 @@ pub(crate) fn derive(
 ) -> Derived {
     let thread = &projection.thread;
     let current = thread["id"].as_str().unwrap_or_default();
-    // The first shell of each thread wins, as T3 orders its shells from most to least current.
     let mut nodes: HashMap<&str, &Value> = HashMap::new();
     let mut threads: Vec<&Value> = Vec::new();
     for shell in shells {
@@ -193,7 +153,6 @@ pub(crate) fn derive(
         }
     }
 
-    // One row per related thread: the first edge that reaches it.
     let mut seen: HashSet<String> = HashSet::new();
     let mut rows: Vec<(String, Edge)> = Vec::new();
     for edge in &edges {
@@ -247,7 +206,6 @@ pub(crate) fn derive(
         if unlisted_row {
             unlisted.push(id.clone());
         }
-        // A subagent row is kept whatever its title; T3 drops the others until their title is known.
         if edge.kind != Kind::Subagent && unlisted_row && !titles.contains_key(&id) {
             continue;
         }
@@ -356,7 +314,6 @@ pub(crate) fn derive(
         side_chats_running,
         can_disconnect: provider_session(projection)
             .is_some_and(|s| s["status"] != "stopped" && s["status"] != "error"),
-        // Titled as its row is: T3's titles first, then the shell.
         merge_target_title: merge_target.as_deref().and_then(|target| {
             titles
                 .get(target)
@@ -369,8 +326,6 @@ pub(crate) fn derive(
     Derived { lineage, unlisted }
 }
 
-/// Adds `edge`, replacing an edge of the same ends and kind; a rolled-back subagent reads as
-/// interrupted, as T3 shows it.
 fn add_edge(edges: &mut Vec<Edge>, mut edge: Edge) {
     if edge.kind == Kind::Subagent && edge.status.as_deref() == Some("rolled_back") {
         edge.status = Some("interrupted".to_owned());
@@ -383,7 +338,6 @@ fn add_edge(edges: &mut Vec<Edge>, mut edge: Edge) {
     }
 }
 
-/// The thread a thread was forked from, or started as a subagent of.
 fn parent_of(thread: &Value) -> Option<String> {
     if thread["forkedFrom"]["type"] == "run" {
         str_of(&thread["forkedFrom"]["threadId"])
@@ -392,7 +346,6 @@ fn parent_of(thread: &Value) -> Option<String> {
     }
 }
 
-/// A subagent edge's status: its child's live status, else the child's last run's, else its own.
 fn subagent_status(subagent: &Value, child: Option<&Value>) -> Option<String> {
     let own = str_of(&subagent["status"]);
     match child {
@@ -406,7 +359,6 @@ fn subagent_status(subagent: &Value, child: Option<&Value>) -> Option<String> {
     }
 }
 
-/// A subagent as its child thread's newer run shows it (T3's `currentSubagent`).
 fn current_subagent(mut agent: Value, child: Option<&Value>) -> Value {
     let Some(child) = child else {
         return agent;
@@ -449,7 +401,6 @@ fn current_subagent(mut agent: Value, child: Option<&Value>) -> Value {
     agent
 }
 
-/// A subagent's title: its own, else its prompt, shortened as T3 shortens it.
 fn agent_title(record: &Value) -> String {
     match record["title"].as_str() {
         Some(title) => title.to_owned(),
@@ -457,7 +408,6 @@ fn agent_title(record: &Value) -> String {
     }
 }
 
-/// A prompt of more than 80 UTF-16 units, cut to 77 and marked with an ellipsis.
 fn prompt_title(prompt: &str) -> String {
     let units: Vec<u16> = prompt.encode_utf16().collect();
     if units.len() <= 80 {
@@ -470,8 +420,6 @@ fn prompt_title(prompt: &str) -> String {
     format!("{}...", String::from_utf16_lossy(&units[..end]))
 }
 
-/// A subagent's title as T3 shows it: without its `Subagent:` prefix, and a path under `/root/`
-/// read as its last name in title case.
 fn display_title(title: &str) -> String {
     let display = match title.get(..9) {
         Some(head) if head.eq_ignore_ascii_case("Subagent:") => title[9..].trim_start(),
@@ -505,7 +453,6 @@ fn display_title(title: &str) -> String {
     }
 }
 
-/// The merge target's latest run that can merge back: finished, with no newer run still going.
 fn merge_run(projection: &Projection) -> Option<Value> {
     let latest = projection.runs.iter().fold(None::<&Value>, |latest, run| {
         let finished = matches!(run["status"].as_str(), Some("waiting" | "completed"));
@@ -528,8 +475,6 @@ fn merge_run(projection: &Projection) -> Option<Value> {
     (!newer_active).then(|| latest.clone())
 }
 
-/// The provider session the thread's active run uses, else its attached one, else the newest
-/// session that has not stopped or failed (T3's `resolveThreadProviderSession`).
 fn provider_session(projection: &Projection) -> Option<&Value> {
     let thread = &projection.thread;
     let active_run = projection.runs.iter().rev().find(|run| {
@@ -566,7 +511,6 @@ fn provider_session(projection: &Projection) -> Option<&Value> {
     }
 }
 
-/// T3's status words for a row; `Unknown` for any other.
 fn status_label(status: Option<&str>) -> &'static str {
     match status {
         Some("preparing" | "starting") => "Starting",
@@ -597,7 +541,6 @@ fn finished(status: Option<&str>) -> bool {
     )
 }
 
-/// Threads with the newest creation first; an unknown creation time last.
 fn newest_first(left: Option<u64>, right: Option<u64>) -> Ordering {
     match (left, right) {
         (left, right) if left == right => Ordering::Equal,
@@ -611,7 +554,6 @@ fn id_of(thread: &Value) -> String {
     str_of(&thread["id"]).unwrap_or_default()
 }
 
-/// A thread's status: its active run's while one runs, else its own.
 fn status_of(thread: &Value) -> Option<String> {
     str_of(&thread["activityRunStatus"]).or_else(|| str_of(&thread["status"]))
 }
@@ -620,17 +562,12 @@ fn str_of(value: &Value) -> Option<String> {
     value.as_str().map(str::to_owned)
 }
 
-/// A live handle on T3's lineage changes: wakes when this thread's projection changes what the
-/// lineage shows, or when any thread's shell changes. Dropping it closes the shell stream.
 pub struct LineageChanges {
     wake: Arc<Notify>,
-    /// Set once the stream behind it ended, after which no change comes.
     ended: Arc<std::sync::atomic::AtomicBool>,
     task: JoinHandle<()>,
 }
 
-/// Marks the changes `ended` and wakes every waiting reader, which then learns no change comes.
-/// `notify_one` keeps a permit for a reader that is about to wait.
 fn end(wake: &Notify, ended: &std::sync::atomic::AtomicBool) {
     ended.store(true, std::sync::atomic::Ordering::SeqCst);
     wake.notify_one();
@@ -638,7 +575,6 @@ fn end(wake: &Notify, ended: &std::sync::atomic::AtomicBool) {
 }
 
 impl LineageChanges {
-    /// Wakes on each item of a stream of the Meta-Harness service.
     pub(crate) fn from_stream(mut stream: crate::remote::Stream<()>) -> Self {
         let wake = Arc::new(Notify::new());
         let ended = Arc::new(std::sync::atomic::AtomicBool::new(false));
@@ -652,10 +588,7 @@ impl LineageChanges {
         Self { wake, ended, task }
     }
 
-    /// Waits for a change, then says whether one came: `false` once the stream behind it ended,
-    /// such as when the connection to Meta-Harness was lost. Read the lineage again after each.
     pub async fn changed(&self) -> bool {
-        // Registered before the check, so an end that comes in between still wakes it.
         let notified = self.wake.notified();
         tokio::pin!(notified);
         notified.as_mut().enable();
@@ -674,7 +607,6 @@ impl Drop for LineageChanges {
 }
 
 impl Thread {
-    /// The thread's lineage as the relationships panel shows it.
     pub async fn lineage(&self) -> Result<Lineage, String> {
         let family = self
             .client
@@ -705,9 +637,7 @@ impl Thread {
         Ok(derive(&self.state().projection, &shells, &titles).lineage)
     }
 
-    /// Follows the changes that can change the lineage; see [`LineageChanges`].
     pub async fn lineage_changes(&self) -> Result<LineageChanges, String> {
-        // Each watch has its own wake, so one watch never takes another's change.
         let wake = Arc::new(Notify::new());
         self.state().lineage.push(Arc::downgrade(&wake));
         let mut shells = self
@@ -725,7 +655,6 @@ impl Thread {
         Ok(LineageChanges { wake, ended, task })
     }
 
-    /// T3's "Merge back": merges this fork's latest finished run into the thread it forked from.
     pub async fn merge_back(&self) -> Result<(), String> {
         let (target, run) = {
             let state = self.state();
@@ -748,7 +677,6 @@ impl Thread {
         .await
     }
 
-    /// T3's "Disconnect agent session": detaches each provider session of this thread.
     pub async fn disconnect(&self) -> Result<(), String> {
         let sessions: Vec<String> = self
             .state()
@@ -769,8 +697,6 @@ impl Thread {
         Ok(())
     }
 
-    /// T3's "Stop subagent": stops the subagent's run here; an app-owned subagent's child thread
-    /// stops too.
     pub async fn stop_subagent(&self, subagent: &str) -> Result<(), String> {
         let record = self
             .state()
@@ -793,7 +719,6 @@ impl Thread {
             str_of(&record["childThreadId"]),
         ) {
             (Some("app_owned"), Some(child)) => {
-                // T3 ignores a failed stop here, since the child stop below still ends the work.
                 if !record["runId"].is_null() {
                     let _ = self.send_command(stop(&record["runId"])).await;
                 }
@@ -805,7 +730,6 @@ impl Thread {
         }
     }
 
-    /// Sends `command` to T3.
     async fn send_command(&self, command: Value) -> Result<(), String> {
         self.client
             .command("orchestration.dispatchCommand", command)

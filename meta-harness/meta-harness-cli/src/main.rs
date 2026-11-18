@@ -1,6 +1,3 @@
-//! `meta`, Meta-Harness's command line (ADR-0286, ADR-0296): it runs the service, which the
-//! login service starts, and talks to it like any client. Data commands print JSON.
-
 mod hosts;
 mod login;
 
@@ -45,7 +42,6 @@ usage: meta <command>
 
 Meta-Harness keeps its data in META_HARNESS_HOME, else ~/.meta-harness.";
 
-/// How the configuration log names this client.
 const CLIENT: &str = "meta";
 
 fn main() -> ExitCode {
@@ -88,7 +84,6 @@ async fn run(args: &[&str]) -> Result<(), String> {
     }
 }
 
-/// What `meta status` says of the service and its harness homes.
 fn status_text(status: &api::Status) -> String {
     let mut text = format!(
         "Meta-Harness runs T3 Code {} as process {}, configuration revision {}.",
@@ -139,7 +134,6 @@ async fn config(host: &remote::Host, args: &[&str]) -> Result<(), String> {
     }
 }
 
-/// Runs the service until the login service or the person stops it.
 async fn serve(home: PathBuf) -> Result<(), String> {
     let service = Service::start(ServiceConfig {
         home,
@@ -172,7 +166,6 @@ async fn stopped() {
     let _ = tokio::signal::ctrl_c().await;
 }
 
-/// The installation's folders: `meta` in `<prefix>/bin`, T3 in `<prefix>/lib/meta-harness`.
 fn prefix() -> Result<PathBuf, String> {
     let program = std::env::current_exe()
         .and_then(|p| p.canonicalize())
@@ -186,8 +179,6 @@ fn prefix() -> Result<PathBuf, String> {
         .ok_or_else(|| format!("{} is not an installed meta.", program.display()))
 }
 
-/// The pinned T3 Code the installer put beside `meta`; `META_HARNESS_T3` names another, for
-/// development.
 fn pinned_t3() -> Result<PathBuf, String> {
     if let Some(t3) = std::env::var_os("META_HARNESS_T3") {
         return Ok(PathBuf::from(t3));
@@ -216,7 +207,6 @@ fn install(home: PathBuf) -> Result<(), String> {
     Ok(())
 }
 
-/// Whether systemd keeps this user's services running after logout.
 fn lingering() -> bool {
     let user = std::env::var("USER").unwrap_or_default();
     std::process::Command::new("loginctl")
@@ -225,7 +215,6 @@ fn lingering() -> bool {
         .is_ok_and(|out| String::from_utf8_lossy(&out.stdout).trim() == "Linger=yes")
 }
 
-/// Stops and removes the login service; a stop step that failed is printed as a warning.
 fn remove_login_service() -> Result<(), String> {
     for failure in login::Manager::current()?.uninstall(run_step)? {
         eprintln!("meta: warning: {failure}");
@@ -233,10 +222,7 @@ fn remove_login_service() -> Result<(), String> {
     Ok(())
 }
 
-/// Whether uninstalling `prefix` removes the data folder `home`, both resolved: `home` lies in
-/// a folder uninstall removes, or is the prefix itself.
 fn removes_data(prefix: &Path, home: &Path) -> bool {
-    // A folder reached through a link is removed where the link points.
     let resolved = |path: PathBuf| path.canonicalize().unwrap_or(path);
     home == prefix
         || ["lib/meta-harness", "share/meta-harness"]
@@ -244,13 +230,10 @@ fn removes_data(prefix: &Path, home: &Path) -> bool {
             .any(|folder| home.starts_with(resolved(prefix.join(folder))))
 }
 
-/// The first of `home` and `recorded`, the data folder the login service keeps, that uninstalling
-/// `prefix` would remove.
 fn data_in_installation(prefix: &Path, recorded: Option<PathBuf>, home: &Path) -> Option<PathBuf> {
     std::iter::once(home.to_path_buf())
         .chain(recorded)
         .find(|home| {
-            // A link to the data folder counts as its target.
             let target = home.canonicalize().unwrap_or_else(|_| home.clone());
             removes_data(prefix, &target)
         })
@@ -260,8 +243,6 @@ fn uninstall() -> Result<(), String> {
     let prefix = prefix()?;
     let home = default_home()?;
     let manager = login::Manager::current()?;
-    // Checked before anything is removed: the login service may keep a data folder that this
-    // shell does not name.
     if let Some(data) = data_in_installation(&prefix, manager.recorded_home()?, &home) {
         return Err(format!(
             "The data folder {} lies in the installation that uninstall removes, so nothing was \
@@ -289,7 +270,6 @@ fn uninstall() -> Result<(), String> {
             _ => {}
         }
     }
-    // Only an empty folder goes; one with other content, or already gone, stays.
     for folder in [
         prefix.join("bin"),
         prefix.join("lib"),
@@ -361,7 +341,6 @@ mod tests {
         let prefix = Path::new("/opt/mh");
         let recorded = PathBuf::from("/opt/mh/lib/meta-harness/data");
         let shell = Path::new("/home/p/.meta-harness");
-        // This shell names a folder outside the installation; the service keeps its data inside.
         assert_eq!(
             data_in_installation(prefix, Some(recorded.clone()), shell),
             Some(recorded)

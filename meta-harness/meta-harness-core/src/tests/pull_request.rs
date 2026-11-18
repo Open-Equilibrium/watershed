@@ -1,6 +1,3 @@
-//! Pull requests through T3's shell, detail, checks, action and worktree replies (ADR-0282): what
-//! the thread details card reads and does.
-
 use std::path::PathBuf;
 
 use serde_json::{Value, json};
@@ -13,7 +10,6 @@ use crate::git::{LineCount, PullRequestCheck, PullRequestDetail};
 const CWD: &str = "/repo";
 const URL: &str = "https://github.com/owner/repo/pull/42";
 
-/// T3's shell snapshot: the project at `CWD` with `identity` as its repository, and a thread in it.
 fn shell(identity: Value) -> Value {
     json!({"snapshot": {
         "projects": [{"id": "project-1", "workspaceRoot": CWD, "deletedAt": null,
@@ -28,8 +24,6 @@ fn github() -> Value {
             "remoteUrl": "git@github.com:owner/repo.git"}})
 }
 
-/// T3's `PullRequestDetail` for #42: open or merged, `mergeability`, the actions it `offered` and
-/// the ones the viewer `permitted`, with `checks`. Merging offers merge and squash, not rebase.
 fn detail(
     state: &str,
     draft: bool,
@@ -63,8 +57,6 @@ fn check(name: &str, status: &str, description: Option<&str>) -> Value {
     json!({"name": name, "status": status, "description": description, "url": null})
 }
 
-/// T3's replies to the card's reads: the shell, `pull` as the detail, its checks as the checks
-/// read, and nothing to a ready or merge action.
 fn replies(
     pull: Value,
     identity: Value,
@@ -254,7 +246,6 @@ async fn a_fix_or_resolve_checks_the_pull_request_out_in_a_worktree_for_a_new_th
         git.pull_request_worktree(URL).await.unwrap(),
         ("feature".to_owned(), Some(PathBuf::from("/wt/feature")))
     );
-    // The new thread does not exist yet, so the checkout names no thread.
     assert_eq!(
         fake.payloads("git.preparePullRequestThread"),
         vec![json!({"cwd": CWD, "reference": URL, "mode": "worktree"})]
@@ -269,7 +260,6 @@ async fn a_project_without_a_repository_is_not_asked_about_its_pull_requests() {
     assert!(fake.payloads("pullRequests.detail").is_empty());
 }
 
-/// The pull request of #42 with `checks`, as the prompts read it.
 fn pull_request(checks: Vec<PullRequestCheck>) -> PullRequestDetail {
     PullRequestDetail {
         number: 42,

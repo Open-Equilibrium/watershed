@@ -1,8 +1,3 @@
-//! The central configuration (ADR-0225, ADR-0227, ADR-0298): shared configuration blocks kept in
-//! Meta-Harness's SQLite, changed only through proposals that someone on the account approves.
-//! Proposals, revisions and the log are append-only; a revert restores an earlier revision as a
-//! new one.
-
 use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::Mutex;
@@ -15,134 +10,88 @@ mod homes;
 
 pub(crate) use homes::{Homes, provider_instances};
 
-/// The configuration blocks of one revision.
 #[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, Eq)]
 pub struct Blocks {
-    /// Instructions by name, written into each harness's instruction file in name order.
     #[serde(default)]
     pub instructions: BTreeMap<String, String>,
-    /// Skills by name: each a folder of text files with a `SKILL.md`.
     #[serde(default)]
     pub skills: BTreeMap<String, BTreeMap<String, String>>,
-    /// MCP servers by name.
     #[serde(default)]
     pub mcp_servers: BTreeMap<String, McpServer>,
 }
 
-/// An MCP server a harness starts or reaches.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum McpServer {
-    /// A program the harness starts and speaks to over standard input and output.
     Command {
-        /// The program.
         command: String,
-        /// Its arguments.
         #[serde(default)]
         args: Vec<String>,
-        /// Environment variables it gets.
         #[serde(default)]
         env: BTreeMap<String, String>,
     },
-    /// A server the harness reaches over HTTP.
     Url {
-        /// Its address.
         url: String,
     },
 }
 
-/// One change to a block: a value sets it, `None` removes it.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum Change {
-    /// An instruction's text.
     Instruction {
-        /// Its name.
         name: String,
-        /// Its text.
         text: Option<String>,
     },
-    /// A skill's files, by path inside its folder.
     Skill {
-        /// Its name.
         name: String,
-        /// Its files.
         files: Option<BTreeMap<String, String>>,
     },
-    /// An MCP server.
     McpServer {
-        /// Its name.
         name: String,
-        /// The server.
         server: Option<McpServer>,
     },
 }
 
-/// What a proposal does once approved.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum Proposed {
-    /// Applies these changes to the revision current at approval.
     Changes(Vec<Change>),
-    /// Makes the blocks of this earlier revision current again.
     Restore(u64),
 }
 
-/// A proposal that waits for a decision.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct Proposal {
-    /// Its number.
     pub number: u64,
-    /// What its author says it does.
     pub summary: String,
-    /// What it does.
     pub proposed: Proposed,
-    /// The client that proposed it, as it named itself.
     pub client: String,
-    /// When, in milliseconds since the Unix epoch.
     pub at_ms: u64,
 }
 
-/// A step the log records.
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum Action {
-    /// A proposal was made.
     Proposed,
-    /// It was approved and became a revision.
     Approved,
-    /// It was rejected.
     Rejected,
 }
 
-/// One entry of the append-only log.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct LogEntry {
-    /// Its position, from 1.
     pub number: u64,
-    /// When, in milliseconds since the Unix epoch.
     pub at_ms: u64,
-    /// The client that took the step, as it named itself; anyone on the account can name any
-    /// client, so this records, not proves, who it was (ADR-0298).
     pub client: String,
-    /// The step.
     pub action: Action,
-    /// The proposal.
     pub proposal: u64,
-    /// The revision an approval made.
     pub revision: Option<u64>,
 }
 
-/// The current revision.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct Current {
-    /// Its number; 0 before the first approval.
     pub revision: u64,
-    /// Its blocks.
     pub blocks: Blocks,
 }
 
-/// Rows never change once written: triggers refuse updates and deletions.
 const SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS revision (number INTEGER PRIMARY KEY, blocks TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS proposal (
@@ -156,15 +105,12 @@ INSERT OR IGNORE INTO revision (number, blocks) VALUES (0, '{}');
 
 const TABLES: [&str; 3] = ["revision", "proposal", "log"];
 
-/// Meta-Harness's configuration store, one SQLite file.
 pub(crate) struct Store {
     db: Mutex<Connection>,
-    /// Whether the harness homes hold the current revision; see [`Store::reconciled`].
     reconciled: AtomicBool,
 }
 
 impl Store {
-    /// Opens the store at `path`, creating it when missing.
     pub fn open(path: &Path) -> Result<Self, String> {
         let db = Connection::open(path).map_err(failed)?;
         let mut schema = SCHEMA.to_owned();
@@ -176,37 +122,34 @@ impl Store {
                 ));
             }
         }
-        db.execute_batch(&format!("BEGIN; {schema} {} COMMIT;", crate::hosts::SCHEMA))
-            .map_err(failed)?;
+        db.execute_batch(&format!(
+            "BEGIN; {schema} {} {} COMMIT;",
+            crate::hosts::SCHEMA,
+            crate::host_move::SCHEMA
+        ))
+        .map_err(failed)?;
         Ok(Self {
             db: Mutex::new(db),
             reconciled: AtomicBool::new(true),
         })
     }
 
-    /// Whether the harness homes hold the current revision. A failed write that its restore could
-    /// not undo leaves them not reconciled, until a later write succeeds: an approval's, or the
-    /// service's at start.
     pub fn reconciled(&self) -> bool {
         self.reconciled.load(Ordering::SeqCst)
     }
 
-    /// Records whether the last write of the current revision into the harness homes succeeded.
     pub fn set_reconciled(&self, reconciled: bool) {
         self.reconciled.store(reconciled, Ordering::SeqCst);
     }
 
-    /// The connection to the store, which the hosts' tables share.
     pub(crate) fn db(&self) -> std::sync::MutexGuard<'_, Connection> {
         crate::util::lock(&self.db)
     }
 
-    /// The current revision.
     pub fn current(&self) -> Result<Current, String> {
         current(&self.db())
     }
 
-    /// Records a proposal by `client` after checking it, and returns its number.
     pub fn propose(&self, client: &str, summary: &str, proposed: Proposed) -> Result<u64, String> {
         check_text("The summary", summary, MAX_SUMMARY)?;
         let mut db = self.db();
@@ -235,7 +178,6 @@ impl Store {
         Ok(number)
     }
 
-    /// The proposals that wait for a decision, oldest first.
     pub fn pending(&self) -> Result<Vec<Proposal>, String> {
         let db = self.db();
         let mut statement = db
@@ -269,11 +211,6 @@ impl Store {
         .collect()
     }
 
-    /// Approves proposal `number` for `client`: its changes apply to the current revision, which
-    /// makes a new one once `write` put its blocks into the harness homes. While `write` runs, no
-    /// other approval does, so the homes always end on the current revision; if it fails, nothing
-    /// is approved and `write` puts the current revision back. If that restore fails too, the homes
-    /// are not reconciled until an approval's write succeeds, which puts its whole revision in.
     pub fn approve(
         &self,
         client: &str,
@@ -298,7 +235,6 @@ impl Store {
             }
         };
         let revision = base.revision + 1;
-        // Any failure after `write` took the blocks, the commit included, puts the current ones back.
         let recorded = write(&blocks).and_then(|()| {
             tx.execute(
                 "INSERT INTO revision (number, blocks) VALUES (?1, ?2)",
@@ -333,7 +269,6 @@ impl Store {
         Ok(Current { revision, blocks })
     }
 
-    /// Rejects proposal `number` for `client`.
     pub fn reject(&self, client: &str, number: u64) -> Result<(), String> {
         let mut db = self.db();
         let tx = db.transaction().map_err(failed)?;
@@ -342,7 +277,6 @@ impl Store {
         tx.commit().map_err(failed)
     }
 
-    /// The whole log, oldest first.
     pub fn log(&self) -> Result<Vec<LogEntry>, String> {
         let db = self.db();
         let mut statement = db
@@ -403,7 +337,6 @@ fn blocks_of(db: &Connection, revision: u64) -> Result<Option<Blocks>, String> {
     .transpose()
 }
 
-/// The proposal `number` as stored, while no decision was logged for it.
 fn undecided(db: &Connection, number: u64) -> Result<String, String> {
     let proposed: String = db
         .query_row(
@@ -464,7 +397,64 @@ fn apply(blocks: &mut Blocks, change: Change) {
     }
 }
 
-/// Bounds that keep a revision small enough to write into every harness home at once.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Direction {
+    Add,
+    Replace,
+    Remove,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Difference {
+    pub direction: Direction,
+    pub change: Change,
+}
+
+pub fn diff_blocks(from: &Blocks, to: &Blocks) -> Vec<Difference> {
+    let mut differences = Vec::new();
+    diff_map(
+        &mut differences,
+        &from.instructions,
+        &to.instructions,
+        |name, text| Change::Instruction { name, text },
+    );
+    diff_map(&mut differences, &from.skills, &to.skills, |name, files| {
+        Change::Skill { name, files }
+    });
+    diff_map(
+        &mut differences,
+        &from.mcp_servers,
+        &to.mcp_servers,
+        |name, server| Change::McpServer { name, server },
+    );
+    differences
+}
+
+fn diff_map<T: Clone + PartialEq>(
+    differences: &mut Vec<Difference>,
+    from: &BTreeMap<String, T>,
+    to: &BTreeMap<String, T>,
+    change: impl Fn(String, Option<T>) -> Change,
+) {
+    for (name, value) in from {
+        let direction = match to.get(name) {
+            Some(existing) if existing == value => continue,
+            Some(_) => Direction::Replace,
+            None => Direction::Add,
+        };
+        differences.push(Difference {
+            direction,
+            change: change(name.clone(), Some(value.clone())),
+        });
+    }
+    for name in to.keys().filter(|name| !from.contains_key(*name)) {
+        differences.push(Difference {
+            direction: Direction::Remove,
+            change: change(name.clone(), None),
+        });
+    }
+}
+
 const MAX_NAME: usize = 64;
 const MAX_SUMMARY: usize = 1000;
 const MAX_TEXT: usize = 256 * 1024;
@@ -490,8 +480,6 @@ fn check_change(change: &Change) -> Result<(), String> {
     }
 }
 
-/// A block name doubles as a folder, table key and file name in each harness home, so it uses
-/// only letters, digits, `-` and `_`.
 pub(crate) fn check_name(name: &str) -> Result<(), String> {
     let fine = !name.is_empty()
         && name.len() <= MAX_NAME
@@ -524,8 +512,6 @@ fn check_skill(files: &BTreeMap<String, String>) -> Result<(), String> {
     if files.len() > MAX_ENTRIES {
         return Err(format!("A skill holds at most {MAX_ENTRIES} files."));
     }
-    // A path that is a folder of another, ignoring case as macOS's default file system does,
-    // could not be written next to it.
     let folded: std::collections::BTreeSet<String> =
         files.keys().map(|p| p.to_ascii_lowercase()).collect();
     if folded.len() < files.len()
@@ -610,7 +596,6 @@ fn check_size(blocks: &Blocks) -> Result<(), String> {
             "A revision holds at most {MAX_ENTRIES} blocks of each kind and {MAX_TOTAL} bytes."
         ));
     }
-    // Each skill is a folder, which case-insensitive file systems would share.
     let folded: std::collections::BTreeSet<String> = blocks
         .skills
         .keys()
@@ -622,7 +607,6 @@ fn check_size(blocks: &Blocks) -> Result<(), String> {
     Ok(())
 }
 
-/// SQLite stores integers signed; Meta-Harness's numbers and times are never negative.
 pub(crate) fn sql(value: u64) -> i64 {
     i64::try_from(value).unwrap_or(i64::MAX)
 }

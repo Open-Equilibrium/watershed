@@ -1,5 +1,3 @@
-//! Git for one checkout through T3's VCS and stacked-action replies (ADR-0282).
-
 use std::path::PathBuf;
 
 use serde_json::{Value, json};
@@ -14,7 +12,6 @@ use crate::t3::Client;
 
 const CWD: &str = "/repo";
 
-/// A stand-in whose replies come from `answer`, and Git for the checkout `CWD` of `thread`.
 pub(super) async fn checkout_in(
     answer: impl Fn(&str, &Value, &str) -> Vec<Message> + Send + 'static,
     thread: Option<&str>,
@@ -51,7 +48,6 @@ fn remote(behind: u64, pull_request: Value) -> Value {
     })
 }
 
-/// T3's status result: the local and remote parts together.
 fn merged(mut local: Value, remote: Value) -> Value {
     local
         .as_object_mut()
@@ -64,7 +60,12 @@ fn merged(mut local: Value, remote: Value) -> Value {
 async fn status_reports_the_checkout_and_its_pull_request() {
     let pull_request = json!({"number": 42, "title": "Add", "url": "https://example.test/pull/42",
         "state": "open", "isDraft": true, "baseRef": "main"});
-    let status = merged(local("README.md"), remote(3, pull_request));
+    let mut checkout_status = local("README.md");
+    checkout_status["workingTree"]["insertions"] = json!(5);
+    checkout_status["workingTree"]["deletions"] = json!(3);
+    checkout_status["branchChanges"] =
+        json!({"baseRef": "origin/main", "insertions": 9, "deletions": 4});
+    let status = merged(checkout_status, remote(3, pull_request));
     let (fake, git) = checkout(move |_, _, id| vec![ok(id, status.clone())]).await;
     assert_eq!(
         git.status().await.unwrap(),
@@ -80,10 +81,16 @@ async fn status_reports_the_checkout_and_its_pull_request() {
                 removed: 1
             }],
             working_tree_lines: LineCount {
-                added: 2,
-                removed: 1,
+                added: 5,
+                removed: 3,
             },
-            branch_changes: None,
+            branch_changes: Some(BranchChanges {
+                base: Some("origin/main".to_owned()),
+                lines: LineCount {
+                    added: 9,
+                    removed: 4,
+                },
+            }),
             upstream: true,
             ahead: 0,
             behind: 3,
@@ -101,34 +108,6 @@ async fn status_reports_the_checkout_and_its_pull_request() {
     assert_eq!(
         fake.payloads("vcs.refreshStatus"),
         vec![json!({"cwd": CWD})]
-    );
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn status_maps_the_branch_changes_and_the_working_tree_totals_as_t3_sends_them() {
-    let mut status = local("README.md");
-    status["workingTree"]["insertions"] = json!(5);
-    status["workingTree"]["deletions"] = json!(3);
-    status["branchChanges"] = json!({"baseRef": "origin/main", "insertions": 9, "deletions": 4});
-    let status = merged(status, remote(0, Value::Null));
-    let (_, git) = checkout(move |_, _, id| vec![ok(id, status.clone())]).await;
-    let status = git.status().await.unwrap();
-    assert_eq!(
-        status.working_tree_lines,
-        LineCount {
-            added: 5,
-            removed: 3
-        }
-    );
-    assert_eq!(
-        status.branch_changes,
-        Some(BranchChanges {
-            base: Some("origin/main".to_owned()),
-            lines: LineCount {
-                added: 9,
-                removed: 4
-            },
-        })
     );
 }
 
@@ -191,6 +170,27 @@ async fn watch_reports_each_change_of_the_local_or_remote_status() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn a_local_branch_past_the_first_page_of_refs_is_found() {
+    let (fake, git) = checkout(|_, payload, id| {
+        let page = match payload["cursor"].as_u64() {
+            Some(0) => json!({"refs": [{"name": "dev-a"}], "nextCursor": 100, "totalCount": 2}),
+            _ => json!({"refs": [{"name": "dev", "upstreamRef": "refs/remotes/origin/dev"}], "totalCount": 2}),
+        };
+        vec![ok(id, page)]
+    })
+    .await;
+    let found = git.local_branch("dev").await.unwrap().unwrap();
+    assert_eq!(found.upstream.as_deref(), Some("refs/remotes/origin/dev"));
+    assert_eq!(
+        fake.payloads("vcs.listRefs"),
+        vec![
+            json!({"cwd": CWD, "cursor": 0, "limit": 100, "query": "dev", "refresh": true}),
+            json!({"cwd": CWD, "cursor": 100, "limit": 100, "query": "dev"}),
+        ]
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn refs_are_listed_a_page_at_a_time_with_the_worktrees_they_are_in() {
     let page = json!({
         "refs": [
@@ -211,21 +211,24 @@ async fn refs_are_listed_a_page_at_a_time_with_the_worktrees_they_are_in() {
                     remote: None,
                     current: true,
                     default: true,
-                    worktree: None
+                    worktree: None,
+                    upstream: None,
                 },
                 Ref {
                     name: "main".to_owned(),
                     remote: Some("origin".to_owned()),
                     current: false,
                     default: true,
-                    worktree: None
+                    worktree: None,
+                    upstream: None,
                 },
                 Ref {
                     name: "feature".to_owned(),
                     remote: None,
                     current: false,
                     default: false,
-                    worktree: Some(PathBuf::from("/repo/wt"))
+                    worktree: Some(PathBuf::from("/repo/wt")),
+                    upstream: None,
                 },
             ],
             next: Some(3),
@@ -264,13 +267,11 @@ async fn pull_says_whether_it_pulled_or_was_up_to_date() {
     );
 }
 
-/// A stacked action's progress item of the action `action-1`.
 fn action(mut item: Value) -> Value {
     item["actionId"] = json!("action-1");
     item
 }
 
-/// Collects a stacked action's progress until it ends.
 async fn progress(mut receiver: tokio::sync::mpsc::Receiver<GitProgress>) -> Vec<GitProgress> {
     let mut all = Vec::new();
     while let Some(step) = receiver.recv().await {
@@ -388,7 +389,6 @@ async fn a_stacked_action_that_fails_says_why_and_ends() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn a_stacked_action_that_t3_fails_is_reported_as_failed_with_its_reason() {
-    // T3 ends the action with its failure, sending no progress event.
     let (_fake, git) = checkout(|_, _, id| {
         vec![fail(
             id,
@@ -488,7 +488,6 @@ async fn dropping_the_status_receiver_interrupts_the_watch_on_t3() {
     let statuses = git.watch().await.unwrap();
     fake.received("subscribeVcsStatus", 1).await;
     let id = fake.request_id("subscribeVcsStatus");
-    // T3 pushes nothing, so the watch must notice the missing listener by itself.
     drop(statuses);
     tokio::time::timeout(std::time::Duration::from_secs(10), fake.interrupted(&id))
         .await
@@ -509,8 +508,6 @@ async fn a_stacked_action_is_never_sent_again_after_t3_drops_the_connection() {
         .unwrap();
     fake.received("git.runStackedAction", 1).await;
     fake.drop_connection();
-    // T3 may have committed or pushed already, so the action ends as failed instead of running
-    // twice.
     let ended = tokio::time::timeout(std::time::Duration::from_secs(10), progress(receiver))
         .await
         .expect("the action ends with the connection");
