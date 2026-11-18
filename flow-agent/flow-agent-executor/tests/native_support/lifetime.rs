@@ -96,7 +96,7 @@ fn assert_child_exited(pid: i32) {
                 thread::sleep(Duration::from_millis(5));
             }
             Err(error) => {
-                assert_eq!(error.raw_os_error(), Some(3));
+                assert_eq!(error, rustix::io::Errno::SRCH);
                 return;
             }
         }
