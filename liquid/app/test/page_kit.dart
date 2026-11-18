@@ -6,13 +6,14 @@ import 'package:liquid/src/agent/sidebar.dart';
 import 'package:liquid/src/app.dart';
 import 'package:liquid/src/launch.dart';
 import 'package:liquid/src/rust/api/database.dart';
-import 'package:liquid/src/rust/api/whiteboard.dart';
+import 'package:liquid/src/rust/api/drawing.dart';
 import 'package:liquid/src/rust/api/workspace.dart';
 import 'package:liquid/src/session/session_state.dart';
 import 'package:liquid/src/shortcuts/shortcut_store.dart';
 import 'package:liquid/src/theme/theme.dart';
 import 'package:liquid/src/whiteboard/board_controller.dart';
 import 'package:liquid/src/workspace/media_block.dart';
+import 'package:liquid/src/workspace/pdf_pages.dart';
 import 'package:liquid/src/workspace/table_block.dart';
 import 'package:liquid/src/workspace/text_block.dart';
 import 'package:liquid/src/workspace/whiteboard_block.dart';
@@ -175,8 +176,13 @@ class PageKit {
     SessionInfo? info,
     ShortcutController? shortcuts,
     void Function()? before,
+    bool pdfRenderer = false,
   }) async {
     await tester.binding.setSurfaceSize(const Size(1400, 900));
+    // Tests have no PDF renderer; those that show PDFs give one before showing the Page.
+    if (!pdfRenderer) {
+      PdfPages.opener = (_) async => throw const PdfUnreadable();
+    }
     fake = FakeWorkspace();
     before?.call();
     workspace = WorkspaceState(fake);
@@ -277,8 +283,8 @@ class PageKit {
             ),
           );
           after = added.view;
-          fake.whiteboards[added.block!] = BridgeWhiteboard(
-            style: BridgeWhiteboardStyle.handDrawn,
+          fake.whiteboards[added.block!] = BridgeDrawing(
+            style: BridgeDrawingStyle.handDrawn,
             elements: [
               for (final (index, element) in elements.indexed)
                 withId(element, 'element $index'),
@@ -308,7 +314,9 @@ class PageKit {
 
   /// The board of the Page's only Whiteboard.
   BoardController boardOf(WidgetTester tester) {
-    final block = tester.widget<WhiteboardBlock>(find.byType(WhiteboardBlock));
+    final block = tester.widget<DrawingFrame>(
+      find.byType(DrawingFrame, skipOffstage: false).first,
+    );
     // The Block holds the board; this look adds no user of its own.
     final board = block.views.boardFor(block.view);
     block.views.releaseBoard(block.view);

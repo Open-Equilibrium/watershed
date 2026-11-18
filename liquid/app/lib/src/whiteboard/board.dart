@@ -4,7 +4,7 @@ import 'dart:ui';
 import 'package:flutter/foundation.dart';
 import 'package:perfect_freehand/perfect_freehand.dart';
 
-import '../rust/api/whiteboard.dart';
+import '../rust/api/drawing.dart';
 import '../theme/tokens.g.dart';
 import 'ink_geometry.dart';
 import 'rough.dart';
@@ -28,20 +28,51 @@ const textWidth = 240.0;
 /// The hand-drawn typeface (Excalifont, OFL-1.1).
 const handFont = 'Excalifont';
 
-/// The color an element is drawn in, by the theme's tokens.
+/// The color an element is drawn in, by the theme's tokens; the highlighter's are the
+/// light theme's tag colors, as they mark paper.
 Color inkColor(WsPalette ws, BridgeInkColor color) => switch (color) {
   BridgeInkColor.text => ws.text,
   BridgeInkColor.data1 => ws.data1,
   BridgeInkColor.data2 => ws.data2,
   BridgeInkColor.data3 => ws.data3,
+  BridgeInkColor.yellow => WsPalette.light.tag4,
+  BridgeInkColor.green => WsPalette.light.tag5,
+  BridgeInkColor.blue => WsPalette.light.tag6,
+  BridgeInkColor.pink => WsPalette.light.tag8,
 };
+
+/// The pens', shapes' and text's colors.
+const inkColors = [
+  BridgeInkColor.text,
+  BridgeInkColor.data1,
+  BridgeInkColor.data2,
+  BridgeInkColor.data3,
+];
+
+/// The highlighter's colors.
+const highlightColors = [
+  BridgeInkColor.yellow,
+  BridgeInkColor.green,
+  BridgeInkColor.blue,
+  BridgeInkColor.pink,
+];
+
+/// Whether an element is the highlighter's mark, drawn beneath the rest.
+bool isHighlight(BridgeElement element) =>
+    element.kind == BridgeElementKind.stroke &&
+    element.pen == BridgePen.highlighter;
+
+/// The highlighter's widths, thin to broad, in board points.
+const highlighterSizes = [12.0, 18.0, 26.0];
 
 /// perfect_freehand's options for a pen, as GoodNotes' ball, fountain and brush pens.
 StrokeOptions penOptions(BridgePen pen, int width, {bool complete = true}) =>
     StrokeOptions(
-      size: penSizes[width.clamp(0, 2)],
+      size: (pen == BridgePen.highlighter
+          ? highlighterSizes
+          : penSizes)[width.clamp(0, 2)],
       thinning: switch (pen) {
-        BridgePen.ball => 0,
+        BridgePen.ball || BridgePen.highlighter => 0,
         BridgePen.fountain => 0.5,
         BridgePen.brush => 0.8,
       },
@@ -375,6 +406,7 @@ BridgeElement newElement(
   List<double> corners = const [],
   String text = '',
   double rotation = 0,
+  int docPage = 0,
 }) => BridgeElement(
   kind: kind,
   x: frame.left,
@@ -384,6 +416,7 @@ BridgeElement newElement(
   rotation: rotation,
   color: color,
   width: width,
+  docPage: docPage,
   pen: pen,
   points: points ?? Uint8List(0),
   shape: shape,

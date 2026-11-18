@@ -2,6 +2,7 @@
 
 pub mod database;
 pub mod details;
+pub mod drawing;
 pub mod events;
 pub mod git;
 pub mod hosts;
@@ -10,5 +11,4 @@ pub(crate) mod record;
 pub mod replica;
 pub mod session;
 pub mod thread;
-pub mod whiteboard;
 pub mod workspace;

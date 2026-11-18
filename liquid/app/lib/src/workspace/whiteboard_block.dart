@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../rust/api/workspace.dart';
 import '../theme/icons.dart';
@@ -9,6 +10,7 @@ import '../theme/tokens.g.dart';
 import '../whiteboard/board_controller.dart';
 import '../whiteboard/board_surface.dart';
 import '../whiteboard/board_tools.dart';
+import '../whiteboard/document_pages.dart';
 import 'anchored_menu.dart';
 import 'page_views.dart';
 import 'workspace_state.dart';
@@ -16,38 +18,96 @@ import 'workspace_state.dart';
 /// A Whiteboard's frame on the Page.
 const whiteboardHeight = 360.0;
 
-/// A Whiteboard Block on its Page (ADR-0306): a frame of
-/// fixed height whose canvas has no edges. A click focuses it, and the tools draw on it in
-/// place; hovering shows full screen and ⋯ with Delete. It follows only its own Block
-/// (client architecture rule 6).
-class WhiteboardBlock extends StatefulWidget {
+/// An annotated PDF's frame on the Page (ADR-0307).
+const documentHeight = 560.0;
+
+/// A Whiteboard Block on its Page (ADR-0306): a frame of fixed height whose canvas has no
+/// edges. A click focuses it, and the tools draw on it in place; hovering shows full screen
+/// and ⋯ with Delete. It follows only its own Block (client architecture rule 6).
+class WhiteboardBlock extends StatelessWidget {
   const WhiteboardBlock({super.key, required this.views, required this.view});
 
   final PageViews views;
   final BridgeView view;
 
   @override
-  State<WhiteboardBlock> createState() => _WhiteboardBlockState();
+  Widget build(BuildContext context) => DrawingFrame(
+    views: views,
+    view: view,
+    name: 'whiteboard',
+    height: whiteboardHeight,
+  );
 }
 
-class _WhiteboardBlockState extends State<WhiteboardBlock> {
+/// A drawing's frame on the Page: a Whiteboard's, or an annotated PDF's or image's
+/// (ADR-0306, ADR-0307). A click focuses it and the tools draw on it in place; hovering
+/// shows the bar, with full screen, `buttons` and ⋯ with Delete.
+class DrawingFrame extends StatefulWidget {
+  const DrawingFrame({
+    super.key,
+    required this.views,
+    required this.view,
+    required this.name,
+    required this.height,
+    this.buttons = const [],
+    this.framed = true,
+    this.bar = true,
+  });
+
+  final PageViews views;
+  final BridgeView view;
+
+  /// What the frame's keys are named after, such as `whiteboard`.
+  final String name;
+  final double height;
+
+  /// Buttons the bar shows after full screen, such as Save as….
+  final List<Widget> buttons;
+
+  /// Whether the frame has its border and canvas, as a Whiteboard's and a PDF's do; an
+  /// image's ink lies right on it.
+  final bool framed;
+
+  /// Whether the frame shows its own bar; a Media Block's image keeps its own.
+  final bool bar;
+
+  @override
+  State<DrawingFrame> createState() => _DrawingFrameState();
+}
+
+class _DrawingFrameState extends State<DrawingFrame> {
   late final BoardController _board = widget.views.boardFor(widget.view);
-  final _focus = FocusNode(debugLabel: 'Whiteboard');
+  final _focus = FocusNode(debugLabel: 'Drawing');
   final _surface = GlobalKey<BoardSurfaceState>();
   final _more = OverlayPortalController();
+  final _frame = GlobalKey(debugLabel: 'Drawing frame');
   var _hovered = false;
+
+  /// The frame's size once laid out; none before.
+  Size _size() => switch (_frame.currentContext?.findRenderObject()) {
+    final RenderBox box when box.hasSize => box.size,
+    _ => Size.zero,
+  };
 
   @override
   void initState() {
     super.initState();
     unawaited(_board.read());
     _focus.addListener(_changed);
+    _board.addListener(_followPages);
     widget.views.focusBoard.addListener(_takeFocus);
     WidgetsBinding.instance.addPostFrameCallback((_) => _takeFocus());
   }
 
+  /// The tools under an image, shown while it is focused.
+  final _below = OverlayPortalController();
+
   void _changed() {
-    if (mounted) setState(() {});
+    if (!mounted) return;
+    if (!widget.framed) {
+      _focus.hasFocus ? _below.show() : _below.hide();
+    }
+    setState(() {});
   }
 
   /// A new Whiteboard starts focused, with the pen.
@@ -58,8 +118,15 @@ class _WhiteboardBlockState extends State<WhiteboardBlock> {
     _focus.requestFocus();
   }
 
+  /// Reads the ink of the pages in view and those next to them.
+  void _followPages() {
+    if (!mounted || !_board.paged) return;
+    followPages(_board, _size());
+  }
+
   @override
   void dispose() {
+    _board.removeListener(_followPages);
     widget.views.focusBoard.removeListener(_takeFocus);
     widget.views.releaseBoard(widget.view);
     _focus.dispose();
@@ -86,7 +153,9 @@ class _WhiteboardBlockState extends State<WhiteboardBlock> {
   Widget build(BuildContext context) {
     final ws = context.ws;
     final focused = _focus.hasFocus;
-    return TapRegion(
+    final name = widget.name;
+    final frame = TapRegion(
+      groupId: _focus,
       onTapOutside: (_) {
         if (_focus.hasFocus) _focus.unfocus();
       },
@@ -98,19 +167,29 @@ class _WhiteboardBlockState extends State<WhiteboardBlock> {
           onEnter: (_) => setState(() => _hovered = true),
           onExit: (_) => setState(() => _hovered = false),
           child: Container(
-            key: const Key('whiteboard'),
-            height: whiteboardHeight,
-            margin: const EdgeInsets.symmetric(vertical: WsMetrics.space1),
-            decoration: BoxDecoration(
-              color: ws.canvas,
-              borderRadius: BorderRadius.circular(10),
-              border: Border.all(
-                color: focused ? ws.accent : ws.border,
-                width: focused ? 1.5 : 1,
-              ),
-            ),
-            clipBehavior: Clip.antiAlias,
+            key: _frame,
+            height: widget.height,
+            margin: widget.framed
+                ? const EdgeInsets.symmetric(vertical: WsMetrics.space1)
+                : null,
+            decoration: widget.framed
+                ? BoxDecoration(
+                    color: _board.paged ? ws.subtle : ws.canvas,
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(
+                      color: focused ? ws.accent : ws.border,
+                      width: focused ? 1.5 : 1,
+                    ),
+                  )
+                : BoxDecoration(
+                    border: focused
+                        ? Border.all(color: ws.accent, width: 1.5)
+                        : null,
+                  ),
+            clipBehavior: widget.framed ? Clip.antiAlias : Clip.none,
             child: Stack(
+              key: Key(name),
+              clipBehavior: Clip.none,
               children: [
                 Positioned.fill(
                   child: BoardSurface(
@@ -121,7 +200,13 @@ class _WhiteboardBlockState extends State<WhiteboardBlock> {
                     onLeave: _focus.unfocus,
                   ),
                 ),
-                if (focused) ...[
+                if (_board.paged && _board.sheets.length > 1)
+                  Positioned(
+                    left: 12,
+                    bottom: 12,
+                    child: PageCounter(board: _board, size: _size),
+                  ),
+                if (focused && widget.framed) ...[
                   Positioned(
                     left: 0,
                     right: 0,
@@ -137,7 +222,7 @@ class _WhiteboardBlockState extends State<WhiteboardBlock> {
                     ),
                   ),
                 ],
-                if (_hovered || _more.isShowing)
+                if (widget.bar && (_hovered || _more.isShowing))
                   Positioned(top: 8, right: 8, child: _bar(context)),
               ],
             ),
@@ -145,26 +230,31 @@ class _WhiteboardBlockState extends State<WhiteboardBlock> {
         ),
       ),
     );
+    if (widget.framed) return frame;
+    // An image's tools hang below it, where they do not cover it, and count as inside it.
+    return OverlayPortal.overlayChildLayoutBuilder(
+      controller: _below,
+      overlayChildBuilder: (context, info) {
+        final anchor = MatrixUtils.transformRect(
+          info.childPaintTransform,
+          Offset.zero & info.childSize,
+        );
+        return Positioned(
+          left: anchor.left,
+          top: anchor.bottom + 8,
+          child: TapRegion(
+            groupId: _focus,
+            child: BoardToolBars(board: _board),
+          ),
+        );
+      },
+      child: frame,
+    );
   }
 
   Widget _bar(BuildContext context) {
     final ws = context.ws;
-    Widget button(IconData icon, Key key, String label, VoidCallback onTap) =>
-        Tooltip(
-          message: label,
-          waitDuration: const Duration(milliseconds: 600),
-          child: MouseRegion(
-            cursor: SystemMouseCursors.click,
-            child: GestureDetector(
-              key: key,
-              onTap: onTap,
-              child: Padding(
-                padding: const EdgeInsets.all(5),
-                child: Icon(icon, size: 14, color: ws.textMuted),
-              ),
-            ),
-          ),
-        );
+    final name = widget.name;
     return Container(
       padding: const EdgeInsets.all(2),
       decoration: BoxDecoration(
@@ -175,12 +265,13 @@ class _WhiteboardBlockState extends State<WhiteboardBlock> {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          button(
-            LucideIcons.maximize2,
-            const Key('whiteboard full screen'),
-            'Full screen',
-            () => widget.views.fullBoard.value = widget.view,
+          BarButton(
+            icon: LucideIcons.maximize2,
+            key: Key('$name full screen'),
+            label: 'Full screen',
+            onTap: () => widget.views.fullBoard.value = widget.view,
           ),
+          ...widget.buttons,
           AnchoredMenu(
             controller: _more,
             onTapOutside: (_) => setState(_more.hide),
@@ -193,7 +284,7 @@ class _WhiteboardBlockState extends State<WhiteboardBlock> {
                 boxShadow: ws.shadow,
               ),
               child: GestureDetector(
-                key: const ValueKey('whiteboard Delete'),
+                key: ValueKey('$name Delete'),
                 onTap: _delete,
                 child: Container(
                   height: 30,
@@ -216,11 +307,11 @@ class _WhiteboardBlockState extends State<WhiteboardBlock> {
                 ),
               ),
             ),
-            child: button(
-              LucideIcons.ellipsis,
-              const Key('whiteboard more'),
-              'More',
-              () => setState(_more.toggle),
+            child: BarButton(
+              icon: LucideIcons.ellipsis,
+              key: Key('$name more'),
+              label: 'More',
+              onTap: () => setState(_more.toggle),
             ),
           ),
         ],
@@ -229,38 +320,144 @@ class _WhiteboardBlockState extends State<WhiteboardBlock> {
   }
 }
 
-/// A Whiteboard full screen over the Page's area, at the same place and zoom: Fit shows
-/// everything drawn, esc or Done returns to the Page (ADR-0306).
-class WhiteboardFullScreen extends StatefulWidget {
-  const WhiteboardFullScreen({
+/// One of a drawing frame's bar buttons, with its label as a tooltip or beside its icon.
+class BarButton extends StatelessWidget {
+  const BarButton({
     super.key,
-    required this.views,
-    required this.view,
+    required this.icon,
+    required this.label,
+    required this.onTap,
+    this.showLabel = false,
   });
+
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+  final bool showLabel;
+
+  @override
+  Widget build(BuildContext context) {
+    final ws = context.ws;
+    return Tooltip(
+      message: label,
+      waitDuration: const Duration(milliseconds: 600),
+      child: MouseRegion(
+        cursor: SystemMouseCursors.click,
+        child: GestureDetector(
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.all(5),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(icon, size: 14, color: ws.textMuted),
+                if (showLabel) ...[
+                  const SizedBox(width: WsMetrics.space1),
+                  Text(
+                    label,
+                    style: TextStyle(
+                      fontSize: WsMetrics.fsCompact,
+                      color: ws.textMuted,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// The ink of the pages in a view of `size` and of those below them, so scrolling finds it
+/// read (client architecture rule 8). The read starts at the first page in view, as it
+/// keeps whole pages from its first within a budget, so a full page above cannot hide them.
+void followPages(BoardController board, Size size) {
+  final view = Rect.fromLTWH(
+    board.origin.dx,
+    board.origin.dy,
+    size.width / board.zoom,
+    size.height / board.zoom,
+  );
+  final shown = [
+    for (final (index, sheet) in board.sheets.indexed)
+      if (sheet.overlaps(view)) index,
+  ];
+  if (shown.isEmpty) return;
+  board.showPages(shown.first, shown.last + 3 - shown.first);
+}
+
+/// Where a document's view is: "3 / 12".
+class PageCounter extends StatelessWidget {
+  const PageCounter({super.key, required this.board, required this.size});
+
+  final BoardController board;
+
+  /// The view's size, once laid out.
+  final Size Function() size;
+
+  @override
+  Widget build(BuildContext context) {
+    final ws = context.ws;
+    return ListenableBuilder(
+      listenable: board,
+      builder: (context, _) {
+        final middle = board.toBoard(size().center(Offset.zero));
+        final page = board.pages?.pageNear(middle) ?? 0;
+        return Container(
+          key: const Key('page counter'),
+          padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3),
+          decoration: BoxDecoration(
+            color: ws.surface,
+            borderRadius: BorderRadius.circular(7),
+            boxShadow: ws.shadow,
+          ),
+          child: Text(
+            '${page + 1} / ${board.sheets.length}',
+            style: TextStyle(fontSize: WsMetrics.fsSmall, color: ws.textMuted),
+          ),
+        );
+      },
+    );
+  }
+}
+
+/// A drawing full screen over the Page's area, at the same place and zoom: a Whiteboard's,
+/// where Fit shows everything drawn, or an annotated document's, where Fit width fits the
+/// page in view and ↑↓ move by a page; esc or Done returns to the Page (ADR-0306, ADR-0307).
+class DrawingFullScreen extends StatefulWidget {
+  const DrawingFullScreen({super.key, required this.views, required this.view});
 
   final PageViews views;
   final BridgeView view;
 
   @override
-  State<WhiteboardFullScreen> createState() => _WhiteboardFullScreenState();
+  State<DrawingFullScreen> createState() => _DrawingFullScreenState();
 }
 
-class _WhiteboardFullScreenState extends State<WhiteboardFullScreen> {
+class _DrawingFullScreenState extends State<DrawingFullScreen> {
   late final BoardController _board = widget.views.boardFor(widget.view);
-  final _focus = FocusNode(debugLabel: 'Whiteboard full screen');
+  final _focus = FocusNode(debugLabel: 'Drawing full screen');
   final _surface = GlobalKey<BoardSurfaceState>();
   final _canvas = GlobalKey();
 
   @override
   void initState() {
     super.initState();
+    _board.addListener(_followPages);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _focus.requestFocus();
     });
   }
 
+  void _followPages() {
+    if (_board.paged) followPages(_board, _size());
+  }
+
   @override
   void dispose() {
+    _board.removeListener(_followPages);
     widget.views.releaseBoard(widget.view);
     _focus.dispose();
     super.dispose();
@@ -268,19 +465,58 @@ class _WhiteboardFullScreenState extends State<WhiteboardFullScreen> {
 
   void _done() => widget.views.fullBoard.value = null;
 
-  Size _size() => _canvas.currentContext?.size ?? Size.zero;
+  Size _size() => switch (_canvas.currentContext?.findRenderObject()) {
+    final RenderBox box when box.hasSize => box.size,
+    _ => Size.zero,
+  };
+
+  /// The page whose middle is nearest the view's.
+  int _page() =>
+      _board.pages?.pageNear(_board.toBoard(_size().center(Offset.zero))) ?? 0;
+
+  /// Shows page `index` at the view's width, from its top.
+  void _show(int index) {
+    final sheets = _board.sheets;
+    if (sheets.isEmpty) return;
+    final sheet = sheets[index.clamp(0, sheets.length - 1)];
+    final size = _size();
+    _board
+      ..zoom = (size.width / (sheet.width + 2 * DocumentPages.gap)).clamp(
+        BoardController.minZoom,
+        BoardController.maxZoom,
+      )
+      ..origin = Offset(
+        sheet.center.dx - size.width / 2 / _board.zoom,
+        sheet.top - DocumentPages.gap,
+      )
+      ..notifyListeners();
+  }
+
+  KeyEventResult _key(KeyEvent event) {
+    if (_board.paged && event is! KeyUpEvent) {
+      switch (event.logicalKey) {
+        case LogicalKeyboardKey.arrowDown:
+          _show(_page() + 1);
+          return KeyEventResult.handled;
+        case LogicalKeyboardKey.arrowUp:
+          _show(_page() - 1);
+          return KeyEventResult.handled;
+      }
+    }
+    return _surface.currentState?.key(event) ?? KeyEventResult.ignored;
+  }
 
   @override
   Widget build(BuildContext context) {
     final ws = context.ws;
+    final paged = _board.paged;
     return Focus(
       focusNode: _focus,
       // esc ends a text box, then clears the selection, then leaves full screen.
-      onKeyEvent: (_, event) =>
-          _surface.currentState?.key(event) ?? KeyEventResult.ignored,
+      onKeyEvent: (_, event) => _key(event),
       child: ColoredBox(
         key: const Key('whiteboard full'),
-        color: ws.canvas,
+        color: paged ? ws.subtle : ws.canvas,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
@@ -288,25 +524,39 @@ class _WhiteboardFullScreenState extends State<WhiteboardFullScreen> {
               height: 44,
               padding: const EdgeInsets.only(left: 20, right: 12),
               decoration: BoxDecoration(
+                color: ws.canvas,
                 border: Border(bottom: BorderSide(color: ws.border)),
               ),
               child: Row(
                 children: [
-                  Icon(LucideIcons.presentation, size: 14, color: ws.textMuted),
+                  Icon(
+                    paged ? LucideIcons.file : LucideIcons.presentation,
+                    size: 14,
+                    color: ws.textMuted,
+                  ),
                   const SizedBox(width: WsMetrics.space2),
-                  Text(
-                    'Whiteboard',
-                    style: TextStyle(
-                      fontSize: WsMetrics.fsCompact,
-                      color: ws.text,
-                      fontWeight: FontWeight.w500,
+                  Flexible(
+                    child: Text(
+                      _board.title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: WsMetrics.fsCompact,
+                        color: ws.text,
+                        fontWeight: FontWeight.w500,
+                      ),
                     ),
                   ),
                   const Spacer(),
+                  if (paged && _board.sheets.length > 1) ...[
+                    PageCounter(board: _board, size: _size),
+                    const SizedBox(width: WsMetrics.space2),
+                  ],
                   TextButton(
                     key: const Key('whiteboard fit'),
-                    onPressed: () => _board.fit(_size()),
-                    child: const Text('Fit'),
+                    onPressed: () =>
+                        paged ? _show(_page()) : _board.fit(_size()),
+                    child: Text(paged ? 'Fit width' : 'Fit'),
                   ),
                   const SizedBox(width: WsMetrics.space1),
                   TextButton.icon(

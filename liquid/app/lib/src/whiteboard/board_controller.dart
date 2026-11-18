@@ -4,15 +4,16 @@ import 'dart:ui';
 
 import 'package:flutter/foundation.dart';
 
-import '../rust/api/whiteboard.dart';
+import '../rust/api/drawing.dart';
 import '../rust/api/workspace.dart';
 import '../workspace/follow.dart';
 import '../workspace/page_views.dart';
 import '../workspace/workspace_state.dart';
 import 'board.dart';
+import 'document_pages.dart';
 
 /// The five tools, as GoodNotes has them (ADR-0306).
-enum BoardTool { lasso, pen, eraser, shape, text }
+enum BoardTool { lasso, pen, highlighter, eraser, shape, text }
 
 /// What the shape tool makes: a drawn shape snapped, or one dragged out.
 enum ShapeKind { snap, rectangle, ellipse, line, arrow }
@@ -29,14 +30,19 @@ class BoardTools extends ChangeNotifier {
   /// Whether the eraser removes whole elements, rather than the parts it passes.
   bool wholeEraser = false;
 
+  /// Whether the eraser takes only the highlighter's marks, as GoodNotes' erase filter.
+  bool highlighterOnly = false;
+
   /// Each tool's color and width; the eraser's width is its size, text's its size.
   final colors = <BoardTool, BridgeInkColor>{
     BoardTool.pen: BridgeInkColor.data3,
+    BoardTool.highlighter: BridgeInkColor.yellow,
     BoardTool.shape: BridgeInkColor.data2,
     BoardTool.text: BridgeInkColor.text,
   };
   final widths = <BoardTool, int>{
     BoardTool.pen: 1,
+    BoardTool.highlighter: 1,
     BoardTool.shape: 1,
     BoardTool.text: 1,
     BoardTool.eraser: 1,
@@ -81,7 +87,7 @@ class BoardController extends ChangeNotifier {
 
   /// The elements, bottom to top; none until first read.
   List<BridgeElement> elements = const [];
-  BridgeWhiteboardStyle style = BridgeWhiteboardStyle.handDrawn;
+  BridgeDrawingStyle style = BridgeDrawingStyle.handDrawn;
   bool loaded = false;
 
   /// Where the canvas looks: the board point at the view's top left, and the zoom.
@@ -116,7 +122,7 @@ class BoardController extends ChangeNotifier {
   int _reads = 0;
   var _disposed = false;
 
-  bool get handDrawn => style == BridgeWhiteboardStyle.handDrawn;
+  bool get handDrawn => style == BridgeDrawingStyle.handDrawn;
 
   void _report(Object error) => _state.report('$error');
 
@@ -126,21 +132,28 @@ class BoardController extends ChangeNotifier {
     final asked = ++_reads;
     final writing = _writing;
     try {
+      final (start, count) = paged ? window : (0, 1);
       final answer = await _state.read(
-        query(BridgeQueryKind.whiteboard, page: views.page, block: view.block),
+        query(
+          BridgeQueryKind.drawing,
+          page: views.page,
+          block: view.block,
+          start: start,
+          limit: count,
+        ),
       );
       if (_disposed || asked != _reads || writing != _writing) return;
       if (_holds > 0) {
         _heldRead = true;
         return;
       }
-      final board = answer.whiteboard;
+      final board = answer.drawing;
       if (board == null) {
         // Gone, as another device deleted it: full screen shows it no more.
         if (views.fullBoard.value?.id == view.id) views.fullBoard.value = null;
         return;
       }
-      elements = board.elements;
+      elements = [for (final element in board.elements) ?_onBoard(element)];
       style = board.style;
       loaded = true;
       selected = {
@@ -161,6 +174,41 @@ class BoardController extends ChangeNotifier {
     List<String> remove = const [],
   }) async {
     if (add.isEmpty && change.isEmpty && remove.isEmpty) return;
+    // An element moved onto another page of a document goes there: it is removed from its
+    // page and added on the other, as a change keeps an element's page.
+    if (paged) {
+      final moved = <BridgeElementChange>[];
+      for (final changed in change) {
+        final element = elements
+            .where((shown) => shown.id == changed.id)
+            .firstOrNull;
+        final center = Rect.fromLTWH(
+          changed.x,
+          changed.y,
+          changed.w,
+          changed.h,
+        ).center;
+        if (element != null &&
+            isStored(element) &&
+            _nearestPage(center) != element.docPage) {
+          moved.add(changed);
+        }
+      }
+      if (moved.isNotEmpty) {
+        final ids = {for (final changed in moved) changed.id};
+        final byId = {for (final element in elements) element.id: element};
+        add = [
+          ...add,
+          for (final changed in moved)
+            _fresh(_applied(byId[changed.id]!, changed)),
+        ];
+        change = [
+          for (final changed in change)
+            if (!ids.contains(changed.id)) changed,
+        ];
+        remove = [...remove, ...ids];
+      }
+    }
     final removed = remove.toSet();
     final changes = {for (final changed in change) changed.id: changed};
     elements = [
@@ -193,12 +241,12 @@ class BoardController extends ChangeNotifier {
     try {
       await views.write(
         mutation(
-          BridgeMutationKind.editWhiteboard,
+          BridgeMutationKind.editDrawing,
           page: views.page,
           block: view.block,
-          whiteboard: BridgeWhiteboardEdit(
-            add: add,
-            change: change,
+          drawing: BridgeDrawingEdit(
+            add: [for (final element in add) _onPage(element)],
+            change: [for (final changed in change) _changeOnPage(changed)],
             remove: remove,
           ),
         ),
@@ -213,6 +261,126 @@ class BoardController extends ChangeNotifier {
   }
 
   int _pending = 0;
+
+  /// A document's pages on the board, top to bottom, in their points; none on a Whiteboard,
+  /// whose canvas has no edges.
+  List<Rect> sheets = const [];
+
+  /// What full screen calls the drawing: "Whiteboard", or a document's file name.
+  String title = 'Whiteboard';
+
+  /// Whether the view stays where it is, as over an image shown on the Page.
+  bool fixed = false;
+
+  /// The pages beneath a document's ink; none on a Whiteboard.
+  DocumentPages? get pages => _pages;
+  DocumentPages? _pages;
+  set pages(DocumentPages? pages) {
+    _pages?.close();
+    _pages = pages;
+    sheets = pages?.sheets ?? const [];
+    notifyListeners();
+  }
+
+  bool get paged => sheets.isNotEmpty;
+
+  /// The document pages read: the first and how many, around those in view.
+  (int, int) window = (0, 1);
+
+  /// Reads the pages from `first`, `count` of them, unless they are read already.
+  void showPages(int first, int count) {
+    if (window == (first, count)) return;
+    window = (first, count);
+    unawaited(read());
+  }
+
+  /// The page under a board point, if any.
+  int? pageAt(Offset at) {
+    for (final (index, sheet) in sheets.indexed) {
+      if (sheet.contains(at)) return index;
+    }
+    return null;
+  }
+
+  int _nearestPage(Offset at) => DocumentPages.nearest(sheets, at);
+
+  /// `element` as stored, its frame in its page's points, moved onto the board; none for a
+  /// page the document does not have.
+  BridgeElement? _onBoard(BridgeElement element) {
+    if (!paged) return element;
+    if (element.docPage >= sheets.length) return null;
+    final at = sheets[element.docPage].topLeft;
+    return _moved(element, at, element.docPage);
+  }
+
+  /// `element` from the board onto the page it lies on, in that page's points.
+  BridgeElement _onPage(BridgeElement element) {
+    if (!paged) return element;
+    final page = _nearestPage(frameOf(element).center);
+    return _moved(element, -sheets[page].topLeft, page);
+  }
+
+  BridgeElementChange _changeOnPage(BridgeElementChange change) {
+    if (!paged) return change;
+    final element = elements
+        .where((shown) => shown.id == change.id)
+        .firstOrNull;
+    final page = element?.docPage ?? 0;
+    final at = page < sheets.length ? sheets[page].topLeft : Offset.zero;
+    return BridgeElementChange(
+      id: change.id,
+      x: change.x - at.dx,
+      y: change.y - at.dy,
+      w: change.w,
+      h: change.h,
+      rotation: change.rotation,
+      color: change.color,
+      width: change.width,
+      text: change.text,
+      arrowhead: change.arrowhead,
+    );
+  }
+
+  /// `element` as a new one, with no name, to be added.
+  static BridgeElement _fresh(BridgeElement element) => BridgeElement(
+    kind: element.kind,
+    x: element.x,
+    y: element.y,
+    w: element.w,
+    h: element.h,
+    rotation: element.rotation,
+    color: element.color,
+    width: element.width,
+    docPage: element.docPage,
+    pen: element.pen,
+    points: element.points,
+    shape: element.shape,
+    seed: element.seed,
+    arrowhead: element.arrowhead,
+    corners: element.corners,
+    text: element.text,
+  );
+
+  static BridgeElement _moved(BridgeElement element, Offset by, int page) =>
+      BridgeElement(
+        id: element.id,
+        kind: element.kind,
+        x: element.x + by.dx,
+        y: element.y + by.dy,
+        w: element.w,
+        h: element.h,
+        rotation: element.rotation,
+        color: element.color,
+        width: element.width,
+        docPage: page,
+        pen: element.pen,
+        points: element.points,
+        shape: element.shape,
+        seed: element.seed,
+        arrowhead: element.arrowhead,
+        corners: element.corners,
+        text: element.text,
+      );
 
   /// `element` after `c`; with `id`, under the change's name too.
   static BridgeElement _applied(
@@ -229,6 +397,7 @@ class BoardController extends ChangeNotifier {
     rotation: c.rotation,
     color: c.color,
     width: c.width,
+    docPage: element.docPage,
     pen: element.pen,
     points: element.points,
     shape: element.shape,
@@ -241,18 +410,18 @@ class BoardController extends ChangeNotifier {
   /// Switches the whole board between hand-drawn and clean.
   Future<void> toggleStyle() async {
     final next = handDrawn
-        ? BridgeWhiteboardStyle.clean
-        : BridgeWhiteboardStyle.handDrawn;
+        ? BridgeDrawingStyle.clean
+        : BridgeDrawingStyle.handDrawn;
     style = next;
     notifyListeners();
     _writing++;
     try {
       await views.write(
         mutation(
-          BridgeMutationKind.setWhiteboardStyle,
+          BridgeMutationKind.setDrawingStyle,
           page: views.page,
           block: view.block,
-          whiteboardStyle: next,
+          drawingStyle: next,
         ),
         [view.block],
       );
@@ -282,12 +451,14 @@ class BoardController extends ChangeNotifier {
   Offset toView(Offset board) => (board - origin) * zoom;
 
   void pan(Offset by) {
+    if (fixed) return;
     origin -= by / zoom;
     notifyListeners();
   }
 
   /// Zooms by `factor` around the view point `focus`, within 10 % and 400 %.
   void zoomBy(double factor, Offset focus) {
+    if (fixed) return;
     final at = toBoard(focus);
     zoom = (zoom * factor).clamp(minZoom, maxZoom);
     origin = at - focus / zoom;
@@ -324,6 +495,7 @@ class BoardController extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
+    _pages?.close();
     unawaited(_followed?.cancel());
     super.dispose();
   }

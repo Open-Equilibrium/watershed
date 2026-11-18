@@ -285,21 +285,24 @@ pub enum Mutation {
         /// The View it follows.
         after: Option<ViewId>,
     },
-    /// Sets how a Whiteboard draws its shapes and text.
-    SetWhiteboardStyle {
+    /// Sets how a Whiteboard's or annotated Media Block's drawing shows its shapes and text.
+    #[serde(alias = "SetWhiteboardStyle")]
+    SetDrawingStyle {
         /// The Block's home Page.
         page: PageId,
-        /// The Whiteboard Block.
+        /// The Whiteboard or Media Block.
         block: BlockId,
         /// The style.
-        style: crate::WhiteboardStyle,
+        style: crate::DrawingStyle,
     },
-    /// Removes, changes and adds a Whiteboard's elements in one Action, as erasing part of a
-    /// stroke replaces it by its pieces; new elements go on top, in their order.
-    EditWhiteboard {
+    /// Removes, changes and adds the elements of a Whiteboard's drawing, or of a Media
+    /// Block's on its file's pages (ADR-0307), in one Action, as erasing part of a stroke
+    /// replaces it by its pieces; new elements go on top, in their order.
+    #[serde(alias = "EditWhiteboard")]
+    EditDrawing {
         /// The Block's home Page.
         page: PageId,
-        /// The Whiteboard Block.
+        /// The Whiteboard or Media Block.
         block: BlockId,
         /// New elements.
         add: Vec<crate::Element>,
@@ -439,7 +442,7 @@ pub enum Created {
     Row(RowId),
     /// A new option of a select field.
     Option(OptionId),
-    /// New elements of a Whiteboard, in the order they were asked for.
+    /// New elements of a drawing, in the order they were asked for.
     Elements(Vec<crate::ElementId>),
 }
 
@@ -485,7 +488,7 @@ pub enum Error {
     WrongKind,
     /// A Database holds [`crate::MAX_FIELDS`] fields, or a select field
     /// [`crate::MAX_OPTIONS`] options, already, or a file cell would hold more than
-    /// [`crate::MAX_FILES`] files, or a Whiteboard or a stroke past its caps
+    /// [`crate::MAX_FILES`] files, or a drawing's page or a stroke past its caps
     /// ([`crate::MAX_ELEMENTS`], [`crate::MAX_BOARD_POINTS`], [`crate::MAX_POINTS`]).
     TooMany,
     /// A placement needs a sort key the core cannot write (ADR-0304): one past the cap, after

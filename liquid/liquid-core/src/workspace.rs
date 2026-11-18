@@ -21,7 +21,7 @@ use crate::{
     Origin, PageEntry, PageId, Permission, PersonId, Place, Request, RowId, TextStyle, View,
     ViewId,
 };
-use crate::{database, whiteboard};
+use crate::{database, drawing};
 
 /// A document is stored again as one snapshot once it has this many chunks, so loading it
 /// never replays more changes than that.
@@ -212,14 +212,16 @@ impl<S: Store> Workspace<S> {
         ))
     }
 
-    /// A live Whiteboard's style and elements, bottom to top, from the document of its home
-    /// `page`; none if `block` is no live Whiteboard.
-    pub fn whiteboard(
+    /// A Whiteboard's or Media Block's drawing: its style and its elements on the document
+    /// pages `pages`, bottom to top, from the document of its home `page` (a Whiteboard's
+    /// are on page 0); none if `block` holds no drawing.
+    pub fn drawing(
         &mut self,
         page: &PageId,
         block: &BlockId,
-    ) -> Result<Option<whiteboard::Whiteboard>, Error> {
-        whiteboard::read(self.doc(&Document::Page(page.clone()))?, block)
+        pages: std::ops::Range<u32>,
+    ) -> Result<Option<drawing::Drawing>, Error> {
+        drawing::read(self.doc(&Document::Page(page.clone()))?, block, pages)
     }
 
     /// A live Database Block's name and fields, from the document of its home `page`; none
@@ -375,12 +377,12 @@ impl<S: Store> Workspace<S> {
             Mutation::AddWhiteboardBlock { page, after } => {
                 self.write_add_whiteboard_block(page, after.as_ref())
             }
-            Mutation::SetWhiteboardStyle { page, block, style } => {
+            Mutation::SetDrawingStyle { page, block, style } => {
                 let doc = self.doc(&Document::Page(page.clone()))?;
-                whiteboard::set_style(doc, block, *style)?;
+                drawing::set_style(doc, block, *style)?;
                 Ok(block_changed(page, block, None))
             }
-            Mutation::EditWhiteboard {
+            Mutation::EditDrawing {
                 page,
                 block,
                 add,
@@ -388,7 +390,7 @@ impl<S: Store> Workspace<S> {
                 remove,
             } => {
                 let doc = self.doc(&Document::Page(page.clone()))?;
-                let ids = whiteboard::edit(doc, block, add, change, remove)?;
+                let ids = drawing::edit(doc, block, add, change, remove)?;
                 let created = (!ids.is_empty()).then_some(Created::Elements(ids));
                 Ok(block_changed(page, block, created))
             }
@@ -725,7 +727,7 @@ impl<S: Store> Workspace<S> {
     ) -> Result<Written, Error> {
         let (doc, order) = self.page(page)?;
         let block = BlockId::new()?;
-        whiteboard::create(doc, &block)?;
+        drawing::create(doc, &block)?;
         let sort = order.key_after(after)?;
         let view = add_view(doc, order, sort, &block, BlockKind::Whiteboard)?;
         let mut written = Written::new(Document::Page(page.clone()), Changed::Views(page.clone()));

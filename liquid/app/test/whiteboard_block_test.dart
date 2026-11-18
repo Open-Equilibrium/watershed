@@ -4,7 +4,7 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:liquid/src/rust/api/whiteboard.dart';
+import 'package:liquid/src/rust/api/drawing.dart';
 import 'package:liquid/src/rust/api/workspace.dart';
 import 'package:liquid/src/whiteboard/board.dart';
 import 'package:liquid/src/whiteboard/board_controller.dart';
@@ -23,7 +23,8 @@ void main() {
       ..tool = BoardTool.pen
       ..pen = BridgePen.fountain
       ..shape = ShapeKind.snap
-      ..wholeEraser = false;
+      ..wholeEraser = false
+      ..highlighterOnly = false;
   });
 
   Finder board() => find.byKey(const Key('whiteboard'));
@@ -31,8 +32,8 @@ void main() {
   /// The board's elements as the fake Workspace keeps them.
   List<BridgeElement> stored() => kit.fake.whiteboards.values.single.elements;
 
-  BridgeWhiteboardEdit lastEdit() =>
-      kit.applied(BridgeMutationKind.editWhiteboard).last.whiteboard!;
+  BridgeDrawingEdit lastEdit() =>
+      kit.applied(BridgeMutationKind.editDrawing).last.drawing!;
 
   /// A screen point at board point `at`, the canvas starting at board (-20, -20).
   Offset screen(WidgetTester tester, Offset at) =>
@@ -182,7 +183,7 @@ void main() {
     await kit.show(tester, [const WhiteboardPart()]);
     expect(find.byKey(const Key('whiteboard tools')), findsNothing);
     await focus(tester);
-    expect(kit.applied(BridgeMutationKind.editWhiteboard), isEmpty);
+    expect(kit.applied(BridgeMutationKind.editDrawing), isEmpty);
     expect(find.byKey(const Key('whiteboard tools')), findsOneWidget);
 
     await draw(tester, [
@@ -197,6 +198,48 @@ void main() {
     expect(points.length, 11);
     expect(added.x, 100);
     expect(added.w, 100);
+  });
+
+  testWidgets('the highlighter marks beneath, straight along a line', (
+    tester,
+  ) async {
+    await kit.show(tester, [const WhiteboardPart()]);
+    await focus(tester);
+    await key(tester, LogicalKeyboardKey.keyH);
+    await draw(tester, [
+      for (var x = 100.0; x <= 300; x += 10) Offset(x, 150 + (x % 20) / 10),
+    ]);
+    final [mark] = lastEdit().add;
+    expect(mark.pen, BridgePen.highlighter);
+    expect(mark.color, BridgeInkColor.yellow);
+    expect(unpackPoints(mark.points), hasLength(2), reason: 'straightened');
+  });
+
+  testWidgets('the eraser can take only the highlighter\'s marks', (
+    tester,
+  ) async {
+    final line = [for (var x = 100.0; x <= 300; x += 5) Offset(x, 100)];
+    final ink = [for (final at in line) InkPoint(at.dx, at.dy)];
+    await kit.show(tester, [
+      WhiteboardPart([
+        stroke(line),
+        newElement(
+          BridgeElementKind.stroke,
+          frame: pointsBounds(ink),
+          color: BridgeInkColor.yellow,
+          width: 1,
+          pen: BridgePen.highlighter,
+          points: packPoints(ink),
+        ),
+      ]),
+    ]);
+    await focus(tester);
+    await key(tester, LogicalKeyboardKey.keyE);
+    boardTools
+      ..wholeEraser = true
+      ..highlighterOnly = true;
+    await draw(tester, [const Offset(200, 80), const Offset(200, 120)]);
+    expect(lastEdit().remove, ['element 1']);
   });
 
   testWidgets('drawing and holding still snaps the stroke into a shape', (
@@ -306,6 +349,7 @@ void main() {
           rotation: 0,
           color: drawn.color,
           width: drawn.width,
+          docPage: drawn.docPage,
           pen: drawn.pen,
           points: drawn.points,
           shape: drawn.shape,
@@ -377,7 +421,7 @@ void main() {
     await tester.tap(find.byKey(const Key('whiteboard text')));
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('whiteboard text')), findsOneWidget);
-    expect(kit.applied(BridgeMutationKind.editWhiteboard), isEmpty);
+    expect(kit.applied(BridgeMutationKind.editDrawing), isEmpty);
     await tester.tapAt(screen(tester, const Offset(500, 300)));
     await tester.pumpAndSettle();
     final [text] = lastEdit().add;
@@ -391,20 +435,20 @@ void main() {
   ) async {
     await kit.show(tester, [const WhiteboardPart()]);
     await focus(tester);
-    BridgeWhiteboardStyle style() => kit.fake.whiteboards.values.single.style;
+    BridgeDrawingStyle style() => kit.fake.whiteboards.values.single.style;
     await tester.tap(find.byKey(const ValueKey('style hand-drawn')));
     await tester.pumpAndSettle();
     expect(
-      kit.applied(BridgeMutationKind.setWhiteboardStyle),
+      kit.applied(BridgeMutationKind.setDrawingStyle),
       isEmpty,
       reason: 'the chosen style stays as it is',
     );
     await tester.tap(find.byKey(const ValueKey('style clean')));
     await tester.pumpAndSettle();
-    expect(style(), BridgeWhiteboardStyle.clean);
+    expect(style(), BridgeDrawingStyle.clean);
     await tester.tap(find.byKey(const ValueKey('style hand-drawn')));
     await tester.pumpAndSettle();
-    expect(style(), BridgeWhiteboardStyle.handDrawn);
+    expect(style(), BridgeDrawingStyle.handDrawn);
   });
 
   testWidgets('pinching zooms a board and the right button pans it', (
@@ -428,7 +472,7 @@ void main() {
     await right.moveBy(const Offset(40, 0));
     await right.up();
     await tester.pumpAndSettle();
-    expect(kit.applied(BridgeMutationKind.editWhiteboard), isEmpty);
+    expect(kit.applied(BridgeMutationKind.editDrawing), isEmpty);
   });
 
   testWidgets('full screen shows the same board until Done', (tester) async {

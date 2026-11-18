@@ -20,6 +20,7 @@
 
 mod attachment;
 mod database;
+mod drawing;
 mod history;
 mod id;
 mod model;
@@ -27,13 +28,16 @@ mod mutation;
 mod order;
 mod sort_key;
 mod store;
-mod whiteboard;
 mod workspace;
 
 pub use attachment::{Attachment, AttachmentId, MAX_ATTACHMENT, Media, PART, Upload};
 pub use database::{
     Database, Field, Filter, MAX_FIELDS, MAX_FILES, MAX_OPTIONS, Match, Row, RowQuery, Rows,
     SelectOption, Sort,
+};
+pub use drawing::{
+    Content, Drawing, DrawingStyle, Element, ElementChange, Frame, InkColor, MAX_BOARD_POINTS,
+    MAX_DOC_PAGES, MAX_ELEMENT_TEXT, MAX_ELEMENTS, MAX_POINTS, Pen, Shape,
 };
 pub use history::{Action, Document, Operation, Permission};
 pub use id::{
@@ -45,10 +49,6 @@ pub use mutation::{
     TextStyle,
 };
 pub use store::{Commit, MemoryStore, Store, Write};
-pub use whiteboard::{
-    Content, Element, ElementChange, Frame, InkColor, MAX_BOARD_POINTS, MAX_ELEMENT_TEXT,
-    MAX_ELEMENTS, MAX_POINTS, Pen, Shape, Whiteboard, WhiteboardStyle,
-};
 pub use workspace::Workspace;
 
 #[cfg(test)]

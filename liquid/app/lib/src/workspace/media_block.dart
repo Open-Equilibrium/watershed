@@ -14,6 +14,7 @@ import '../theme/icons.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
 import 'anchored_menu.dart';
+import 'document_block.dart';
 import 'follow.dart';
 import 'page_views.dart';
 import 'workspace_state.dart';
@@ -21,7 +22,7 @@ import 'workspace_state.dart';
 /// The largest file a Media Block takes: 5 GiB, as the core caps it (ADR-0305).
 const maxAttachment = 5 << 30;
 
-/// The largest image Liquid shows, as the bridge's `MAX_SHOWN`; a larger one shows as a file.
+/// The largest image or PDF Liquid shows, as the bridge's `MAX_SHOWN`; a larger one shows as a file.
 const maxShown = 100 << 20;
 
 /// A file to add: on disk, read in Rust, or pasted bytes.
@@ -401,6 +402,9 @@ class _MediaBlockState extends State<MediaBlock> {
   bool _hovered = false;
   final _more = OverlayPortalController();
 
+  /// Whether the system's renderer could not read the PDF, which then shows as a file.
+  var _unreadable = false;
+
   WorkspaceState get _state => widget.views.state;
 
   @override
@@ -627,6 +631,17 @@ class _MediaBlockState extends State<MediaBlock> {
     final ws = context.ws;
     final media = _media;
     if (media == null) return const SizedBox(height: WsMetrics.lhProse);
+    // A PDF shows its pages and takes ink on them (ADR-0307).
+    if (media.mediaType == 'application/pdf' &&
+        media.size <= maxShown &&
+        !_unreadable) {
+      return DocumentBlock(
+        views: widget.views,
+        view: widget.view,
+        media: media,
+        onUnreadable: () => setState(() => _unreadable = true),
+      );
+    }
     final image = _image;
     final Widget shown;
     if (image case (final bytes, final pixels)) {
@@ -636,18 +651,32 @@ class _MediaBlockState extends State<MediaBlock> {
           final ratio = MediaQuery.devicePixelRatioOf(context);
           return Align(
             alignment: Alignment.centerLeft,
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(WsMetrics.radiusLg),
-              child: Image.memory(
-                bytes,
-                key: const Key('media image'),
-                width: width,
-                height: width * pixels.height / pixels.width,
-                // Decoded at the size shown, so memory stays bounded.
-                cacheWidth: (width * ratio).round(),
-                fit: BoxFit.contain,
-                gaplessPlayback: true,
-              ),
+            // Its ink lies right over it (ADR-0307).
+            child: Stack(
+              clipBehavior: Clip.none,
+              children: [
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(WsMetrics.radiusLg),
+                  child: Image.memory(
+                    bytes,
+                    key: const Key('media image'),
+                    width: width,
+                    height: width * pixels.height / pixels.width,
+                    // Decoded at the size shown, so memory stays bounded.
+                    cacheWidth: (width * ratio).round(),
+                    fit: BoxFit.contain,
+                    gaplessPlayback: true,
+                  ),
+                ),
+                Positioned.fill(
+                  child: ImageInk(
+                    views: widget.views,
+                    view: widget.view,
+                    pixels: pixels,
+                    width: width,
+                  ),
+                ),
+              ],
             ),
           );
         },

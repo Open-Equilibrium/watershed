@@ -4,9 +4,10 @@
 //! Workspace document  { owner, areas: { <area>: { name, sort, deleted } } }
 //! area document       { pages: { <page>: { title, parent?, sort, deleted } } }
 //! Page document       { blocks: { <block>: { kind, text, style?, language?, deleted } },
-//!                       (a Media Block's entry: { kind, name, type, attachment, size, deleted })
-//!                       (a Database Block's entry is in `database.rs`, a Whiteboard's in
-//!                        `whiteboard.rs`)
+//!                       (a Media Block's entry: { kind, name, type, attachment, size, deleted,
+//!                        style?, elements? })
+//!                       (a Database Block's entry is in `database.rs`, a Whiteboard's and
+//!                        a Media Block's drawing in `drawing.rs`)
 //!                       views: { <view>: { block, sort, boundary, deleted } } }
 //! ```
 

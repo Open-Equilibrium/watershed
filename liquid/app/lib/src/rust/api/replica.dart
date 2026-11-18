@@ -5,11 +5,11 @@
 
 import '../frb_generated.dart';
 import 'database.dart';
+import 'drawing.dart';
 import 'media.dart';
 
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-import 'whiteboard.dart';
 import 'workspace.dart';
 
 // These functions are ignored because they are not marked as `pub`: `notify`, `open_lock`, `open_with`, `read`, `release_page`, `release`, `state`, `take_lock`, `watch`
@@ -42,7 +42,7 @@ abstract class LiquidWorkspace implements RustOpaqueInterface {
   /// Reads one bounded window, one Block's text or one Database's fields.
   Future<BridgeAnswer> query({required BridgeQuery query});
 
-  /// The bytes of an attachment of at most [`MAX_SHOWN`] bytes, to show it as an image.
+  /// The bytes of an attachment of at most [`MAX_SHOWN`] bytes, to show it as an image or a PDF.
   Future<Uint8List> readAttachment({required String attachment});
 
   /// Writes an attachment's bytes to `path`, which the person chose in the save dialog,

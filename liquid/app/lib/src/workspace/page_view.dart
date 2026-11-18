@@ -211,7 +211,7 @@ class _WorkspacePageState extends State<WorkspacePage> implements EditorSource {
         Offstage(offstage: board != null, child: page),
         if (board != null)
           Positioned.fill(
-            child: WhiteboardFullScreen(
+            child: DrawingFullScreen(
               key: ValueKey('full ${board.id}'),
               views: _views,
               view: board,

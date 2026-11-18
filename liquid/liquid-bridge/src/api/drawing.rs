@@ -1,35 +1,35 @@
-//! The parts of the Workspace's messages that carry Whiteboard Blocks (ADR-0306): elements,
-//! the changes to them, and what a Whiteboard read answers. Like the other messages they are
+//! The parts of the Workspace's messages that carry drawings, a Whiteboard's (ADR-0306) or
+//! an annotated Media Block's (ADR-0307): elements, the changes to them, and what a drawing
+//! read answers. Like the other messages they are
 //! flat, and identities cross as text; a stroke's points cross as bytes, never as numbers.
 
 use liquid_core::{
-    Content, Element, ElementChange, ElementId, Frame, InkColor, Pen, Shape, Whiteboard,
-    WhiteboardStyle,
+    Content, Drawing, DrawingStyle, Element, ElementChange, ElementId, Frame, InkColor, Pen, Shape,
 };
 
 use super::workspace::id;
 
-/// How a Whiteboard draws its shapes and text.
+/// How a drawing shows its shapes and text.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum BridgeWhiteboardStyle {
+pub enum BridgeDrawingStyle {
     /// As Excalidraw draws, text in Excalifont.
     HandDrawn,
     /// Exact lines, text in Liquid's typeface.
     Clean,
 }
 
-impl BridgeWhiteboardStyle {
-    pub(crate) fn to_core(self) -> WhiteboardStyle {
+impl BridgeDrawingStyle {
+    pub(crate) fn to_core(self) -> DrawingStyle {
         match self {
-            Self::HandDrawn => WhiteboardStyle::HandDrawn,
-            Self::Clean => WhiteboardStyle::Clean,
+            Self::HandDrawn => DrawingStyle::HandDrawn,
+            Self::Clean => DrawingStyle::Clean,
         }
     }
 
-    fn of(style: WhiteboardStyle) -> Self {
+    fn of(style: DrawingStyle) -> Self {
         match style {
-            WhiteboardStyle::HandDrawn => Self::HandDrawn,
-            WhiteboardStyle::Clean => Self::Clean,
+            DrawingStyle::HandDrawn => Self::HandDrawn,
+            DrawingStyle::Clean => Self::Clean,
         }
     }
 }
@@ -54,6 +54,8 @@ pub enum BridgePen {
     Fountain,
     /// A line that follows the pressure most.
     Brush,
+    /// Broad, translucent ink beneath the rest.
+    Highlighter,
 }
 
 /// A shape.
@@ -80,6 +82,14 @@ pub enum BridgeInkColor {
     Data2,
     /// Data color 3.
     Data3,
+    /// The yellow tag color.
+    Yellow,
+    /// The green tag color.
+    Green,
+    /// The blue tag color.
+    Blue,
+    /// The pink tag color.
+    Pink,
 }
 
 /// A stroke, shape or text: where it lies, turned `rotation` radians clockwise around its
@@ -104,6 +114,8 @@ pub struct BridgeElement {
     pub color: BridgeInkColor,
     /// Its line width, or a text's size: 0, 1 or 2.
     pub width: i64,
+    /// The page of an annotated document it lies on, from 0; 0 on a Whiteboard.
+    pub doc_page: i64,
     /// A stroke's pen.
     pub pen: BridgePen,
     /// A stroke's points: x, y and pressure as little-endian f32, 12 bytes a point.
@@ -147,7 +159,7 @@ pub struct BridgeElementChange {
 
 /// Elements removed, changed and added in one Action.
 #[derive(Debug, Clone, PartialEq, Default)]
-pub struct BridgeWhiteboardEdit {
+pub struct BridgeDrawingEdit {
     /// New elements, each above all before.
     pub add: Vec<BridgeElement>,
     /// Changes to live elements.
@@ -156,19 +168,19 @@ pub struct BridgeWhiteboardEdit {
     pub remove: Vec<String>,
 }
 
-/// A Whiteboard's style and elements, bottom to top.
+/// A drawing's style and elements, bottom to top.
 #[derive(Debug, Clone, PartialEq)]
-pub struct BridgeWhiteboard {
+pub struct BridgeDrawing {
     /// How it draws its shapes and text.
-    pub style: BridgeWhiteboardStyle,
+    pub style: BridgeDrawingStyle,
     /// Its elements, bottom to top.
     pub elements: Vec<BridgeElement>,
 }
 
-impl BridgeWhiteboard {
-    pub(crate) fn of(board: Whiteboard) -> Self {
+impl BridgeDrawing {
+    pub(crate) fn of(board: Drawing) -> Self {
         Self {
-            style: BridgeWhiteboardStyle::of(board.style),
+            style: BridgeDrawingStyle::of(board.style),
             elements: board
                 .elements
                 .into_iter()
@@ -184,6 +196,10 @@ fn color(color: BridgeInkColor) -> InkColor {
         BridgeInkColor::Data1 => InkColor::Data1,
         BridgeInkColor::Data2 => InkColor::Data2,
         BridgeInkColor::Data3 => InkColor::Data3,
+        BridgeInkColor::Yellow => InkColor::Yellow,
+        BridgeInkColor::Green => InkColor::Green,
+        BridgeInkColor::Blue => InkColor::Blue,
+        BridgeInkColor::Pink => InkColor::Pink,
     }
 }
 
@@ -206,8 +222,13 @@ impl BridgeElement {
                 InkColor::Data1 => BridgeInkColor::Data1,
                 InkColor::Data2 => BridgeInkColor::Data2,
                 InkColor::Data3 => BridgeInkColor::Data3,
+                InkColor::Yellow => BridgeInkColor::Yellow,
+                InkColor::Green => BridgeInkColor::Green,
+                InkColor::Blue => BridgeInkColor::Blue,
+                InkColor::Pink => BridgeInkColor::Pink,
             },
             width: i64::from(element.width),
+            doc_page: i64::from(element.doc_page),
             pen: BridgePen::Ball,
             points: Vec::new(),
             shape: BridgeShape::Rectangle,
@@ -223,6 +244,7 @@ impl BridgeElement {
                     Pen::Ball => BridgePen::Ball,
                     Pen::Fountain => BridgePen::Fountain,
                     Pen::Brush => BridgePen::Brush,
+                    Pen::Highlighter => BridgePen::Highlighter,
                 };
                 read.points = points;
             }
@@ -254,6 +276,7 @@ impl BridgeElement {
                     BridgePen::Ball => Pen::Ball,
                     BridgePen::Fountain => Pen::Fountain,
                     BridgePen::Brush => Pen::Brush,
+                    BridgePen::Highlighter => Pen::Highlighter,
                 },
                 points: self.points.clone(),
             },
@@ -288,6 +311,8 @@ impl BridgeElement {
             },
             color: color(self.color),
             width: width(self.width)?,
+            doc_page: u32::try_from(self.doc_page)
+                .map_err(|_| "a document page is from 0".to_string())?,
             content,
         })
     }
@@ -296,7 +321,7 @@ impl BridgeElement {
 /// An edit's added, changed and removed elements, as the core takes them.
 type Edit = (Vec<Element>, Vec<ElementChange>, Vec<ElementId>);
 
-impl BridgeWhiteboardEdit {
+impl BridgeDrawingEdit {
     /// The core's parts of the edit.
     pub(crate) fn to_core(&self) -> Result<Edit, String> {
         let add = self

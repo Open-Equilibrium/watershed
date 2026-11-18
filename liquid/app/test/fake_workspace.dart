@@ -4,7 +4,7 @@ import 'dart:typed_data';
 import 'package:liquid/src/rust/api/database.dart';
 import 'package:liquid/src/rust/api/media.dart';
 import 'package:liquid/src/rust/api/replica.dart';
-import 'package:liquid/src/rust/api/whiteboard.dart';
+import 'package:liquid/src/rust/api/drawing.dart';
 import 'package:liquid/src/rust/api/workspace.dart';
 
 /// An in-memory Workspace behind the bridge's calls: areas and Page trees, with a change for
@@ -36,7 +36,11 @@ class FakeWorkspace implements LiquidWorkspace {
   final rows = <String, List<BridgeRow>>{};
 
   /// Each Whiteboard's style and elements, bottom to top.
-  final whiteboards = <String, BridgeWhiteboard>{};
+  final whiteboards = <String, BridgeDrawing>{};
+
+  /// How many elements a drawing's read returns, as the core's point budget: whole pages
+  /// from the window's first, while they fit.
+  var readBudget = 1 << 30;
 
   /// Fails every apply with this text.
   String? refuse;
@@ -474,8 +478,8 @@ class FakeWorkspace implements LiquidWorkspace {
           boundary: false,
           kind: BridgeBlockKind.whiteboard,
         );
-        whiteboards[view.block] = const BridgeWhiteboard(
-          style: BridgeWhiteboardStyle.handDrawn,
+        whiteboards[view.block] = const BridgeDrawing(
+          style: BridgeDrawingStyle.handDrawn,
           elements: [],
         );
         page.insert(
@@ -493,20 +497,28 @@ class FakeWorkspace implements LiquidWorkspace {
           block: view.block,
           view: view.id,
         );
-      case BridgeMutationKind.setWhiteboardStyle:
+      case BridgeMutationKind.setDrawingStyle:
         final board = whiteboards[mutation.block] ?? (throw 'not found');
-        if (board.style == mutation.whiteboardStyle) {
+        if (board.style == mutation.drawingStyle) {
           throw 'the write changes nothing';
         }
-        whiteboards[mutation.block!] = BridgeWhiteboard(
-          style: mutation.whiteboardStyle!,
+        whiteboards[mutation.block!] = BridgeDrawing(
+          style: mutation.drawingStyle!,
           elements: board.elements,
         );
         _changed(_blockResource(mutation));
         return BridgeApplied(elements: const [], action: _id());
-      case BridgeMutationKind.editWhiteboard:
-        final board = whiteboards[mutation.block] ?? (throw 'not found');
-        final edit = mutation.whiteboard!;
+      case BridgeMutationKind.editDrawing:
+        // A Media Block's drawing starts with its first annotation.
+        final board =
+            whiteboards[mutation.block] ??
+            (media.containsKey(mutation.block)
+                ? const BridgeDrawing(
+                    style: BridgeDrawingStyle.handDrawn,
+                    elements: [],
+                  )
+                : throw 'not found');
+        final edit = mutation.drawing!;
         final elements = [...board.elements];
         for (final removed in edit.remove) {
           final at = elements.indexWhere((element) => element.id == removed);
@@ -522,7 +534,7 @@ class FakeWorkspace implements LiquidWorkspace {
         for (final (index, element) in edit.add.indexed) {
           elements.add(withId(element, ids[index]));
         }
-        whiteboards[mutation.block!] = BridgeWhiteboard(
+        whiteboards[mutation.block!] = BridgeDrawing(
           style: board.style,
           elements: elements,
         );
@@ -624,6 +636,23 @@ class FakeWorkspace implements LiquidWorkspace {
     return false;
   }
 
+  List<BridgeElement> _withinBudget(List<BridgeElement> elements) {
+    final pages = {for (final element in elements) element.docPage}.toList()
+      ..sort();
+    var budget = readBudget;
+    final kept = <int>{};
+    for (final page in pages) {
+      final count = elements.where((element) => element.docPage == page).length;
+      if (count > budget) break;
+      budget -= count;
+      kept.add(page);
+    }
+    return [
+      for (final element in elements)
+        if (kept.contains(element.docPage)) element,
+    ];
+  }
+
   @override
   Future<BridgeAnswer> query({required BridgeQuery query}) async {
     asked.add(query);
@@ -692,12 +721,27 @@ class FakeWorkspace implements LiquidWorkspace {
         media: media[query.block],
         rows: const [],
       ),
-      BridgeQueryKind.whiteboard => BridgeAnswer(
+      BridgeQueryKind.drawing => BridgeAnswer(
         areas: const [],
         pages: const [],
         views: const [],
         count: 0,
-        whiteboard: whiteboards[query.block],
+        drawing: switch (whiteboards[query.block]) {
+          final board? => BridgeDrawing(
+            style: board.style,
+            elements: _withinBudget([
+              for (final element in board.elements)
+                if (element.docPage >= query.start &&
+                    element.docPage < query.start + query.limit)
+                  element,
+            ]),
+          ),
+          null when media.containsKey(query.block) => const BridgeDrawing(
+            style: BridgeDrawingStyle.handDrawn,
+            elements: [],
+          ),
+          null => null,
+        },
         rows: const [],
       ),
       BridgeQueryKind.database => BridgeAnswer(
@@ -796,6 +840,7 @@ BridgeElement withId(BridgeElement element, String id) => BridgeElement(
   rotation: element.rotation,
   color: element.color,
   width: element.width,
+  docPage: element.docPage,
   pen: element.pen,
   points: element.points,
   shape: element.shape,
@@ -817,6 +862,7 @@ BridgeElement changed(BridgeElement element, BridgeElementChange change) =>
       rotation: change.rotation,
       color: change.color,
       width: change.width,
+      docPage: element.docPage,
       pen: element.pen,
       points: element.points,
       shape: element.shape,
