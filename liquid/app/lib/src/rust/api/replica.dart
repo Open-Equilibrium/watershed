@@ -42,7 +42,7 @@ abstract class LiquidWorkspace implements RustOpaqueInterface {
   /// Reads one bounded window, one Block's text or one Database's fields.
   Future<BridgeAnswer> query({required BridgeQuery query});
 
-  /// The bytes of an attachment of at most [`MAX_SHOWN`] bytes, to show it as an image.
+  /// The bytes of an attachment of at most [`MAX_SHOWN`] bytes, to show it as an image or a PDF.
   Future<Uint8List> readAttachment({required String attachment});
 
   /// Writes an attachment's bytes to `path`, which the person chose in the save dialog,

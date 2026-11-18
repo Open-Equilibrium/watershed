@@ -22,7 +22,7 @@ import 'workspace_state.dart';
 /// The largest file a Media Block takes: 5 GiB, as the core caps it (ADR-0305).
 const maxAttachment = 5 << 30;
 
-/// The largest image Liquid shows, as the bridge's `MAX_SHOWN`; a larger one shows as a file.
+/// The largest image or PDF Liquid shows, as the bridge's `MAX_SHOWN`; a larger one shows as a file.
 const maxShown = 100 << 20;
 
 /// A file to add: on disk, read in Rust, or pasted bytes.

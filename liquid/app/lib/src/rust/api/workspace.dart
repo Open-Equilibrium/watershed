@@ -120,7 +120,7 @@ class BridgeApplied {
   /// A new option of a select field.
   final String? option;
 
-  /// A Whiteboard's new elements, in the order they were asked for.
+  /// A drawing's new elements, in the order they were asked for.
   final List<String> elements;
 
   const BridgeApplied({

@@ -194,7 +194,7 @@ Canonical terms. Use these exactly; do not introduce synonyms. Tool names are fi
 - **Table** — The Block of typed fields and rows, kept in its home Page's document and shown through Views such as Table, Board and Calendar. The core calls it the Database Block (ADR-0244).
 - **Code Block** — A Block of code with syntax colors that Liquid never runs; a Text Block turns into one with ``` or the slash command Code (ADR-0302).
 - **Media Block** — A Block that shows an image or a file, kept as an attachment (ADR-0305).
-- **Whiteboard Block** — A Block of pen strokes, shapes and text on a canvas without edges, drawn on in place; each stroke, shape or text is one element, which merges on its own (ADR-0306).
+- **Whiteboard Block** — A Block whose Drawing lies on a canvas without edges, drawn on in place (ADR-0306).
 - **Drawing** — The strokes, shapes and text of a Whiteboard Block, or the ink on an annotated Media Block's pages, each an element that merges on its own (ADR-0306, ADR-0307).
 - **Attachment** — A file's bytes in a Workspace, kept in the encrypted replica in parts and named by the SHA-256 of its bytes, so a file added twice is kept once (ADR-0305).
 - **Calculation Block** — A Block of lines that each pair a label with a value or formula, laid out as labels left and values right, for reports in Excel's layout (ADR-0244).

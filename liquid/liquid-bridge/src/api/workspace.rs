@@ -214,7 +214,7 @@ pub struct BridgeApplied {
     pub row: Option<String>,
     /// A new option of a select field.
     pub option: Option<String>,
-    /// A Whiteboard's new elements, in the order they were asked for.
+    /// A drawing's new elements, in the order they were asked for.
     pub elements: Vec<String>,
 }
 

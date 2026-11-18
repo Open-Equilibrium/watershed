@@ -11462,7 +11462,7 @@ class LiquidWorkspaceImpl extends RustOpaque implements LiquidWorkspace {
       .api
       .crateApiReplicaLiquidWorkspaceQuery(that: this, query: query);
 
-  /// The bytes of an attachment of at most [`MAX_SHOWN`] bytes, to show it as an image.
+  /// The bytes of an attachment of at most [`MAX_SHOWN`] bytes, to show it as an image or a PDF.
   Future<Uint8List> readAttachment({required String attachment}) =>
       RustLib.instance.api.crateApiReplicaLiquidWorkspaceReadAttachment(
         that: this,

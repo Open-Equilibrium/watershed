@@ -156,7 +156,7 @@ impl LiquidWorkspace {
         Ok(finished.id.to_string())
     }
 
-    /// The bytes of an attachment of at most [`MAX_SHOWN`] bytes, to show it as an image.
+    /// The bytes of an attachment of at most [`MAX_SHOWN`] bytes, to show it as an image or a PDF.
     pub fn read_attachment(&self, attachment: String) -> Result<Vec<u8>, String> {
         let id = self::attachment(&attachment)?;
         let size = self.size(&id)?;
