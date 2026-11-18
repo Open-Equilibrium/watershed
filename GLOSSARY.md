@@ -48,6 +48,8 @@ Canonical terms. Use these exactly; do not introduce synonyms. Tool names are fi
 - **Device token** — The token a device keeps after pairing; what it may reach is in [SECURITY.md](SECURITY.md#meta-harness-service-and-configuration) (ADR-0299).
 - **Host token** — The token another host keeps after pairing; what it may reach is in [SECURITY.md](SECURITY.md#meta-harness-service-and-configuration) (ADR-0288, ADR-0299).
 - **Host move** — Continuing a session on another host, which then owns it; until the Liquid account exists, only while both hosts answer (ADR-0284, ADR-0308). Canonical: [V-Spec](docs/concept/V-Spec_MetaHarness.html#host-move).
+- **Sealed session** — A moved session's thread on the host it left: it takes no new messages, leaves that host's thread list and may be archived or deleted (ADR-0308).
+- **Transfer** — One attempt at a host move, named by an id that makes each step repeatable; it ends sealed or released, and a released session stays on its host (ADR-0308).
 - **Host link** — A link that lets one host's T3 Code reach another's; Meta-Harness pairs each direction separately, carries it through a host tunnel and renews it (ADR-0285, ADR-0288, ADR-0299). Canonical: [V-Spec](docs/concept/V-Spec_MetaHarness.html#host-links).
 - **Host tunnel** — The request-passing path of a host link: a loopback port on the linking host to the other host's remote access, passing only the requests a link makes. Refusals: [SECURITY.md](SECURITY.md#meta-harness-service-and-configuration) (ADR-0300, ADR-0301).
 - **Peer link** — T3 Code's own link from one T3 server to another's `/mcp`, which a host link carries (ADR-0288).

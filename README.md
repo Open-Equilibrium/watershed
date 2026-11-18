@@ -111,7 +111,7 @@ Each topic's canonical home; other files link there.
 | Meta-Harness service, its API and `meta` | [Meta-Harness V-Spec](docs/concept/V-Spec_MetaHarness.html#surfaces); trust: [SECURITY.md](SECURITY.md#meta-harness-service-and-configuration) |
 | Installing Meta-Harness | [meta-harness/README.md](meta-harness/README.md#install) |
 | Remote access, pairing and host links | commands: [meta-harness/README.md](meta-harness/README.md#remote-access-and-host-links); mechanism: [Meta-Harness V-Spec](docs/concept/V-Spec_MetaHarness.html#orchestration); trust: [SECURITY.md](SECURITY.md#meta-harness-service-and-configuration) |
-| Moving a session to another host | mechanism: [Meta-Harness V-Spec](docs/concept/V-Spec_MetaHarness.html#host-move); trust: [SECURITY.md](SECURITY.md#meta-harness-service-and-configuration) |
+| Moving a session to another host | mechanism: [Meta-Harness V-Spec](docs/concept/V-Spec_MetaHarness.html#host-move); trust: [SECURITY.md](SECURITY.md#meta-harness-agent-sessions) |
 | Orchestration of agents | [Meta-Harness V-Spec](docs/concept/V-Spec_MetaHarness.html#orchestration) |
 | Durability | [Meta-Harness V-Spec](docs/concept/V-Spec_MetaHarness.html#durability) |
 | Session record export | [Meta-Harness V-Spec](docs/concept/V-Spec_MetaHarness.html#boundary) |
