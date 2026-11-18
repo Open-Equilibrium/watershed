@@ -42,7 +42,8 @@ pub(crate) fn path_name(folder: &Path) -> Result<String, String> {
 /// The replica's key, found through the key name file in `dir`. A folder without that file, or
 /// whose key is still filed under its path, takes its key under a new name once: the name file
 /// is synced before the key is stored, and the path entry is deleted only after that. Without a
-/// key, a replica whose database exists is refused (ADR-0237).
+/// key, a replica whose database exists is refused (ADR-0237). The caller holds the replica's lock,
+/// which keeps a second session from making a key of its own meanwhile.
 pub(crate) fn replica_key(
     dir: &Path,
     keys: &dyn Keys,

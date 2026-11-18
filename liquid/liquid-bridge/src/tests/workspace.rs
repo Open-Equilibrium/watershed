@@ -595,6 +595,58 @@ fn one_session_at_a_time_opens_a_replica_folder() {
     assert!(LiquidWorkspace::open_with(&folder.0, &keys).is_ok());
 }
 
+/// A keychain whose first lookup waits, after announcing it, until the test lets it go on.
+#[derive(Default)]
+struct PausedLookup {
+    keys: Memory,
+    paused: std::sync::atomic::AtomicBool,
+    reached: Option<std::sync::Barrier>,
+    resume: Option<std::sync::Barrier>,
+}
+
+impl Keys for PausedLookup {
+    fn read(&self, name: &str) -> Result<Option<[u8; 32]>, String> {
+        let found = self.keys.read(name);
+        if !self.paused.swap(true, std::sync::atomic::Ordering::SeqCst) {
+            self.reached.as_ref().unwrap().wait();
+            self.resume.as_ref().unwrap().wait();
+        }
+        found
+    }
+
+    fn write(&self, name: &str, key: &[u8; 32]) -> Result<(), String> {
+        self.keys.write(name, key)
+    }
+
+    fn delete(&self, name: &str) -> Result<(), String> {
+        self.keys.delete(name)
+    }
+}
+
+#[test]
+fn a_second_session_cannot_make_a_key_while_the_first_is_making_one() {
+    let folder = Folder::new("first-key");
+    let keys = PausedLookup {
+        reached: Some(std::sync::Barrier::new(2)),
+        resume: Some(std::sync::Barrier::new(2)),
+        ..PausedLookup::default()
+    };
+    let (first, second) = std::thread::scope(|scope| {
+        let first = scope.spawn(|| LiquidWorkspace::open_with(&folder.0, &keys).map(drop).err());
+        keys.reached.as_ref().unwrap().wait();
+        let second = LiquidWorkspace::open_with(&folder.0, &keys).map(drop).err();
+        keys.resume.as_ref().unwrap().wait();
+        (first.join().unwrap(), second)
+    });
+    assert_eq!(first, None);
+    assert_eq!(
+        second.as_deref(),
+        Some("another Liquid session holds this replica")
+    );
+    assert!(keys.keys.only().is_some());
+    assert!(LiquidWorkspace::open_with(&folder.0, &keys.keys).is_ok());
+}
+
 #[test]
 fn a_lock_held_only_for_a_moment_is_waited_for() {
     // A child process started between fork and exec holds the lock it inherited until exec.
