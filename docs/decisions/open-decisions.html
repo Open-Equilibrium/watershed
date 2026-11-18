@@ -105,7 +105,7 @@
       <details id="d-110" class="decision wide">
         <summary><h3>D-110 - Checking Liquid's Test Workspace Against The Real Core</h3></summary>
         <p><strong>Status:</strong> Open; a Minor from the second M3a KPI review (PLAN.md).</p>
-        <p><strong>Problem:</strong> Liquid's Flutter tests run against <code>FakeWorkspace</code> (<code>liquid/app/test/fake_workspace.dart</code>), a second, Dart-side copy of what the core does when Text Blocks split or join, Sections start, rows, fields and options are placed or a cell is set. No test compares the two, so the fake can drift from the core and every app test still passes. Each later slice (Views with sort and filter, the deletion cascade, other Blocks) adds more to copy. The real Workspace opens only with a key from the operating system's keychain, and Flutter tests load no Rust code today.</p>
+        <p><strong>Problem:</strong> Liquid's Flutter tests run against <code>FakeWorkspace</code> (<code>liquid/app/test/fake_workspace.dart</code>), a second, Dart-side copy of what the core does when Text Blocks split or join, Sections start, rows, fields and options are placed, a cell is set or a View filters and sorts its rows. No test compares the two, so the fake can drift from the core and every app test still passes. Each later slice (the deletion cascade, other Blocks) adds more to copy. The real Workspace opens only with a key from the operating system's keychain, and Flutter tests load no Rust code today.</p>
         <p><strong>Question:</strong> How should the app's tests be tied to the real core?</p>
         <div class="dia">
           <div class="opt rec"><h4>A: Shared scenarios <span class="tag">Recommended</span></h4>
@@ -161,7 +161,7 @@
 
       <details id="d-112" class="decision wide">
         <summary><h3>D-112 - Where A Table Lives Once It Shows On Several Pages</h3></summary>
-        <p><strong>Status:</strong> Open; blocks the rest of the Views slice (PLAN.md).</p>
+        <p><strong>Status:</strong> Open; blocks Views on several Pages (PLAN.md).</p>
         <p><strong>Problem:</strong> A Block, with all a Table's rows, is stored inside the document of the Page it was made on, its home Page. A View on a second Page has to reach that other document. Each Page's document loads and syncs on its own, and access is granted per area, so the second Page may be in an area someone cannot read. It must also be settled what happens when the home Page's own View is removed, or the home Page is deleted, while other Views remain. Removing a Block's last View must still delete it in one revertible Action.</p>
         <p><strong>Question:</strong> Where does a Block that shows on several Pages live?</p>
         <div class="dia">
@@ -180,7 +180,7 @@
           </div>
         </div>
         <p><strong>Recommendation:</strong> A; it needs the least new machinery, and B stays possible later for very large Tables.</p>
-        <p><strong>Acceptance criterion:</strong> a Table shown on two Pages reads and writes the same rows from both after a reload; removing its last View deletes it in one Action that a revert restores; a View without access to the home Page shows a placeholder.</p>
+        <p><strong>Acceptance criterion:</strong> a Table shown on two Pages reads and writes the same rows from both after a reload; removing its last View deletes it in one Action that a revert restores; once Roles and protection ship, a View without access to the home Page shows a placeholder.</p>
       </details>
     </div>
   </section>

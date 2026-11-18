@@ -90,7 +90,7 @@ Liquid        = local-first workspace and App platform</code></pre>
 └── Settings</code></pre>
       <ul>
         <li>A <strong>Block</strong> is the canonical typed content/functionality instance. A <strong>View</strong> is one representation and placement of that Block.</li>
-        <li>A Block may support several View kinds, such as Database table/board/calendar or App UI/code. Switching or adding a View does not create a Block.</li>
+        <li>A Block may support several View kinds, such as Database table/board/calendar or App UI/code. Switching or adding a View does not create a Block. A Table's View keeps its own sort and filter, for everyone who sees that View (ADR-0244); they do not change the Block or its other Views.</li>
         <li>The same Block may appear through synchronized Views on several Pages. Editing any View changes the same canonical state everywhere.</li>
         <li><strong>Duplicate</strong> copies current state into a new independent Block. <strong>Add View</strong> reuses the existing Block. Pasting a copied Block duplicates it; a View is always explicit (ADR-0235).</li>
         <li>Removing the last View deletes the Block in the same atomic, reversible History Action. There is no orphan Block pool or separate Trash.</li>

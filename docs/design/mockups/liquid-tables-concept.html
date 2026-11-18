@@ -154,11 +154,12 @@ h4.qh{margin:14px 0 6px;font-size:13px}
       <tr><td>Rollup</td><td>A formula over linked rows, e.g. <code>SUM(Trips.Cost)</code></td><td>With Formulas</td></tr>
       <tr><td>Formula property</td><td>Calculated field (section 3)</td><td>With Formulas</td></tr>
       <tr><td>Button property</td><td>Button field running an Automation</td><td>With Automations</td></tr>
-      <tr><td>Views: table, board, calendar (list, gallery, timeline, chart)</td><td>Table, Board, Calendar; charts are Chart Blocks fed by a Connection</td><td>Views slice; more View kinds later</td></tr>
-      <tr><td>Sort, filter, group per View</td><td>Stored on the View, with group subtotals</td><td>Views slice</td></tr>
+      <tr><td>Views: table, board, calendar (list, gallery, timeline, chart)</td><td>Table, Board, Calendar; charts are Chart Blocks fed by a Connection</td><td>Views on several Pages; more View kinds later</td></tr>
+      <tr><td>Sort, filter per View</td><td>One sort and one filter, stored on the View</td><td>Done</td></tr>
+      <tr><td>Group per View</td><td>Stored on the View, with group subtotals</td><td>Views on several Pages</td></tr>
       <tr><td>Calculate in the footer</td><td>Total row (section 2)</td><td>With Formulas</td></tr>
       <tr><td>Each row is a Page with its own content</td><td>Open question 4</td><td>—</td></tr>
-      <tr><td>Linked view of a database on another Page</td><td>A View of the same Block on another Page (ADR-0235)</td><td>Views slice</td></tr>
+      <tr><td>Linked view of a database on another Page</td><td>A View of the same Block on another Page (ADR-0235)</td><td>Views on several Pages</td></tr>
       <tr><td>Row and page permissions</td><td>Roles per area and Block (ADR-0223)</td><td>Roles slice</td></tr>
       <tr><td>Database automations</td><td>Automations on row events</td><td>Automations slice</td></tr>
     </table></div>
@@ -207,7 +208,7 @@ h4.qh{margin:14px 0 6px;font-size:13px}
       <li>The Block is a <b>Table</b> with Views, as Airtable; the core keeps calling it the Database Block.</li>
       <li>Reports in Excel's layout are a <b>Calculation Block</b> (section 5, A).</li>
       <li>A new field finds its kind from its first value and can change it later (section 6); the first Table View keeps the approved kind menu until the core can change a field's kind.</li>
-      <li>Whether a row opens as a Page is decided with the Views slice.</li>
+      <li>Whether a row opens as a Page is decided with Views on several Pages.</li>
     </ol>
   </section>
 </div>
