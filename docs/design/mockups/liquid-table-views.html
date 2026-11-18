@@ -9,14 +9,14 @@
 .app{display:flex;min-height:var(--h,420px);overflow:hidden}
 .app .side{display:flex;flex-direction:column}
 .app .main{padding:0}
-.app .pgc{padding:24px;display:flex;flex-direction:column;gap:12px;min-width:0}
+.app .pgc{padding:24px 16px;display:flex;flex-direction:column;gap:12px;min-width:0}
 .app h2.ptitle{margin:0;font-size:var(--ws-fs-h1);line-height:var(--ws-lh-h1);font-weight:700}
 .block{position:relative;padding:12px;display:flex;flex-direction:column;gap:6px;min-width:0}
-.vh{display:flex;align-items:center;gap:8px;min-height:32px;flex-wrap:wrap;min-width:0}
+.vh{display:flex;align-items:center;gap:8px;min-height:32px;min-width:0}
 .vh .ico{width:16px}
 .vh b{font-size:var(--ws-fs-prose);line-height:24px;font-weight:600;white-space:nowrap}
-.vh .end{margin-left:auto;display:flex;gap:2px}
-.note{font-size:12px;line-height:18px;color:var(--ws-text-faint);white-space:nowrap;border-radius:4px;padding:0 4px}
+.vh .end{margin-left:auto;display:flex;gap:2px;flex:none}
+.note{font-size:12px;line-height:18px;color:var(--ws-text-faint);white-space:nowrap;border-radius:4px;padding:0 4px;min-width:0;overflow:hidden;text-overflow:ellipsis}
 .note span{color:var(--ws-text-muted)}
 .qb{display:inline-flex;gap:5px;align-items:center;height:26px;padding:0 7px;border-radius:6px;font-size:13px;color:var(--ws-text-muted)}
 .qb.on{color:var(--ws-accent);background:var(--ws-accent-subtle)}
@@ -50,6 +50,7 @@
   .app .side{width:100%;box-sizing:border-box}
   .app .pgc{padding:14px}
   .block{padding:6px}
+  .vh{flex-wrap:wrap}
 }
 </style></head><body class="theme-light chrome">
 <div class="page">
