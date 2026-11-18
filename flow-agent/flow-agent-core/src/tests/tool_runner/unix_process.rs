@@ -515,3 +515,23 @@ fn runner_output_drain_rejects_an_escaped_child_that_exceeds_the_stream_cap() {
     assert!(started.elapsed() >= Duration::from_secs(1));
     assert!(started.elapsed() < Duration::from_secs(10));
 }
+
+#[test]
+fn runner_noop_lifecycle() {
+    let cancelled = AtomicBool::new(false);
+    for _ in 0..4 {
+        let outcome = execute_tool_invocation(
+            &ToolInvocation {
+                executable: "/usr/bin/true".to_owned(),
+                argv: Vec::new(),
+            },
+            Path::new("."),
+            ToolRunControl {
+                cancelled: &cancelled,
+                deadline: Instant::now() + Duration::from_secs(5),
+            },
+        );
+        assert_eq!(outcome.status, RunAttemptOutcome::Completed);
+        assert_eq!(outcome.exit_code, Some(0));
+    }
+}

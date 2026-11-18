@@ -575,3 +575,32 @@ fn tool_projection_rejects_an_empty_run_log() {
     assert_eq!(page.to_string(), inspection.to_string());
     assert_eq!(text.to_string(), inspection.to_string());
 }
+
+#[test]
+fn run_log_append_durability() {
+    let workspace = empty_workspace("run-log-append-durability");
+    let path = workspace.join("run-log.jsonl");
+    fs::write(&path, "").expect("run log is created");
+    let records = (0..8)
+        .map(|index| {
+            let empty = proto::canonical_json(&serde_json::json!({
+                "index": index,
+                "padding": ""
+            }))
+            .unwrap();
+            serde_json::json!({
+                "index": index,
+                "padding": "x".repeat(576 - empty.len())
+            })
+        })
+        .collect::<Vec<_>>();
+    for record in &records {
+        assert_eq!(canonical_json(record).unwrap().len(), 576);
+        append_jsonl(&path, record).expect("record appends and synchronizes");
+    }
+
+    assert_eq!(
+        read_jsonl::<serde_json::Value>(&path).expect("synchronized records replay"),
+        records
+    );
+}
