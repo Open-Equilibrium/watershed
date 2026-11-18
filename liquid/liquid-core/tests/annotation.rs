@@ -6,8 +6,8 @@
 
 use liquid_core::{
     Actor, Applied, BlockId, Content, Created, DrawingStyle, Element, Error, Frame, InkColor,
-    MAX_DOC_PAGES, MAX_ELEMENTS, MemoryStore, Mutation, Origin, PageId, Pen, PersonId, Request,
-    Shape,
+    MAX_BOARD_POINTS, MAX_DOC_PAGES, MAX_DRAWING_ELEMENTS, MAX_DRAWING_POINTS, MAX_ELEMENTS,
+    MAX_POINTS, MemoryStore, Mutation, Origin, PageId, Pen, PersonId, Request, Shape,
 };
 
 type Workspace = liquid_core::Workspace<MemoryStore>;
@@ -191,6 +191,55 @@ fn each_page_holds_the_board_caps_and_a_document_its_pages() {
         draw(&mut workspace, &page, &board, vec![box_on(1)]),
         Err(Error::WrongKind),
         "a Whiteboard has one page"
+    );
+}
+
+#[test]
+fn a_document_holds_ten_boards_of_elements_in_all() {
+    let (mut workspace, page, pdf, _) = agreement();
+    let pages = (MAX_DRAWING_ELEMENTS / MAX_ELEMENTS) as u32;
+    for doc_page in 0..pages {
+        draw(
+            &mut workspace,
+            &page,
+            &pdf,
+            vec![box_on(doc_page); MAX_ELEMENTS],
+        )
+        .unwrap();
+    }
+    assert_eq!(
+        draw(&mut workspace, &page, &pdf, vec![box_on(pages)]),
+        Err(Error::TooMany)
+    );
+}
+
+#[test]
+fn a_document_holds_ten_boards_of_points_in_all() {
+    let (mut workspace, page, pdf, _) = agreement();
+    let longest: Vec<u8> = (0..MAX_POINTS)
+        .flat_map(|at| [at as f32, 1.0, 0.5])
+        .flat_map(f32::to_le_bytes)
+        .collect();
+    let full = |doc_page| Element {
+        content: Content::Stroke {
+            pen: Pen::Fountain,
+            points: longest.clone(),
+        },
+        ..mark(doc_page, InkColor::Text)
+    };
+    let pages = (MAX_DRAWING_POINTS / MAX_BOARD_POINTS) as u32;
+    for doc_page in 0..pages {
+        let strokes = MAX_BOARD_POINTS / MAX_POINTS;
+        draw(&mut workspace, &page, &pdf, vec![full(doc_page); strokes]).unwrap();
+    }
+    assert_eq!(
+        draw(
+            &mut workspace,
+            &page,
+            &pdf,
+            vec![mark(pages, InkColor::Text)]
+        ),
+        Err(Error::TooMany)
     );
 }
 

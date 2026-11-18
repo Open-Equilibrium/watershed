@@ -50,6 +50,11 @@ pub const MAX_POINTS: usize = 10_000;
 /// together, so a board or a page reads and crosses the bridge bounded, at 12 bytes a point
 /// (client architecture rule 3).
 pub const MAX_BOARD_POINTS: usize = 1_000_000;
+/// The most live elements one drawing holds on all its pages: ten boards, so the Page's
+/// document, which loads and syncs whole, stays bounded (ADR-0307).
+pub const MAX_DRAWING_ELEMENTS: usize = 10 * MAX_ELEMENTS;
+/// The most points one drawing's live strokes hold on all its pages: ten boards.
+pub const MAX_DRAWING_POINTS: usize = 10 * MAX_BOARD_POINTS;
 /// The most characters one text element holds.
 pub const MAX_ELEMENT_TEXT: usize = 10_000;
 /// The farthest a coordinate lies from the board's origin.
@@ -493,18 +498,28 @@ pub(crate) fn edit(
             doc.put(&obj, ARROWHEAD, arrowhead)?;
         }
     }
-    // Each page holds a board's caps.
+    // Each page holds a board's caps, and the drawing ten boards'.
     let mut pages: HashMap<u32, (usize, usize)> = HashMap::new();
+    let mut all = (0, 0);
     for stored in &live {
         let held = pages.entry(stored.doc_page()).or_default();
         held.0 += 1;
         held.1 += stored.count();
+        all.0 += 1;
+        all.1 += stored.count();
     }
     for element in add {
+        let points = point_count(element);
         let held = pages.entry(element.doc_page).or_default();
         held.0 += 1;
-        held.1 += point_count(element);
-        if held.0 > MAX_ELEMENTS || held.1 > MAX_BOARD_POINTS {
+        held.1 += points;
+        all.0 += 1;
+        all.1 += points;
+        if held.0 > MAX_ELEMENTS
+            || held.1 > MAX_BOARD_POINTS
+            || all.0 > MAX_DRAWING_ELEMENTS
+            || all.1 > MAX_DRAWING_POINTS
+        {
             return Err(Error::TooMany);
         }
     }
