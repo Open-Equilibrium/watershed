@@ -66,8 +66,9 @@ CASES = {
         "cat <<-'END'\n\t# body\n\tEND\n"
         "cat <<< '# s'\n"
         "x=$((1 << 2))\n"
-        "# three\n",
-        ["# one", "# two", "# three"],
+        "# three\n"
+        "cat <<A <<B # four\n# body\nA\n# body\nB\n",
+        ["# one", "# two", "# three", "# four"],
     ),
 }
 

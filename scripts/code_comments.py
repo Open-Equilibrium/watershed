@@ -77,7 +77,8 @@ SHELL_TOKEN = re.compile(
     r"""|\\."""
     r"""|<<<"""
     r"""|<<(?P<strip>-?)\s*(?P<delimiter_quote>['"]?)(?P<delimiter>[\w.-]+)(?P=delimiter_quote)"""
-    r"""|(?P<comment>(?<![^\s;&|()])\#[^\n]*)""",
+    r"""|(?P<comment>(?<![^\s;&|()])\#[^\n]*)"""
+    r"""|(?P<newline>\n)""",
     re.DOTALL,
 )
 
@@ -140,6 +141,7 @@ def _scan_code(
 
 def _shell_comments(text: str) -> list[tuple[int, str]]:
     found = []
+    heredocs: list[re.Pattern[str]] = []
     position = 0
     while match := SHELL_TOKEN.search(text, position):
         position = match.end()
@@ -147,10 +149,12 @@ def _shell_comments(text: str) -> list[tuple[int, str]]:
             found.append((match.start(), match[0]))
         elif match["delimiter"]:
             indent = r"[ \t]*" if match["strip"] else ""
-            end = re.compile(rf"^{indent}{re.escape(match['delimiter'])}$", re.MULTILINE)
-            line_end = text.find("\n", position)
-            closing = end.search(text, line_end + 1) if line_end >= 0 else None
-            position = closing.end() if closing else position
+            heredocs.append(re.compile(rf"^{indent}{re.escape(match['delimiter'])}$", re.MULTILINE))
+        elif match["newline"]:
+            for heredoc in heredocs:
+                if closing := heredoc.search(text, position):
+                    position = closing.end()
+            heredocs.clear()
     return found
 
 
