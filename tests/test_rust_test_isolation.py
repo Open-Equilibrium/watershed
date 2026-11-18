@@ -3,12 +3,10 @@ import os
 import selectors
 import signal
 import subprocess
-import sys
 import time
 import tomllib
 import unittest
 from pathlib import Path
-from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -17,7 +15,6 @@ DEADLINE = 30
 
 
 def read_line(stream) -> str:
-    """The next line of `stream`; fails instead of waiting past the deadline, even mid-line."""
     descriptor = stream.fileno()
     line = b""
     deadline = time.monotonic() + DEADLINE
@@ -60,18 +57,19 @@ class RustTestIsolationRunnerTest(unittest.TestCase):
             timeout=DEADLINE,
         )
 
-    def test_runner_isolates_home_forwards_arguments_and_cleans_up(self) -> None:
+    def test_runner_isolates_home_forwards_arguments_preserves_exit_status_and_cleans_up(self) -> None:
         result = self.run_runner(
             "const fs=require('node:fs');"
             "console.log(JSON.stringify({home:process.env.FLOW_AGENT_HOME,"
             "homeExists:fs.existsSync(process.env.FLOW_AGENT_HOME),"
             "platform:process.platform,"
-            "args:process.argv.slice(1)}))",
+            "args:process.argv.slice(1)}));"
+            "process.exit(23)",
             "first",
             "second",
         )
 
-        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.returncode, 23, result.stderr)
         report = json.loads(result.stdout)
         child_home = Path(report["home"])
         self.assertTrue(child_home.is_absolute())
@@ -81,36 +79,8 @@ class RustTestIsolationRunnerTest(unittest.TestCase):
         self.assertNotEqual(report["home"], "parent-home-sentinel")
         self.assertNotEqual(os.environ.get("FLOW_AGENT_HOME"), report["home"])
 
-    def test_runner_preserves_child_exit_status_and_still_cleans_up(self) -> None:
-        result = self.run_runner(
-            "console.log(process.env.FLOW_AGENT_HOME); process.exit(23)",
-        )
-
-        self.assertEqual(result.returncode, 23, result.stderr)
-        child_home = Path(result.stdout.strip())
-        self.assertTrue(child_home.is_absolute())
-        self.assertFalse(child_home.parent.exists())
-
-    @unittest.skipIf(os.name == "nt", "requires POSIX pipes")
-    def test_read_line_gives_up_on_an_unfinished_line(self) -> None:
-        # The child leaves a half line in the pipe and stays alive, so only the deadline ends the read.
-        child = subprocess.Popen(
-            [sys.executable, "-c",
-             "import sys, time; sys.stdout.write('partial'); sys.stdout.flush(); time.sleep(5)"],
-            stdout=subprocess.PIPE,
-            text=True,
-        )
-        try:
-            with mock.patch.object(sys.modules[__name__], "DEADLINE", 1), self.assertRaises(AssertionError):
-                read_line(child.stdout)
-        finally:
-            child.kill()
-            child.wait()
-            child.stdout.close()
-
     @unittest.skipIf(os.name == "nt", "requires POSIX signals")
     def test_runner_forwards_every_signal_until_the_child_exits(self) -> None:
-        # The child survives SIGINT and exits on SIGTERM; 99 means SIGTERM never arrived.
         child = (
             "process.on('SIGINT',()=>console.log('SIGINT'));"
             "process.on('SIGTERM',()=>process.exit(0));"

@@ -34,19 +34,18 @@ def write(path, content, mode=0o644):
 
 
 def snapshot(root):
-    """Every path under root with its file bytes (None for a folder), to prove nothing changed."""
     if not root.exists():
         return {}
     return {str(path.relative_to(root)): path.read_bytes() if path.is_file() else None
             for path in sorted(root.rglob("*"))}
 
 
-def run_packager(root, target, output, t3_version=T3_VERSION):
+def run_packager(root, target, output, t3_version=T3_VERSION, t3=None):
     meta = write(root / "fixtures" / "meta", b"synthetic meta program", 0o755)
-    t3 = root / "fixtures" / f"t3-{t3_version}-{target}"
-    write(t3 / "t3", b"synthetic T3 program", 0o755)
-    # A relative link inside T3's folder, which the download must keep relative.
-    (t3 / "helper").symlink_to("t3")
+    if t3 is None:
+        t3 = root / "fixtures" / f"t3-{t3_version}-{target}"
+        write(t3 / "t3", b"synthetic T3 program", 0o755)
+        (t3 / "helper").symlink_to("t3")
     return subprocess.run(
         ["node", str(PACKAGER), "--meta", str(meta), "--t3", str(t3), "--platform", target,
          "--output", str(output)],
@@ -66,7 +65,6 @@ class InstallerTest(unittest.TestCase):
         self.log = self.root / "service.log"
 
     def bundle(self, version, target, t3_version, generation):
-        """An unpacked download laid out as the packager writes it; its meta logs its arguments."""
         folder = self.root / f"bundle-{generation}"
         write(folder / "bin" / "meta",
               f"#!/bin/sh\n# {generation}\nprintf '%s %s\\n' \"$0\" \"$*\" >> {shlex.quote(str(self.log))}\n",
@@ -91,7 +89,7 @@ class InstallerTest(unittest.TestCase):
 
     def test_fresh_install_places_every_file_and_starts_the_service(self):
         bundle = self.bundle("0.0.1", HOST, "0.1.9", "first")
-        result = self.install(bundle)  # the default prefix under HOME
+        result = self.install(bundle)
         self.assertEqual(result.returncode, 0, result.stderr)
         prefix = self.home / ".local" / "meta-harness"
         files = {"bin/meta": bundle / "bin" / "meta",
@@ -114,14 +112,6 @@ class InstallerTest(unittest.TestCase):
         self.assertEqual(sorted(path.name for path in (prefix / "lib" / "meta-harness").iterdir()),
                          [f"t3-0.1.9-{HOST}"])
         self.assertEqual(self.log_lines(), [f"{prefix}/bin/meta service install"] * 2)
-
-    def test_no_service_installs_without_running_the_program(self):
-        prefix = self.root / "prefix"
-        result = self.install(self.bundle("0.0.1", HOST, "0.1.9", "first"), "--prefix", str(prefix),
-                              "--no-service")
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertTrue((prefix / "bin" / "meta").is_file())
-        self.assertEqual(self.log_lines(), [])
 
     def test_failed_service_install_keeps_the_files_and_exits_non_zero(self):
         prefix = self.root / "prefix"
@@ -166,6 +156,7 @@ class InstallerTest(unittest.TestCase):
         self.assertEqual(os.readlink(bundle / "lib" / "meta-harness" / t3_name / "helper"), "t3")
         result = self.install(bundle, "--prefix", str(self.root / "prefix"), "--no-service")
         self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.log_lines(), [])
         installed = self.root / "prefix" / "lib" / "meta-harness" / t3_name
         self.assertTrue(os.access(installed / "t3", os.X_OK))
         self.assertEqual(os.readlink(installed / "helper"), "t3")
@@ -230,13 +221,8 @@ class PackagerTest(unittest.TestCase):
                 link = root / "links" / f"t3-{T3_VERSION}-{target}"
                 link.parent.mkdir()
                 link.symlink_to(root / "real")
-                meta = write(root / "fixtures" / "meta", b"synthetic meta program", 0o755)
                 output = root / "download"
-                result = subprocess.run(
-                    ["node", str(PACKAGER), "--meta", str(meta), "--t3", str(link), "--platform",
-                     target, "--output", str(output)],
-                    capture_output=True, text=True, timeout=60,
-                )
+                result = run_packager(root, target, output, t3=link)
                 self.assertEqual(result.returncode, 0, result.stderr)
                 name = f"meta-harness-{META_VERSION}-{target}"
                 with tarfile.open(output / f"{name}.tar.gz", "r:gz") as bundle:

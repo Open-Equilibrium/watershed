@@ -1,5 +1,3 @@
-"""Evidence classification must not mistake a broken helper for protection."""
-
 import importlib.util
 import json
 import os
@@ -54,7 +52,6 @@ class NativeObservation(unittest.TestCase):
                 environment["SystemRoot"] = os.environ["SystemRoot"]
                 environment["ComSpec"] = str(Path(os.environ["SystemRoot"]) / "System32" / "cmd.exe")
                 environment["PATH"] += os.pathsep + str(Path(os.environ["SystemRoot"]) / "System32")
-            # App Sandbox changes the initial directory; npm must select the fixture explicitly.
             result = subprocess.run(command, cwd=root, env=environment, capture_output=True, text=True, timeout=30)
             observation = {"launched": True, "returncode": result.returncode, "timeout": False,
                            "output": result.stdout + result.stderr}
@@ -92,8 +89,6 @@ class NativeObservation(unittest.TestCase):
 
 
 class CompareWorkloads(unittest.TestCase):
-    """Runs the comparison loop against a stub invoke that fakes each host command."""
-
     def run_compare(self, base):
         root, binary = base / "run", base / "probe-binary"
         binary.write_bytes(b"binary")

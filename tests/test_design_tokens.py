@@ -1,5 +1,3 @@
-"""Liquid's Dart design tokens must follow the canonical CSS tokens."""
-
 import importlib.util
 import re
 import tempfile
@@ -13,7 +11,6 @@ SPEC.loader.exec_module(TOKENS)
 
 
 def channels(css_color, backdrop=(0.0, 0.0, 0.0)):
-    """A CSS color's channels from 0 to 1, drawn over an opaque backdrop when translucent."""
     match = TOKENS.COLOR.fullmatch(css_color.strip())
     if match.group(1):
         values, alpha = [int(match.group(1)[i:i + 2], 16) / 255 for i in (0, 2, 4)], 1.0
@@ -33,7 +30,6 @@ def contrast(first, second):
 
 
 def text_contrast(tokens, tone, background):
-    """The contrast of a text tone on its background, both drawn over the canvas."""
     surface = channels(tokens[background], channels(tokens["canvas"]))
     return contrast(channels(tokens[tone], surface), surface)
 
@@ -76,10 +72,13 @@ class DesignTokens(unittest.TestCase):
             self.assertIn(expected, dart)
 
     def test_font_families_become_valid_dart_strings(self):
-        dart = TOKENS.render(SAMPLE.replace(
-            'ui-sans-serif, "Segoe UI", Arial', """'Inter', "Noto's Sans", Font$Name"""))
-        self.assertIn(
-            r"static const List<String> fontUi = ['Inter', 'Noto\'s Sans', 'Font\$Name'];", dart)
+        for families, expected in [
+            ("""'Inter', "Noto's Sans", Font$Name""", r"['Inter', 'Noto\'s Sans', 'Font\$Name']"),
+            ('Arial, "ACME, Inc.", sans-serif', "['Arial', 'ACME, Inc.', 'sans-serif']"),
+        ]:
+            with self.subTest(families=families):
+                dart = TOKENS.render(SAMPLE.replace('ui-sans-serif, "Segoe UI", Arial', families))
+                self.assertIn(f"static const List<String> fontUi = {expected};", dart)
 
     def test_comments_define_no_tokens(self):
         commented = SAMPLE.replace("--ws-fs-ui: 14px;", "--ws-fs-ui: 14px; /* --ws-fs-ui: 99px; } */")
@@ -91,35 +90,22 @@ class DesignTokens(unittest.TestCase):
         quoted = TOKENS.render(SAMPLE.replace('"Segoe UI"', '"Segoe/*UI*/"'))
         self.assertIn("'Segoe/*UI*/'", quoted, "a quoted name keeps what looks like a comment")
 
-    def test_themes_must_define_the_same_tokens(self):
-        with self.assertRaisesRegex(ValueError, "light and dark"):
-            TOKENS.render(SAMPLE.replace("--ws-text-muted: #9b9b9b;", ""))
-
-    def test_unknown_values_fail_instead_of_guessing(self):
-        with self.assertRaisesRegex(ValueError, "--ws-fs-ui"):
-            TOKENS.render(SAMPLE.replace("14px", "1.4em"))
-
     def test_last_declaration_without_a_semicolon_is_kept(self):
         dart = TOKENS.render(SAMPLE.replace("cubic-bezier(0, 0, 0.2, 1);", "cubic-bezier(0, 0, 0.2, 1)"))
         self.assertIn("static const Cubic ease = Cubic(0, 0, 0.2, 1);", dart)
 
-    def test_out_of_range_colors_are_rejected(self):
-        for color in ["rgba(256, 0, 0, 1)", "rgba(0, 0, 0, 1.1)"]:
-            with self.subTest(color=color), self.assertRaisesRegex(ValueError, "--ws-text-muted"):
-                TOKENS.render(SAMPLE.replace("#787774", color))
-
-    def test_repeated_selector_is_rejected(self):
-        with self.assertRaisesRegex(ValueError, "repeated selector"):
-            TOKENS.render(SAMPLE + ":root { --ws-fs-ui: 5px; }")
-
-    def test_quoted_font_family_keeps_its_comma(self):
-        dart = TOKENS.render(SAMPLE.replace('ui-sans-serif, "Segoe UI", Arial', 'Arial, "ACME, Inc.", sans-serif'))
-        self.assertIn("static const List<String> fontUi = ['Arial', 'ACME, Inc.', 'sans-serif'];", dart)
-
-    def test_font_families_outside_the_plain_grammar_fail_instead_of_splitting(self):
-        for families in [r'"Example \"Display, Inc.", Arial', '"Segoe UI, Arial']:
-            with self.subTest(families=families), self.assertRaisesRegex(ValueError, "--ws-font-ui"):
-                TOKENS.render(SAMPLE.replace('ui-sans-serif, "Segoe UI", Arial', families))
+    def test_invalid_sources_fail_instead_of_guessing(self):
+        for source, message in [
+            (SAMPLE.replace("--ws-text-muted: #9b9b9b;", ""), "light and dark"),
+            (SAMPLE.replace("14px", "1.4em"), "--ws-fs-ui"),
+            (SAMPLE + ":root { --ws-fs-ui: 5px; }", "repeated selector"),
+            *((SAMPLE.replace("#787774", color), "--ws-text-muted")
+              for color in ("rgba(256, 0, 0, 1)", "rgba(0, 0, 0, 1.1)")),
+            *((SAMPLE.replace('ui-sans-serif, "Segoe UI", Arial', families), "--ws-font-ui")
+              for families in (r'"Example \"Display, Inc.", Arial', '"Segoe UI, Arial')),
+        ]:
+            with self.subTest(message=message), self.assertRaisesRegex(ValueError, message):
+                TOKENS.render(source)
 
     def test_check_reports_drift(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -133,23 +119,13 @@ class DesignTokens(unittest.TestCase):
     def test_the_committed_dart_tokens_match_the_canonical_css(self):
         self.assertEqual(TOKENS.main(["--check"]), 0)
 
-    def test_tag_text_meets_wcag_aa_on_every_tag_color(self):
-        blocks = TOKENS.blocks(TOKENS.CSS.read_text())
-        for theme in [".theme-light", ".theme-dark"]:
-            tokens = blocks[theme]
-            for index in range(10):
-                with self.subTest(theme=theme, tag=index):
-                    self.assertGreaterEqual(text_contrast(tokens, "tag-text", f"tag-{index}"), 4.5)
-
     def test_text_tones_meet_wcag_aa_wherever_they_carry_content(self):
         blocks = TOKENS.blocks(TOKENS.CSS.read_text())
         backgrounds = ["canvas", "subtle", "surface", "hover", "selected", "titlebar", "code",
                        "warning-subtle"]
         pairs = [(tone, background) for tone in ["text", "text-muted", "text-faint"]
                  for background in backgrounds]
-        # Diff line numbers sit on the strong diff colors in muted.
         pairs += [("text-muted", "diff-add-strong"), ("text-muted", "diff-del-strong")]
-        # Status colors are text on surfaces, hover rows and their own tints.
         for tone, tint in [("accent", "accent-subtle"), ("success", "success-subtle"),
                            ("warning", "warning-subtle"), ("danger", "danger-subtle")]:
             pairs += [(tone, background)
@@ -157,6 +133,7 @@ class DesignTokens(unittest.TestCase):
         pairs += [("on-accent", "accent")]
         pairs += [("on-data", f"data-{lane}") for lane in (1, 2, 3)]
         pairs += [("syn-com", background) for background in ["diff-add", "diff-del", "code"]]
+        pairs += [("tag-text", f"tag-{index}") for index in range(10)]
         for theme in [".theme-light", ".theme-dark"]:
             tokens = blocks[theme]
             for tone, background in pairs:
@@ -164,7 +141,6 @@ class DesignTokens(unittest.TestCase):
                     self.assertGreaterEqual(text_contrast(tokens, tone, background), 4.5)
 
     def test_translucent_backgrounds_are_judged_over_the_canvas(self):
-        # White text on a 30% white tint over a white canvas is white on white.
         tokens = {"canvas": "#ffffff", "tint": "rgba(255, 255, 255, 0.3)", "text": "#ffffff"}
         self.assertAlmostEqual(text_contrast(tokens, "text", "tint"), 1.0, places=2)
 

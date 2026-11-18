@@ -1,5 +1,3 @@
-"""Native installer/readiness acceptance helpers (CI only, never installed)."""
-
 import ctypes
 import json
 import os
@@ -19,8 +17,6 @@ MAC_READINESS_FAULT = ('(version 1)(allow default)'
 
 
 def linux_fault_filter(fault):
-    # x86_64 only. These inherited, process-local filters inject EPERM without
-    # changing kernel settings, files, services or the host's security policy.
     load_number = (0x20, 0, 0, 0)
     load_argument = (0x20, 0, 0, 16)
     deny = (0x06, 0, 0, 0x50001)
@@ -71,7 +67,7 @@ def signal_process_group(pid, signum):
     try:
         os.killpg(pid, signum)
     except ProcessLookupError:
-        pass  # The group already exited; the timeout diagnostic must still be raised.
+        pass
 
 
 def run(command, *, env=None, fault=None, timeout=20, capture=True):
@@ -92,7 +88,6 @@ def run(command, *, env=None, fault=None, timeout=20, capture=True):
                 child.communicate(timeout=2)
             except subprocess.TimeoutExpired:
                 pass
-            # Group members can outlive the direct child and ignore SIGTERM, so always finish the group.
             signal_process_group(child.pid, signal.SIGKILL)
             child.wait()
             raise AssertionError(f"native acceptance exceeded {timeout}s: {command[0]}")
@@ -125,7 +120,6 @@ def readiness_negatives():
             shutil.copyfile(source, bundle / name)
             (bundle / name).chmod(0o755)
         if sys.platform == "darwin":
-            # Fault the real checker; the installer must inspect its group first.
             installer = bundle / "install.sh"
             source = installer.read_text(encoding="utf-8")
             checker = '"$flow_target" executor check </dev/null'
@@ -147,7 +141,6 @@ def readiness_negatives():
         validate_probe(baseline.stdout, ready=True, platform=platform, backend=backend)
         assert baseline.stderr == b"", baseline.stderr
         for fault in faults:
-            # Use the actual native Executor, not a probe stub or changed OS policy.
             probe = run([str(bundle / "flow-executor"), "--probe"], env=environment, fault=fault)
             assert probe.returncode == 0, probe.stderr
             validate_probe(probe.stdout, ready=False, platform=platform, backend=backend)

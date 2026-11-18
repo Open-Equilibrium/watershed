@@ -1,7 +1,4 @@
 #!/usr/bin/env node
-// Downloads the T3 Code release meta-harness/t3.lock pins for this platform, checks it against
-// the lock's SHA-256, unpacks it into the folder given as the only argument and prints the path
-// of its `t3` executable. CI uses it for the T3 contract tests (ADR-0281).
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";

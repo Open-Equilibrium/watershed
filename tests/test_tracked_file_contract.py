@@ -8,8 +8,9 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
+from unittest import mock
 
-from git_fixture import git_environment
+from git_fixture import REPOSITORY_VARIABLES, git_environment
 from test_ci_toolchain_contract import step_run, workflow_text
 
 
@@ -17,6 +18,13 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class TrackedFileContractTest(unittest.TestCase):
+    def test_fixture_git_never_inherits_the_repository_a_hook_runs_in(self) -> None:
+        inherited = {name: "/caller/repository" for name in REPOSITORY_VARIABLES}
+        with mock.patch.dict(os.environ, inherited):
+            environment = git_environment()
+        self.assertFalse(set(REPOSITORY_VARIABLES) & set(environment))
+        self.assertEqual(environment["PATH"], os.environ["PATH"])
+
     def test_tracked_file_listing_preserves_unusual_paths(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             repo = Path(temporary_directory)

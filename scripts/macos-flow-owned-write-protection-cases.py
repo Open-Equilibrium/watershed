@@ -1,5 +1,3 @@
-"""Dev-only protected-object lifecycle cases; not a production scanner or launcher."""
-
 import errno
 import json
 import os
@@ -11,7 +9,6 @@ from pathlib import Path
 
 
 def admit(roots: list[Path], files: list[Path], limit: int = 4096) -> int:
-    """Bounded fixture scan under exclusive fixture ownership, not race-safe admission."""
     names, identities = set(), {}
 
     def visit(path: Path, depth: int) -> None:
@@ -87,7 +84,7 @@ result.write_text(json.dumps(observations))
 
 
 def lifecycle(probe, root: Path, guarded: bool) -> list[dict]:
-    import pty  # Native call site only; the admission tests also run on Windows.
+    import pty
 
     homes = [root / "owner" / "homes" / name for name in ("first", 'second "quoted"\\slash-\u2603\nline')]
     store, project, bin_dir = root / "platform-store", root / "project", root / "bin"
@@ -149,7 +146,6 @@ def lifecycle(probe, root: Path, guarded: bool) -> list[dict]:
             if not ready.is_file(): raise ValueError("native helper did not become ready")
             late_master, late_slave = pty.openpty()
             late_terminal.write_text(str(Path(os.ttyname(late_slave)).resolve()))
-            # Real trusted-parent operations after the protected child has started.
             stage.write_bytes(probe.ORIGINAL); os.link(stage, late)
             staged_replacement = homes[0] / "replace-stage"; staged_replacement.write_bytes(probe.ORIGINAL)
             os.replace(staged_replacement, replacement)
@@ -210,12 +206,10 @@ def detached(probe, root: Path, guarded: bool) -> dict:
         policy.write_text(probe.profile(data["protected"], True), encoding="utf-8")
         command = [str(probe.SANDBOX_EXEC), "-f", str(policy), *command]
     leader = probe.invoke(command, data["scratch"], data["scratch"] / "leader.log")
-    # The actual Tool-root exit is observed before the helper may attempt its write.
     if leader.get("returncode") != 0 or leader.get("timeout"):
         return {"case": "helper_after_parent_exit", "outcome": "failure", "leader": leader}
     release.write_bytes(b"parent-exited")
     deadline = time.monotonic() + 5
-    # The helper creates its result before writing it; wait for a complete marker.
     while (child := probe.read_marker(result)) is None and time.monotonic() < deadline: time.sleep(.01)
     intact = probe.unchanged(data["file"])
     passed = child == {"state": "error", "errno": errno.EPERM} and intact if guarded else child == {"state": "ok"} and not intact

@@ -1,5 +1,3 @@
-"""Synthetic admission behavior for the dev-only Flow-owned write protection experiment."""
-
 import importlib.util
 import os
 import sys
@@ -33,7 +31,6 @@ class LinkCreationIsNotProtection(unittest.TestCase):
             return data
 
         def unsandboxed(command, *args, **kwargs):
-            # The real helper runs without the sandbox wrapper: its link succeeds and its write is denied.
             return real_invoke(command[command.index(sys.executable):], *args, **kwargs)
 
         with tempfile.TemporaryDirectory() as temporary, \
@@ -83,9 +80,6 @@ class DetachedHelperResult(unittest.TestCase):
         helpers = []
 
         def invoke(command, cwd, log):
-            # Stands in for the detached helper: the leader exits at once, then the
-            # helper writes and publishes its result with a pause after creating it.
-            # Like the real helper, it gives up if the probe never releases it.
             target, release, result = map(Path, command[-3:])
 
             def helper():

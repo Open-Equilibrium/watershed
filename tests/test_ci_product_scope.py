@@ -175,7 +175,6 @@ class CiProductScopeTest(unittest.TestCase):
             ("core/core-policy/src/lib.rs", scope(True, "flow_agent")),
             ("proto/proto/src/lib.rs", scope(True, "flow_agent")),
             ("install/install.sh", scope(True, "flow_agent")),
-            # A member manifest can change features the others build with.
             ("liquid/liquid-bridge/Cargo.toml", ALL),
             ("Cargo.lock", ALL),
             ("scripts/run-python.mjs", ALL),
@@ -213,7 +212,6 @@ class CiProductScopeTest(unittest.TestCase):
             crates[package["package"]["name"]] = (member, dependencies)
 
         def dependents(name: str) -> set[str]:
-            # Dev-dependencies may form cycles, so expand each crate once.
             found, pending = set(), [name]
             while pending:
                 current = pending.pop()
@@ -257,7 +255,6 @@ class CiProductScopeTest(unittest.TestCase):
                 before = current
 
     def test_a_previous_tip_absent_from_the_clone_compares_the_branch_against_main(self) -> None:
-        # A rebase and force-push leaves the previous tip on no fetched ref.
         main = self.commit({"meta-harness/meta-harness-core/src/lib.rs": "Fixture\n"})
         self.git("update-ref", "refs/remotes/origin/main", main)
         self.commit({"flow-agent/flow-agent-core/src/lib.rs": "Fixture\n"})
@@ -265,7 +262,6 @@ class CiProductScopeTest(unittest.TestCase):
         self.push("f" * 40, scope(True, "flow_agent", "liquid"))
 
     def test_a_push_to_main_without_its_previous_tip_selects_every_gate(self) -> None:
-        # On main, origin/main is the pushed commit itself, so the branch has no commits outside it.
         main = self.commit({"meta-harness/meta-harness-core/src/lib.rs": "Fixture\n"})
         self.git("update-ref", "refs/remotes/origin/main", main)
         self.push("f" * 40, ALL)
@@ -278,7 +274,6 @@ class CiProductScopeTest(unittest.TestCase):
 
 
 class CiJobScopeTest(unittest.TestCase):
-    # Each gated job and the scope output that must be true for it to run.
     JOB_SCOPES = {
         "checks": "docs",
         "test": "product",
@@ -343,7 +338,6 @@ class CiJobScopeTest(unittest.TestCase):
         self.assertTrue(verdict({"flow-agent": "skipped", "m11-evidence": "skipped"},
                                 scope(True, "liquid")))
         self.assertTrue(verdict(dict.fromkeys(self.JOB_SCOPES, "skipped"), SETUP))
-        # Only the job's own scope output permits its skip; failure is never permitted.
         for name, key in self.JOB_SCOPES.items():
             for other in {*ALL} - {"rust_packages"}:
                 with self.subTest(job=name, unselected=other):

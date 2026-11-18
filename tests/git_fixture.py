@@ -1,9 +1,3 @@
-"""The environment for Git commands that build test fixtures in a temporary repository.
-
-Git hooks export the repository they run in. A fixture must not inherit those variables, or its
-commands would write to that repository (its index, its objects) instead of its own.
-"""
-
 import os
 
 REPOSITORY_VARIABLES = (

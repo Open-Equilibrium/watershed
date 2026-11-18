@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-"""Dev-only native comparison; local ad-hoc signatures, synthetic files, no product backend."""
 
 import errno
 import importlib.util
@@ -85,7 +84,6 @@ int main(int argc, char **argv) { @autoreleasepool {
 
 
 def classify_mutation(result, changed, required_starts=1):
-    """A launch failure, unrelated error, timeout or missing effect is never protection evidence."""
     if not result.get("launched") or result.get("timeout") or result.get("output", "").splitlines().count("probe_started") < required_starts:
         return "failure"
     if result.get("returncode") == 0 and changed:
@@ -120,7 +118,6 @@ def npm_host():
 
 
 def npm_fixture(root, host, kind, protected=None):
-    """Offline npm lifecycle fixture; no dependency installation or ambient npm configuration."""
     project = root / ("npm-" + kind); project.mkdir()
     for name in ("user.npmrc", "global.npmrc"): (project / name).write_text("", encoding="utf-8")
     (project / "package.json").write_text(json.dumps({"name": "native-build-probe", "version": "1.0.0", "private": True,
@@ -277,7 +274,7 @@ def compare(api, root, binary, mode, host):
         observation = classify_mutation(result, changed, required_starts=2 if nested_start else 1)
         if nested_start and result.get("output", "").splitlines().count("probe_started") < 2:
             observation = "program_not_started"
-        if action == "link" and auxiliary.exists():  # creating the alias itself was allowed
+        if action == "link" and auxiliary.exists():
             observation = "allowed"
         if mode == "profile-guard" and action == "fd" and result.get("returncode") == 11 and "probe_errno=9" in result.get("output", "") and not changed:
             observation = "closed_handle"
@@ -342,7 +339,6 @@ def main():
     api = importlib.util.module_from_spec(spec); spec.loader.exec_module(api)
     api.CHILD_ENV.update({"GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": "/dev/null"})
     try:
-        # Only this unique synthetic directory is created/read/removed; no existing home data is inspected.
         with tempfile.TemporaryDirectory(prefix="watershed-app-probe-", dir=Path.home()) as temporary:
             root = Path(temporary).resolve()
             source = root / "probe.m"; source.write_text(SOURCE, encoding="utf-8")

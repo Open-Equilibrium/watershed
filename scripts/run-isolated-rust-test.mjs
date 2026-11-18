@@ -11,7 +11,6 @@ if (!executable) {
 } else {
   const root = mkdtempSync(join(tmpdir(), "watershed-rust-test-"));
   const home = join(root, "home");
-  // The per-user folders of Watershed's locks live in this home, never in the real one.
   const userHome = join(root, "user-home");
   if (process.platform !== "win32") {
     mkdirSync(home, { mode: 0o700 });
@@ -22,7 +21,6 @@ if (!executable) {
     stdio: "inherit",
   });
   const forwardedSignals = ["SIGINT", "SIGTERM"];
-  // Forward every signal until the child exits; kill() is a no-op once it has.
   const signalHandlers = new Map(
     forwardedSignals.map((signal) => [signal, () => child.kill(signal)]),
   );

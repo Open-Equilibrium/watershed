@@ -35,20 +35,13 @@ class DartCoverageGateTest(unittest.TestCase):
                 self.assertEqual(crlf.returncode, lf.returncode, crlf.stderr)
                 self.assertEqual(crlf.returncode == 0, passes, crlf.stderr)
 
-    def test_generated_and_ffi_glue_are_not_measured(self) -> None:
+    def test_generated_and_ffi_glue_are_not_measured_but_other_session_code_is(self) -> None:
         result = self.run_gate(
             record("lib/app.dart", 100, 90),
             record("lib/src/rust/api/git.dart", 500, 0),
             record("lib/src/rust/frb_generated.dart", 500, 0),
             record("lib/src/theme/tokens.g.dart", 500, 0),
             record("lib/src/session/backend.dart", 500, 0),
-        )
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("90.00%", result.stdout)
-
-    def test_glue_exclusion_matches_only_the_backend_file(self) -> None:
-        result = self.run_gate(
-            record("lib/app.dart", 100, 90),
             record("lib/src/session/session_state.dart", 100, 0),
         )
         self.assertEqual(result.returncode, 1, result.stdout)
@@ -70,7 +63,6 @@ class DartCoverageGateTest(unittest.TestCase):
                 self.assertEqual(result.stdout, "")
 
     def test_totals_beyond_the_exact_integer_range_fail(self) -> None:
-        # Each record is exact, but the total 2**53 is not, so the ratio cannot be trusted.
         result = self.run_gate(
             record("lib/a.dart", 2**53 - 1, 2**53 - 1),
             record("lib/b.dart", 1, 0),

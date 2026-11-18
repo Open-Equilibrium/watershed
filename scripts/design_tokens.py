@@ -1,8 +1,3 @@
-"""Generates Liquid's Dart design tokens from the canonical docs/design/tokens.css.
-
-Run without arguments to rewrite the Dart file; `--check` fails when it is out of date.
-"""
-
 import argparse
 import re
 import sys
@@ -12,13 +7,10 @@ ROOT = Path(__file__).resolve().parents[1]
 CSS = ROOT / "docs" / "design" / "tokens.css"
 DART = ROOT / "liquid" / "app" / "lib" / "src" / "theme" / "tokens.g.dart"
 
-# A comment runs to its end or to the end of the file; quoted text is matched first, so a
-# name such as "a/*b*/" keeps what only looks like a comment.
 COMMENT = re.compile(r"\"(?:\\.|[^\"\\])*\"|'(?:\\.|[^'\\])*'|/\*.*?(?:\*/|\Z)", re.S)
 BLOCK = re.compile(r"(:root|\.theme-light|\.theme-dark)\s*\{(.*?)\}", re.S)
 DECLARATION = re.compile(r"--ws-([a-z0-9-]+)\s*:\s*([^;]+?)\s*(?:;|$)")
 COLOR = re.compile(r"#([0-9a-fA-F]{6})|rgba\(\s*(\d+),\s*(\d+),\s*(\d+),\s*([0-9.]+)\s*\)")
-# dart format's line width; the output matches its layout so formatting never changes it.
 WIDTH = 80
 SHADOW = re.compile(r"(-?[\d.]+)(?:px)?\s+(-?[\d.]+)(?:px)?\s+([\d.]+)(?:px)?(?:\s+(-?[\d.]+)(?:px)?)?\s+(#[0-9a-fA-F]{6}|rgba\([^)]*\))")
 
@@ -42,13 +34,11 @@ def color(text, name):
     red, green, blue, alpha = match.group(2, 3, 4, 5)
     if max(int(red), int(green), int(blue)) > 255 or not 0 <= float(alpha) <= 1:
         raise ValueError(f"--ws-{name}: unsupported color {text!r}")
-    # Round half up, as browsers do; round() would round 76.5 down to 76.
     opacity = int(float(alpha) * 255 + 0.5)
     return f"Color(0x{opacity:02X}{int(red):02X}{int(green):02X}{int(blue):02X})"
 
 
 def wrapped(head, items, tail, indent):
-    """One line if it fits, else dart format's one-item-per-line layout."""
     line = f"{indent}{head}{', '.join(items)}{tail}"
     if len(line) <= WIDTH:
         return [line]
@@ -74,26 +64,20 @@ def shadows(text, name):
 
 
 def unquoted(family):
-    """A CSS font family without its matching surrounding quotes."""
     if len(family) >= 2 and family[0] == family[-1] and family[0] in "'\"":
         return family[1:-1]
     return family
 
 
 def dart_string(text):
-    """A single-quoted Dart literal of `text`."""
     escaped = text.replace("\\", "\\\\").replace("'", "\\'").replace("$", "\\$")
     return f"'{escaped}'"
 
-
-# One CSS font family: a quoted name without escapes or line breaks, or a bare name. The list is
-# matched whole, so escapes and unclosed quotes are refused instead of being split by guessing.
 FAMILY = r"""(?:"[^"\\\r\n]*"|'[^'\\\r\n]*'|[^\s,"'\\][^,"'\\\r\n]*)"""
 FAMILIES = re.compile(rf"{FAMILY}(?:\s*,\s*{FAMILY})*")
 
 
 def metric(name, value):
-    """Returns the Dart type and expression of one theme-independent token."""
     if name.startswith("font-"):
         if not FAMILIES.fullmatch(value):
             raise ValueError(f"--ws-{name}: unsupported font family list {value!r}")
@@ -111,7 +95,6 @@ def metric(name, value):
 
 
 def blocks(css):
-    """The token declarations of each selector; comments declare nothing."""
     css = COMMENT.sub(lambda match: "" if match[0].startswith("/*") else match[0], css)
     found = {}
     for selector, body in BLOCK.findall(css):

@@ -64,25 +64,16 @@ class DownloadBundleTest(unittest.TestCase):
                 repeated = root / "repeated"
                 self.assertEqual(self.package(binaries, repeated, platform).returncode, 0)
                 self.assertEqual((repeated / archive.name).read_bytes(), final_bytes)
-                # A second invocation must not silently replace a prepared release.
                 rejected = self.package(binaries, output, platform)
                 self.assertNotEqual(rejected.returncode, 0)
                 self.assertEqual(archive.read_bytes(), final_bytes)
                 self.assertEqual((output / "SHA256SUMS").read_text(), checksum)
 
-    def test_dropped_macos_release_does_not_produce_a_download(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            root = pathlib.Path(temporary)
-            platform = "macos-26-aarch64"
-            output = root / "download"
-            result = self.package(self.binaries(root, platform), output, platform)
-            self.assertNotEqual(result.returncode, 0)
-            self.assertFalse(output.exists(), result.stderr)
-
-    def test_missing_or_wrong_architecture_program_does_not_produce_a_download(self):
-        platform = "ubuntu-24.04-x86_64"
-        for fault in ("missing", "wrong-architecture", "not-executable-format"):
-            with self.subTest(fault=fault), tempfile.TemporaryDirectory() as temporary:
+    def test_unusable_releases_produce_no_download(self):
+        for platform, fault in (("macos-26-aarch64", None), ("ubuntu-24.04-x86_64", "missing"),
+                                ("ubuntu-24.04-x86_64", "wrong-architecture"),
+                                ("ubuntu-24.04-x86_64", "not-executable-format")):
+            with self.subTest(platform=platform, fault=fault), tempfile.TemporaryDirectory() as temporary:
                 root = pathlib.Path(temporary)
                 binaries = self.binaries(root, platform)
                 executor = binaries / "flow-executor"
@@ -90,7 +81,7 @@ class DownloadBundleTest(unittest.TestCase):
                     executor.unlink()
                 elif fault == "wrong-architecture":
                     executor.write_bytes(struct.pack("<II", 0xFEEDFACF, 0x0100000C) + bytes(64))
-                else:
+                elif fault == "not-executable-format":
                     executor.write_bytes(b"not a native executable")
                 output = root / "download"
                 result = self.package(binaries, output, platform)
