@@ -17,6 +17,16 @@
 .wsr .cur span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .wsr .o{width:28px;height:28px;display:grid;place-items:center;border-radius:6px;flex:none}
 .wsr .more{width:28px;height:28px;display:grid;place-items:center;border-radius:6px;flex:none;font-size:12px;color:var(--ws-text-muted)}
+.wpop{position:absolute;z-index:3;left:12px;top:40px;width:216px;box-sizing:border-box;border-radius:10px;background:var(--ws-surface);box-shadow:var(--ws-shadow);padding:10px;display:flex;flex-direction:column;gap:8px;font-size:13px}
+.wpop .nm{display:flex;gap:8px;align-items:center}
+.wpop .ic{width:30px;height:30px;border-radius:7px;display:grid;place-items:center;font-size:17px;box-shadow:inset 0 0 0 1px var(--ws-border-strong);flex:none}
+.wpop .fld{flex:1;min-width:0;height:30px;border-radius:6px;box-shadow:0 0 0 2px var(--ws-accent);display:flex;align-items:center;padding:0 8px;white-space:nowrap;overflow:hidden}
+.wpop .fld i{display:inline-block;width:1.5px;height:15px;background:var(--ws-text);margin-left:1px}
+.wpop .lbl{font-size:12px;color:var(--ws-text-faint)}
+.wpop .grid{display:grid;grid-template-columns:repeat(8,1fr);gap:2px;font-size:17px;text-align:center}
+.wpop .grid span{height:28px;display:grid;place-items:center;border-radius:6px}
+.wpop .grid span.on{background:var(--ws-hover)}
+.wpop .ltr{display:flex;align-items:center;gap:8px;height:28px;padding:0 6px;border-radius:6px;color:var(--ws-text-muted)}
 .k1{background:#2f7cf6}.k2{background:#d9730d}.k3{background:#0f9d76}.k4{background:#9065b0}
 </style></head><body class="theme-light chrome">
 <div class="page">
@@ -35,10 +45,26 @@
 
   <section data-s="2">
     <h3 class="sec">2 · Switching Workspaces</h3>
-    <p class="sub">The sidebar's top row shows every Workspace side by side (ADR-0310): the one you are in with its icon and name, the others as icons, ＋ adds one. A hover or long press shows a Workspace's name; ⌘1 to ⌘9 switch to the first nine. With one Workspace, the row shows its icon and name, and ＋.</p>
+    <p class="sub">The sidebar's top row shows every Workspace side by side (ADR-0310): the one you are in with its icon and name, the others as icons, ＋ adds one. A hover or long press shows a Workspace's name; ⌘1 to ⌘9 switch to the first nine. With one Workspace, the row shows its icon and name, and ＋. ＋ makes a Workspace named “New Workspace” and opens its name for editing. ＋ in Tables makes a Table in the open Page's area, else in the first area.</p>
     <div class="stage">
       <div class="col2"><div class="lab">Three Workspaces</div><div class="win"><div class="app" id="s2b" style="--h:200px"></div></div><div class="lab">Six Workspaces: the rest behind “+2”</div><div class="win"><div class="app" id="s2c" style="--h:120px"></div></div></div>
     </div>
+  </section>
+
+  <section data-s="3">
+    <h3 class="sec">3 · Naming a Workspace and choosing its icon</h3>
+    <p class="sub">A click on the Workspace you are in opens its name and icon. Both belong to the Workspace, so every device shows them. The icon is an emoji, as a Page's will be, or the name's first letter on a color.</p>
+    <div class="stage">
+      <div class="col2"><div class="win"><div class="app" id="s3" style="--h:360px;position:relative"></div></div></div>
+    </div>
+  </section>
+
+  <section data-s="4">
+    <h3 class="sec">Decisions for this mockup</h3>
+    <ol class="qs">
+      <li><b>Opening it:</b> a click on the Workspace you are in, as shown (recommended)?</li>
+      <li><b>The icon:</b> emoji or the first letter for now, with uploaded images later together with Page icons (recommended)?</li>
+    </ol>
   </section>
 
 </div>
@@ -62,6 +88,7 @@ const av=(k,l)=>`<span class="av ${k}">${l}</span>`;
 const put=(id,html)=>document.getElementById(id).innerHTML=html;
 put('s1',`<div class="side"><div class="wsr"><span class="cur" style="background:none">${av('k1','B')}<span>Benni's Workspace</span></span><span class="more">${I.plus}</span></div>${srch}${body(true)}${foot}</div>`);
 put('s2b',`<div class="side"><div class="wsr"><span class="cur">${av('k1','B')}<span>Benni's Workspace</span></span><span class="o">${av('k2','A')}</span><span class="o">${av('k3','F')}</span><span class="more">${I.plus}</span></div>${srch}${sec('Private',true,nav(em('💰'),'Household budget',{on:1})+nav(em('📊'),'Monthly review'))}</div>`);
+put('s3',`<div class="side"><div class="wsr"><span class="cur">${em('🏡')}<span>Home</span></span><span class="o">${av('k2','A')}</span><span class="o">${av('k3','F')}</span><span class="more">${I.plus}</span></div>${srch}</div><div class="wpop"><div class="nm"><span class="ic">🏡</span><span class="fld">Home<i></i></span></div><div class="lbl">Icon</div><div class="grid">${['🏡','💼','📚','🧪','🎨','🧳','💰','⚽','🎵','🌱','🚀','🛠️','📷','🍳','🐾','❤️'].map((e,i)=>`<span class="${i==0?'on':''}">${e}</span>`).join('')}</div><div class="ltr">${av('k1','H')}Use the first letter</div></div>`);
 put('s2c',`<div class="side"><div class="wsr"><span class="cur">${av('k1','B')}<span>Benni's Workspace</span></span><span class="o">${av('k2','A')}</span><span class="o">${av('k3','F')}</span><span class="o">${av('k4','H')}</span><span class="more">+2</span></div>${srch}</div>`);
 
 let mode='system';const mq=matchMedia('(prefers-color-scheme: dark)');
