@@ -14,17 +14,20 @@
 .block{position:relative;padding:12px;display:flex;flex-direction:column;gap:6px;min-width:0}
 .vh{display:flex;align-items:center;gap:8px;min-height:32px;min-width:0}
 .vh .ico{width:16px}
-.vh b{font-size:var(--ws-fs-prose);line-height:24px;font-weight:600;white-space:nowrap}
+.vh b{font-size:var(--ws-fs-prose);line-height:24px;font-weight:600;white-space:nowrap;min-width:0;overflow:hidden;text-overflow:ellipsis}
 .vh .end{margin-left:auto;display:flex;gap:2px;flex:none}
-.note{font-size:12px;line-height:18px;color:var(--ws-text-faint);white-space:nowrap;border-radius:4px;padding:0 4px;min-width:0;overflow:hidden;text-overflow:ellipsis}
+.note{margin-left:auto;flex:0 1 auto;max-width:50%;font-size:12px;line-height:18px;color:var(--ws-text-faint);white-space:nowrap;border-radius:4px;padding:0 4px;min-width:0;overflow:hidden;text-overflow:ellipsis}
 .note span{color:var(--ws-text-muted)}
-.qb{display:inline-flex;gap:5px;align-items:center;height:26px;padding:0 7px;border-radius:6px;font-size:13px;color:var(--ws-text-muted)}
-.qb.on{color:var(--ws-accent);background:var(--ws-accent-subtle)}
-.fchips{display:flex;gap:6px}
+.setup{display:flex;gap:6px;min-width:0}
+.sc{display:inline-flex;align-items:center;gap:5px;height:26px;padding:0 8px;border-radius:6px;font-size:13px;color:var(--ws-text-muted);white-space:nowrap;min-width:0;flex:0 1 auto}
+.sc svg{flex:none}
+.sc .v{color:var(--ws-text);overflow:hidden;text-overflow:ellipsis}
+.sc.on{background:var(--ws-accent-subtle)}
+.sc.on svg{color:var(--ws-accent)}
+.chip svg{color:var(--ws-accent)}
 .edit{box-shadow:0 0 0 2px var(--ws-accent);border-radius:4px;padding:0 4px;background:var(--ws-canvas)}
 .edit i{display:inline-block;width:1.5px;height:1em;background:var(--ws-text);vertical-align:-2px;margin-left:1px}
 .vf{display:flex;gap:12px;align-items:center;font-size:12px;line-height:18px;color:var(--ws-text-faint);padding:2px 2px 0}
-.vf .note{margin-left:auto;padding:0}
 .hintp{top:48px;left:var(--at,36px);font-size:12px;line-height:18px;padding:6px 10px;color:var(--ws-text-muted)}
 .ptable{position:static;width:min(320px,100%);box-sizing:border-box}
 .in-line{font-size:var(--ws-fs-prose);line-height:24px}
@@ -50,7 +53,6 @@
   .app .side{width:100%;box-sizing:border-box}
   .app .pgc{padding:14px}
   .block{padding:6px}
-  .vh{flex-wrap:wrap}
 }
 </style></head><body class="theme-light chrome">
 <div class="page">
@@ -63,35 +65,32 @@
 
   <section data-s="1">
     <h3 class="sec">1 · A View on a Page, and Tables in the sidebar</h3>
-    <p class="sub">The block has one title, the View's. The note always names the Table. The sidebar's Tables section lists every Table in the Workspace, whichever area it belongs to.</p>
+    <p class="sub">The block has one title, the View's. The note on the right always names the Table. The sidebar's Tables section lists every Table in the Workspace, whichever area it belongs to.</p>
     <div class="stage"><div class="win"><div class="app" id="s1"></div></div></div>
   </section>
 
   <section data-s="2">
-    <h3 class="sec">2 · Where the note sits</h3>
-    <p class="sub">Neither place adds a line.</p>
+    <h3 class="sec">2 · The note on the right, Sort and Filter below</h3>
+    <p class="sub">Sort and Filter sit on the line below the title, and each shows what it holds. Several sorts or filters show the first and a count, such as “+1”. A click opens its editor.</p>
     <div class="stage">
-      <div class="lab">A · Beside the title<em>Recommended, always in view</em></div>
+      <div class="lab">A · Sort and Filter are named<em>Recommended</em></div>
       <div class="win" id="s2a"></div>
-      <div class="lab">B · In the footer, beside the row count</div>
+      <div class="lab">A, with nothing set</div>
       <div class="win" id="s2b"></div>
+      <div class="lab">B · Only icons tell them apart, as in Notion</div>
+      <div class="win" id="s2c"></div>
     </div>
   </section>
 
   <section data-s="3">
-    <h3 class="sec">3 · Two names, each edited in place</h3>
-    <p class="sub">A click on the title changes this View only. A click on the note renames the Table, so nobody has to open it for that. A new Table starts with the first title typed as its name too; after that the two are separate.</p>
-    <div class="stage">
-      <div class="lab">Editing the View's title</div>
-      <div class="win" id="s3a"></div>
-      <div class="lab">Editing the Table's name</div>
-      <div class="win" id="s3b"></div>
-    </div>
+    <h3 class="sec">3 · Editing the View's title</h3>
+    <p class="sub">A click on the title changes this View only. The Table is renamed on its own page (section 4). A new Table starts with the first title typed as its name too; after that the two are separate.</p>
+    <div class="stage"><div class="win" id="s3a"></div></div>
   </section>
 
   <section data-s="4">
     <h3 class="sec">4 · Opening a Table from the sidebar</h3>
-    <p class="sub">Optional, since everything can be done from a View. It shows all rows, unsorted and unfiltered, and where the Table is shown. Its ··· menu holds Delete Table….</p>
+    <p class="sub">It shows all rows, unsorted and unfiltered, and where the Table is shown. A click on its title renames the Table; its ··· menu holds Delete Table….</p>
     <div class="stage"><div class="win"><div class="app" id="s4"></div></div></div>
   </section>
 
@@ -106,11 +105,9 @@
 
   <section data-s="6">
     <h3 class="sec">6 · Deleting</h3>
-    <p class="sub">Deleting a View while the Table has others asks nothing. Deleting the last one asks first. Every deletion is one Action that a revert restores.</p>
+    <p class="sub">Deleting a View while the Table has others on Pages asks nothing. Deleting the last one asks whether the Table goes too; kept, it stays in Tables. Every deletion is one Action that a revert restores.</p>
     <div class="stage">
-      <div class="lab">Last View · 1: Delete or Cancel<em>As approved</em></div>
-      <div class="dlg" id="s6a"></div>
-      <div class="lab">Last View · 2: The Table can stay in Tables<em>Recommended now that Tables has a home</em></div>
+      <div class="lab">The last View on a Page</div>
       <div class="dlg" id="s6b"></div>
       <div class="lab">Delete Table… from the sidebar</div>
       <div class="dlg" id="s6c"></div>
@@ -129,9 +126,8 @@
   <section data-s="8">
     <h3 class="sec">Decisions for this mockup</h3>
     <ol class="qs">
-      <li><b>The note:</b> beside the title (A, recommended) or in the footer (B)?</li>
-      <li><b>The last View:</b> Delete or Cancel (1, approved), or may the Table stay in Tables (2, recommended)? The V-Spec counts a full-page representation as a View, so with 2 a Table’s entry in Tables is itself a View and no Table is ever orphaned; ＋ in Tables can then make a Table before any Page shows it. With 1, that entry must not count as a View, and Tables has no ＋.</li>
-      <li><b>A Table in the sidebar:</b> does a click open it as in section 4 (recommended)?</li>
+      <li><b>Sort and Filter:</b> named (A, recommended) or told apart by icons only (B)?</li>
+      <li><b>The note:</b> does a click open the Table, as a link (recommended)? Without access it stays plain text.</li>
     </ol>
   </section>
 </div>
@@ -159,21 +155,21 @@ const side=(s='')=>`<div class="side"><div class="wsw"><span class="av">B</span>
 const rows=[['1 Nov','Groceries','Food','t1','84.20'],['30 Oct','Electricity','Home','t2','96.00'],['28 Oct','Train to Porto','Travel','t3','42.50'],['27 Oct','Rent','Home','t2','950.00']];
 const table=(r=rows)=>`<div class="tbl" style="--cols:78px minmax(0,1fr) 84px 92px"><div class="tr hd"><span>Date</span><span>Item</span><span>Category</span><span class="num">Amount</span></div>${r.map(x=>`<div class="tr"><span>${x[0]}</span><span>${x[1]}</span><span><span class="tag ${x[3]}">${x[2]}</span></span><span class="num">€ ${x[4]}</span></div>`).join('')}</div>`;
 const note=(n='Expenses')=>`<span class="note">Table: <span>${n}</span></span>`;
-const tools=`<span class="end"><span class="qb on">${I.sort}Sort</span><span class="qb on">${I.filter}Filter</span></span>`;
-const head=(title='October spending',n=note())=>`<div class="vh"><span class="ico">${I.db}</span><b>${title}</b>${n}${tools}</div>`;
-const chips=`<div class="fchips"><span class="chip">Date, newest first</span><span class="chip">Date is in October</span></div>`;
+const head=(title='October spending',n=note())=>`<div class="vh"><span class="ico">${I.db}</span><b>${title}</b>${n}</div>`;
+const named=`<div class="setup"><span class="sc on">${I.sort}Sort:<span class="v">Date, newest first</span></span><span class="sc on">${I.filter}Filter:<span class="v">Date is in October</span></span></div>`;
+const unset=`<div class="setup"><span class="sc">${I.sort}Sort</span><span class="sc">${I.filter}Filter</span></div>`;
+const iconed=`<div class="setup"><span class="chip">${I.sort}Date, newest first</span><span class="chip">${I.filter}Date is in October</span><span class="ib">${I.plus}</span></div>`;
 const foot=(x='')=>`<div class="vf"><span>4 of 240 rows</span>${x}</div>`;
-const view=(h,f=foot())=>`<div class="block">${h}${chips}${table()}${f}</div>`;
+const view=(h,f=foot(),c=named,r=rows)=>`<div class="block">${h}${c}${table(r)}${f}</div>`;
 const put=(id,html)=>document.getElementById(id).innerHTML=html;
 put('s1',`${side('budget')}<div class="main"><div class="pgc"><h2 class="ptitle">Household budget</h2>${view(head()).replace('class="block"','class="block" style="padding:0"')}</div></div>`);
 put('s2a',view(head()));
-put('s2b',view(`<div class="vh"><span class="ico">${I.db}</span><b>October spending</b>${tools}</div>`,foot(note())));
+put('s2b',view(head('All costs'),`<div class="vf"><span>240 rows</span></div>`,unset,[rows[3],rows[0]]));
+put('s2c',view(head(),foot(),iconed));
 put('s3a',view(head('<span class="edit">October spending<i></i></span>')+`<div class="pop hintp">Changes this View only</div>`));
-put('s3b',view(head('October spending',`<span class="note edit">Table: <span>Expenses<i></i></span></span>`)+`<div class="pop hintp" style="--at:170px">Renames the Table in all 3 Views</div>`));
-put('s4',`${side('table')}<div class="main"><div class="pgc"><div class="vh"><h2 class="ptitle">Expenses</h2><span class="end"><span class="ib">${I.more}</span></span></div><div class="flist"><div class="frow"><span class="d">Shown in</span></div><div class="frow"><span>October spending</span><span class="r">Household budget</span></div><div class="frow"><span>All costs</span><span class="r">Monthly review</span></div><div class="frow"><span>Travel costs</span><span class="r">Trip to Lisbon</span></div></div>${table()}<div class="vf"><span>240 rows</span></div></div></div>`);
+put('s4',`${side('table')}<div class="main"><div class="pgc"><div class="vh" style="position:relative"><h2 class="ptitle"><span class="edit">Expenses<i></i></span></h2><span class="end"><span class="ib">${I.more}</span></span><div class="pop hintp" style="top:calc(100% + 6px);--at:0">Renames the Table in all 3 Views</div></div><div class="flist"><div class="frow"><span class="d">Shown in</span></div><div class="frow"><span>October spending</span><span class="r">Household budget</span></div><div class="frow"><span>All costs</span><span class="r">Monthly review</span></div><div class="frow"><span>Travel costs</span><span class="r">Trip to Lisbon</span></div></div>${table()}<div class="vf"><span>240 rows</span></div></div></div>`);
 put('s5a',`<div class="in-line">/tab</div><div class="pop ptable"><div class="it on"><span class="bi">${I.db}</span><span class="tx">Table<span class="d">New fields and rows</span></span></div><div class="it"><span class="bi">${I.db}</span><span class="tx">Existing Table…<span class="d">Another View of a Table</span></span></div></div>`);
 put('s5b',`<h4>Add a View of “Expenses”</h4><div class="flist"><div class="frow on"><span class="rd on"></span><span class="tx">Start with no sort or filter</span></div><div class="frow"><span class="d">Or copy the setup of</span></div><div class="frow"><span class="rd"></span><span class="tx">October spending<span class="d">Date, newest first · Date is in October</span></span><span class="r">Household budget</span></div><div class="frow"><span class="rd"></span><span class="tx">Travel costs<span class="d">Category is Travel</span></span><span class="r">Trip to Lisbon</span></div></div><div class="acts"><span class="btn pri">Add View</span><span class="btn">Cancel</span></div>`);
-put('s6a',`<h4>Delete the Table “Expenses”?</h4><p>This is its last View, so the Table and its 240 rows go with it.</p><div class="acts"><span class="btn dngp">Delete Table</span><span class="btn">Cancel</span></div>`);
 put('s6b',`<h4>Delete the last View of “Expenses”?</h4><p>The Table and its 240 rows stay in Tables, unless you delete them too.</p><div class="acts"><span class="btn pri">Delete View</span><span class="btn dng">Delete Table too</span><span class="btn">Cancel</span></div>`);
 put('s6c',`<h4>Delete the Table “Expenses”?</h4><p>Its 240 rows go with it, and so do its 3 Views on Household budget, Monthly review and Trip to Lisbon.</p><div class="acts"><span class="btn dngp">Delete Table</span><span class="btn">Cancel</span></div>`);
 const plain=(t,n)=>`<div class="vh"><span class="ico">${I.db}</span><b>${t}</b>${n}</div>`;

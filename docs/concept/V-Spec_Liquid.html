@@ -91,7 +91,7 @@
         <li><strong>Duplicate</strong> copies current state into a new independent Block. <strong>Add View</strong> reuses the existing Block. Pasting a copied Block duplicates it; a View is always explicit (ADR-0235).</li>
         <li>Removing the last View deletes the Block in the same atomic, reversible History Action. There is no orphan Block pool or separate Trash.</li>
         <li>That deletion also removes its Connections and owned Automations. Independent Workspace Automations that reference it are disabled and surfaced as <em>Needs attention</em>; deletion shows this impact when dependencies exist.</li>
-        <li>A full-page representation counts as a View. Deleting its Explorer entry therefore follows the same last-View rule.</li>
+        <li>A full-page representation counts as a View. Deleting its Explorer entry therefore follows the same last-View rule. A Table's entry in the sidebar's Tables section is such a representation, so removing its last View on a Page asks whether to delete the Table too (ADR-0309).</li>
       </ul>
       <h3>One store, three views</h3>
       <svg viewBox="0 0 640 300" role="img" aria-label="One store with three views" style="width:100%;max-width:760px;height:auto;display:block">

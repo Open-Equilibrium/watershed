@@ -78,7 +78,7 @@ The macOS Liquid app runs its agent sessions on a pinned T3 Code server through 
 - PowerBar for finding Workspace objects, creating Blocks and invoking permitted Workspace actions.
 - Content-first flow followed by explicit responsive Arrange mode. Mobile retains every Block; complex Views open focused surfaces. Safe compact OS widgets remain post-MVP.
 - Chart, Formula, Whiteboard and Embed Blocks.
-- Synchronized multi-Page Views over one canonical Block. Duplicate creates a new Block; deleting the last View deletes the Block, its Connections and owned Automations in one reversible Action, while independent dependent Automations are disabled for repair.
+- Synchronized multi-Page Views over one canonical Block. Duplicate creates a new Block; deleting the last View deletes the Block (a Table's last View on a Page asks first, ADR-0309), its Connections and owned Automations in one reversible Action, while independent dependent Automations are disabled for repair.
 - Connections/formulas for direct logic and Workspace Automations for when/if/then logic.
 - Allow-only Roles with default-denied unlisted access; explicit deny rules are post-MVP.
 - One mutation pipeline and History for every M3a write surface, including UI, Connections/formulas, Automations and import. History and revert follow ADR-0235.
