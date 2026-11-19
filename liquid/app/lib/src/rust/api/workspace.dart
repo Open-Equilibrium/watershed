@@ -27,6 +27,7 @@ class BridgeAnswer {
   final List<BridgeRow> rows;
   final List<BridgeTable> tables;
   final List<BridgeShown> shown;
+  final String? icon;
 
   const BridgeAnswer({
     required this.areas,
@@ -42,6 +43,7 @@ class BridgeAnswer {
     required this.rows,
     required this.tables,
     required this.shown,
+    this.icon,
   });
 
   @override
@@ -58,7 +60,8 @@ class BridgeAnswer {
       database.hashCode ^
       rows.hashCode ^
       tables.hashCode ^
-      shown.hashCode;
+      shown.hashCode ^
+      icon.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -77,7 +80,8 @@ class BridgeAnswer {
           database == other.database &&
           rows == other.rows &&
           tables == other.tables &&
-          shown == other.shown;
+          shown == other.shown &&
+          icon == other.icon;
 }
 
 class BridgeApplied {
@@ -281,6 +285,8 @@ class BridgeMutation {
 }
 
 enum BridgeMutationKind {
+  renameWorkspace,
+  setWorkspaceIcon,
   createArea,
   createPage,
   renamePage,
@@ -387,6 +393,7 @@ class BridgeQuery {
 }
 
 enum BridgeQueryKind {
+  workspace,
   areas,
   pages,
   views,
@@ -423,7 +430,7 @@ class BridgeResource {
           block == other.block;
 }
 
-enum BridgeResourceKind { areas, pages, views, block, tables, table }
+enum BridgeResourceKind { workspace, areas, pages, views, block, tables, table }
 
 class BridgeShown {
   final String page;

@@ -617,3 +617,38 @@ fn a_table_shows_on_two_pages_keeps_its_name_and_goes_with_all_its_views() {
             .is_loaded(&liquid_core::PageId::parse(&expenses.page).unwrap())
     );
 }
+
+#[test]
+fn a_workspace_s_name_and_icon_are_read_and_announced() {
+    let expenses = Expenses::new("workspace-name");
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let sink = seen.clone();
+    expenses
+        .workspace
+        .watch(1, resource(BridgeResourceKind::Workspace), move |change| {
+            sink.lock().unwrap().push(change.seq);
+            true
+        })
+        .unwrap();
+    for (kind, text) in [
+        (BridgeMutationKind::RenameWorkspace, "Home"),
+        (BridgeMutationKind::SetWorkspaceIcon, "🏡"),
+    ] {
+        expenses
+            .workspace
+            .apply(BridgeMutation {
+                text: Some(text.into()),
+                ..mutation(kind)
+            })
+            .unwrap();
+    }
+    let read = expenses
+        .workspace
+        .query(query(BridgeQueryKind::Workspace))
+        .unwrap();
+    assert_eq!(
+        (read.text.as_deref(), read.icon.as_deref()),
+        (Some("Home"), Some("🏡"))
+    );
+    assert_eq!(*seen.lock().unwrap(), [0, 1, 2]);
+}

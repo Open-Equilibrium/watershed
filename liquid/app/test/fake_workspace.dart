@@ -8,6 +8,14 @@ import 'package:liquid/src/rust/api/drawing.dart';
 import 'package:liquid/src/rust/api/workspace.dart';
 
 class FakeWorkspace implements LiquidWorkspace {
+  @override
+  bool isDisposed = false;
+
+  @override
+  void dispose() => isDisposed = true;
+
+  String name = '';
+  String icon = '';
   final areas = <BridgeArea>[];
   final pages = <String, List<BridgePage>>{};
   final applied = <BridgeMutation>[];
@@ -81,6 +89,14 @@ class FakeWorkspace implements LiquidWorkspace {
     }
     applied.add(mutation);
     switch (mutation.kind) {
+      case BridgeMutationKind.renameWorkspace:
+        name = mutation.text!;
+        _changed(const BridgeResource(kind: BridgeResourceKind.workspace));
+        return BridgeApplied(elements: const [], action: _id());
+      case BridgeMutationKind.setWorkspaceIcon:
+        icon = mutation.text!;
+        _changed(const BridgeResource(kind: BridgeResourceKind.workspace));
+        return BridgeApplied(elements: const [], action: _id());
       case BridgeMutationKind.createArea:
         final area = BridgeArea(id: _id(), name: mutation.text!);
         areas.add(area);
@@ -737,6 +753,7 @@ class FakeWorkspace implements LiquidWorkspace {
       List<BridgeRow> rows = const [],
       List<BridgeTable> tables = const [],
       List<BridgeShown> shown = const [],
+      String? icon,
     }) => BridgeAnswer(
       areas: areas,
       pages: pages,
@@ -751,6 +768,7 @@ class FakeWorkspace implements LiquidWorkspace {
       rows: rows,
       tables: tables,
       shown: shown,
+      icon: icon,
     );
     final code = _isCode(query.block);
     return switch (query.kind) {
@@ -801,6 +819,7 @@ class FakeWorkspace implements LiquidWorkspace {
         final shown = _shownRows(query);
         return answer(count: shown.length, rows: window(shown));
       }(),
+      BridgeQueryKind.workspace => answer(text: name, icon: icon),
       BridgeQueryKind.tables => answer(
         count: tables.length,
         tables: window(tables),

@@ -25,6 +25,7 @@ import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
 import '../workspace/page_view.dart';
 import '../workspace/table_page.dart';
+import '../workspace/workspaces.dart';
 import '../workspace/workspace_state.dart';
 import 'action_area.dart';
 import 'chat_view.dart';
@@ -44,6 +45,7 @@ class AgentShell extends StatefulWidget {
     this.info,
     this.workspace,
     this.workspaceProblem,
+    this.workspaces,
     this.agentProblem,
     this.shortcuts,
     this.diffSettings,
@@ -59,6 +61,8 @@ class AgentShell extends StatefulWidget {
 
   final WorkspaceState? workspace;
   final String? workspaceProblem;
+
+  final Workspaces? workspaces;
 
   final String? agentProblem;
 
@@ -405,7 +409,14 @@ class _AgentShellState extends State<AgentShell> {
       ShortcutReveal(
         liquid: keys.liquidKey,
         child: CallbackShortcuts(
-          bindings: keys.bind(_actions),
+          bindings: {
+            ...keys.bind(_actions),
+            if (widget.workspaces case final workspaces?)
+              ...Fixed.switchWorkspace.bind([
+                for (var index = 0; index < 9; index++)
+                  () => unawaited(workspaces.switchTo(index)),
+              ]),
+          },
           child: Focus(
             focusNode: _focus,
             autofocus: true,
@@ -420,6 +431,7 @@ class _AgentShellState extends State<AgentShell> {
                     info: widget.info,
                     workspace: widget.workspace,
                     workspaceProblem: widget.workspaceProblem,
+                    workspaces: widget.workspaces,
                     agentProblem: widget.agentProblem,
                     onSettings: _toggleSettings,
                     onNewSession: _newSession,

@@ -198,8 +198,14 @@ impl LiquidWorkspace {
             rows: Vec::new(),
             tables: Vec::new(),
             shown: Vec::new(),
+            icon: None,
         };
         match query.kind {
+            BridgeQueryKind::Workspace => {
+                let (name, icon) = workspace.name_and_icon().map_err(message)?;
+                answer.text = Some(name);
+                answer.icon = Some(icon);
+            }
             BridgeQueryKind::Areas => {
                 let areas = workspace.areas().map_err(message)?;
                 answer.count = areas.len() as i64;

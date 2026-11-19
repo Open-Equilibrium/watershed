@@ -7,9 +7,11 @@ use automerge::{ActorId, AutoCommit, ObjType, ROOT, ReadDoc};
 use crate::history::Header;
 use crate::id::random_bytes;
 use crate::model::{
-    self, AREA, AREAS, BLOCK, BLOCKS, BOUNDARY, KIND, LANGUAGE, NAME, OWNER, PAGE, PAGES, PARENT,
-    ROW_FILTER, ROW_SORT, SORT, STYLE, TABLE, TABLES, TEXT, TITLE, VIEWS,
+    self, AREA, AREAS, BLOCK, BLOCKS, BOUNDARY, ICON, KIND, LANGUAGE, NAME, OWNER, PAGE, PAGES,
+    PARENT, ROW_FILTER, ROW_SORT, SORT, STYLE, TABLE, TABLES, TEXT, TITLE, VIEWS,
 };
+
+const MAX_ICON: usize = 64;
 use crate::order::Order;
 use crate::store::{Commit, Store, Write};
 use crate::{
@@ -189,6 +191,14 @@ impl<S: Store> Workspace<S> {
         drawing::read(self.doc(&Document::Page(page.clone()))?, block, pages)
     }
 
+    pub fn name_and_icon(&mut self) -> Result<(String, String), Error> {
+        let doc = self.doc(&Document::Workspace)?;
+        Ok((
+            model::string(doc, &ROOT, NAME).unwrap_or_default(),
+            model::string(doc, &ROOT, ICON).unwrap_or_default(),
+        ))
+    }
+
     pub fn tables(&mut self) -> Result<Vec<TableEntry>, Error> {
         Ok(model::tables(self.doc(&Document::Workspace)?))
     }
@@ -309,6 +319,13 @@ impl<S: Store> Workspace<S> {
     fn write(&mut self, mutation: &Mutation) -> Result<Written, Error> {
         match mutation {
             Mutation::CreateArea { name } => self.write_create_area(name),
+            Mutation::RenameWorkspace { name } => self.write_workspace(NAME, name),
+            Mutation::SetWorkspaceIcon { icon } => {
+                if icon.len() > MAX_ICON {
+                    return Err(Error::TooLong);
+                }
+                self.write_workspace(ICON, icon)
+            }
             Mutation::CreatePage {
                 area,
                 parent,
@@ -458,6 +475,11 @@ impl<S: Store> Workspace<S> {
                 self.write_view_filter(page, view, filter.as_ref())
             }
         }
+    }
+
+    fn write_workspace(&mut self, key: &str, value: &str) -> Result<Written, Error> {
+        self.doc(&Document::Workspace)?.put(ROOT, key, value)?;
+        Ok(Written::new(Document::Workspace, Changed::Workspace))
     }
 
     fn write_create_area(&mut self, name: &str) -> Result<Written, Error> {

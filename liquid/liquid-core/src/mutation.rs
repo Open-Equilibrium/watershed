@@ -101,6 +101,12 @@ pub enum Mutation {
     CreateArea {
         name: String,
     },
+    RenameWorkspace {
+        name: String,
+    },
+    SetWorkspaceIcon {
+        icon: String,
+    },
     CreatePage {
         area: AreaId,
         parent: Option<PageId>,
@@ -284,6 +290,7 @@ pub enum Created {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Changed {
+    Workspace,
     Areas,
     Pages(AreaId),
     Views(PageId),

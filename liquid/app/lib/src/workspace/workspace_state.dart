@@ -159,6 +159,11 @@ class WorkspaceState {
 
   final areas = ValueNotifier<List<BridgeArea>>(const []);
 
+  final named = ValueNotifier<({String name, String icon})>((
+    name: '',
+    icon: '',
+  ));
+
   final tables = ValueNotifier<List<BridgeTable>>(const []);
 
   final open = ValueNotifier<OpenPage?>(null);
@@ -242,6 +247,10 @@ class WorkspaceState {
     _listen(const BridgeResource(kind: BridgeResourceKind.areas), areas);
     final tables = _Reread(_readTables);
     _listen(const BridgeResource(kind: BridgeResourceKind.tables), tables);
+    _listen(
+      const BridgeResource(kind: BridgeResourceKind.workspace),
+      _Reread(_readNamed),
+    );
     final first = await workspace.query(query: query(BridgeQueryKind.areas));
     if (first.count == 0) {
       final private = await apply(
@@ -290,6 +299,19 @@ class WorkspaceState {
     await apply(mutation(BridgeMutationKind.deleteTable, block: table));
     if (open.value?.table == table) open.value = _back;
   }
+
+  Future<void> _readNamed() async {
+    final answer = await read(query(BridgeQueryKind.workspace));
+    if (!_disposed) {
+      named.value = (name: answer.text ?? '', icon: answer.icon ?? '');
+    }
+  }
+
+  Future<void> renameWorkspace(String name) =>
+      apply(mutation(BridgeMutationKind.renameWorkspace, text: name));
+
+  Future<void> setWorkspaceIcon(String icon) =>
+      apply(mutation(BridgeMutationKind.setWorkspaceIcon, text: icon));
 
   Future<void> _readTables() async {
     final read = <BridgeTable>[];
@@ -411,6 +433,7 @@ class WorkspaceState {
     await Future.wait(followed.map((subscription) => subscription.cancel()));
     areas.dispose();
     tables.dispose();
+    named.dispose();
     folded.dispose();
     open.dispose();
     problem.dispose();

@@ -13,6 +13,8 @@ pub const MAX_WINDOW: i64 = 500;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BridgeMutationKind {
+    RenameWorkspace,
+    SetWorkspaceIcon,
     CreateArea,
     CreatePage,
     RenamePage,
@@ -133,6 +135,7 @@ pub struct BridgeApplied {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BridgeQueryKind {
+    Workspace,
     Areas,
     Pages,
     Views,
@@ -224,10 +227,12 @@ pub struct BridgeAnswer {
     pub rows: Vec<BridgeRow>,
     pub tables: Vec<BridgeTable>,
     pub shown: Vec<BridgeShown>,
+    pub icon: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum BridgeResourceKind {
+    Workspace,
     Areas,
     Pages,
     Views,
@@ -312,6 +317,8 @@ impl BridgeMutation {
         let field = || id(&self.field, FieldId::parse, "field");
         let row = || id(&self.row, RowId::parse, "row");
         Ok(match self.kind {
+            BridgeMutationKind::RenameWorkspace => Mutation::RenameWorkspace { name: text()? },
+            BridgeMutationKind::SetWorkspaceIcon => Mutation::SetWorkspaceIcon { icon: text()? },
             BridgeMutationKind::CreateArea => Mutation::CreateArea { name: text()? },
             BridgeMutationKind::CreatePage => Mutation::CreatePage {
                 area: id(&self.area, AreaId::parse, "area")?,
@@ -488,7 +495,7 @@ impl BridgeResource {
         let block =
             || id(&self.block, BlockId::parse, "block").map(|block| Some(block.to_string()));
         let (area, page, block) = match self.kind {
-            BridgeResourceKind::Areas => (None, None, None),
+            BridgeResourceKind::Workspace | BridgeResourceKind::Areas => (None, None, None),
             BridgeResourceKind::Pages => (area()?, None, None),
             BridgeResourceKind::Views => (None, page()?, None),
             BridgeResourceKind::Block => (None, page()?, block()?),
@@ -505,6 +512,7 @@ impl BridgeResource {
 
     pub(crate) fn of(changed: &Changed) -> Self {
         let (kind, area, page, block) = match changed {
+            Changed::Workspace => (BridgeResourceKind::Workspace, None, None, None),
             Changed::Areas => (BridgeResourceKind::Areas, None, None, None),
             Changed::Pages(area) => (
                 BridgeResourceKind::Pages,

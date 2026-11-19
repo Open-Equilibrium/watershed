@@ -33,6 +33,7 @@ pub(crate) const TABLES: &str = "tables";
 pub(crate) const TABLE: &str = "table";
 pub(crate) const AREA: &str = "area";
 pub(crate) const PAGE: &str = "page";
+pub(crate) const ICON: &str = "icon";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Area {

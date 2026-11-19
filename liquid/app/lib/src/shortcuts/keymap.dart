@@ -221,6 +221,17 @@ enum Fixed {
   ], repeats: false),
   turnMenu('Choose the turn', Area.diff, 'T', [
     Keys(LogicalKeyboardKey.keyT),
+  ], repeats: false),
+  switchWorkspace('Switch to a Workspace', Area.app, '⌘1–⌘9', [
+    Keys(LogicalKeyboardKey.digit1, meta: true),
+    Keys(LogicalKeyboardKey.digit2, meta: true),
+    Keys(LogicalKeyboardKey.digit3, meta: true),
+    Keys(LogicalKeyboardKey.digit4, meta: true),
+    Keys(LogicalKeyboardKey.digit5, meta: true),
+    Keys(LogicalKeyboardKey.digit6, meta: true),
+    Keys(LogicalKeyboardKey.digit7, meta: true),
+    Keys(LogicalKeyboardKey.digit8, meta: true),
+    Keys(LogicalKeyboardKey.digit9, meta: true),
   ], repeats: false);
 
   const Fixed(

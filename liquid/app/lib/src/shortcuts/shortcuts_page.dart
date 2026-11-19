@@ -50,6 +50,7 @@ const List<_Group> _left = [
       _Entry(Command.sessionDetails),
       _Entry(Command.statistics),
       _Entry(Command.focusInput),
+      _Entry.fixed(Fixed.switchWorkspace),
     ],
   ),
   (

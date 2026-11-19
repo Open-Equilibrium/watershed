@@ -6,6 +6,7 @@ import 'package:flutter/widgets.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated_io.dart'
     show ExternalLibrary;
 
+import 'src/workspace/workspaces.dart';
 import 'src/agent_hosts/agent_hosts.dart';
 import 'src/app.dart';
 import 'src/appearance.dart';
@@ -45,16 +46,16 @@ Future<void> main() async {
     unawaited(links.connect(host.address));
   }
   AppLifecycleListener(onResume: links.retryAll);
-  final (workspace, workspaceProblem) = await openWorkspace(
-    '$settings/Workspace',
-    show: launch.state == null,
+  final workspaces = await Workspaces.load(
+    settings,
+    (dir) => openWorkspace(dir, show: launch.state == null),
+    file: SettingsFile(File('$settings/workspaces.json')),
   );
   final surface = ValueNotifier(launch);
   runApp(
     LiquidApp(
       launch: surface,
-      workspace: workspace,
-      workspaceProblem: workspaceProblem,
+      workspaces: workspaces,
       shortcuts: await ShortcutController.load(
         ShortcutStore(File('$settings/shortcuts.json')),
         const ChannelLiquidKeyHost(),

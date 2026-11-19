@@ -5358,8 +5358,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   BridgeAnswer dco_decode_bridge_answer(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 13)
-      throw Exception('unexpected arr length: expect 13 but see ${arr.length}');
+    if (arr.length != 14)
+      throw Exception('unexpected arr length: expect 14 but see ${arr.length}');
     return BridgeAnswer(
       areas: dco_decode_list_bridge_area(arr[0]),
       pages: dco_decode_list_bridge_page(arr[1]),
@@ -5374,6 +5374,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       rows: dco_decode_list_bridge_row(arr[10]),
       tables: dco_decode_list_bridge_table(arr[11]),
       shown: dco_decode_list_bridge_shown(arr[12]),
+      icon: dco_decode_opt_String(arr[13]),
     );
   }
 
@@ -7681,6 +7682,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_rows = sse_decode_list_bridge_row(deserializer);
     var var_tables = sse_decode_list_bridge_table(deserializer);
     var var_shown = sse_decode_list_bridge_shown(deserializer);
+    var var_icon = sse_decode_opt_String(deserializer);
     return BridgeAnswer(
       areas: var_areas,
       pages: var_pages,
@@ -7695,6 +7697,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       rows: var_rows,
       tables: var_tables,
       shown: var_shown,
+      icon: var_icon,
     );
   }
 
@@ -10727,6 +10730,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_list_bridge_row(self.rows, serializer);
     sse_encode_list_bridge_table(self.tables, serializer);
     sse_encode_list_bridge_shown(self.shown, serializer);
+    sse_encode_opt_String(self.icon, serializer);
   }
 
   @protected
