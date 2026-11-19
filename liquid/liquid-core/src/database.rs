@@ -503,7 +503,7 @@ pub(crate) fn rows(
             .map(|option| (option.id.as_str(), option.name.to_lowercase()))
             .collect();
         rows.retain(|row| {
-            live.iter().any(|field| match cell(row, field) {
+            live.iter().any(|field| match row.cells.get(field.as_str()) {
                 Some(Cell::Text(text)) => text.to_lowercase().contains(&search),
                 Some(Cell::Select(option)) => options
                     .get(option.as_str())
