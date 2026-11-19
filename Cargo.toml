@@ -62,6 +62,3 @@ unicode-normalization = "=0.1.25"
 [workspace.lints.clippy]
 # Test code may unwrap (clippy.toml); production code states why a value is present.
 unwrap_used = "deny"
-
-[profile.dev.package."*"]
-opt-level = 2
