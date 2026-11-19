@@ -98,9 +98,9 @@ class Sidebar extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          if (workspace case final workspace?)
+          if (workspace != null || workspaces != null)
             WorkspaceSwitcher(
-              key: ObjectKey(workspace),
+              key: ValueKey((workspace, workspaces)),
               state: workspace,
               workspaces: workspaces,
             )

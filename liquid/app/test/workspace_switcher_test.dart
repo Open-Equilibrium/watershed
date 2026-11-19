@@ -11,10 +11,13 @@ import 'fake_workspace.dart';
 void main() {
   late Map<String, FakeWorkspace> opened;
 
-  Future<Workspaces> show(WidgetTester tester) async {
+  Future<Workspaces> show(WidgetTester tester, {bool failNew = false}) async {
     await tester.binding.setSurfaceSize(const Size(1400, 900));
     opened = {};
     final workspaces = await Workspaces.load('/workspaces', (path) async {
+      if (failNew && path.endsWith('/Workspace') == false) {
+        return (null, 'The Workspace did not open: no key');
+      }
       final fake = opened.putIfAbsent(path.split('/').last, FakeWorkspace.new);
       fake.isDisposed = false;
       final state = WorkspaceState(fake);
@@ -102,5 +105,18 @@ void main() {
       await tester.pump(const Duration(milliseconds: 50));
     }
     expect(workspaces.at, 1);
+  });
+
+  testWidgets('a Workspace that did not open still lets another be chosen', (
+    tester,
+  ) async {
+    final workspaces = await show(tester, failNew: true);
+    await tap(tester, find.byKey(const Key('new workspace')));
+    expect(workspaces.at, 1);
+    expect(workspaces.current, isNull);
+    expect(find.text('The Workspace did not open: no key'), findsOneWidget);
+    await tap(tester, find.byKey(const Key('workspace 0')));
+    expect(workspaces.at, 0);
+    expect(workspaces.current, isNotNull);
   });
 }

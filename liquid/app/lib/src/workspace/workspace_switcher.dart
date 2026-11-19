@@ -82,22 +82,29 @@ class WorkspaceSwitcher extends StatelessWidget {
     required this.workspaces,
   });
 
-  final WorkspaceState state;
+  final WorkspaceState? state;
   final Workspaces? workspaces;
 
   @override
   Widget build(BuildContext context) {
     final ws = context.ws;
     return ListenableBuilder(
-      listenable: Listenable.merge([state.named, ?workspaces]),
+      listenable: Listenable.merge([state?.named, workspaces]),
       builder: (context, _) {
         final workspaces = this.workspaces;
-        final named = state.named.value;
+        final live = state?.named.value;
         final entries =
             workspaces?.entries ??
-            [(dir: 'Workspace', name: named.name, icon: named.icon)];
+            [
+              (
+                dir: 'Workspace',
+                name: live?.name ?? '',
+                icon: live?.icon ?? '',
+              ),
+            ];
         final at = workspaces?.at ?? 0;
         final current = entries[at];
+        final named = live ?? (name: current.name, icon: current.icon);
         return LayoutBuilder(
           builder: (context, constraints) {
             final others = [
@@ -188,7 +195,7 @@ class _Current extends StatefulWidget {
   final bool alone;
   final Workspaces? workspaces;
 
-  final WorkspaceState state;
+  final WorkspaceState? state;
   final String dir;
   final ({String name, String icon}) named;
 
@@ -200,9 +207,9 @@ class _CurrentState extends State<_Current> {
   final _menu = OverlayPortalController();
   late final _name = StoredName(
     widget.named.name,
-    rename: widget.state.renameWorkspace,
-    restore: () async => mounted ? widget.state.named.value.name : null,
-    quitting: () => widget.state.quitting,
+    rename: (name) => widget.state?.renameWorkspace(name) ?? Future.value(),
+    restore: () async => mounted ? widget.state?.named.value.name : null,
+    quitting: () => widget.state?.quitting ?? false,
     replaced: () {
       if (mounted) setState(() {});
     },
@@ -212,7 +219,7 @@ class _CurrentState extends State<_Current> {
   @override
   void initState() {
     super.initState();
-    widget.state.finishing.add(_name.typed);
+    widget.state?.finishing.add(_name.typed);
     if (widget.workspaces?.takeFresh() ?? false) {
       WidgetsBinding.instance.addPostFrameCallback((_) => _open());
     }
@@ -221,14 +228,22 @@ class _CurrentState extends State<_Current> {
   @override
   void didUpdateWidget(_Current old) {
     super.didUpdateWidget(old);
-    if (widget.named.name != old.named.name && !_focus.hasFocus) {
+    final unedited =
+        !_focus.hasFocus || _name.controller.text == old.named.name;
+    if (widget.named.name != old.named.name && unedited) {
       _name.show(widget.named.name);
+      if (_focus.hasFocus) {
+        _name.take().selection = TextSelection(
+          baseOffset: 0,
+          extentOffset: widget.named.name.length,
+        );
+      }
     }
   }
 
   @override
   void dispose() {
-    widget.state.finishing.remove(_name.typed);
+    widget.state?.finishing.remove(_name.typed);
     _name.write();
     _name.dispose();
     _focus.dispose();
@@ -251,7 +266,7 @@ class _CurrentState extends State<_Current> {
   }
 
   void _icon(String icon) =>
-      unawaited(widget.state.setWorkspaceIcon(icon).catchError((_) {}));
+      unawaited(widget.state?.setWorkspaceIcon(icon).catchError((_) {}));
 
   @override
   Widget build(BuildContext context) {
@@ -356,7 +371,9 @@ class _CurrentState extends State<_Current> {
       child: InkWell(
         key: const Key('current workspace'),
         borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
-        onTap: () => _menu.isShowing ? _close() : _open(),
+        onTap: widget.state == null
+            ? null
+            : () => _menu.isShowing ? _close() : _open(),
         child: Container(
           height: 28,
           padding: const EdgeInsets.symmetric(horizontal: WsMetrics.space2),
