@@ -31,6 +31,7 @@ References: Notion, AppFlowy, Microsoft Loop and T3 Code.
 - The input area floats at the bottom of each tab's main column, centered within the reading width, as T3 Code's composer does; content runs on beneath it. Agent questions appear inside it, and widgets sit directly above it.
 - A choice of one among a few options uses the shared segments (`Segments` in `liquid/app/lib/src/controls.dart`): one framed control on the subtle background, the chosen segment raised on the surface, the same in every view; mockups that draw it otherwise are superseded.
 - An action that cannot run stays visible, dimmed, and says why on hover.
+- Where a click on a column's name sorts, the column's menu opens from ⌄ beside the name, seen on hover and always on touch, or by a right-click or long press.
 - A row's menu button (···) sits inside the row at its right end, seen on hover or keyboard focus; the sidebar's session row shows it in place of its status word. Right-click opens the same menu.
 - A dialog row that does not fit offers its fixes as segments in a row of their own below its text, and the chosen fixes run with the dialog's main action, which stays available; Liquid's “Move to host” dialog is the model (ADR-0308).
 - A session's menu lists “Export record” above “Delete session…”. It writes the session's record folder to Downloads and shows it in Finder, without a save dialog, since Finder lets the person move the folder; the status bar says where it went.
