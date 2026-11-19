@@ -1,7 +1,7 @@
 use automerge::ChangeHash;
 use serde::{Deserialize, Serialize};
 
-use crate::{ActionId, Actor, AreaId, Mutation, Origin, PageId};
+use crate::{ActionId, Actor, AreaId, BlockId, Mutation, Origin, PageId};
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Permission {
@@ -19,6 +19,7 @@ pub enum Document {
     Workspace,
     Area(AreaId),
     Page(PageId),
+    Table(BlockId),
 }
 
 impl Document {
@@ -27,6 +28,7 @@ impl Document {
             Self::Workspace => "workspace".to_string(),
             Self::Area(area) => format!("area/{area}"),
             Self::Page(page) => format!("page/{page}"),
+            Self::Table(table) => format!("table/{table}"),
         }
     }
 }

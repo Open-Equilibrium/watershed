@@ -33,6 +33,10 @@ pub enum BridgeMutationKind {
     SetDrawingStyle,
     EditDrawing,
     AddDatabaseBlock,
+    CreateTable,
+    AddTableView,
+    RenameView,
+    DeleteTable,
     RenameDatabase,
     AddField,
     RenameField,
@@ -138,6 +142,8 @@ pub enum BridgeQueryKind {
     Drawing,
     Database,
     Rows,
+    Tables,
+    TableViews,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -165,6 +171,19 @@ pub struct BridgePage {
     pub title: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BridgeTable {
+    pub id: String,
+    pub area: String,
+    pub name: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BridgeShown {
+    pub page: String,
+    pub view: String,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BridgeBlockKind {
     Text,
@@ -179,6 +198,7 @@ pub enum BridgeBlockKind {
 pub struct BridgeView {
     pub id: String,
     pub block: String,
+    pub title: String,
     pub boundary: bool,
     pub kind: BridgeBlockKind,
     pub sort: Option<BridgeSort>,
@@ -198,6 +218,8 @@ pub struct BridgeAnswer {
     pub drawing: Option<BridgeDrawing>,
     pub database: Option<BridgeDatabase>,
     pub rows: Vec<BridgeRow>,
+    pub tables: Vec<BridgeTable>,
+    pub shown: Vec<BridgeShown>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -206,6 +228,8 @@ pub enum BridgeResourceKind {
     Pages,
     Views,
     Block,
+    Tables,
+    Table,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -392,48 +416,58 @@ impl BridgeMutation {
                 after: optional_id(&self.after, ViewId::parse, "after")?,
                 name: text()?,
             },
-            BridgeMutationKind::RenameDatabase => Mutation::RenameDatabase {
+            BridgeMutationKind::CreateTable => Mutation::CreateTable {
+                area: id(&self.area, AreaId::parse, "area")?,
+                name: text()?,
+            },
+            BridgeMutationKind::AddTableView => Mutation::AddTableView {
                 page: page()?,
+                after: optional_id(&self.after, ViewId::parse, "after")?,
+                table: block()?,
+                title: text()?,
+                sort: row_query(&self.sort, &None, 0, 0)?.sort,
+                filter: row_query(&None, &self.filter, 0, 0)?.filter,
+            },
+            BridgeMutationKind::RenameView => Mutation::RenameView {
+                page: page()?,
+                view: id(&self.view, ViewId::parse, "view")?,
+                title: text()?,
+            },
+            BridgeMutationKind::DeleteTable => Mutation::DeleteTable { block: block()? },
+            BridgeMutationKind::RenameDatabase => Mutation::RenameDatabase {
                 block: block()?,
                 name: text()?,
             },
             BridgeMutationKind::AddField => Mutation::AddField {
-                page: page()?,
                 block: block()?,
                 place: self.place(FieldId::parse)?,
                 name: text()?,
                 kind: self.field_kind.ok_or("field kind is missing")?.to_core(),
             },
             BridgeMutationKind::RenameField => Mutation::RenameField {
-                page: page()?,
                 block: block()?,
                 field: field()?,
                 name: text()?,
             },
             BridgeMutationKind::RemoveField => Mutation::RemoveField {
-                page: page()?,
                 block: block()?,
                 field: field()?,
             },
             BridgeMutationKind::AddOption => Mutation::AddOption {
-                page: page()?,
                 block: block()?,
                 field: field()?,
                 name: text()?,
                 color: u8::try_from(self.color).map_err(|_| "color is out of range")?,
             },
             BridgeMutationKind::AddRow => Mutation::AddRow {
-                page: page()?,
                 block: block()?,
                 place: self.place(RowId::parse)?,
             },
             BridgeMutationKind::RemoveRow => Mutation::RemoveRow {
-                page: page()?,
                 block: block()?,
                 row: row()?,
             },
             BridgeMutationKind::SetCell => Mutation::SetCell {
-                page: page()?,
                 block: block()?,
                 row: row()?,
                 field: field()?,
@@ -454,6 +488,8 @@ impl BridgeResource {
             BridgeResourceKind::Pages => (area()?, None, None),
             BridgeResourceKind::Views => (None, page()?, None),
             BridgeResourceKind::Block => (None, page()?, block()?),
+            BridgeResourceKind::Tables => (None, None, None),
+            BridgeResourceKind::Table => (None, None, block()?),
         };
         Ok(Self {
             kind: self.kind,
@@ -484,6 +520,13 @@ impl BridgeResource {
                 Some(page.to_string()),
                 Some(block.to_string()),
             ),
+            Changed::Tables => (BridgeResourceKind::Tables, None, None, None),
+            Changed::Table(block) => (
+                BridgeResourceKind::Table,
+                None,
+                None,
+                Some(block.to_string()),
+            ),
         };
         Self {
             kind,
@@ -500,6 +543,12 @@ impl BridgeResource {
         )
         .then_some(self.page.as_deref())
         .flatten()
+    }
+
+    pub(crate) fn table(&self) -> Option<&str> {
+        (self.kind == BridgeResourceKind::Table)
+            .then_some(self.block.as_deref())
+            .flatten()
     }
 }
 

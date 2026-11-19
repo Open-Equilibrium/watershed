@@ -200,13 +200,31 @@ pub enum Mutation {
         after: Option<ViewId>,
         name: String,
     },
-    RenameDatabase {
+    CreateTable {
+        area: AreaId,
+        name: String,
+    },
+    AddTableView {
         page: PageId,
+        after: Option<ViewId>,
+        table: BlockId,
+        title: String,
+        sort: Option<crate::Sort>,
+        filter: Option<crate::Filter>,
+    },
+    RenameView {
+        page: PageId,
+        view: ViewId,
+        title: String,
+    },
+    DeleteTable {
+        block: BlockId,
+    },
+    RenameDatabase {
         block: BlockId,
         name: String,
     },
     AddField {
-        page: PageId,
         block: BlockId,
         #[serde(alias = "after", deserialize_with = "stored_place")]
         place: Place<FieldId>,
@@ -214,36 +232,30 @@ pub enum Mutation {
         kind: FieldKind,
     },
     RenameField {
-        page: PageId,
         block: BlockId,
         field: FieldId,
         name: String,
     },
     RemoveField {
-        page: PageId,
         block: BlockId,
         field: FieldId,
     },
     AddOption {
-        page: PageId,
         block: BlockId,
         field: FieldId,
         name: String,
         color: u8,
     },
     AddRow {
-        page: PageId,
         block: BlockId,
         #[serde(alias = "after", deserialize_with = "stored_place")]
         place: Place<RowId>,
     },
     RemoveRow {
-        page: PageId,
         block: BlockId,
         row: RowId,
     },
     SetCell {
-        page: PageId,
         block: BlockId,
         row: RowId,
         field: FieldId,
@@ -263,6 +275,7 @@ pub enum Created {
     Area(AreaId),
     Page(PageId),
     Block { block: BlockId, view: ViewId },
+    Table(BlockId),
     Field(FieldId),
     Row(RowId),
     Option(OptionId),
@@ -275,6 +288,8 @@ pub enum Changed {
     Pages(AreaId),
     Views(PageId),
     Block(PageId, BlockId),
+    Tables,
+    Table(BlockId),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

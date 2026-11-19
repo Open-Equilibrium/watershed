@@ -3,7 +3,7 @@ use std::path::Path;
 use std::sync::{Mutex, MutexGuard};
 
 use liquid_core::{
-    Actor, AreaId, BlockId, BlockKind, Created, Error, Mutation, Origin, PageId, PersonId, Request,
+    Actor, AreaId, BlockId, BlockKind, Created, Document, Error, Origin, PageId, PersonId, Request,
     Workspace,
 };
 use liquid_storage::Sqlite;
@@ -13,8 +13,8 @@ use super::drawing::BridgeDrawing;
 use super::media::BridgeMedia;
 use super::workspace::{
     BridgeAnswer, BridgeApplied, BridgeArea, BridgeBlockKind, BridgeChange, BridgeMutation,
-    BridgePage, BridgeQuery, BridgeQueryKind, BridgeResource, BridgeTextStyle, BridgeView, id,
-    message, window,
+    BridgePage, BridgeQuery, BridgeQueryKind, BridgeResource, BridgeShown, BridgeTable,
+    BridgeTextStyle, BridgeView, id, message, window,
 };
 use crate::frb_generated::StreamSink;
 use crate::keys::{Keychain, Keys, random_hex, replica_key};
@@ -122,36 +122,6 @@ impl LiquidWorkspace {
 
     pub fn apply(&self, mutation: BridgeMutation) -> Result<BridgeApplied, String> {
         let mutation = mutation.to_core()?;
-        let mutation_page = match &mutation {
-            Mutation::CreateArea { .. }
-            | Mutation::CreatePage { .. }
-            | Mutation::RenamePage { .. } => None,
-            Mutation::AddTextBlock { page, .. }
-            | Mutation::EditText { page, .. }
-            | Mutation::RemoveView { page, .. }
-            | Mutation::SetViewSort { page, .. }
-            | Mutation::SetViewFilter { page, .. }
-            | Mutation::SplitTextBlock { page, .. }
-            | Mutation::JoinTextBlock { page, .. }
-            | Mutation::SetTextStyle { page, .. }
-            | Mutation::SetSectionBoundary { page, .. }
-            | Mutation::TurnIntoCode { page, .. }
-            | Mutation::TurnIntoText { page, .. }
-            | Mutation::SetCodeLanguage { page, .. }
-            | Mutation::AddMediaBlock { page, .. }
-            | Mutation::AddWhiteboardBlock { page, .. }
-            | Mutation::SetDrawingStyle { page, .. }
-            | Mutation::EditDrawing { page, .. }
-            | Mutation::AddDatabaseBlock { page, .. }
-            | Mutation::RenameDatabase { page, .. }
-            | Mutation::AddField { page, .. }
-            | Mutation::RenameField { page, .. }
-            | Mutation::RemoveField { page, .. }
-            | Mutation::AddOption { page, .. }
-            | Mutation::AddRow { page, .. }
-            | Mutation::RemoveRow { page, .. }
-            | Mutation::SetCell { page, .. } => Some(page.clone()),
-        };
         let mut inner = self.state()?;
         let actor = Actor::Person(inner.workspace.owner().clone());
         let result = inner.workspace.apply(Request {
@@ -162,21 +132,14 @@ impl LiquidWorkspace {
         let applied = match result {
             Ok(applied) => applied,
             Err(error) => {
-                if let Some(page) = &mutation_page {
-                    inner.release_page(page);
-                }
+                inner.release_unfollowed();
                 return Err(message(error));
             }
         };
         for changed in &applied.changed {
             inner.notify(BridgeResource::of(changed));
         }
-        if let Some(page) = mutation_page.as_ref().or(match &applied.created {
-            Some(Created::Page(page)) => Some(page),
-            _ => None,
-        }) {
-            inner.release_page(page);
-        }
+        inner.release_unfollowed();
         let mut answer = BridgeApplied {
             action: applied.action.to_string(),
             area: None,
@@ -195,6 +158,7 @@ impl LiquidWorkspace {
                 answer.block = Some(block.to_string());
                 answer.view = Some(view.to_string());
             }
+            Some(Created::Table(table)) => answer.block = Some(table.to_string()),
             Some(Created::Field(field)) => answer.field = Some(field.to_string()),
             Some(Created::Row(row)) => answer.row = Some(row.to_string()),
             Some(Created::Option(option)) => answer.option = Some(option.to_string()),
@@ -209,11 +173,8 @@ impl LiquidWorkspace {
     pub fn query(&self, query: BridgeQuery) -> Result<BridgeAnswer, String> {
         let mut inner = self.state()?;
         let (start, limit) = window(query.start, query.limit)?;
-        let mut read = None;
-        let result = Self::read(&mut inner.workspace, &query, start, limit, &mut read);
-        if let Some(page) = read {
-            inner.release_page(&page);
-        }
+        let result = Self::read(&mut inner.workspace, &query, start, limit);
+        inner.release_unfollowed();
         result
     }
 
@@ -222,7 +183,6 @@ impl LiquidWorkspace {
         query: &BridgeQuery,
         start: usize,
         limit: usize,
-        read: &mut Option<PageId>,
     ) -> Result<BridgeAnswer, String> {
         let mut answer = BridgeAnswer {
             areas: Vec::new(),
@@ -236,6 +196,8 @@ impl LiquidWorkspace {
             drawing: None,
             database: None,
             rows: Vec::new(),
+            tables: Vec::new(),
+            shown: Vec::new(),
         };
         match query.kind {
             BridgeQueryKind::Areas => {
@@ -269,7 +231,6 @@ impl LiquidWorkspace {
             }
             BridgeQueryKind::Views => {
                 let page = id(&query.page, PageId::parse, "page")?;
-                *read = Some(page.clone());
                 answer.count = workspace.view_count(&page).map_err(message)? as i64;
                 answer.views = workspace
                     .views(&page, start, limit)
@@ -278,6 +239,7 @@ impl LiquidWorkspace {
                     .map(|view| BridgeView {
                         id: view.id.to_string(),
                         block: view.block.to_string(),
+                        title: view.title,
                         boundary: view.boundary,
                         kind: match view.kind {
                             BlockKind::Text => BridgeBlockKind::Text,
@@ -294,7 +256,6 @@ impl LiquidWorkspace {
             }
             BridgeQueryKind::Text => {
                 let page = id(&query.page, PageId::parse, "page")?;
-                *read = Some(page.clone());
                 let block = id(&query.block, BlockId::parse, "block")?;
                 answer.text = workspace.text(&page, &block).map_err(message)?;
                 answer.style = workspace
@@ -304,7 +265,6 @@ impl LiquidWorkspace {
             }
             BridgeQueryKind::Code => {
                 let page = id(&query.page, PageId::parse, "page")?;
-                *read = Some(page.clone());
                 let block = id(&query.block, BlockId::parse, "block")?;
                 if let Some(code) = workspace.code(&page, &block).map_err(message)? {
                     answer.text = Some(code.text);
@@ -313,7 +273,6 @@ impl LiquidWorkspace {
             }
             BridgeQueryKind::Media => {
                 let page = id(&query.page, PageId::parse, "page")?;
-                *read = Some(page.clone());
                 let block = id(&query.block, BlockId::parse, "block")?;
                 answer.media = workspace
                     .media(&page, &block)
@@ -322,7 +281,6 @@ impl LiquidWorkspace {
             }
             BridgeQueryKind::Drawing => {
                 let page = id(&query.page, PageId::parse, "page")?;
-                *read = Some(page.clone());
                 let block = id(&query.block, BlockId::parse, "block")?;
                 let pages = u32::try_from(start).unwrap_or(u32::MAX)
                     ..u32::try_from(start.saturating_add(limit)).unwrap_or(u32::MAX);
@@ -332,22 +290,46 @@ impl LiquidWorkspace {
                     .map(BridgeDrawing::of);
             }
             BridgeQueryKind::Database => {
-                let page = id(&query.page, PageId::parse, "page")?;
-                *read = Some(page.clone());
                 let block = id(&query.block, BlockId::parse, "block")?;
                 answer.database = workspace
-                    .database(&page, &block)
+                    .database(&block)
                     .map_err(message)?
                     .map(BridgeDatabase::of);
             }
             BridgeQueryKind::Rows => {
-                let page = id(&query.page, PageId::parse, "page")?;
-                *read = Some(page.clone());
                 let block = id(&query.block, BlockId::parse, "block")?;
                 let rows = row_query(&query.sort, &query.filter, start, limit)?;
-                let rows = workspace.rows(&page, &block, &rows).map_err(message)?;
+                let rows = workspace.rows(&block, &rows).map_err(message)?;
                 answer.count = rows.count as i64;
                 answer.rows = rows.rows.into_iter().map(BridgeRow::of).collect();
+            }
+            BridgeQueryKind::Tables => {
+                let tables = workspace.tables().map_err(message)?;
+                answer.count = tables.len() as i64;
+                answer.tables = tables
+                    .into_iter()
+                    .skip(start)
+                    .take(limit)
+                    .map(|table| BridgeTable {
+                        id: table.id.to_string(),
+                        area: table.area.to_string(),
+                        name: table.name,
+                    })
+                    .collect();
+            }
+            BridgeQueryKind::TableViews => {
+                let block = id(&query.block, BlockId::parse, "block")?;
+                let shown = workspace.table_views(&block).map_err(message)?;
+                answer.count = shown.len() as i64;
+                answer.shown = shown
+                    .into_iter()
+                    .skip(start)
+                    .take(limit)
+                    .map(|(page, view)| BridgeShown {
+                        page: page.to_string(),
+                        view: view.to_string(),
+                    })
+                    .collect();
             }
         }
         Ok(answer)
@@ -386,8 +368,8 @@ impl LiquidWorkspace {
         let Ok(mut inner) = self.state() else {
             return;
         };
-        if let Some(resource) = inner.subscriptions.close(subscription) {
-            inner.release(&resource);
+        if inner.subscriptions.close(subscription).is_some() {
+            inner.release_unfollowed();
         }
     }
 }
@@ -413,20 +395,17 @@ impl LiquidWorkspace {
 
 impl Inner {
     fn notify(&mut self, resource: BridgeResource) {
-        for gone in self.subscriptions.notify(resource) {
-            self.release(&gone);
+        if !self.subscriptions.notify(resource).is_empty() {
+            self.release_unfollowed();
         }
     }
 
-    fn release(&mut self, resource: &BridgeResource) {
-        if let Some(page) = resource.page().and_then(PageId::parse) {
-            self.release_page(&page);
-        }
-    }
-
-    fn release_page(&mut self, page: &PageId) {
-        if !self.subscriptions.follows(page) {
-            self.workspace.close_page(page);
-        }
+    fn release_unfollowed(&mut self) {
+        let subscriptions = &self.subscriptions;
+        self.workspace.retain_loaded(|document| match document {
+            Document::Page(page) => subscriptions.follows(page),
+            Document::Table(table) => subscriptions.follows_table(table),
+            _ => true,
+        });
     }
 }

@@ -65,10 +65,7 @@ impl Sheet {
     }
 
     fn database(&mut self) -> Database {
-        self.workspace
-            .database(&self.page, &self.block)
-            .unwrap()
-            .unwrap()
+        self.workspace.database(&self.block).unwrap().unwrap()
     }
 
     fn name_field(&mut self) -> FieldId {
@@ -77,7 +74,6 @@ impl Sheet {
 
     fn field(&mut self, name: &str, kind: FieldKind) -> FieldId {
         let add = Mutation::AddField {
-            page: self.page.clone(),
             block: self.block.clone(),
             place: Place::Last,
             name: name.into(),
@@ -91,7 +87,6 @@ impl Sheet {
 
     fn add_row(&mut self, place: Place<RowId>) -> RowId {
         let add = Mutation::AddRow {
-            page: self.page.clone(),
             block: self.block.clone(),
             place,
         };
@@ -107,7 +102,6 @@ impl Sheet {
 
     fn set(&mut self, row: &RowId, field: &FieldId, value: Cell) -> Result<Applied, Error> {
         self.edit(Mutation::SetCell {
-            page: self.page.clone(),
             block: self.block.clone(),
             row: row.clone(),
             field: field.clone(),
@@ -116,7 +110,7 @@ impl Sheet {
     }
 
     fn rows(&mut self, query: &RowQuery) -> Rows {
-        self.workspace.rows(&self.page, &self.block, query).unwrap()
+        self.workspace.rows(&self.block, query).unwrap()
     }
 
     fn ids(&mut self, query: &RowQuery) -> Vec<RowId> {
@@ -247,7 +241,6 @@ fn a_cell_takes_only_values_of_its_field_s_kind() {
     }
     let Some(Created::Option(home)) = sheet
         .edit(Mutation::AddOption {
-            page: sheet.page.clone(),
             block: sheet.block.clone(),
             field: category.clone(),
             name: "Home".into(),
@@ -379,17 +372,14 @@ fn removed_rows_and_fields_disappear_and_renames_show() {
     sheet.set(&second, &amount, Cell::Number(3.0)).unwrap();
     for mutation in [
         Mutation::RemoveRow {
-            page: sheet.page.clone(),
             block: sheet.block.clone(),
             row: first.clone(),
         },
         Mutation::RemoveField {
-            page: sheet.page.clone(),
             block: sheet.block.clone(),
             field: amount.clone(),
         },
         Mutation::RenameDatabase {
-            page: sheet.page.clone(),
             block: sheet.block.clone(),
             name: "Spending".into(),
         },
@@ -417,15 +407,11 @@ fn a_database_takes_no_text_writes_or_style() {
     let mut sheet = Sheet::new();
     let applied = sheet
         .edit(Mutation::AddRow {
-            page: sheet.page.clone(),
             block: sheet.block.clone(),
             place: Place::First,
         })
         .unwrap();
-    assert_eq!(
-        applied.changed,
-        [Changed::Block(sheet.page.clone(), sheet.block.clone())]
-    );
+    assert_eq!(applied.changed, [Changed::Table(sheet.block.clone())]);
     assert_eq!(
         sheet.workspace.text(&sheet.page, &sheet.block).unwrap(),
         None
@@ -514,11 +500,10 @@ fn every_cell_equals_itself() {
 #[test]
 fn a_database_holds_a_bounded_number_of_fields_and_options() {
     let mut sheet = Sheet::new();
-    let (page, block) = (sheet.page.clone(), sheet.block.clone());
+    let block = sheet.block.clone();
     for number in 1..MAX_FIELDS {
         sheet
             .edit(Mutation::AddField {
-                page: page.clone(),
                 block: block.clone(),
                 place: Place::First,
                 name: format!("Field {number}"),
@@ -527,7 +512,6 @@ fn a_database_holds_a_bounded_number_of_fields_and_options() {
             .unwrap();
     }
     let one_more = Mutation::AddField {
-        page: page.clone(),
         block: block.clone(),
         place: Place::First,
         name: "One more".into(),
@@ -538,7 +522,6 @@ fn a_database_holds_a_bounded_number_of_fields_and_options() {
     assert_eq!(fields.len(), MAX_FIELDS);
     sheet
         .edit(Mutation::RemoveField {
-            page: page.clone(),
             block: block.clone(),
             field: fields[0].id.clone(),
         })
@@ -547,7 +530,6 @@ fn a_database_holds_a_bounded_number_of_fields_and_options() {
 
     let select = fields[1].id.clone();
     let option = |number: usize| Mutation::AddOption {
-        page: page.clone(),
         block: block.clone(),
         field: select.clone(),
         name: format!("Option {number}"),
@@ -599,7 +581,6 @@ fn rows_and_fields_added_last_go_after_all_others_when_applied() {
     sheet.field("Amount", FieldKind::Number);
     sheet
         .edit(Mutation::AddField {
-            page: sheet.page.clone(),
             block: sheet.block.clone(),
             place: Place::First,
             name: "Paid".into(),
@@ -620,7 +601,7 @@ fn rows_and_fields_added_last_go_after_all_others_when_applied() {
 fn actions_stored_before_places_still_read() {
     let mut sheet = Sheet::new();
     let row = sheet.add_row(Place::Last);
-    let (page, block) = (sheet.page.clone(), sheet.block.clone());
+    let block = sheet.block.clone();
     for (after, place) in [
         (serde_json::Value::Null, Place::First),
         (
@@ -629,7 +610,6 @@ fn actions_stored_before_places_still_read() {
         ),
     ] {
         let mut stored = serde_json::to_value(Mutation::AddRow {
-            page: page.clone(),
             block: block.clone(),
             place: Place::Last,
         })
@@ -641,7 +621,6 @@ fn actions_stored_before_places_still_read() {
         assert_eq!(
             read,
             Mutation::AddRow {
-                page: page.clone(),
                 block: block.clone(),
                 place,
             }
@@ -656,7 +635,6 @@ fn actions_stored_before_places_still_read() {
         ),
     ] {
         let add = |place| Mutation::AddField {
-            page: page.clone(),
             block: block.clone(),
             place,
             name: "Amount".into(),
@@ -824,7 +802,7 @@ fn a_removed_field_no_longer_sorts_or_filters() {
     let amount = sheet.field("Amount", FieldKind::Number);
     let name = sheet
         .workspace
-        .database(&sheet.page, &sheet.block)
+        .database(&sheet.block)
         .unwrap()
         .unwrap()
         .fields[0]
@@ -835,7 +813,6 @@ fn a_removed_field_no_longer_sorts_or_filters() {
         sheet.set(&added, &name, Cell::Text(label.into())).unwrap();
     }
     let remove = Mutation::RemoveField {
-        page: sheet.page.clone(),
         block: sheet.block.clone(),
         field: amount.clone(),
     };
@@ -847,14 +824,7 @@ fn a_removed_field_no_longer_sorts_or_filters() {
         }),
         ..all()
     };
-    assert_eq!(
-        sheet
-            .workspace
-            .rows(&sheet.page, &sheet.block, &query)
-            .unwrap()
-            .count,
-        2
-    );
+    assert_eq!(sheet.workspace.rows(&sheet.block, &query).unwrap().count, 2);
 }
 
 #[test]
@@ -871,10 +841,6 @@ fn an_unticked_filter_finds_boxes_never_ticked() {
         }),
         ..all()
     };
-    let rows = sheet
-        .workspace
-        .rows(&sheet.page, &sheet.block, &query)
-        .unwrap()
-        .rows;
+    let rows = sheet.workspace.rows(&sheet.block, &query).unwrap().rows;
     assert_eq!(rows.iter().map(|row| &row.id).collect::<Vec<_>>(), [&never]);
 }

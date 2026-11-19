@@ -296,13 +296,12 @@ fn rows_come_in_filtered_and_sorted_windows() {
 }
 
 #[test]
-fn a_database_write_reaches_its_block_s_subscribers_until_it_closes() {
+fn a_table_write_reaches_its_subscribers_until_it_closes() {
     let expenses = Expenses::new("database-notify");
     let seen = Arc::new(Mutex::new(Vec::new()));
     let block = BridgeResource {
-        page: Some(expenses.page.clone()),
         block: Some(expenses.block.clone()),
-        ..resource(BridgeResourceKind::Block)
+        ..resource(BridgeResourceKind::Table)
     };
     let sink = seen.clone();
     expenses
@@ -510,4 +509,111 @@ fn a_view_s_sort_and_filter_cross_the_bridge() {
     let shown = view(read());
     assert_eq!(shown.sort, Some(sort));
     assert_eq!(shown.filter, Some(filter));
+}
+
+#[test]
+fn a_table_shows_on_two_pages_keeps_its_name_and_goes_with_all_its_views() {
+    let expenses = Expenses::new("table-views");
+    let tables = || {
+        expenses
+            .workspace
+            .query(query(BridgeQueryKind::Tables))
+            .unwrap()
+            .tables
+    };
+    let listed = tables();
+    assert_eq!(listed.len(), 1);
+    assert_eq!(
+        (listed[0].id.as_str(), listed[0].name.as_str()),
+        (expenses.block.as_str(), "Expenses")
+    );
+
+    let review = expenses
+        .workspace
+        .apply(BridgeMutation {
+            area: Some(listed[0].area.clone()),
+            text: Some("Monthly review".into()),
+            ..mutation(BridgeMutationKind::CreatePage)
+        })
+        .unwrap()
+        .page
+        .unwrap();
+    let view = expenses
+        .workspace
+        .apply(BridgeMutation {
+            page: Some(review.clone()),
+            block: Some(expenses.block.clone()),
+            text: Some("All costs".into()),
+            sort: Some(BridgeSort {
+                field: expenses.name.clone(),
+                descending: true,
+            }),
+            ..mutation(BridgeMutationKind::AddTableView)
+        })
+        .unwrap()
+        .view
+        .unwrap();
+    expenses
+        .workspace
+        .apply(BridgeMutation {
+            page: Some(review.clone()),
+            view: Some(view.clone()),
+            text: Some("Costs".into()),
+            ..mutation(BridgeMutationKind::RenameView)
+        })
+        .unwrap();
+    let shown = expenses
+        .workspace
+        .query(BridgeQuery {
+            page: Some(review.clone()),
+            ..query(BridgeQueryKind::Views)
+        })
+        .unwrap()
+        .views
+        .remove(0);
+    assert_eq!(
+        (
+            shown.block.as_str(),
+            shown.title.as_str(),
+            shown.sort.is_some()
+        ),
+        (expenses.block.as_str(), "Costs", true)
+    );
+    let mut pages: Vec<_> = expenses
+        .workspace
+        .query(BridgeQuery {
+            block: Some(expenses.block.clone()),
+            ..query(BridgeQueryKind::TableViews)
+        })
+        .unwrap()
+        .shown
+        .into_iter()
+        .map(|shown| shown.page)
+        .collect();
+    pages.sort();
+    let mut expected = vec![expenses.page.clone(), review.clone()];
+    expected.sort();
+    assert_eq!(pages, expected);
+
+    expenses
+        .workspace
+        .apply(BridgeMutation {
+            block: Some(expenses.block.clone()),
+            ..mutation(BridgeMutationKind::DeleteTable)
+        })
+        .unwrap();
+    assert!(tables().is_empty());
+    let left = expenses
+        .workspace
+        .query(BridgeQuery {
+            page: Some(review),
+            ..query(BridgeQueryKind::Views)
+        })
+        .unwrap();
+    assert_eq!(left.count, 0);
+    assert!(
+        !expenses
+            .workspace
+            .is_loaded(&liquid_core::PageId::parse(&expenses.page).unwrap())
+    );
 }

@@ -7,15 +7,15 @@ use automerge::{ActorId, AutoCommit, ObjType, ROOT, ReadDoc};
 use crate::history::Header;
 use crate::id::random_bytes;
 use crate::model::{
-    self, AREAS, BLOCK, BLOCKS, BOUNDARY, KIND, LANGUAGE, NAME, OWNER, PAGES, PARENT, ROW_FILTER,
-    ROW_SORT, SORT, STYLE, TEXT, TITLE, VIEWS,
+    self, AREA, AREAS, BLOCK, BLOCKS, BOUNDARY, KIND, LANGUAGE, NAME, OWNER, PAGE, PAGES, PARENT,
+    ROW_FILTER, ROW_SORT, SORT, STYLE, TABLE, TABLES, TEXT, TITLE, VIEWS,
 };
 use crate::order::Order;
 use crate::store::{Commit, Store, Write};
 use crate::{
     Action, ActionId, Actor, Applied, Area, AreaId, AttachmentId, BlockId, BlockKind, Cell,
-    Changed, Code, Created, Document, Error, FieldId, FieldKind, Media, Mutation, Operation,
-    Origin, PageEntry, PageId, Permission, PersonId, Place, Request, RowId, TextStyle, View,
+    Changed, Code, Created, Document, Error, FieldId, Media, Mutation, Operation, Origin,
+    PageEntry, PageId, Permission, PersonId, Place, Request, RowId, TableEntry, TextStyle, View,
     ViewId,
 };
 use crate::{database, drawing};
@@ -189,22 +189,45 @@ impl<S: Store> Workspace<S> {
         drawing::read(self.doc(&Document::Page(page.clone()))?, block, pages)
     }
 
-    pub fn database(
-        &mut self,
-        page: &PageId,
-        block: &BlockId,
-    ) -> Result<Option<database::Database>, Error> {
-        database::read(self.doc(&Document::Page(page.clone()))?, block)
+    pub fn tables(&mut self) -> Result<Vec<TableEntry>, Error> {
+        Ok(model::tables(self.doc(&Document::Workspace)?))
+    }
+
+    pub fn database(&mut self, table: &BlockId) -> Result<Option<database::Database>, Error> {
+        let Some(name) = self.table_name(table)? else {
+            return Ok(None);
+        };
+        let read = database::read(self.doc(&Document::Table(table.clone()))?, table)?;
+        Ok(read.map(|database| database::Database { name, ..database }))
     }
 
     pub fn rows(
         &mut self,
-        page: &PageId,
-        block: &BlockId,
+        table: &BlockId,
         query: &database::RowQuery,
     ) -> Result<database::Rows, Error> {
-        let (doc, index) = self.database_index(page, block)?;
-        database::rows(doc, index, block, query)
+        if self.table_name(table)?.is_none() {
+            return Err(Error::NotFound);
+        }
+        let (doc, index) = self.database_index(table)?;
+        database::rows(doc, index, table, query)
+    }
+
+    pub fn table_views(&mut self, table: &BlockId) -> Result<Vec<(PageId, ViewId)>, Error> {
+        if self.table_name(table)?.is_none() {
+            return Err(Error::NotFound);
+        }
+        let doc = self.doc(&Document::Table(table.clone()))?;
+        Ok(model::sorted(doc, VIEWS)
+            .into_iter()
+            .filter_map(|entry| Some((PageId::stored(entry.get(PAGE)?), ViewId::stored(&entry.id))))
+            .collect())
+    }
+
+    fn table_name(&mut self, table: &BlockId) -> Result<Option<String>, Error> {
+        let doc = self.doc(&Document::Workspace)?;
+        Ok(model::live(doc, TABLES, table.as_str())
+            .map(|entry| model::string(doc, &entry, NAME).unwrap_or_default()))
     }
 
     pub fn is_loaded(&self, page: &PageId) -> bool {
@@ -213,6 +236,12 @@ impl<S: Store> Workspace<S> {
 
     pub fn close_page(&mut self, page: &PageId) {
         self.docs.remove(&Document::Page(page.clone()));
+    }
+
+    pub fn retain_loaded(&mut self, mut keep: impl FnMut(&Document) -> bool) {
+        self.docs.retain(|document, _| {
+            matches!(document, Document::Workspace | Document::Area(_)) || keep(document)
+        });
     }
 
     pub fn history(
@@ -233,10 +262,9 @@ impl<S: Store> Workspace<S> {
 
     fn database_index(
         &mut self,
-        page: &PageId,
         block: &BlockId,
     ) -> Result<(&mut AutoCommit, &mut database::Index), Error> {
-        let document = Document::Page(page.clone());
+        let document = Document::Table(block.clone());
         self.doc(&document)?;
         let loaded = self.docs.get_mut(&document).expect("loaded above");
         if !loaded.databases.contains_key(block) {
@@ -350,41 +378,74 @@ impl<S: Store> Workspace<S> {
             Mutation::AddDatabaseBlock { page, after, name } => {
                 self.write_add_database_block(page, after.as_ref(), name)
             }
-            Mutation::RenameDatabase { page, block, name } => {
-                self.write_rename_database(page, block, name)
+            Mutation::CreateTable { area, name } => {
+                let (table, mut written) = self.write_create_table(area, name)?;
+                written.created = Some(Created::Table(table));
+                Ok(written)
             }
-            Mutation::AddField {
+            Mutation::AddTableView {
                 page,
+                after,
+                table,
+                title,
+                sort,
+                filter,
+            } => self.write_add_table_view(
+                page,
+                after.as_ref(),
+                table,
+                title,
+                (sort.as_ref(), filter.as_ref()),
+            ),
+            Mutation::RenameView { page, view, title } => self.write_rename_view(page, view, title),
+            Mutation::DeleteTable { block } => self.write_delete_table(block),
+            Mutation::RenameDatabase { block, name } => self.write_rename_database(block, name),
+            Mutation::AddField {
                 block,
                 place,
                 name,
                 kind,
-            } => self.write_add_field(page, block, place, name, *kind),
-            Mutation::RenameField {
-                page,
-                block,
-                field,
-                name,
-            } => self.write_rename_field(page, block, field, name),
-            Mutation::RemoveField { page, block, field } => {
-                self.write_remove_field(page, block, field)
+            } => {
+                let doc = self.table_doc(block)?;
+                let field = database::add_field(doc, block, place.as_ref(), name, *kind)?;
+                Ok(table_changed(block, Some(Created::Field(field))))
+            }
+            Mutation::RenameField { block, field, name } => {
+                database::rename_field(self.table_doc(block)?, block, field, name)?;
+                Ok(table_changed(block, None))
+            }
+            Mutation::RemoveField { block, field } => {
+                database::remove_field(self.table_doc(block)?, block, field)?;
+                Ok(table_changed(block, None))
             }
             Mutation::AddOption {
-                page,
                 block,
                 field,
                 name,
                 color,
-            } => self.write_add_option(page, block, field, name, *color),
-            Mutation::AddRow { page, block, place } => self.write_add_row(page, block, place),
-            Mutation::RemoveRow { page, block, row } => self.write_remove_row(page, block, row),
+            } => {
+                let doc = self.table_doc(block)?;
+                let option = database::add_option(doc, block, field, name, *color)?;
+                Ok(table_changed(block, Some(Created::Option(option))))
+            }
+            Mutation::AddRow { block, place } => {
+                self.table_doc(block)?;
+                let (doc, index) = self.database_index(block)?;
+                let row = database::add_row(doc, index, block, place.as_ref())?;
+                Ok(table_changed(block, Some(Created::Row(row))))
+            }
+            Mutation::RemoveRow { block, row } => {
+                self.table_doc(block)?;
+                let (doc, index) = self.database_index(block)?;
+                database::remove_row(doc, index, block, row)?;
+                Ok(table_changed(block, None))
+            }
             Mutation::SetCell {
-                page,
                 block,
                 row,
                 field,
                 value,
-            } => self.write_set_cell(page, block, row, field, value),
+            } => self.write_set_cell(block, row, field, value),
             Mutation::RemoveView { page, view } => self.write_remove_view(page, view),
             Mutation::SetViewSort { page, view, sort } => {
                 self.write_view_sort(page, view, sort.as_ref())
@@ -448,17 +509,31 @@ impl<S: Store> Workspace<S> {
     }
 
     fn write_rename_page(&mut self, page: &PageId, title: &str) -> Result<Written, Error> {
+        let area = self.area_of(page)?;
+        let area_doc = self.doc(&Document::Area(area.clone()))?;
+        let entry = model::live(area_doc, PAGES, page.as_str()).ok_or(Error::NotFound)?;
+        area_doc.put(&entry, TITLE, title)?;
+        Ok(Written::new(
+            Document::Area(area.clone()),
+            Changed::Pages(area),
+        ))
+    }
+
+    fn area_of(&mut self, page: &PageId) -> Result<AreaId, Error> {
         for area in model::areas(self.doc(&Document::Workspace)?) {
             let area_doc = self.doc(&Document::Area(area.id.clone()))?;
-            if let Some(entry) = model::live(area_doc, PAGES, page.as_str()) {
-                area_doc.put(&entry, TITLE, title)?;
-                return Ok(Written::new(
-                    Document::Area(area.id.clone()),
-                    Changed::Pages(area.id),
-                ));
+            if model::live(area_doc, PAGES, page.as_str()).is_some() {
+                return Ok(area.id);
             }
         }
         Err(Error::NotFound)
+    }
+
+    fn table_doc(&mut self, table: &BlockId) -> Result<&mut AutoCommit, Error> {
+        if self.table_name(table)?.is_none() {
+            return Err(Error::NotFound);
+        }
+        self.doc(&Document::Table(table.clone()))
     }
 
     fn write_add_text_block(
@@ -696,98 +771,165 @@ impl<S: Store> Workspace<S> {
         after: Option<&ViewId>,
         name: &str,
     ) -> Result<Written, Error> {
-        let (doc, order) = self.page(page)?;
-        let block = BlockId::new()?;
-        database::create(doc, &block, name)?;
-        let sort = order.key_after(after)?;
-        let view = add_view(doc, order, sort, &block, BlockKind::Database)?;
-        let mut written = Written::new(Document::Page(page.clone()), Changed::Views(page.clone()));
-        written.created = Some(Created::Block { block, view });
+        let area = self.area_of(page)?;
+        let (table, mut written) = self.write_create_table(&area, name)?;
+        let view = ViewId::new()?;
+        let (_, doc) = written.new.last_mut().expect("the new Table");
+        model::insert(doc, VIEWS, view.as_str(), &[(PAGE, page.as_str())])?;
+        let shown = self.place_table_view(page, after, &table, &view, name, (None, None))?;
+        written.touched.extend(shown.touched);
+        written.changed.extend(shown.changed);
+        written.created = shown.created;
         Ok(written)
     }
 
-    fn write_rename_database(
+    fn write_create_table(
         &mut self,
-        page: &PageId,
-        block: &BlockId,
+        area: &AreaId,
         name: &str,
-    ) -> Result<Written, Error> {
-        database::rename(self.doc(&Document::Page(page.clone()))?, block, name)?;
-        Ok(block_changed(page, block, None))
+    ) -> Result<(BlockId, Written), Error> {
+        self.doc(&Document::Area(area.clone()))?;
+        let table = BlockId::new()?;
+        let workspace = self.doc(&Document::Workspace)?;
+        if model::child(workspace, &ROOT, TABLES).is_none() {
+            model::create_maps(workspace, &[TABLES])?;
+        }
+        let siblings = model::sorted(workspace, TABLES);
+        let sort = model::sort_at(&siblings, Place::Last)?;
+        model::insert(
+            workspace,
+            TABLES,
+            table.as_str(),
+            &[(NAME, name), (AREA, area.as_str()), (SORT, &sort)],
+        )?;
+        let mut doc = model::document(&self.device);
+        model::create_maps(&mut doc, &[BLOCKS, VIEWS])?;
+        database::create(&mut doc, &table)?;
+        let mut written = Written::new(Document::Workspace, Changed::Tables);
+        written.touched.push(Document::Table(table.clone()));
+        written.new.push((Document::Table(table.clone()), doc));
+        Ok((table, written))
     }
 
-    fn write_add_field(
+    fn write_add_table_view(
         &mut self,
         page: &PageId,
-        block: &BlockId,
-        place: &Place<FieldId>,
-        name: &str,
-        kind: FieldKind,
+        after: Option<&ViewId>,
+        table: &BlockId,
+        title: &str,
+        (sort, filter): (Option<&database::Sort>, Option<&database::Filter>),
     ) -> Result<Written, Error> {
-        let doc = self.doc(&Document::Page(page.clone()))?;
-        let field = database::add_field(doc, block, place.as_ref(), name, kind)?;
-        Ok(block_changed(page, block, Some(Created::Field(field))))
+        let view = ViewId::new()?;
+        {
+            let doc = self.table_doc(table)?;
+            if let Some(sort) = sort {
+                database::check_sort(doc, table, sort)?;
+            }
+            if let Some(filter) = filter {
+                database::check_filter(doc, table, filter)?;
+            }
+            model::insert(doc, VIEWS, view.as_str(), &[(PAGE, page.as_str())])?;
+        }
+        let mut written =
+            self.place_table_view(page, after, table, &view, title, (sort, filter))?;
+        written.touched.push(Document::Table(table.clone()));
+        Ok(written)
     }
 
-    fn write_rename_field(
+    fn place_table_view(
         &mut self,
         page: &PageId,
-        block: &BlockId,
-        field: &FieldId,
-        name: &str,
+        after: Option<&ViewId>,
+        table: &BlockId,
+        view: &ViewId,
+        title: &str,
+        (sort, filter): (Option<&database::Sort>, Option<&database::Filter>),
     ) -> Result<Written, Error> {
-        database::rename_field(self.doc(&Document::Page(page.clone()))?, block, field, name)?;
-        Ok(block_changed(page, block, None))
+        let (doc, order) = self.page(page)?;
+        let key = order.key_after(after)?;
+        let entry = model::insert(
+            doc,
+            VIEWS,
+            view.as_str(),
+            &[(TABLE, table.as_str()), (TITLE, title), (SORT, &key)],
+        )?;
+        doc.put(&entry, BOUNDARY, false)?;
+        put_setting(doc, view, ROW_SORT, sort)?;
+        put_setting(doc, view, ROW_FILTER, filter)?;
+        order.insert(
+            key,
+            View {
+                id: view.clone(),
+                block: table.clone(),
+                title: title.to_string(),
+                boundary: false,
+                kind: BlockKind::Database,
+                sort: sort.cloned(),
+                filter: filter.cloned(),
+            },
+        );
+        let mut written = Written::new(Document::Page(page.clone()), Changed::Views(page.clone()));
+        written.created = Some(Created::Block {
+            block: table.clone(),
+            view: view.clone(),
+        });
+        Ok(written)
     }
 
-    fn write_remove_field(
+    fn write_rename_view(
         &mut self,
         page: &PageId,
-        block: &BlockId,
-        field: &FieldId,
+        view: &ViewId,
+        title: &str,
     ) -> Result<Written, Error> {
-        database::remove_field(self.doc(&Document::Page(page.clone()))?, block, field)?;
-        Ok(block_changed(page, block, None))
+        let (doc, order) = self.page(page)?;
+        let entry = model::live(doc, VIEWS, view.as_str()).ok_or(Error::NotFound)?;
+        let table = model::string(doc, &entry, TABLE).map(|table| BlockId::stored(&table));
+        doc.put(&entry, TITLE, title)?;
+        order.set_title(view, title);
+        let mut written = Written::new(Document::Page(page.clone()), Changed::Views(page.clone()));
+        if let Some(table) = table
+            && self.table_name(&table)?.as_deref() == Some("")
+        {
+            let named = self.write_rename_database(&table, title)?;
+            written.touched.extend(named.touched);
+            written.changed.extend(named.changed);
+        }
+        Ok(written)
     }
 
-    fn write_add_option(
-        &mut self,
-        page: &PageId,
-        block: &BlockId,
-        field: &FieldId,
-        name: &str,
-        color: u8,
-    ) -> Result<Written, Error> {
-        let doc = self.doc(&Document::Page(page.clone()))?;
-        let option = database::add_option(doc, block, field, name, color)?;
-        Ok(block_changed(page, block, Some(Created::Option(option))))
+    fn write_rename_database(&mut self, table: &BlockId, name: &str) -> Result<Written, Error> {
+        let workspace = self.doc(&Document::Workspace)?;
+        let entry = model::live(workspace, TABLES, table.as_str()).ok_or(Error::NotFound)?;
+        workspace.put(&entry, NAME, name)?;
+        let mut written = Written::new(Document::Workspace, Changed::Tables);
+        written.changed.push(Changed::Table(table.clone()));
+        Ok(written)
     }
 
-    fn write_add_row(
-        &mut self,
-        page: &PageId,
-        block: &BlockId,
-        place: &Place<RowId>,
-    ) -> Result<Written, Error> {
-        let (doc, index) = self.database_index(page, block)?;
-        let row = database::add_row(doc, index, block, place.as_ref())?;
-        Ok(block_changed(page, block, Some(Created::Row(row))))
-    }
-
-    fn write_remove_row(
-        &mut self,
-        page: &PageId,
-        block: &BlockId,
-        row: &RowId,
-    ) -> Result<Written, Error> {
-        let (doc, index) = self.database_index(page, block)?;
-        database::remove_row(doc, index, block, row)?;
-        Ok(block_changed(page, block, None))
+    fn write_delete_table(&mut self, table: &BlockId) -> Result<Written, Error> {
+        let shown = self.table_views(table)?;
+        let workspace = self.doc(&Document::Workspace)?;
+        let entry = model::live(workspace, TABLES, table.as_str()).ok_or(Error::NotFound)?;
+        model::mark_deleted(workspace, &entry)?;
+        let mut written = Written::new(Document::Workspace, Changed::Tables);
+        written.changed.push(Changed::Table(table.clone()));
+        for (page, view) in shown {
+            let Ok((doc, order)) = self.page(&page) else {
+                continue;
+            };
+            if let Some(entry) = model::live(doc, VIEWS, view.as_str()) {
+                model::mark_deleted(doc, &entry)?;
+                order.remove(&view);
+                written.touched.push(Document::Page(page.clone()));
+                written.changed.push(Changed::Views(page));
+            }
+        }
+        Ok(written)
     }
 
     fn write_set_cell(
         &mut self,
-        page: &PageId,
         block: &BlockId,
         row: &RowId,
         field: &FieldId,
@@ -812,14 +954,29 @@ impl<S: Store> Workspace<S> {
             }
             value => value,
         };
-        let (doc, index) = self.database_index(page, block)?;
+        self.table_doc(block)?;
+        let (doc, index) = self.database_index(block)?;
         database::set_cell(doc, index, block, row, field, value)?;
-        Ok(block_changed(page, block, None))
+        Ok(table_changed(block, None))
     }
 
     fn write_remove_view(&mut self, page: &PageId, view: &ViewId) -> Result<Written, Error> {
         let (doc, order) = self.page(page)?;
         let entry = model::live(doc, VIEWS, view.as_str()).ok_or(Error::NotFound)?;
+        if let Some(table) = model::string(doc, &entry, TABLE) {
+            model::mark_deleted(doc, &entry)?;
+            order.remove(view);
+            let mut written =
+                Written::new(Document::Page(page.clone()), Changed::Views(page.clone()));
+            let table = BlockId::stored(&table);
+            if let Ok(doc) = self.table_doc(&table)
+                && let Some(shown) = model::live(doc, VIEWS, view.as_str())
+            {
+                model::mark_deleted(doc, &shown)?;
+                written.touched.push(Document::Table(table));
+            }
+            return Ok(written);
+        }
         let block = BlockId::stored(&model::string(doc, &entry, BLOCK).ok_or(Error::NotFound)?);
         model::mark_deleted(doc, &entry)?;
         let mut written = Written::new(Document::Page(page.clone()), Changed::Views(page.clone()));
@@ -839,11 +996,11 @@ impl<S: Store> Workspace<S> {
         view: &ViewId,
         sort: Option<&database::Sort>,
     ) -> Result<Written, Error> {
-        let (doc, order) = self.page(page)?;
-        let block = table_of(order, view)?;
+        let block = table_of(self.page(page)?.1, view)?;
         if let Some(sort) = sort {
-            database::check_sort(doc, &block, sort)?;
+            database::check_sort(self.table_doc(&block)?, &block, sort)?;
         }
+        let (doc, order) = self.page(page)?;
         put_setting(doc, view, ROW_SORT, sort)?;
         order.set_sort(view, sort.cloned());
         Ok(Written::new(
@@ -858,11 +1015,11 @@ impl<S: Store> Workspace<S> {
         view: &ViewId,
         filter: Option<&database::Filter>,
     ) -> Result<Written, Error> {
-        let (doc, order) = self.page(page)?;
-        let block = table_of(order, view)?;
+        let block = table_of(self.page(page)?.1, view)?;
         if let Some(filter) = filter {
-            database::check_filter(doc, &block, filter)?;
+            database::check_filter(self.table_doc(&block)?, &block, filter)?;
         }
+        let (doc, order) = self.page(page)?;
         put_setting(doc, view, ROW_FILTER, filter)?;
         order.set_filter(view, filter.cloned());
         Ok(Written::new(
@@ -963,6 +1120,15 @@ fn block_changed(page: &PageId, block: &BlockId, created: Option<Created>) -> Wr
     written
 }
 
+fn table_changed(table: &BlockId, created: Option<Created>) -> Written {
+    let mut written = Written::new(
+        Document::Table(table.clone()),
+        Changed::Table(table.clone()),
+    );
+    written.created = created;
+    written
+}
+
 fn table_of(order: &Order, view: &ViewId) -> Result<BlockId, Error> {
     let shown = order.view(view).ok_or(Error::NotFound)?;
     if shown.kind != BlockKind::Database {
@@ -1013,6 +1179,7 @@ fn add_view(
     let placed = View {
         id: view.clone(),
         block: block.clone(),
+        title: String::new(),
         boundary: false,
         kind,
         sort: None,

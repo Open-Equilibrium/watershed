@@ -191,13 +191,8 @@ fn map(doc: &AutoCommit, entry: &ObjId, key: &str) -> Result<ObjId, Error> {
     model::child(doc, entry, key).ok_or_else(|| Error::Document(format!("no {key} map")))
 }
 
-pub(crate) fn create(doc: &mut AutoCommit, block: &BlockId, name: &str) -> Result<(), Error> {
-    let entry = model::insert(
-        doc,
-        BLOCKS,
-        block.as_str(),
-        &[(KIND, DATABASE), (NAME, name)],
-    )?;
+pub(crate) fn create(doc: &mut AutoCommit, block: &BlockId) -> Result<(), Error> {
+    let entry = model::insert(doc, BLOCKS, block.as_str(), &[(KIND, DATABASE)])?;
     let fields = doc.put_object(&entry, FIELDS, ObjType::Map)?;
     doc.put_object(&entry, ROWS, ObjType::Map)?;
     add_field_to(
@@ -237,11 +232,6 @@ fn add_field_to(
     )?;
     doc.put_object(&entry, OPTIONS, ObjType::Map)?;
     Ok(())
-}
-
-pub(crate) fn rename(doc: &mut AutoCommit, block: &BlockId, name: &str) -> Result<(), Error> {
-    let entry = entry(doc, block)?;
-    Ok(doc.put(&entry, NAME, name)?)
 }
 
 pub(crate) fn add_field(
@@ -460,7 +450,7 @@ pub(crate) fn read(doc: &AutoCommit, block: &BlockId) -> Result<Option<Database>
         })
         .collect();
     Ok(Some(Database {
-        name: model::string(doc, &entry, NAME).unwrap_or_default(),
+        name: String::new(),
         fields,
     }))
 }

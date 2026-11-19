@@ -303,7 +303,6 @@ fn a_file_cell_holds_files_of_finished_attachments() {
     let Some(Created::Field(files)) = apply(
         &mut workspace,
         Mutation::AddField {
-            page: page.clone(),
             block: block.clone(),
             place: Place::Last,
             name: "Files".into(),
@@ -316,7 +315,6 @@ fn a_file_cell_holds_files_of_finished_attachments() {
     let Some(Created::Row(row)) = apply(
         &mut workspace,
         Mutation::AddRow {
-            page: page.clone(),
             block: block.clone(),
             place: Place::Last,
         },
@@ -325,7 +323,6 @@ fn a_file_cell_holds_files_of_finished_attachments() {
         panic!("a row")
     };
     let set = |value: Cell| Mutation::SetCell {
-        page: page.clone(),
         block: block.clone(),
         row: row.clone(),
         field: files.clone(),
@@ -348,7 +345,7 @@ fn a_file_cell_holds_files_of_finished_attachments() {
         start: 0,
         limit: 10,
     };
-    let rows = workspace.rows(&page, &block, &all).unwrap().rows;
+    let rows = workspace.rows(&block, &all).unwrap().rows;
     let Some(Cell::Files(read)) = rows[0].cell(&files) else {
         panic!("files, stored")
     };
@@ -380,7 +377,7 @@ fn a_file_cell_holds_files_of_finished_attachments() {
         Err(Error::WrongKind)
     );
     apply(&mut workspace, set(Cell::Files(Vec::new()))).unwrap();
-    let rows = workspace.rows(&page, &block, &all).unwrap();
+    let rows = workspace.rows(&block, &all).unwrap();
     assert_eq!(rows.count, 0, "no files is an empty cell");
     let no_files = RowQuery {
         filter: Some(liquid_core::Filter {
@@ -390,7 +387,7 @@ fn a_file_cell_holds_files_of_finished_attachments() {
         ..all
     };
     assert_eq!(
-        workspace.rows(&page, &block, &no_files).unwrap().count,
+        workspace.rows(&block, &no_files).unwrap().count,
         1,
         "and so it is as a filter's value"
     );
