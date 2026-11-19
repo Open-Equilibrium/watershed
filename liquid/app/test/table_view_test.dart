@@ -134,8 +134,8 @@ void main() {
       expect(rows.every((query) => query.start == 0), isTrue);
       expect(
         tester.getSize(find.byType(TableBlock)).height,
-        lessThan(32 + 11 * 34 + 2 * 40),
-        reason: 'about ten rows high',
+        lessThan(32 + 40 + 11 * 34 + 2 * 40),
+        reason: 'a title, the Sort and Filter line, and about ten rows',
       );
 
       await tester.scrollUntilVisible(
@@ -202,7 +202,7 @@ void main() {
   });
 
   testWidgets(
-    '⌘Z in a Table name after a rename elsewhere does not bring back what was typed',
+    '⌘Z in a View\'s title after a rename elsewhere does not bring back what was typed',
     (tester) async {
       await kit.show(tester, [TablePart(expenses)]);
       final name = kit.inTable(find.byType(TextField));
@@ -218,12 +218,12 @@ void main() {
       await tester.pump(const Duration(milliseconds: 600));
       FocusManager.instance.primaryFocus?.unfocus();
       await tester.pumpAndSettle();
-      final table = kit.fake.views[kit.page]!.single.block;
+      final view = kit.fake.views[kit.page]!.single.id;
       await kit.workspace.apply(
         mutation(
-          BridgeMutationKind.renameDatabase,
+          BridgeMutationKind.renameView,
           page: kit.page,
-          block: table,
+          view: view,
           text: 'Trips',
         ),
       );

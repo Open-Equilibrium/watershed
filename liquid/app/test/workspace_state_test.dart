@@ -142,6 +142,7 @@ void main() {
     await pumpEventQueue();
     expect(fake.followed, {
       const BridgeResource(kind: BridgeResourceKind.areas),
+      const BridgeResource(kind: BridgeResourceKind.tables),
       BridgeResource(
         kind: BridgeResourceKind.pages,
         area: fake.areas.single.id,

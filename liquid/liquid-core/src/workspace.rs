@@ -224,6 +224,12 @@ impl<S: Store> Workspace<S> {
             .collect())
     }
 
+    pub fn view_title(&mut self, page: &PageId, view: &ViewId) -> Result<Option<String>, Error> {
+        let doc = self.doc(&Document::Page(page.clone()))?;
+        Ok(model::live(doc, VIEWS, view.as_str())
+            .map(|entry| model::string(doc, &entry, TITLE).unwrap_or_default()))
+    }
+
     fn table_name(&mut self, table: &BlockId) -> Result<Option<String>, Error> {
         let doc = self.doc(&Document::Workspace)?;
         Ok(model::live(doc, TABLES, table.as_str())
@@ -833,6 +839,7 @@ impl<S: Store> Workspace<S> {
         let mut written =
             self.place_table_view(page, after, table, &view, title, (sort, filter))?;
         written.touched.push(Document::Table(table.clone()));
+        written.changed.push(Changed::Table(table.clone()));
         Ok(written)
     }
 
@@ -973,7 +980,8 @@ impl<S: Store> Workspace<S> {
                 && let Some(shown) = model::live(doc, VIEWS, view.as_str())
             {
                 model::mark_deleted(doc, &shown)?;
-                written.touched.push(Document::Table(table));
+                written.touched.push(Document::Table(table.clone()));
+                written.changed.push(Changed::Table(table));
             }
             return Ok(written);
         }

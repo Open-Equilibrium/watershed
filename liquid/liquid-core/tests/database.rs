@@ -145,6 +145,7 @@ fn all() -> RowQuery {
         filter: None,
         start: 0,
         limit: usize::MAX,
+        search: None,
     }
 }
 
@@ -332,6 +333,7 @@ fn rows_sort_and_filter_in_windows() {
     let window = RowQuery {
         start: 1,
         limit: 2,
+        search: None,
         ..by(&name, false)
     };
     assert_eq!(sheet.rows(&window).count, 5);

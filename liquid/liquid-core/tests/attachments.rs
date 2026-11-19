@@ -344,6 +344,7 @@ fn a_file_cell_holds_files_of_finished_attachments() {
         }),
         start: 0,
         limit: 10,
+        search: None,
     };
     let rows = workspace.rows(&block, &all).unwrap().rows;
     let Some(Cell::Files(read)) = rows[0].cell(&files) else {

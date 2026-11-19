@@ -5,6 +5,7 @@ import 'dart:math';
 import 'agent/sidebar.dart';
 import 'agent_hosts/agent_hosts.dart';
 import 'rust/api/replica.dart';
+import 'settings_file.dart';
 import 'rust/api/session.dart';
 import 'session/backend.dart';
 import 'session/session_state.dart';
@@ -218,14 +219,19 @@ Future<(WorkspaceState?, String?)> openWorkspace(
   } on Object catch (error) {
     return (null, 'The Workspace did not open: $error');
   }
-  return startWorkspace(workspace, show: show);
+  return startWorkspace(
+    workspace,
+    show: show,
+    layout: SettingsFile(File('$dir/sidebar.json')),
+  );
 }
 
 Future<(WorkspaceState, String?)> startWorkspace(
   LiquidWorkspace workspace, {
   required bool show,
+  SettingsFile? layout,
 }) async {
-  final state = WorkspaceState(workspace);
+  final state = WorkspaceState(workspace, layout: layout);
   try {
     await state.start(show: show);
   } on Object catch (error) {

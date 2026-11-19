@@ -24,6 +24,7 @@ import '../theme/icons.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
 import '../workspace/page_view.dart';
+import '../workspace/table_page.dart';
 import '../workspace/workspace_state.dart';
 import 'action_area.dart';
 import 'chat_view.dart';
@@ -472,7 +473,13 @@ class _AgentShellState extends State<AgentShell> {
                           sizing: StackFit.expand,
                           children: [
                             agent ?? const SizedBox.shrink(),
-                            if (open != null)
+                            if (open?.table case final table?)
+                              TablePage(
+                                key: ValueKey(table),
+                                state: widget.workspace!,
+                                table: table,
+                              )
+                            else if (open != null)
                               WorkspacePage(
                                 key: ValueKey(open.page),
                                 state: widget.workspace!,

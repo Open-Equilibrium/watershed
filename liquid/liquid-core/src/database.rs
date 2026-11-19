@@ -64,6 +64,7 @@ pub struct RowQuery {
     pub filter: Option<Filter>,
     pub start: usize,
     pub limit: usize,
+    pub search: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -474,7 +475,12 @@ pub(crate) fn rows(
         .as_ref()
         .filter(|filter| applies(&filter.field));
     let sort = query.sort.as_ref().filter(|sort| applies(&sort.field));
-    if filter.is_none() && sort.is_none() {
+    let search = query
+        .search
+        .as_deref()
+        .map(str::to_lowercase)
+        .filter(|search| !search.is_empty());
+    if filter.is_none() && sort.is_none() && search.is_none() {
         let window = index.rows.iter().skip(query.start).take(query.limit);
         return Ok(Rows {
             count: index.rows.len(),
@@ -489,6 +495,23 @@ pub(crate) fn rows(
             .collect(),
         None => index.rows.iter().collect(),
     };
+    if let Some(search) = search {
+        let options: HashMap<&str, String> = database
+            .fields
+            .iter()
+            .flat_map(|field| &field.options)
+            .map(|option| (option.id.as_str(), option.name.to_lowercase()))
+            .collect();
+        rows.retain(|row| {
+            live.iter().any(|field| match cell(row, field) {
+                Some(Cell::Text(text)) => text.to_lowercase().contains(&search),
+                Some(Cell::Select(option)) => options
+                    .get(option.as_str())
+                    .is_some_and(|name| name.contains(&search)),
+                _ => false,
+            })
+        });
+    }
     if let Some(sort) = sort {
         let positions: HashMap<&str, usize> = database
             .fields

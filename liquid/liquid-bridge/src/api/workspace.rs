@@ -156,6 +156,7 @@ pub struct BridgeQuery {
     pub limit: i64,
     pub sort: Option<BridgeSort>,
     pub filter: Option<BridgeFilter>,
+    pub search: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -182,6 +183,7 @@ pub struct BridgeTable {
 pub struct BridgeShown {
     pub page: String,
     pub view: String,
+    pub title: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

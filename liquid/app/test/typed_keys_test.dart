@@ -1,3 +1,4 @@
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -91,7 +92,10 @@ void main() {
     variant: macOS,
     (tester) async {
       await kit.show(tester, [TablePart(expenses)]);
-      await tester.tap(kit.inTable(find.text('Category')));
+      await tester.tap(
+        kit.inTable(find.text('Category')),
+        buttons: kSecondaryButton,
+      );
       await tester.pumpAndSettle();
       expect(
         focused(tester).textEditingValue.selection,

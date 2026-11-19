@@ -111,6 +111,7 @@ fn all() -> RowQuery {
         filter: None,
         start: 0,
         limit: usize::MAX,
+        search: None,
     }
 }
 
@@ -320,4 +321,88 @@ fn a_table_made_in_tables_belongs_to_its_area_and_a_new_view_may_copy_a_setup() 
         filter: None,
     };
     assert_eq!(home.edit(foreign), Err(Error::NotFound));
+}
+
+#[test]
+fn a_search_keeps_rows_whose_text_or_option_holds_it() {
+    let mut home = Home::new();
+    let table = home.table.clone();
+    let name = home.workspace.database(&table).unwrap().unwrap().fields[0]
+        .id
+        .clone();
+    let Some(Created::Field(category)) = home
+        .edit(Mutation::AddField {
+            block: table.clone(),
+            place: Place::Last,
+            name: "Category".into(),
+            kind: FieldKind::Select,
+        })
+        .unwrap()
+        .created
+    else {
+        panic!("a field")
+    };
+    let Some(Created::Option(home_option)) = home
+        .edit(Mutation::AddOption {
+            block: table.clone(),
+            field: category.clone(),
+            name: "Home".into(),
+            color: 0,
+        })
+        .unwrap()
+        .created
+    else {
+        panic!("an option")
+    };
+    for (item, option) in [
+        ("Rent", Some(&home_option)),
+        ("Groceries", None),
+        ("Train", None),
+    ] {
+        let Some(Created::Row(row)) = home
+            .edit(Mutation::AddRow {
+                block: table.clone(),
+                place: Place::Last,
+            })
+            .unwrap()
+            .created
+        else {
+            panic!("a row")
+        };
+        home.edit(Mutation::SetCell {
+            block: table.clone(),
+            row: row.clone(),
+            field: name.clone(),
+            value: Cell::Text(item.into()),
+        })
+        .unwrap();
+        if let Some(option) = option {
+            home.edit(Mutation::SetCell {
+                block: table.clone(),
+                row,
+                field: category.clone(),
+                value: Cell::Select(option.clone()),
+            })
+            .unwrap();
+        }
+    }
+    let found = |home: &mut Home, search: &str| -> Vec<Cell> {
+        let query = RowQuery {
+            search: Some(search.into()),
+            ..all()
+        };
+        home.workspace
+            .rows(&table, &query)
+            .unwrap()
+            .rows
+            .into_iter()
+            .map(|row| row.cell(&name).cloned().unwrap_or(Cell::Empty))
+            .collect()
+    };
+    assert_eq!(
+        found(&mut home, "O"),
+        [Cell::Text("Rent".into()), Cell::Text("Groceries".into())]
+    );
+    assert_eq!(found(&mut home, "home"), [Cell::Text("Rent".into())]);
+    assert_eq!(found(&mut home, "plane"), Vec::<Cell>::new());
 }

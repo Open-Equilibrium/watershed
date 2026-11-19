@@ -20,6 +20,7 @@ import 'stored_name.dart';
 import 'table_cells.dart';
 import 'table_query.dart';
 import 'table_selection.dart';
+import 'table_view_parts.dart';
 import 'follow.dart';
 import 'page_views.dart';
 import 'windowed_list.dart';
@@ -43,10 +44,17 @@ double _width(BridgeFieldKind kind) => switch (kind) {
 };
 
 class TableBlock extends StatefulWidget {
-  const TableBlock({super.key, required this.views, required this.view});
+  const TableBlock({
+    super.key,
+    required this.views,
+    required this.view,
+    this.fullPage = false,
+  });
 
   final PageViews views;
   final BridgeView view;
+
+  final bool fullPage;
 
   @override
   State<TableBlock> createState() => _TableBlockState();
@@ -56,28 +64,25 @@ class _TableBlockState extends State<TableBlock> implements CellDrop {
   BridgeDatabase? _database;
   late final _rows = WindowedList<BridgeRow>(
     (start, limit) async {
-      final BridgeView(:sort, :filter) = widget.view;
+      final sort = widget.fullPage ? _pageSort : widget.view.sort;
+      final filter = widget.fullPage ? null : widget.view.filter;
+      final search = _search.isEmpty ? null : _search;
       final answer = await _state.read(
         query(
           BridgeQueryKind.rows,
-          page: _page,
           block: _block,
           start: start,
           limit: limit,
           sort: sort,
           filter: filter,
+          search: search,
         ),
       );
       if (start == 0) {
-        _allRows = filter == null
+        _allRows = filter == null && search == null
             ? answer.count
             : (await _state.read(
-                query(
-                  BridgeQueryKind.rows,
-                  page: _page,
-                  block: _block,
-                  limit: 0,
-                ),
+                query(BridgeQueryKind.rows, block: _block, limit: 0),
               )).count;
       }
       return (answer.count, answer.rows);
@@ -169,32 +174,44 @@ class _TableBlockState extends State<TableBlock> implements CellDrop {
 
   String _rowCount(NumberFormat format, int count, BridgeFilter? filter) {
     final all = _allRows ?? count;
-    return filter == null
+    return filter == null && _search.isEmpty
         ? '${format.format(count)} ${count == 1 ? 'row' : 'rows'}'
         : '${format.format(count)} of ${format.format(all)} '
               '${all == 1 ? 'row' : 'rows'}';
   }
 
   late final _name = StoredName(
-    '',
-    rename: (name) => widget.views.write(
+    widget.view.title,
+    rename: (title) => widget.views.write(
       mutation(
-        BridgeMutationKind.renameDatabase,
+        BridgeMutationKind.renameView,
         page: _page,
-        block: _block,
-        text: name,
+        view: widget.view.id,
+        text: title,
       ),
-      [_block],
+      [widget.view.id],
     ),
-    restore: () async => mounted ? _database?.name ?? '' : null,
+    restore: () async => mounted ? widget.view.title : null,
     quitting: () => _state.quitting,
     replaced: () {
       if (mounted) setState(() {});
     },
   );
-  final _nameFocus = FocusNode(debugLabel: 'Table name');
+  final _nameFocus = FocusNode(debugLabel: 'View title');
 
-  int _readSent = 0;
+  String _search = '';
+  bool _searching = false;
+  final _searchText = TextEditingController();
+  final _searchFocus = FocusNode(debugLabel: 'Table search');
+  Timer? _searchSettle;
+
+  BridgeSort? _pageSort;
+
+  bool _read1 = false;
+
+  bool _hovered = false;
+  bool _headerHovered = false;
+
   StreamSubscription<String>? _settled;
 
   int _reads = 0;
@@ -225,17 +242,18 @@ class _TableBlockState extends State<TableBlock> implements CellDrop {
     });
     _followed = follow(
       _state.workspace,
-      BridgeResource(
-        kind: BridgeResourceKind.block,
-        page: _page,
-        block: _block,
-      ),
+      BridgeResource(kind: BridgeResourceKind.table, block: _block),
     ).listen((_) => unawaited(_read()), onError: _report);
   }
 
   @override
   void didUpdateWidget(TableBlock old) {
     super.didUpdateWidget(old);
+    if (widget.view.title != old.view.title &&
+        !_nameFocus.hasFocus &&
+        widget.views.pending(widget.view.id) == 0) {
+      _name.show(widget.view.title);
+    }
     if (widget.view.sort == old.view.sort &&
         sameFilter(widget.view.filter, old.view.filter)) {
       return;
@@ -252,7 +270,43 @@ class _TableBlockState extends State<TableBlock> implements CellDrop {
     widget.views.write(change, const []).then((_) {}, onError: (Object _) {}),
   );
 
+  void _searched(String text) {
+    _searchSettle?.cancel();
+    _searchSettle = Timer(const Duration(milliseconds: 150), () {
+      if (!mounted || text == _search) return;
+      setState(() => _search = text);
+      _toTop();
+      unawaited(_rows.reread());
+    });
+  }
+
+  void _toTop() {
+    if (!_down.hasClients) return;
+    _scrollingItself = true;
+    _down.jumpTo(0);
+    _scrollingItself = false;
+  }
+
+  void _sortBy(BridgeField field) {
+    final sort = _liveSort;
+    _setSort(switch (sort) {
+      final sort? when sort.field == field.id && !sort.descending => BridgeSort(
+        field: field.id,
+        descending: true,
+      ),
+      final sort? when sort.field == field.id => null,
+      _ => BridgeSort(field: field.id, descending: false),
+    });
+  }
+
   void _setSort(BridgeSort? sort) {
+    if (widget.fullPage) {
+      if (sort == _pageSort) return;
+      setState(() => _pageSort = sort);
+      _toTop();
+      unawaited(_rows.reread());
+      return;
+    }
     if (sort == widget.view.sort) return;
     _setQuery(
       mutation(
@@ -309,10 +363,11 @@ class _TableBlockState extends State<TableBlock> implements CellDrop {
   bool _isField(String id) =>
       _database?.fields.any((field) => field.id == id) ?? false;
 
-  BridgeSort? get _liveSort => switch (widget.view.sort) {
-    final sort? when _isField(sort.field) => sort,
-    _ => null,
-  };
+  BridgeSort? get _liveSort =>
+      switch (widget.fullPage ? _pageSort : widget.view.sort) {
+        final sort? when _isField(sort.field) => sort,
+        _ => null,
+      };
   BridgeFilter? get _liveFilter => switch (widget.view.filter) {
     final filter? when _isField(filter.field) => filter,
     _ => null,
@@ -360,6 +415,9 @@ class _TableBlockState extends State<TableBlock> implements CellDrop {
     _down.dispose();
     _name.dispose();
     _nameFocus.dispose();
+    _searchSettle?.cancel();
+    _searchText.dispose();
+    _searchFocus.dispose();
     _fieldMenus.renameTyped();
     _state.finishing.remove(_fieldMenus.renameTyped);
     _fieldMenus.dispose();
@@ -640,19 +698,15 @@ class _TableBlockState extends State<TableBlock> implements CellDrop {
   void _left() {
     if (_nameFocus.hasFocus) return;
     _name.write();
-    final views = widget.views;
-    if (views.pending(_block) > 0 || views.sent(_block) != _readSent) return;
-    _name.show(_database?.name ?? '');
+    if (widget.views.pending(widget.view.id) > 0) return;
+    _name.show(widget.view.title);
   }
 
   Future<void> _read() async {
     final read = ++_reads;
-    final views = widget.views;
-    final clean = views.pending(_block) == 0;
-    final sent = views.sent(_block);
     try {
       final answer = await _state.read(
-        query(BridgeQueryKind.database, page: _page, block: _block),
+        query(BridgeQueryKind.database, block: _block),
       );
       if (!mounted || read != _reads) return;
       if (_fieldAdded case final field?) {
@@ -664,11 +718,10 @@ class _TableBlockState extends State<TableBlock> implements CellDrop {
           _fieldAdded = null;
         }
       }
-      if (clean && views.pending(_block) == 0 && sent == views.sent(_block)) {
-        _readSent = sent;
-        if (!_nameFocus.hasFocus) _name.show(answer.database?.name ?? '');
-      }
-      setState(() => _database = answer.database);
+      setState(() {
+        _database = answer.database;
+        _read1 = true;
+      });
       _fieldMenus.read();
       _cells.relocate((id) => _rows.indexWhere((row) => row.id == id));
     } on Object catch (error) {
@@ -682,6 +735,211 @@ class _TableBlockState extends State<TableBlock> implements CellDrop {
       _rowAdded = false;
       setState(() => _toLastRow = true);
     }
+  }
+
+  void _openTable() => _state.openTable(_block);
+
+  Future<void> _deleteView() async {
+    final BridgeAnswer shown;
+    try {
+      shown = await _state.read(
+        query(BridgeQueryKind.tableViews, block: _block, limit: 2),
+      );
+    } on Object catch (error) {
+      _report(error);
+      return;
+    }
+    if (!mounted) return;
+    final remove = mutation(
+      BridgeMutationKind.removeView,
+      page: _page,
+      view: widget.view.id,
+    );
+    if (shown.count > 1) {
+      unawaited(_write(remove));
+      return;
+    }
+    final chosen = await showDialog<LastView>(
+      context: context,
+      builder: (_) => LastViewDialog(
+        name: _database?.name ?? '',
+        rows: _allRows ?? _rows.count ?? 0,
+      ),
+    );
+    if (!mounted || chosen == null) return;
+    unawaited(
+      _write(
+        chosen == LastView.table
+            ? mutation(BridgeMutationKind.deleteTable, block: _block)
+            : remove,
+      ),
+    );
+  }
+
+  Future<void> _write(BridgeMutation change) =>
+      widget.views.write(change, const []).then((_) {}, onError: (Object _) {});
+
+  Widget _titleLine(BridgeDatabase? database) {
+    final ws = context.ws;
+    return MouseRegion(
+      onEnter: (_) => setState(() => _hovered = true),
+      onExit: (_) => setState(() => _hovered = false),
+      child: SizedBox(
+        height: 32,
+        child: Row(
+          children: [
+            Icon(LucideIcons.table, size: 16, color: ws.textFaint),
+            const SizedBox(width: WsMetrics.space3),
+            Expanded(
+              child: TextField(
+                controller: _name.take(),
+                focusNode: _nameFocus,
+                selectAllOnFocus: false,
+                style: TextStyle(
+                  fontSize: WsMetrics.fsProse,
+                  fontWeight: WsMetrics.fwSemibold,
+                  color: ws.text,
+                ),
+                decoration: InputDecoration.collapsed(
+                  hintText: untitled,
+                  hintStyle: TextStyle(color: ws.textFaint),
+                ),
+              ),
+            ),
+            if (database != null) ...[
+              const SizedBox(width: WsMetrics.space3),
+              Flexible(
+                child: Align(
+                  alignment: Alignment.centerRight,
+                  child: TableNote(name: database.name, onOpen: _openTable),
+                ),
+              ),
+            ],
+            MoreMenu(
+              label: 'View actions',
+              visible: _hovered || touchFirst,
+              items: [(LucideIcons.trash, 'Delete View', _deleteView)],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _setupLine(
+    BridgeDatabase database,
+    BridgeSort? sort,
+    BridgeFilter? filter,
+    NumberFormat numbers,
+    String days,
+  ) {
+    String? sortLabel(BridgeSort sort) {
+      final field = database.fields
+          .where((field) => field.id == sort.field)
+          .firstOrNull;
+      if (field == null) return null;
+      return '${field.name}, ${sort.descending ? 'descending' : 'ascending'}';
+    }
+
+    return Padding(
+      padding: const EdgeInsets.only(
+        top: WsMetrics.space1,
+        bottom: WsMetrics.space2,
+      ),
+      child: SizedBox(
+        height: 28,
+        child: Row(
+          children: [
+            Flexible(
+              child: _sortAnchor(
+                database.fields,
+                (toggle, _) => SetupControl(
+                  key: const Key('table sort'),
+                  icon: LucideIcons.arrowDownUp,
+                  label: 'Sort',
+                  value: sort == null ? null : sortLabel(sort),
+                  onTap: toggle,
+                ),
+              ),
+            ),
+            const SizedBox(width: WsMetrics.space2),
+            Flexible(
+              child: _filterAnchor(
+                database.fields,
+                numbers,
+                days,
+                (toggle, _) => SetupControl(
+                  key: const Key('table filter'),
+                  icon: LucideIcons.filter,
+                  label: 'Filter',
+                  value: filter == null
+                      ? null
+                      : filterLabel(
+                          filter,
+                          database.fields,
+                          numbers,
+                          shownDays(days),
+                        ),
+                  onTap: toggle,
+                ),
+              ),
+            ),
+            const Spacer(),
+            if (_searching)
+              SizedBox(width: 200, child: _searchField(boxed: true))
+            else
+              QueryButton(
+                key: const Key('table search'),
+                icon: LucideIcons.search,
+                label: 'Search',
+                on: false,
+                onTap: () {
+                  setState(() => _searching = true);
+                  _searchFocus.requestFocus();
+                },
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _searchField({required bool boxed}) {
+    final ws = context.ws;
+    return Container(
+      height: 28,
+      padding: const EdgeInsets.symmetric(horizontal: WsMetrics.space3),
+      decoration: BoxDecoration(
+        border: Border.all(color: ws.borderStrong),
+        borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
+      ),
+      child: Row(
+        children: [
+          Icon(LucideIcons.search, size: 14, color: ws.textFaint),
+          const SizedBox(width: WsMetrics.space2),
+          Expanded(
+            child: TapRegion(
+              onTapOutside: (_) {
+                if (_searchText.text.isEmpty && !widget.fullPage) {
+                  setState(() => _searching = false);
+                }
+              },
+              child: TextField(
+                key: const Key('table search field'),
+                controller: _searchText,
+                focusNode: _searchFocus,
+                onChanged: _searched,
+                style: TextStyle(fontSize: WsMetrics.fsCompact, color: ws.text),
+                decoration: InputDecoration.collapsed(
+                  hintText: 'Search',
+                  hintStyle: TextStyle(color: ws.textFaint),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   @override
@@ -731,101 +989,28 @@ class _TableBlockState extends State<TableBlock> implements CellDrop {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                SizedBox(
-                  height: 32,
-                  child: Row(
-                    children: [
-                      Icon(LucideIcons.table, size: 16, color: ws.textFaint),
-                      const SizedBox(width: WsMetrics.space3),
-                      Expanded(
-                        child: TextField(
-                          controller: _name.take(),
-                          focusNode: _nameFocus,
-                          selectAllOnFocus: false,
-                          style: TextStyle(
-                            fontSize: WsMetrics.fsProse,
-                            fontWeight: WsMetrics.fwSemibold,
-                            color: ws.text,
-                          ),
-                          decoration: InputDecoration.collapsed(
-                            hintText: untitled,
-                            hintStyle: TextStyle(color: ws.textFaint),
-                          ),
-                        ),
-                      ),
-                      if (database != null && database.fields.isNotEmpty) ...[
-                        _sortAnchor(
-                          database.fields,
-                          (toggle, open) => QueryButton(
-                            key: const Key('table sort'),
-                            icon: LucideIcons.arrowDownUp,
-                            label: 'Sort',
-                            on: open || sort != null,
-                            onTap: toggle,
-                          ),
-                        ),
-                        const SizedBox(width: 2),
-                        _filterAnchor(
-                          database.fields,
-                          numberFormat,
-                          days,
-                          (toggle, open) => QueryButton(
-                            key: const Key('table filter'),
-                            icon: LucideIcons.filter,
-                            label: 'Filter',
-                            on: open || filter != null,
-                            onTap: toggle,
-                          ),
-                        ),
-                      ],
-                    ],
-                  ),
-                ),
-                if (database != null && (sort != null || filter != null))
+                if (widget.fullPage)
                   Padding(
-                    padding: const EdgeInsets.only(
-                      top: WsMetrics.space1,
-                      bottom: WsMetrics.space2,
+                    padding: const EdgeInsets.only(bottom: WsMetrics.space3),
+                    child: Align(
+                      alignment: Alignment.centerLeft,
+                      child: SizedBox(
+                        width: 260,
+                        child: _searchField(boxed: true),
+                      ),
                     ),
-                    child: Wrap(
-                      spacing: WsMetrics.space2,
-                      runSpacing: WsMetrics.space1,
-                      children: [
-                        if (sort != null)
-                          _sortAnchor(
-                            database.fields,
-                            (toggle, _) => QueryChip(
-                              key: const Key('table sort chip'),
-                              icon: sort.descending
-                                  ? LucideIcons.arrowDown
-                                  : LucideIcons.arrowUp,
-                              label: database.fields
-                                  .firstWhere((field) => field.id == sort.field)
-                                  .name,
-                              onTap: toggle,
-                            ),
-                          ),
-                        if (filter != null)
-                          _filterAnchor(
-                            database.fields,
-                            numberFormat,
-                            days,
-                            (toggle, _) => QueryChip(
-                              key: const Key('table filter chip'),
-                              label:
-                                  filterLabel(
-                                    filter,
-                                    database.fields,
-                                    numberFormat,
-                                    shownDays(days),
-                                  ) ??
-                                  '',
-                              onTap: toggle,
-                            ),
-                          ),
-                      ],
+                  )
+                else ...[
+                  _titleLine(database),
+                  if (database != null && database.fields.isNotEmpty)
+                    _setupLine(database, sort, filter, numberFormat, days),
+                  if (database == null && _read1)
+                    TablePlaceholder(
+                      _state.tables.value.any((table) => table.id == _block)
+                          ? 'Liquid could not read this Table.'
+                          : 'This Table was deleted.',
                     ),
-                  ),
+                ],
                 if (database != null)
                   Focus(
                     focusNode: _cells.cellsFocus,
@@ -947,6 +1132,7 @@ class _TableBlockState extends State<TableBlock> implements CellDrop {
       VoidCallback? addOutOfView,
       Decoration? Function(int index)? mark,
       void Function(int index)? onTap,
+      void Function(int index)? onMenu,
       Key? Function(int index)? keyOf,
       bool Function(int index)? editing,
       bool Function(int index)? picking,
@@ -985,6 +1171,8 @@ class _TableBlockState extends State<TableBlock> implements CellDrop {
           final tapped = GestureDetector(
             behavior: HitTestBehavior.opaque,
             onTap: () => onTap(index),
+            onSecondaryTap: onMenu == null ? null : () => onMenu(index),
+            onLongPress: onMenu == null ? null : () => onMenu(index),
             child: box,
           );
           if (menu?.call(index) ?? false) {
@@ -1040,45 +1228,77 @@ class _TableBlockState extends State<TableBlock> implements CellDrop {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            DecoratedBox(
-              position: DecorationPosition.foreground,
-              decoration: BoxDecoration(
-                border: Border(bottom: BorderSide(color: ws.border)),
-              ),
-              child: DefaultTextStyle.merge(
-                style: TextStyle(
-                  fontSize: WsMetrics.fsCompact,
-                  color: ws.textMuted,
+            MouseRegion(
+              onEnter: (_) => setState(() => _headerHovered = true),
+              onExit: (_) => setState(() => _headerHovered = false),
+              child: DecoratedBox(
+                position: DecorationPosition.foreground,
+                decoration: BoxDecoration(
+                  border: Border(bottom: BorderSide(color: ws.border)),
                 ),
-                child: line(
-                  height: _headerHeight,
-                  color: ws.subtle,
-                  addOutOfView: _panelOutOfView,
-                  onTap: (index) {
-                    if (index >= fields.length) return;
-                    if (_panel.isShowing) _panel.hide();
-                    _fieldMenus.toggle(fields[index]);
-                  },
-                  menu: (index) =>
-                      index < fields.length &&
-                      fields[index].id == _fieldMenus.open,
-                  cell: (index) => index == fields.length
-                      ? AddField(
-                          plus: _plus,
-                          panel: _panel,
-                          onTap: _togglePanel,
-                        )
-                      : Row(
-                          children: [
-                            Icon(
-                              fieldKindIcon(fields[index].kind),
-                              size: 14,
-                              color: ws.textFaint,
-                            ),
-                            const SizedBox(width: WsMetrics.space2),
-                            Flexible(child: cellText(fields[index].name)),
-                          ],
-                        ),
+                child: DefaultTextStyle.merge(
+                  style: TextStyle(
+                    fontSize: WsMetrics.fsCompact,
+                    color: ws.textMuted,
+                  ),
+                  child: line(
+                    height: _headerHeight,
+                    color: ws.subtle,
+                    addOutOfView: _panelOutOfView,
+                    onTap: (index) {
+                      if (index >= fields.length) return;
+                      _fieldMenus.close();
+                      _sortBy(fields[index]);
+                    },
+                    onMenu: (index) {
+                      if (index >= fields.length) return;
+                      if (_panel.isShowing) _panel.hide();
+                      _fieldMenus.toggle(fields[index]);
+                    },
+                    menu: (index) =>
+                        index < fields.length &&
+                        fields[index].id == _fieldMenus.open,
+                    cell: (index) => index == fields.length
+                        ? AddField(
+                            plus: _plus,
+                            panel: _panel,
+                            onTap: _togglePanel,
+                          )
+                        : Row(
+                            children: [
+                              Icon(
+                                fieldKindIcon(fields[index].kind),
+                                size: 14,
+                                color: ws.textFaint,
+                              ),
+                              const SizedBox(width: WsMetrics.space2),
+                              Flexible(child: cellText(fields[index].name)),
+                              if (_liveSort case final sort?
+                                  when sort.field == fields[index].id) ...[
+                                const SizedBox(width: WsMetrics.space1),
+                                Icon(
+                                  sort.descending
+                                      ? LucideIcons.arrowDown
+                                      : LucideIcons.arrowUp,
+                                  key: const Key('column sorted'),
+                                  size: 12,
+                                  color: ws.accent,
+                                ),
+                              ],
+                              const Spacer(),
+                              _ColumnMenuButton(
+                                shown:
+                                    _headerHovered ||
+                                    touchFirst ||
+                                    fields[index].id == _fieldMenus.open,
+                                onTap: () {
+                                  if (_panel.isShowing) _panel.hide();
+                                  _fieldMenus.toggle(fields[index]);
+                                },
+                              ),
+                            ],
+                          ),
+                  ),
                 ),
               ),
             ),
@@ -1202,4 +1422,31 @@ class _NewRow extends StatelessWidget {
       ),
     );
   }
+}
+
+class _ColumnMenuButton extends StatelessWidget {
+  const _ColumnMenuButton({required this.shown, required this.onTap});
+
+  final bool shown;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) => Semantics(
+    button: true,
+    label: 'Column menu',
+    child: GestureDetector(
+      key: const Key('column menu'),
+      behavior: HitTestBehavior.opaque,
+      onTap: onTap,
+      child: SizedBox(
+        width: 18,
+        height: 24,
+        child: Icon(
+          LucideIcons.chevronDown,
+          size: 12,
+          color: shown ? context.ws.textMuted : const Color(0x00000000),
+        ),
+      ),
+    ),
+  );
 }

@@ -196,6 +196,7 @@ class PageEditor {
       BridgeView(
         id: target.view,
         block: target.block,
+        title: '',
         boundary: target.boundary,
         kind: BridgeBlockKind.text,
       ),

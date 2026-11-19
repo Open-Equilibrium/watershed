@@ -25,8 +25,15 @@ void main() {
     await tester.pumpAndSettle();
   }
 
+  Finder chevron(String name) => find
+      .descendant(
+        of: find.ancestor(of: header(name), matching: find.byType(Row)).first,
+        matching: find.byKey(const Key('column menu')),
+      )
+      .first;
+
   Future<void> open(WidgetTester tester, String name) async {
-    await tap(tester, header(name));
+    await tap(tester, chevron(name));
   }
 
   Future<void> type(WidgetTester tester, String name) async {
@@ -39,8 +46,15 @@ void main() {
       (rename.field, rename.text),
   ];
 
-  testWidgets('a click on a field\'s header opens its menu', (tester) async {
+  testWidgets('the chevron or a right-click on a column opens its menu', (
+    tester,
+  ) async {
     await kit.show(tester, [TablePart(expenses)]);
+    await tester.tap(header('Category'), buttons: kSecondaryButton);
+    await tester.pumpAndSettle();
+    expect(menu, findsOneWidget);
+    await key(tester, LogicalKeyboardKey.escape);
+    expect(menu, findsNothing);
     await open(tester, 'Category');
     expect(menu, findsOneWidget);
     expect(

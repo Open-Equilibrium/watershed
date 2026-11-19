@@ -344,6 +344,7 @@ class BridgeQuery {
   final PlatformInt64 limit;
   final BridgeSort? sort;
   final BridgeFilter? filter;
+  final String? search;
 
   const BridgeQuery({
     required this.kind,
@@ -354,6 +355,7 @@ class BridgeQuery {
     required this.limit,
     this.sort,
     this.filter,
+    this.search,
   });
 
   @override
@@ -365,7 +367,8 @@ class BridgeQuery {
       start.hashCode ^
       limit.hashCode ^
       sort.hashCode ^
-      filter.hashCode;
+      filter.hashCode ^
+      search.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -379,7 +382,8 @@ class BridgeQuery {
           start == other.start &&
           limit == other.limit &&
           sort == other.sort &&
-          filter == other.filter;
+          filter == other.filter &&
+          search == other.search;
 }
 
 enum BridgeQueryKind {
@@ -424,11 +428,16 @@ enum BridgeResourceKind { areas, pages, views, block, tables, table }
 class BridgeShown {
   final String page;
   final String view;
+  final String title;
 
-  const BridgeShown({required this.page, required this.view});
+  const BridgeShown({
+    required this.page,
+    required this.view,
+    required this.title,
+  });
 
   @override
-  int get hashCode => page.hashCode ^ view.hashCode;
+  int get hashCode => page.hashCode ^ view.hashCode ^ title.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -436,7 +445,8 @@ class BridgeShown {
       other is BridgeShown &&
           runtimeType == other.runtimeType &&
           page == other.page &&
-          view == other.view;
+          view == other.view &&
+          title == other.title;
 }
 
 class BridgeTable {

@@ -298,7 +298,13 @@ impl LiquidWorkspace {
             }
             BridgeQueryKind::Rows => {
                 let block = id(&query.block, BlockId::parse, "block")?;
-                let rows = row_query(&query.sort, &query.filter, start, limit)?;
+                let mut rows = row_query(&query.sort, &query.filter, start, limit)?;
+                if let Some(search) = &query.search {
+                    if search.chars().count() > liquid_core::MAX_FILTER_TEXT {
+                        return Err("the search is too long".into());
+                    }
+                    rows.search = Some(search.clone());
+                }
                 let rows = workspace.rows(&block, &rows).map_err(message)?;
                 answer.count = rows.count as i64;
                 answer.rows = rows.rows.into_iter().map(BridgeRow::of).collect();
@@ -321,15 +327,19 @@ impl LiquidWorkspace {
                 let block = id(&query.block, BlockId::parse, "block")?;
                 let shown = workspace.table_views(&block).map_err(message)?;
                 answer.count = shown.len() as i64;
-                answer.shown = shown
-                    .into_iter()
-                    .skip(start)
-                    .take(limit)
-                    .map(|(page, view)| BridgeShown {
+                let mut listed = Vec::new();
+                for (page, view) in shown.into_iter().skip(start).take(limit) {
+                    let title = workspace
+                        .view_title(&page, &view)
+                        .map_err(message)?
+                        .unwrap_or_default();
+                    listed.push(BridgeShown {
                         page: page.to_string(),
                         view: view.to_string(),
-                    })
-                    .collect();
+                        title,
+                    });
+                }
+                answer.shown = listed;
             }
         }
         Ok(answer)

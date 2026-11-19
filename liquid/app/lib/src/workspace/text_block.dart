@@ -271,12 +271,12 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
       views
           .write(
             mutation(
-              BridgeMutationKind.renameDatabase,
+              BridgeMutationKind.renameView,
               page: _page,
-              block: added.block,
+              view: added.view,
               text: typed,
             ),
-            [added.block!],
+            [added.view!],
           )
           .then<void>((_) {}, onError: (Object _) {}),
     );

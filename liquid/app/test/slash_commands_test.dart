@@ -164,17 +164,17 @@ void main() {
     },
   );
 
-  testWidgets('a Table\'s name follows a rename elsewhere', (tester) async {
+  testWidgets('a View\'s title follows a rename elsewhere', (tester) async {
     await show(tester, ['']);
     await addTable(tester, 0);
     await tester.tap(block(0));
     await tester.pumpAndSettle();
-    final table = kit.fake.views[kit.page]![0].block;
+    final view = kit.fake.views[kit.page]![0].id;
     await kit.workspace.apply(
       mutation(
-        BridgeMutationKind.renameDatabase,
+        BridgeMutationKind.renameView,
         page: kit.page,
-        block: table,
+        view: view,
         text: 'Trips',
       ),
     );
@@ -207,7 +207,7 @@ void main() {
     await show(tester, ['']);
     await addTable(tester, 0);
     int renames() => kit.fake.applied
-        .where((applied) => applied.kind == BridgeMutationKind.renameDatabase)
+        .where((applied) => applied.kind == BridgeMutationKind.renameView)
         .length;
     for (final typed in ['n', 'ni', 'nih']) {
       tester.testTextInput.updateEditingValue(
@@ -263,16 +263,16 @@ void main() {
   });
 
   testWidgets(
-    'a Table\'s name renamed elsewhere while typed in shows once left',
+    'a View\'s title renamed elsewhere while typed in shows once left',
     (tester) async {
       await show(tester, ['']);
       await addTable(tester, 0);
-      final table = kit.fake.views[kit.page]![0].block;
+      final view = kit.fake.views[kit.page]![0].id;
       await kit.workspace.apply(
         mutation(
-          BridgeMutationKind.renameDatabase,
+          BridgeMutationKind.renameView,
           page: kit.page,
-          block: table,
+          view: view,
           text: 'Trips',
         ),
       );
@@ -525,7 +525,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(
       kit.fake.applied.where(
-        (applied) => applied.kind == BridgeMutationKind.renameDatabase,
+        (applied) => applied.kind == BridgeMutationKind.renameView,
       ),
       hasLength(1),
     );
