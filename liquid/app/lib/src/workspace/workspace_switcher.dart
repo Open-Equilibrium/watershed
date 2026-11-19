@@ -42,7 +42,7 @@ class WorkspaceIcon extends StatelessWidget {
         width: 22,
         height: 22,
         child: Center(
-          child: Text(icon, style: const TextStyle(fontSize: 15, height: 1)),
+          child: Text(icon, style: const TextStyle(fontSize: WsMetrics.fsUi, height: 1)),
         ),
       );
     }
@@ -67,7 +67,7 @@ class WorkspaceIcon extends StatelessWidget {
         _shown(name).characters.first.toUpperCase(),
         style: TextStyle(
           color: foreground,
-          fontSize: 12,
+          fontSize: WsMetrics.fsSmall,
           fontWeight: WsMetrics.fwSemibold,
         ),
       ),
@@ -333,7 +333,7 @@ class _CurrentState extends State<_Current> {
                         color: icon == named.icon ? ws.hover : null,
                         borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
                       ),
-                      child: Text(icon, style: const TextStyle(fontSize: 16)),
+                      child: Text(icon, style: const TextStyle(fontSize: WsMetrics.fsProse)),
                     ),
                   ),
               ],
