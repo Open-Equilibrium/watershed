@@ -136,7 +136,7 @@ void main() {
     final first = WorkspaceState(fake, layout: file);
     await first.start();
     first.toggleFold('tables');
-    await pumpEventQueue();
+    await first.layoutSaved;
     await first.dispose();
     final again = WorkspaceState(fake, layout: file);
     await again.start();

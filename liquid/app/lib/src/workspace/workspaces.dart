@@ -137,15 +137,23 @@ class Workspaces extends ChangeNotifier {
     _save();
   }
 
-  void _save() => unawaited(
-    _file
-        ?.save({
-          'open': _entries[_at].dir,
-          'list': [
-            for (final entry in _entries)
-              {'dir': entry.dir, 'name': entry.name, 'icon': entry.icon},
-          ],
-        })
-        .then<void>((_) {}, onError: (Object _) {}),
-  );
+  Future<void> _saving = Future.value();
+
+  @visibleForTesting
+  Future<void> get saved => _saving;
+
+  void _save() {
+    final file = _file;
+    if (file == null) return;
+    final json = {
+      'open': _entries[_at].dir,
+      'list': [
+        for (final entry in _entries)
+          {'dir': entry.dir, 'name': entry.name, 'icon': entry.icon},
+      ],
+    };
+    _saving = _saving
+        .then((_) => file.save(json))
+        .then<void>((_) {}, onError: (Object _) {});
+  }
 }

@@ -10,12 +10,19 @@ import 'fake_workspace.dart';
 void main() {
   late Directory dir;
   late Map<String, FakeWorkspace> opened;
+  final loaded = <Workspaces>[];
 
   setUp(() async {
     dir = await Directory.systemTemp.createTemp('liquid-workspaces');
     opened = {};
   });
-  tearDown(() => dir.delete(recursive: true));
+  tearDown(() async {
+    for (final workspaces in loaded) {
+      await workspaces.saved;
+    }
+    loaded.clear();
+    await dir.delete(recursive: true);
+  });
 
   SettingsFile file() => SettingsFile(File('${dir.path}/workspaces.json'));
 
@@ -27,14 +34,20 @@ void main() {
     return (state, null);
   }
 
-  test('the first start opens the one Workspace there is', () async {
+  Future<Workspaces> load() async {
     final workspaces = await Workspaces.load(dir.path, open, file: file());
+    loaded.add(workspaces);
+    return workspaces;
+  }
+
+  test('the first start opens the one Workspace there is', () async {
+    final workspaces = await load();
     expect(workspaces.entries.map((entry) => entry.dir), ['Workspace']);
     expect(workspaces.current?.workspace, opened['Workspace']);
   });
 
   test('a new Workspace is named, opened, and the old one closed', () async {
-    final workspaces = await Workspaces.load(dir.path, open, file: file());
+    final workspaces = await load();
     final first = opened['Workspace']!;
     await workspaces.create();
     expect(first.isDisposed, isTrue);
@@ -48,7 +61,7 @@ void main() {
   });
 
   test('switching opens the other, and a restart opens the last one', () async {
-    var workspaces = await Workspaces.load(dir.path, open, file: file());
+    var workspaces = await load();
     await workspaces.create();
     await workspaces.current!.setWorkspaceIcon('🏡');
     await pumpEventQueue();
@@ -57,8 +70,8 @@ void main() {
     expect(opened[workspaces.entries[1].dir]!.isDisposed, isTrue);
     expect(workspaces.entries[1].icon, '🏡');
     await workspaces.switchTo(1);
-    await pumpEventQueue();
-    workspaces = await Workspaces.load(dir.path, open, file: file());
+    await workspaces.saved;
+    workspaces = await load();
     expect(workspaces.at, 1);
     expect(workspaces.entries.map((entry) => (entry.name, entry.icon)), [
       ('', ''),
@@ -73,7 +86,7 @@ void main() {
         {'dir': '../elsewhere', 'name': 'x', 'icon': ''},
       ],
     });
-    final workspaces = await Workspaces.load(dir.path, open, file: file());
+    final workspaces = await load();
     expect(workspaces.entries.map((entry) => entry.dir), ['Workspace']);
   });
 }

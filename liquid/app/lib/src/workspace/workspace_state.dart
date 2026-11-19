@@ -150,12 +150,18 @@ class WorkspaceState {
     final folded = {...this.folded.value};
     if (!folded.remove(section)) folded.add(section);
     this.folded.value = folded;
-    unawaited(
-      layout
-          ?.save({'folded': folded.toList()})
-          .then<void>((_) {}, onError: (Object _) {}),
-    );
+    final layout = this.layout;
+    if (layout == null) return;
+    final json = {'folded': folded.toList()};
+    _layoutSaving = _layoutSaving
+        .then((_) => layout.save(json))
+        .then<void>((_) {}, onError: (Object _) {});
   }
+
+  Future<void> _layoutSaving = Future.value();
+
+  @visibleForTesting
+  Future<void> get layoutSaved => _layoutSaving;
 
   final areas = ValueNotifier<List<BridgeArea>>(const []);
 
