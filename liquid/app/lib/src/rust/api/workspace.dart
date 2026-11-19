@@ -11,7 +11,7 @@ import 'media.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
 // These functions are ignored because they are not marked as `pub`: `id`, `message`, `normalized`, `of`, `of`, `optional_id`, `page`, `place`, `table`, `to_core`, `to_core`, `units`, `window`
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `hash`, `hash`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `hash`, `hash`
 
 class BridgeAnswer {
   final List<BridgeArea> areas;
@@ -429,15 +429,24 @@ class BridgeShown {
   final String page;
   final String view;
   final String title;
+  final BridgeSort? sort;
+  final BridgeFilter? filter;
 
   const BridgeShown({
     required this.page,
     required this.view,
     required this.title,
+    this.sort,
+    this.filter,
   });
 
   @override
-  int get hashCode => page.hashCode ^ view.hashCode ^ title.hashCode;
+  int get hashCode =>
+      page.hashCode ^
+      view.hashCode ^
+      title.hashCode ^
+      sort.hashCode ^
+      filter.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -446,7 +455,9 @@ class BridgeShown {
           runtimeType == other.runtimeType &&
           page == other.page &&
           view == other.view &&
-          title == other.title;
+          title == other.title &&
+          sort == other.sort &&
+          filter == other.filter;
 }
 
 class BridgeTable {

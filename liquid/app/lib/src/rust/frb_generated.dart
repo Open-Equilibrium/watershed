@@ -6430,12 +6430,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   BridgeShown dco_decode_bridge_shown(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 3)
-      throw Exception('unexpected arr length: expect 3 but see ${arr.length}');
+    if (arr.length != 5)
+      throw Exception('unexpected arr length: expect 5 but see ${arr.length}');
     return BridgeShown(
       page: dco_decode_String(arr[0]),
       view: dco_decode_String(arr[1]),
       title: dco_decode_String(arr[2]),
+      sort: dco_decode_opt_box_autoadd_bridge_sort(arr[3]),
+      filter: dco_decode_opt_box_autoadd_bridge_filter(arr[4]),
     );
   }
 
@@ -8932,7 +8934,15 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_page = sse_decode_String(deserializer);
     var var_view = sse_decode_String(deserializer);
     var var_title = sse_decode_String(deserializer);
-    return BridgeShown(page: var_page, view: var_view, title: var_title);
+    var var_sort = sse_decode_opt_box_autoadd_bridge_sort(deserializer);
+    var var_filter = sse_decode_opt_box_autoadd_bridge_filter(deserializer);
+    return BridgeShown(
+      page: var_page,
+      view: var_view,
+      title: var_title,
+      sort: var_sort,
+      filter: var_filter,
+    );
   }
 
   @protected
@@ -11658,6 +11668,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_String(self.page, serializer);
     sse_encode_String(self.view, serializer);
     sse_encode_String(self.title, serializer);
+    sse_encode_opt_box_autoadd_bridge_sort(self.sort, serializer);
+    sse_encode_opt_box_autoadd_bridge_filter(self.filter, serializer);
   }
 
   @protected

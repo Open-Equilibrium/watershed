@@ -224,10 +224,8 @@ impl<S: Store> Workspace<S> {
             .collect())
     }
 
-    pub fn view_title(&mut self, page: &PageId, view: &ViewId) -> Result<Option<String>, Error> {
-        let doc = self.doc(&Document::Page(page.clone()))?;
-        Ok(model::live(doc, VIEWS, view.as_str())
-            .map(|entry| model::string(doc, &entry, TITLE).unwrap_or_default()))
+    pub fn view(&mut self, page: &PageId, view: &ViewId) -> Result<Option<View>, Error> {
+        Ok(self.page(page)?.1.view(view).cloned())
     }
 
     fn table_name(&mut self, table: &BlockId) -> Result<Option<String>, Error> {

@@ -17,6 +17,7 @@ import 'page_editor.dart';
 import 'page_views.dart';
 import 'paste.dart';
 import 'slash_commands.dart';
+import 'table_pickers.dart';
 import 'workspace_state.dart';
 
 const _end = caretEnd;
@@ -177,6 +178,11 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
     if (choice.block == BridgeBlockKind.code) return _turnIntoCode();
     if (choice.block == BridgeBlockKind.media) return _addMedia(_pickFiles);
     if (choice.block == BridgeBlockKind.whiteboard) return _addWhiteboard();
+    ExistingView? existing;
+    if (choice.existing) {
+      existing = await pickExistingTable(context, _state);
+      if (existing == null || !mounted) return;
+    }
     final views = widget.views;
     final view = widget.view;
     final last = widget.index == (views.count ?? 0) - 1;
@@ -196,15 +202,23 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
         }
         after = above?.id;
       }
-      added = await views.write(
-        mutation(
+      added = await views.write(switch (existing) {
+        final existing? => mutation(
+          BridgeMutationKind.addTableView,
+          page: _page,
+          after: after,
+          block: existing.table,
+          text: existing.title,
+          sort: existing.sort,
+          filter: existing.filter,
+        ),
+        null => mutation(
           BridgeMutationKind.addDatabaseBlock,
           page: _page,
           after: after,
           text: '',
         ),
-        const [],
-      );
+      }, const []);
     } on Object {
       if (mounted) {
         _adding = false;
@@ -219,7 +233,11 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
       return;
     }
     _added = added;
-    if (!mounted) {
+    if (existing != null) {
+      _adding = false;
+      _added = null;
+      views.moveCaret(Caret(added.view!, 0));
+    } else if (!mounted) {
       _name(views, added, _gone ?? '');
     } else if (!_focus.hasFocus || _state.quitting) {
       _finish(_text.text);

@@ -7622,10 +7622,14 @@ impl SseDecode for crate::api::workspace::BridgeShown {
         let mut var_page = <String>::sse_decode(deserializer);
         let mut var_view = <String>::sse_decode(deserializer);
         let mut var_title = <String>::sse_decode(deserializer);
+        let mut var_sort = <Option<crate::api::database::BridgeSort>>::sse_decode(deserializer);
+        let mut var_filter = <Option<crate::api::database::BridgeFilter>>::sse_decode(deserializer);
         return crate::api::workspace::BridgeShown {
             page: var_page,
             view: var_view,
             title: var_title,
+            sort: var_sort,
+            filter: var_filter,
         };
     }
 }
@@ -11508,6 +11512,8 @@ impl flutter_rust_bridge::IntoDart for crate::api::workspace::BridgeShown {
             self.page.into_into_dart().into_dart(),
             self.view.into_into_dart().into_dart(),
             self.title.into_into_dart().into_dart(),
+            self.sort.into_into_dart().into_dart(),
+            self.filter.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -13413,6 +13419,8 @@ impl SseEncode for crate::api::workspace::BridgeShown {
         <String>::sse_encode(self.page, serializer);
         <String>::sse_encode(self.view, serializer);
         <String>::sse_encode(self.title, serializer);
+        <Option<crate::api::database::BridgeSort>>::sse_encode(self.sort, serializer);
+        <Option<crate::api::database::BridgeFilter>>::sse_encode(self.filter, serializer);
     }
 }
 

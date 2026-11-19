@@ -329,14 +329,15 @@ impl LiquidWorkspace {
                 answer.count = shown.len() as i64;
                 let mut listed = Vec::new();
                 for (page, view) in shown.into_iter().skip(start).take(limit) {
-                    let title = workspace
-                        .view_title(&page, &view)
-                        .map_err(message)?
-                        .unwrap_or_default();
+                    let Some(shown) = workspace.view(&page, &view).map_err(message)? else {
+                        continue;
+                    };
                     listed.push(BridgeShown {
                         page: page.to_string(),
                         view: view.to_string(),
-                        title,
+                        title: shown.title,
+                        sort: shown.sort.as_ref().map(BridgeSort::of),
+                        filter: shown.filter.as_ref().map(BridgeFilter::of),
                     });
                 }
                 answer.shown = listed;

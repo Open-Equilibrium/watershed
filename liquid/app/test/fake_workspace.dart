@@ -587,7 +587,13 @@ class FakeWorkspace implements LiquidWorkspace {
     for (final MapEntry(key: page, value: shown) in views.entries)
       for (final view in shown)
         if (view.kind == BridgeBlockKind.database && view.block == table)
-          BridgeShown(page: page, view: view.id, title: view.title),
+          BridgeShown(
+            page: page,
+            view: view.id,
+            title: view.title,
+            sort: view.sort,
+            filter: view.filter,
+          ),
   ];
 
   BridgeResource _tableResource(String? block) =>

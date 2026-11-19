@@ -179,11 +179,13 @@ pub struct BridgeTable {
     pub name: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct BridgeShown {
     pub page: String,
     pub view: String,
     pub title: String,
+    pub sort: Option<BridgeSort>,
+    pub filter: Option<BridgeFilter>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
