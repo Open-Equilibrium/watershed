@@ -31,7 +31,7 @@ MAC = "matrix.os == 'xcode-27'"
 PRODUCT = "needs.scope.outputs.product == 'true'"
 LIQUID = "needs.scope.outputs.liquid == 'true'"
 LIQUID_COVERAGE_PACKAGES = "-p meta-harness-cli -p meta-harness-core -p liquid_bridge -p liquid-core -p liquid-storage"
-MATRIX_JOBS = ("checks", "test", "flow-agent", "liquid")
+MATRIX_JOBS = ("checks", "test", "flow-agent", "flow-coverage", "liquid")
 M12_EXECUTOR = "target/m12-standard/release/flow-executor"
 EVIDENCE_ONLY_UNIX_RUNNER_PATTERN = (
     r"flow-agent[\\/]flow-agent-core[\\/]src[\\/]runtime[\\/]"
@@ -228,8 +228,9 @@ class CiWorkflowContractTest(unittest.TestCase):
                 self.assertLessEqual(set(names[:position]),
                                      {"Checkout", "Install pinned Node", "Check Node version"})
         self.assertEqual(set(job_of(workflow, "Provision native Linux protection prerequisites")),
-                         {"test", "flow-agent"})
-        for job, first in (("test", "Run tests"), ("flow-agent", "Build native installation artifacts")):
+                         {"test", "flow-agent", "flow-coverage"})
+        for job, first in (("test", "Run tests"), ("flow-agent", "Build native installation artifacts"),
+                           ("flow-coverage", "Build native installation artifacts")):
             names = step_names(workflow, job)
             self.assertLess(names.index("Provision native Linux protection prerequisites"),
                             names.index(first))
@@ -460,7 +461,7 @@ class CiWorkflowContractTest(unittest.TestCase):
             'echo "META_HARNESS_T3=$t3" >> "$GITHUB_ENV"',
         )
         assert_step_state(
-            self, workflow, "Install pinned T3 Code for the workspace coverage", job="flow-agent",
+            self, workflow, "Install pinned T3 Code for the workspace coverage", job="flow-coverage",
         )
         self.assertEqual(
             step_run(workflow, "Install pinned T3 Code for the workspace coverage"),
@@ -476,8 +477,10 @@ class CiWorkflowContractTest(unittest.TestCase):
 
         self.assertIn("      RUST_PACKAGES: ${{ needs.scope.outputs.rust_packages }}", jobs(workflow)["test"])
         assert_step_state(self, workflow, "Run tests", job="test",
-                          condition="needs.scope.outputs.flow_agent == 'true' || "
-                          "needs.scope.outputs.liquid != 'true'")
+                          condition="(needs.scope.outputs.flow_agent == 'true' && "
+                          "github.event_name != 'pull_request') || "
+                          "(needs.scope.outputs.flow_agent != 'true' && "
+                          "needs.scope.outputs.liquid != 'true')")
         self.assertEqual(
             folded_tokens(workflow, "Run tests"),
             ["cargo", "nextest", "run", "--no-fail-fast", "--config", TEST_ISOLATION,
@@ -503,7 +506,7 @@ class CiWorkflowContractTest(unittest.TestCase):
                   "--ignore-filename-regex", "$COVERAGE_EXCLUSIONS", "--show-missing-lines"]
 
         native_lines = assert_step_state(
-            self, workflow, "Check native coverage and installation acceptance", job="flow-agent")
+            self, workflow, "Check native coverage and installation acceptance", job="flow-coverage")
         self.assertIn("        shell: bash", native_lines)
         native = step_run(workflow, "Check native coverage and installation acceptance")
         ordered = (
@@ -524,7 +527,7 @@ class CiWorkflowContractTest(unittest.TestCase):
         native_test = native[native.index("cargo nextest run"):
                              native.index("/bin/sh scripts/run-m12-readiness-negatives.sh")]
         self.assertEqual(shlex.split(native_test.replace("\\\n", " ")), [
-            "cargo", "nextest", "run", "--config", TEST_ISOLATION, "--locked",
+            "cargo", "nextest", "run", "--no-fail-fast", "--config", TEST_ISOLATION, "--locked",
             "--workspace", "--all-targets", "--all-features",
         ])
         self.assertEqual(
@@ -617,7 +620,15 @@ class CiWorkflowContractTest(unittest.TestCase):
 
     def assert_m12_release_boundary(self, workflow: str) -> None:
         job = "flow-agent"
-        assert_step_state(self, workflow, "Build native installation artifacts", job=job)
+        for shared in ("Build native installation artifacts", "Package native download"):
+            self.assertEqual(job_of(workflow, shared), [job, "flow-coverage"], shared)
+            self.assertEqual(
+                [line for line in step_lines(workflow, shared) if line.startswith("        if:")], [])
+        coverage_order = step_names(workflow, "flow-coverage")
+        self.assertLess(coverage_order.index("Build native installation artifacts"),
+                        coverage_order.index("Package native download"))
+        self.assertLess(coverage_order.index("Package native download"),
+                        coverage_order.index("Check native coverage and installation acceptance"))
         build = step_run(workflow, "Build native installation artifacts")
         self.assertIn("cargo build --locked --release -p flow-agent-cli -p flow-agent-executor "
                       "--target-dir target/m12-standard", build)
@@ -635,8 +646,6 @@ class CiWorkflowContractTest(unittest.TestCase):
         self.assertIn("cargo nextest run --locked -p flow-agent-executor "
                       "--test native_contract --test native_flow_owned_write_protection", release)
         self.assertNotIn("--skip", release)
-        self.assertLess(order.index("Run native release Executor acceptance"),
-                        order.index("Check native coverage and installation acceptance"))
         assert_step_state(self, workflow, "Run public Custom Executor conformance", job=job)
         conformance = step_run(workflow, "Run public Custom Executor conformance")
         self.assertIn("--example custom_executor_conformance", conformance)
@@ -656,7 +665,6 @@ class CiWorkflowContractTest(unittest.TestCase):
                           "official_linux", "linux_support", "static-self-reexec"):
             self.assertNotIn(forbidden, workflow)
 
-        assert_step_state(self, workflow, "Package native download", job=job)
         package = step_run(workflow, "Package native download")
         self.assertIn("scripts/package_flow_agent.py", package)
         self.assertIn("--binaries target/m12-standard/release", package)

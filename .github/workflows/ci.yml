@@ -210,7 +210,8 @@ jobs:
 
       - *rust
 
-      - name: Install test tools
+      - &test-tools
+        name: Install test tools
         uses: taiki-e/install-action@83ac0ad63c0167e6f06796fab0fce28db1bf3db0 # v2.87.22
         with:
           tool: cargo-nextest@0.9.146,cargo-llvm-cov@0.9.1
@@ -233,10 +234,10 @@ jobs:
           sudo apparmor_parser --replace /etc/apparmor.d/watershed-bwrap-userns
           test "$(sysctl -n kernel.apparmor_restrict_unprivileged_userns)" = 1
 
-      # Without Flow Agent the scope's packages are Liquid's coverage packages: the coverage step
-      # below runs each of their tests once.
+      # Flow Agent coverage runs the whole workspace and Liquid coverage the Liquid packages, so a
+      # pull request runs their tests there once. Main still runs Flow Agent's twice.
       - name: Run tests
-        if: needs.scope.outputs.flow_agent == 'true' || needs.scope.outputs.liquid != 'true'
+        if: (needs.scope.outputs.flow_agent == 'true' && github.event_name != 'pull_request') || (needs.scope.outputs.flow_agent != 'true' && needs.scope.outputs.liquid != 'true')
         run: >-
           cargo nextest run
           --no-fail-fast
@@ -279,13 +280,6 @@ jobs:
       - *checkout
       - *node
       - *mac-host
-
-      # The native coverage below tests the whole workspace, Meta-Harness's T3 contract tests included.
-      - name: Install pinned T3 Code for the workspace coverage
-        shell: bash
-        run: |
-          t3="$(node scripts/install-t3.mjs "$RUNNER_TEMP/t3")"
-          echo "META_HARNESS_T3=$t3" >> "$GITHUB_ENV"
 
       - name: Establish experimental Mac unprotected red control
         if: matrix.os == 'xcode-27' && github.event_name == 'workflow_dispatch' && inputs.mac_flow_owned_write_protection_evaluation
@@ -350,7 +344,8 @@ jobs:
 
       - *linux-protection
 
-      - name: Build native installation artifacts
+      - &native-artifacts
+        name: Build native installation artifacts
         shell: bash
         run: |
           cargo build --locked --release -p flow-agent-cli -p flow-agent-executor --target-dir target/m12-standard
@@ -358,7 +353,8 @@ jobs:
           target/m12-standard/release/flow-executor --probe |
             python3 -c 'import json, sys; probe=json.load(sys.stdin); assert probe["ready"] is True, probe'
 
-      - name: Package native download
+      - &native-download
+        name: Package native download
         shell: bash
         run: |
           case "$(uname -s)" in
@@ -420,6 +416,40 @@ jobs:
         shell: bash
         run: exit 1
 
+      - name: Retain tested native download
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: flow-agent-download-${{ matrix.os }}
+          path: target/m12-download/
+          if-no-files-found: error
+
+  flow-coverage:
+    name: Flow Agent coverage (${{ matrix.os }})
+    needs: scope
+    if: needs.scope.outputs.flow_agent == 'true'
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, xcode-27]
+    steps:
+      - *checkout
+      - *node
+      - *mac-host
+
+      # The native coverage below tests the whole workspace, Meta-Harness's T3 contract tests included.
+      - name: Install pinned T3 Code for the workspace coverage
+        shell: bash
+        run: |
+          t3="$(node scripts/install-t3.mjs "$RUNNER_TEMP/t3")"
+          echo "META_HARNESS_T3=$t3" >> "$GITHUB_ENV"
+
+      - *rust
+      - *test-tools
+      - *linux-protection
+      - *native-artifacts
+      - *native-download
+
       - name: Check native coverage and installation acceptance
         shell: bash
         run: |
@@ -428,19 +458,12 @@ jobs:
           cargo build --locked -p flow-agent-cli -p flow-agent-executor
           export M12_COVERAGE_BIN_DIR="$CARGO_LLVM_COV_TARGET_DIR/debug"
           /bin/sh scripts/run-m12-installer-acceptance.sh
-          cargo nextest run \
+          cargo nextest run --no-fail-fast \
             --config 'target."cfg(all())".runner = ["node", "../../scripts/run-isolated-rust-test.mjs"]' \
             --locked --workspace --all-targets --all-features
           /bin/sh scripts/run-m12-readiness-negatives.sh
           cargo llvm-cov report --fail-under-lines 88 \
             --ignore-filename-regex "$COVERAGE_EXCLUSIONS" --show-missing-lines
-
-      - name: Retain tested native download
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: flow-agent-download-${{ matrix.os }}
-          path: target/m12-download/
-          if-no-files-found: error
 
   m11-evidence:
     name: M1.1 performance evidence
@@ -552,7 +575,7 @@ jobs:
   # was skipped because the scope did not select it, so splitting jobs needs no ruleset change.
   gates:
     name: Flow Agent gates (${{ matrix.os }}) [${{ github.event_name }}]
-    needs: [scope, checks, test, flow-agent, m11-evidence, liquid]
+    needs: [scope, checks, test, flow-agent, flow-coverage, m11-evidence, liquid]
     if: always()
     runs-on: ubuntu-24.04
     strategy:
@@ -570,7 +593,8 @@ jobs:
           scope = needs.pop("scope")
           outputs = scope["outputs"] if scope["result"] == "success" else {}
           selected_by = {"checks": "docs", "test": "product", "flow-agent": "flow_agent",
-                         "m11-evidence": "flow_agent", "liquid": "liquid"}
+                         "flow-coverage": "flow_agent", "m11-evidence": "flow_agent",
+                         "liquid": "liquid"}
           failed = [job for job, need in needs.items() if need["result"] != "success"
                     and not (need["result"] == "skipped" and outputs.get(selected_by[job]) == "false")]
           print(f"scope: {scope['result']}", *(f"{job}: {need['result']}" for job, need in needs.items()),
