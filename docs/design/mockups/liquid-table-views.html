@@ -19,6 +19,7 @@
 .note{margin-left:auto;flex:0 1 auto;max-width:50%;font-size:12px;line-height:18px;color:var(--ws-text-faint);white-space:nowrap;border-radius:4px;padding:0 4px;min-width:0;overflow:hidden;text-overflow:ellipsis}
 .note span{color:var(--ws-text-muted)}
 .setup{display:flex;gap:6px;min-width:0}
+.setup .ib{margin-left:auto;flex:none}
 .sc{display:inline-flex;align-items:center;gap:5px;height:26px;padding:0 8px;border-radius:6px;font-size:13px;color:var(--ws-text-muted);white-space:nowrap;min-width:0;flex:0 1 auto}
 .sc svg{flex:none}
 .sc .v{color:var(--ws-text);overflow:hidden;text-overflow:ellipsis}
@@ -73,7 +74,7 @@
 
   <section data-s="2">
     <h3 class="sec">2 · The note on the right, Sort and Filter below</h3>
-    <p class="sub">Sort and Filter sit on the line below the title, and each shows what it holds. Several sorts or filters show the first and a count, such as “+1”. A click opens its editor.</p>
+    <p class="sub">Sort and Filter sit on the line below the title, and each shows what it holds. Several sorts or filters show the first and a count, such as “+1”. A click opens its editor. A click on a column's name sorts by it, as on a Table's page, but saved in the View's Sort. The magnifier opens the same search field as on a Table's page; it is never saved.</p>
     <div class="stage">
       <div class="win" id="s2a"></div>
       <div class="lab">With nothing set</div>
@@ -122,13 +123,6 @@
     </div>
   </section>
 
-  <section data-s="8">
-    <h3 class="sec">Decisions for this mockup</h3>
-    <ol class="qs">
-      <li><b>Sorting and searching on a Table's page:</b> cleared when the page is left (recommended), or saved for everyone? Saved, the page would need its own setup, like a View.</li>
-      <li><b>In a View too:</b> does a click on a column's name set the View's sort, and does a View get the same search field, also not saved (both recommended)?</li>
-    </ol>
-  </section>
 </div>
 <script>
 const sv=p=>`<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">${p}</svg>`;
@@ -155,8 +149,8 @@ const rows=[['1 Nov','Groceries','Food','t1','84.20'],['30 Oct','Electricity','H
 const table=(r=rows)=>`<div class="tbl" style="--cols:78px minmax(0,1fr) 84px 92px"><div class="tr hd"><span>Date</span><span>Item</span><span>Category</span><span class="num">Amount</span></div>${r.map(x=>`<div class="tr"><span>${x[0]}</span><span>${x[1]}</span><span><span class="tag ${x[3]}">${x[2]}</span></span><span class="num">€ ${x[4]}</span></div>`).join('')}</div>`;
 const note=(n='Expenses')=>`<span class="note">Table: <span>${n}</span></span>`;
 const head=(title='October spending',n=note())=>`<div class="vh"><span class="ico">${I.db}</span><b>${title}</b>${n}</div>`;
-const named=`<div class="setup"><span class="sc on">${I.sort}Sort:<span class="v">Date, newest first</span></span><span class="sc on">${I.filter}Filter:<span class="v">Date is in October</span></span></div>`;
-const unset=`<div class="setup"><span class="sc">${I.sort}Sort</span><span class="sc">${I.filter}Filter</span></div>`;
+const named=`<div class="setup"><span class="sc on">${I.sort}Sort:<span class="v">Date, newest first</span></span><span class="sc on">${I.filter}Filter:<span class="v">Date is in October</span></span><span class="ib">${I.srch}</span></div>`;
+const unset=`<div class="setup"><span class="sc">${I.sort}Sort</span><span class="sc">${I.filter}Filter</span><span class="ib">${I.srch}</span></div>`;
 const foot=(x='')=>`<div class="vf"><span>4 of 240 rows</span>${x}</div>`;
 const view=(h,f=foot(),c=named,r=rows)=>`<div class="block">${h}${c}${table(r)}${f}</div>`;
 const put=(id,html)=>document.getElementById(id).innerHTML=html;
