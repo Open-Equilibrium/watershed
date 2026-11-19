@@ -135,6 +135,15 @@
         <p><strong>Recommendation:</strong> A.</p>
       </details>
 
+      <details id="d-115" class="decision">
+        <summary><h3>D-115 - One View Over Several Tables</h3></summary>
+        <p><strong>Status:</strong> Open after Roles.</p>
+        <p><strong>Problem:</strong> A View shows one Table (ADR-0309). Access is granted per area, so teams that keep their tasks in their own areas cannot share one Table, and nobody can see all their tasks in one View.</p>
+        <p><strong>Question:</strong> May a View show the rows of several Tables?</p>
+        <ul><li><strong>A:</strong> No; data that belongs together lives in one Table, and Views filter it, as in Notion. Pro: nothing new. Con: no overview across areas.</li><li><strong>B:</strong> A read-only View over several Tables whose fields are matched by name, as Airtable's synced tables do. Pro: the overview across areas, and each row still edits in its own Table. Con: field matching, rows from Tables the viewer cannot read are left out, and no new rows from there.</li><li><strong>C:</strong> B, plus new rows that ask which Table they go into. Pro: a full View. Con: the most new rules.</li></ul>
+        <p><strong>Recommendation:</strong> B once Roles exist, if the cross-area overview is still missing.</p>
+      </details>
+
     </div>
   </section>
 

@@ -24,7 +24,9 @@
 .sc .v{color:var(--ws-text);overflow:hidden;text-overflow:ellipsis}
 .sc.on{background:var(--ws-accent-subtle)}
 .sc.on svg{color:var(--ws-accent)}
-.chip svg{color:var(--ws-accent)}
+.find{display:flex;align-items:center;gap:8px;height:30px;padding:0 10px;border-radius:6px;box-shadow:inset 0 0 0 1px var(--ws-border-strong);color:var(--ws-text-faint);font-size:13px;width:min(260px,100%);box-sizing:border-box}
+.find b{font-weight:400;color:var(--ws-text)}
+.srt{color:var(--ws-accent)}
 .edit{box-shadow:0 0 0 2px var(--ws-accent);border-radius:4px;padding:0 4px;background:var(--ws-canvas)}
 .edit i{display:inline-block;width:1.5px;height:1em;background:var(--ws-text);vertical-align:-2px;margin-left:1px}
 .vf{display:flex;gap:12px;align-items:center;font-size:12px;line-height:18px;color:var(--ws-text-faint);padding:2px 2px 0}
@@ -73,12 +75,9 @@
     <h3 class="sec">2 · The note on the right, Sort and Filter below</h3>
     <p class="sub">Sort and Filter sit on the line below the title, and each shows what it holds. Several sorts or filters show the first and a count, such as “+1”. A click opens its editor.</p>
     <div class="stage">
-      <div class="lab">A · Sort and Filter are named<em>Recommended</em></div>
       <div class="win" id="s2a"></div>
-      <div class="lab">A, with nothing set</div>
+      <div class="lab">With nothing set</div>
       <div class="win" id="s2b"></div>
-      <div class="lab">B · Only icons tell them apart, as in Notion</div>
-      <div class="win" id="s2c"></div>
     </div>
   </section>
 
@@ -90,7 +89,7 @@
 
   <section data-s="4">
     <h3 class="sec">4 · Opening a Table from the sidebar</h3>
-    <p class="sub">It shows all rows, unsorted and unfiltered, and where the Table is shown. A click on its title renames the Table; its ··· menu holds Delete Table….</p>
+    <p class="sub">It shows all rows and where the Table is shown. A click on a column's name sorts by it, a second click reverses that, a third clears it; the search field keeps the rows that contain its text. Neither is saved: both clear when the page is left. A click on the title renames the Table; its ··· menu holds Delete Table….</p>
     <div class="stage"><div class="win"><div class="app" id="s4"></div></div></div>
   </section>
 
@@ -126,8 +125,8 @@
   <section data-s="8">
     <h3 class="sec">Decisions for this mockup</h3>
     <ol class="qs">
-      <li><b>Sort and Filter:</b> named (A, recommended) or told apart by icons only (B)?</li>
-      <li><b>The note:</b> does a click open the Table, as a link (recommended)? Without access it stays plain text.</li>
+      <li><b>Sorting and searching on a Table's page:</b> cleared when the page is left (recommended), or saved for everyone? Saved, the page would need its own setup, like a View.</li>
+      <li><b>In a View too:</b> does a click on a column's name set the View's sort, and does a View get the same search field, also not saved (both recommended)?</li>
     </ol>
   </section>
 </div>
@@ -148,9 +147,9 @@ const em=e=>`<span class="em">${e}</span>`;
 const nav=(d,ic,label,o={})=>`<div class="nav ${o.on?'on':''}" style="--d:${d}"><span class="tw">${o.tw||''}</span><span class="ico">${ic}</span><span>${label}</span>${o.r?`<span class="r">${o.r}</span>`:''}</div>`;
 const side=(s='')=>`<div class="side"><div class="wsw"><span class="av">B</span>Benni's Workspace<span style="margin-left:auto;color:var(--ws-text-faint)">⌄</span></div>
 <div class="srch">${I.srch}<span>Search or run a command</span><kbd>⌘K</kbd></div>
-<h6>Private</h6>${nav(0,em('💰'),'Household budget',{on:s=='budget'})}${nav(0,em('📊'),'Monthly review')}${nav(0,em('🧳'),'Trip to Lisbon')}
-<h6>Acme API</h6>${nav(0,em('🗺️'),'Roadmap')}
-<h6>Tables<span class="a" style="color:var(--ws-text-muted)">＋</span></h6>${nav(0,I.db,'Expenses',{on:s=='table',r:s=='table'?'···':''})}${nav(0,I.db,'Reading list')}${nav(0,I.db,'Customers')}
+<h6>Private ▾</h6>${nav(0,em('💰'),'Household budget',{on:s=='budget'})}${nav(0,em('📊'),'Monthly review')}${nav(0,em('🧳'),'Trip to Lisbon')}
+<h6>Acme API ▾</h6>${nav(0,em('🗺️'),'Roadmap')}
+<h6>Tables ▾<span class="a" style="color:var(--ws-text-muted)">＋</span></h6>${nav(0,I.db,'Expenses',{on:s=='table',r:s=='table'?'···':''})}${nav(0,I.db,'Reading list')}${nav(0,I.db,'Customers')}
 <div class="foot">${nav(0,I.zap,'Automations')}${nav(0,I.clock,'History')}${nav(0,I.cog,'Settings')}</div></div>`;
 const rows=[['1 Nov','Groceries','Food','t1','84.20'],['30 Oct','Electricity','Home','t2','96.00'],['28 Oct','Train to Porto','Travel','t3','42.50'],['27 Oct','Rent','Home','t2','950.00']];
 const table=(r=rows)=>`<div class="tbl" style="--cols:78px minmax(0,1fr) 84px 92px"><div class="tr hd"><span>Date</span><span>Item</span><span>Category</span><span class="num">Amount</span></div>${r.map(x=>`<div class="tr"><span>${x[0]}</span><span>${x[1]}</span><span><span class="tag ${x[3]}">${x[2]}</span></span><span class="num">€ ${x[4]}</span></div>`).join('')}</div>`;
@@ -158,16 +157,14 @@ const note=(n='Expenses')=>`<span class="note">Table: <span>${n}</span></span>`;
 const head=(title='October spending',n=note())=>`<div class="vh"><span class="ico">${I.db}</span><b>${title}</b>${n}</div>`;
 const named=`<div class="setup"><span class="sc on">${I.sort}Sort:<span class="v">Date, newest first</span></span><span class="sc on">${I.filter}Filter:<span class="v">Date is in October</span></span></div>`;
 const unset=`<div class="setup"><span class="sc">${I.sort}Sort</span><span class="sc">${I.filter}Filter</span></div>`;
-const iconed=`<div class="setup"><span class="chip">${I.sort}Date, newest first</span><span class="chip">${I.filter}Date is in October</span><span class="ib">${I.plus}</span></div>`;
 const foot=(x='')=>`<div class="vf"><span>4 of 240 rows</span>${x}</div>`;
 const view=(h,f=foot(),c=named,r=rows)=>`<div class="block">${h}${c}${table(r)}${f}</div>`;
 const put=(id,html)=>document.getElementById(id).innerHTML=html;
 put('s1',`${side('budget')}<div class="main"><div class="pgc"><h2 class="ptitle">Household budget</h2>${view(head()).replace('class="block"','class="block" style="padding:0"')}</div></div>`);
 put('s2a',view(head()));
 put('s2b',view(head('All costs'),`<div class="vf"><span>240 rows</span></div>`,unset,[rows[3],rows[0]]));
-put('s2c',view(head(),foot(),iconed));
 put('s3a',view(head('<span class="edit">October spending<i></i></span>')+`<div class="pop hintp">Changes this View only</div>`));
-put('s4',`${side('table')}<div class="main"><div class="pgc"><div class="vh" style="position:relative"><h2 class="ptitle"><span class="edit">Expenses<i></i></span></h2><span class="end"><span class="ib">${I.more}</span></span><div class="pop hintp" style="top:calc(100% + 6px);--at:0">Renames the Table in all 3 Views</div></div><div class="flist"><div class="frow"><span class="d">Shown in</span></div><div class="frow"><span>October spending</span><span class="r">Household budget</span></div><div class="frow"><span>All costs</span><span class="r">Monthly review</span></div><div class="frow"><span>Travel costs</span><span class="r">Trip to Lisbon</span></div></div>${table()}<div class="vf"><span>240 rows</span></div></div></div>`);
+put('s4',`${side('table')}<div class="main"><div class="pgc"><div class="vh" style="position:relative"><h2 class="ptitle"><span class="edit">Expenses<i></i></span></h2><span class="end"><span class="ib">${I.more}</span></span><div class="pop hintp" style="top:calc(100% + 6px);--at:0">Renames the Table in all 3 Views</div></div><div class="flist"><div class="frow"><span class="d">Shown in</span></div><div class="frow"><span>October spending</span><span class="r">Household budget</span></div><div class="frow"><span>All costs</span><span class="r">Monthly review</span></div><div class="frow"><span>Travel costs</span><span class="r">Trip to Lisbon</span></div></div><div class="find">${I.srch}<b>rent</b></div>${table([rows[3]]).replace('<span>Date</span>','<span class="srt">Date ↓</span>')}<div class="vf"><span>1 of 240 rows</span></div></div></div>`);
 put('s5a',`<div class="in-line">/tab</div><div class="pop ptable"><div class="it on"><span class="bi">${I.db}</span><span class="tx">Table<span class="d">New fields and rows</span></span></div><div class="it"><span class="bi">${I.db}</span><span class="tx">Existing Table…<span class="d">Another View of a Table</span></span></div></div>`);
 put('s5b',`<h4>Add a View of “Expenses”</h4><div class="flist"><div class="frow on"><span class="rd on"></span><span class="tx">Start with no sort or filter</span></div><div class="frow"><span class="d">Or copy the setup of</span></div><div class="frow"><span class="rd"></span><span class="tx">October spending<span class="d">Date, newest first · Date is in October</span></span><span class="r">Household budget</span></div><div class="frow"><span class="rd"></span><span class="tx">Travel costs<span class="d">Category is Travel</span></span><span class="r">Trip to Lisbon</span></div></div><div class="acts"><span class="btn pri">Add View</span><span class="btn">Cancel</span></div>`);
 put('s6b',`<h4>Delete the last View of “Expenses”?</h4><p>The Table and its 240 rows stay in Tables, unless you delete them too.</p><div class="acts"><span class="btn pri">Delete View</span><span class="btn dng">Delete Table too</span><span class="btn">Cancel</span></div>`);
