@@ -234,8 +234,8 @@ jobs:
           sudo apparmor_parser --replace /etc/apparmor.d/watershed-bwrap-userns
           test "$(sysctl -n kernel.apparmor_restrict_unprivileged_userns)" = 1
 
-      # Flow Agent coverage runs the whole workspace and Liquid coverage the Liquid packages, so a
-      # pull request runs their tests there once. Main still runs Flow Agent's twice.
+      # A pull request runs Flow Agent's tests only in its workspace coverage, and Liquid's alone only
+      # in Liquid coverage; main still runs Flow Agent's here too.
       - name: Run tests
         if: (needs.scope.outputs.flow_agent == 'true' && github.event_name != 'pull_request') || (needs.scope.outputs.flow_agent != 'true' && needs.scope.outputs.liquid != 'true')
         run: >-
