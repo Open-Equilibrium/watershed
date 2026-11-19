@@ -127,7 +127,7 @@ class WorkspaceSwitcher extends StatelessWidget {
                   for (final (index, entry) in shown)
                     Tooltip(
                       message: index < 9
-                          ? '${_shown(entry.name)} · ⌘${index + 1}'
+                          ? '${_shown(entry.name)} · ⌥⌘${index + 1}'
                           : _shown(entry.name),
                       child: InkWell(
                         key: Key('workspace $index'),

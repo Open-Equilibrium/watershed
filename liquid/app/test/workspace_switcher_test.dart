@@ -64,7 +64,7 @@ void main() {
     expect(fake.icon, '');
   });
 
-  testWidgets('＋ makes a Workspace to name; a click or ⌘1 switches back', (
+  testWidgets('＋ makes a Workspace to name; a click or ⌥⌘2 switches', (
     tester,
   ) async {
     final workspaces = await show(tester);
@@ -86,7 +86,14 @@ void main() {
     expect(workspaces.at, 0);
     expect(find.byKey(const Key('workspace menu')), findsNothing);
     await tester.sendKeyDownEvent(LogicalKeyboardKey.meta);
+    await tester.sendKeyEvent(LogicalKeyboardKey.digit1);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.meta);
+    await tester.pumpAndSettle();
+    expect(workspaces.at, 0, reason: '⌘1 stays the Chat\'s');
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.meta);
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.alt);
     await tester.sendKeyEvent(LogicalKeyboardKey.digit2);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.alt);
     await tester.sendKeyUpEvent(LogicalKeyboardKey.meta);
     for (var turn = 0; turn < 20; turn++) {
       await tester.runAsync(
