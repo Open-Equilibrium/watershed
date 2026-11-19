@@ -83,7 +83,6 @@
 .tab.add{color:var(--ws-text-faint)}
 .group{flex:1;min-width:0;display:flex;flex-direction:column}
 .rail .ri.later{opacity:.45}
-.rail .wsav{width:30px;height:30px;border-radius:8px;background:var(--ws-accent);color:var(--ws-on-accent);display:grid;place-items:center;font-weight:600;font-size:13px;margin-bottom:6px}
 .rail .sep{width:24px;height:1px;background:var(--ws-border-strong);margin:6px 0}
 .menu{position:absolute;z-index:3;border-radius:8px;background:var(--ws-surface);box-shadow:var(--ws-shadow);padding:6px;display:flex;flex-direction:column;gap:1px;font-size:13.5px;width:210px}
 .menu div{height:28px;display:flex;align-items:center;gap:8px;padding:0 8px;border-radius:6px}
@@ -127,7 +126,7 @@
   </section>
   <section>
     <h3 class="sec">1 · Rail and tabs</h3>
-    <p class="sub">The rail, top to bottom: the <b>Workspace</b> you are in, its initial on a colored square, which switches Workspaces as Slack's rail does; <b>Inbox</b>, first, since it holds what waits for you; <b>Pages</b>, the Explorer of Pages and Sources; <b>Chats</b>; after a divider <b>Files</b> and <b>Media</b>, the store's two later views (ADR-0228), shown faint until they exist. At the foot <b>Settings</b> (the gear) and <b>you</b>. Only the Inbox carries a count, of what needs you, amber while an agent waits; Chats shows at most a quiet dot while something is unread, and the list itself shows which, as WhatsApp does, so nothing is counted twice. Above the main area, each open Page or Chat is a <b>tab</b>, as in Notion's desktop app and VS Code; tabs return after a restart. Here a Page shows a Chat Block among its other Blocks.</p>
+    <p class="sub">The rail, top to bottom (Workspaces switch at the top of the sidebar, ADR-0310): <b>Inbox</b>, first, since it holds what waits for you; <b>Pages</b>, the Explorer of Pages and Sources; <b>Chats</b>; after a divider <b>Files</b> and <b>Media</b>, the store's two later views (ADR-0228), shown faint until they exist. At the foot <b>Settings</b> (the gear) and <b>you</b>. Only the Inbox carries a count, of what needs you, amber while an agent waits; Chats shows at most a quiet dot while something is unread, and the list itself shows which, as WhatsApp does, so nothing is counted twice. Above the main area, each open Page or Chat is a <b>tab</b>, as in Notion's desktop app and VS Code; tabs return after a restart. Here a Page shows a Chat Block among its other Blocks.</p>
     <div class="stage"><div class="scaler"><div class="win" id="w-ws" data-w="1240"></div></div></div>
   </section>
   <section>
@@ -157,7 +156,7 @@
   </section>
   <section>
     <h3 class="sec">7 · On a phone</h3>
-    <p class="sub">The rail becomes the tab bar: Inbox, Pages, Chats and Search; the Workspace switcher sits in Pages' title.</p>
+    <p class="sub">The rail becomes the tab bar: Inbox, Pages, Chats and Search; the Workspace switcher sits at the top of Pages (ADR-0310).</p>
     <div class="stage"><div class="scaler"><div class="win bare" id="w-phone" data-w="1240"></div></div></div>
   </section>
   <section>
@@ -234,7 +233,7 @@ const R={
  task:sv('<rect x="2.5" y="2.5" width="11" height="11" rx="2"/><path d="M5.5 8l2 2 3.5-4"/>'),
 };
 function rail(on){const ri=(k,i,b,o='')=>`<span class="ri ${on==k?'on':''} ${o}">${i}${b||''}</span>`;
-return `<div class="rail"><span class="wsav">B</span>${ri('inbox',R.inbox,'<span class="bd w">4</span>')}${ri('pages',R.pages)}${ri('chats',R.chat,'<span class="dt"></span>')}<span class="sep"></span>${ri('files',R.files,'','later')}${ri('media',R.media,'','later')}<span style="flex:1"></span>${ri('set',R.gear)}<span class="ri">${avatar('me','BW')}</span></div>`}
+return `<div class="rail">${ri('inbox',R.inbox,'<span class="bd w">4</span>')}${ri('pages',R.pages)}${ri('chats',R.chat,'<span class="dt"></span>')}<span class="sep"></span>${ri('files',R.files,'','later')}${ri('media',R.media,'','later')}<span style="flex:1"></span>${ri('set',R.gear)}<span class="ri">${avatar('me','BW')}</span></div>`}
 const tree=(sel)=>`<div class="side2"><div class="ttl2">Benni's Workspace</div>
 <h6>Private<span style="color:var(--ws-text-muted)">＋</span></h6>${nav(0,em(E.budget),'Household budget',{tw:'⌄'})}${nav(1,em(E.review),'Monthly review')}${nav(0,em(E.trip),'Trip to Lisbon',{tw:'›',on:sel=='trip'})}${nav(0,I.file,'bank-export.csv')}
 <h6>Acme API</h6>${nav(0,em(E.road),'Roadmap')}${nav(0,em(E.api),'API design')}${nav(0,I.db,'Tasks')}${nav(0,I.dir,'acme-api',{tw:'›'})}<div class="foot">${nav(0,I.zap,'Automations')}${nav(0,I.clock,'History')}</div></div>`;

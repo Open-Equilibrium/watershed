@@ -145,7 +145,7 @@ filter:sv('<path d="M2 3h12L9.5 8.5V13l-3-1.5v-3z"/>'),
 };
 const em=e=>`<span class="em">${e}</span>`;
 const nav=(d,ic,label,o={})=>`<div class="nav ${o.on?'on':''}" style="--d:${d}"><span class="tw">${o.tw||''}</span><span class="ico">${ic}</span><span>${label}</span>${o.r?`<span class="r">${o.r}</span>`:''}</div>`;
-const side=(s='')=>`<div class="side"><div class="wsw"><span class="av">B</span>Benni's Workspace<span style="margin-left:auto;color:var(--ws-text-faint)">⌄</span></div>
+const side=(s='')=>`<div class="side"><div class="wsw"><span class="av">B</span>Benni's Workspace</div>
 <div class="srch">${I.srch}<span>Search or run a command</span><kbd>⌘K</kbd></div>
 <h6>Private ▾</h6>${nav(0,em('💰'),'Household budget',{on:s=='budget'})}${nav(0,em('📊'),'Monthly review')}${nav(0,em('🧳'),'Trip to Lisbon')}
 <h6>Acme API ▾</h6>${nav(0,em('🗺️'),'Roadmap')}

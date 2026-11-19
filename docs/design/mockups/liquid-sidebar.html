@@ -12,20 +12,11 @@
 .side h6 .c{margin-left:4px;font-size:12px}
 .side h6 .n{flex:1;display:flex;align-items:center}
 .ttl2{font-weight:600;padding:6px 8px 2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.rail{width:52px;flex:none;background:var(--ws-subtle);box-shadow:inset -1px 0 0 var(--ws-border);display:flex;flex-direction:column;align-items:center;gap:6px;padding:10px 0}
-.rail .wa{position:relative;width:30px;height:30px;border-radius:8px;display:grid;place-items:center;font-weight:600;font-size:13px;color:#fff}
-.rail .wa.on{box-shadow:0 0 0 2px var(--ws-canvas),0 0 0 4px var(--ws-accent)}
-.rail .wa.on::before{content:"";position:absolute;left:-11px;top:5px;width:4px;height:20px;border-radius:0 3px 3px 0;background:var(--ws-text)}
-.rail .ri{width:36px;height:36px;border-radius:8px;display:grid;place-items:center;color:var(--ws-text-muted)}
-.rail .ri.on{background:var(--ws-selected);color:var(--ws-accent)}
-.rail .sep{width:24px;height:1px;background:var(--ws-border-strong);margin:2px 0}
-.rail .add{width:30px;height:30px;border-radius:8px;display:grid;place-items:center;color:var(--ws-text-muted);box-shadow:inset 0 0 0 1px var(--ws-border-strong)}
 .wsr{display:flex;align-items:center;gap:4px;height:var(--ws-row-side);min-width:0}
 .wsr .cur{flex:1;min-width:0;display:flex;align-items:center;gap:8px;height:100%;padding:0 6px;border-radius:6px;background:var(--ws-selected);font-weight:500}
 .wsr .cur span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .wsr .o{width:28px;height:28px;display:grid;place-items:center;border-radius:6px;flex:none}
 .wsr .more{width:28px;height:28px;display:grid;place-items:center;border-radius:6px;flex:none;font-size:12px;color:var(--ws-text-muted)}
-.tip{position:absolute;z-index:3;left:60px;top:var(--y,48px);background:var(--ws-surface);box-shadow:var(--ws-shadow);border-radius:6px;padding:4px 8px;font-size:12px;white-space:nowrap}
 .k1{background:#2f7cf6}.k2{background:#d9730d}.k3{background:#0f9d76}.k4{background:#9065b0}
 </style></head><body class="theme-light chrome">
 <div class="page">
@@ -33,7 +24,7 @@
 
   <section data-s="0">
     <h1>Liquid: the sidebar</h1>
-    <p class="sub">For the Tables slice in <a href="../../../PLAN.md#m3a--local-workspace-foundation">PLAN.md</a>. Sections fold, and Workspaces switch without a dropdown.</p>
+    <p class="sub">For the Tables slice in <a href="../../../PLAN.md#m3a--local-workspace-foundation">PLAN.md</a>, after <a href="../../adr/ADR-LOG.md">ADR-0310</a>.</p>
   </section>
 
   <section data-s="1">
@@ -44,19 +35,12 @@
 
   <section data-s="2">
     <h3 class="sec">2 · Switching Workspaces</h3>
-    <p class="sub">Every Workspace shows as its icon, and the one you are in is marked. A hover or long press shows a Workspace's name; ⌘1 to ⌘9 switch to the first nine. With one Workspace there is nothing to switch, so only its icon and name show.</p>
+    <p class="sub">The sidebar's top row shows every Workspace side by side (ADR-0310): the one you are in with its icon and name, the others as icons, ＋ adds one. A hover or long press shows a Workspace's name; ⌘1 to ⌘9 switch to the first nine. With one Workspace, the row shows its icon and name, and ＋.</p>
     <div class="stage">
-      <div class="col2"><div class="lab">A · Stacked in the rail, as in Slack<em>Recommended, the place ADR-0241 gives the switcher</em></div><div class="win"><div class="app" id="s2a" style="position:relative"></div></div></div>
-      <div class="col2"><div class="lab">B · Side by side in the sidebar's top row</div><div class="win"><div class="app" id="s2b" style="--h:200px"></div></div><div class="lab">B with six Workspaces: the rest behind “+2”</div><div class="win"><div class="app" id="s2c" style="--h:120px"></div></div></div>
+      <div class="col2"><div class="lab">Three Workspaces</div><div class="win"><div class="app" id="s2b" style="--h:200px"></div></div><div class="lab">Six Workspaces: the rest behind “+2”</div><div class="win"><div class="app" id="s2c" style="--h:120px"></div></div></div>
     </div>
   </section>
 
-  <section data-s="3">
-    <h3 class="sec">Decisions for this mockup</h3>
-    <ol class="qs">
-      <li><b>The switcher:</b> stacked in the rail (A, recommended) or side by side in the sidebar (B)? A builds the rail's first part now: the Workspaces and below them the icons for Pages and Chats. B fits about four Workspaces before the name of the one you are in gets cut, and moves into the rail when the rest of it ships.</li>
-    </ol>
-  </section>
 </div>
 <script>
 const sv=p=>`<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">${p}</svg>`;
@@ -66,8 +50,6 @@ zap:sv('<path d="M9 1.5L3 9h4.5L7 14.5 13 7H8.5z"/>'),
 clock:sv('<circle cx="8" cy="8" r="6"/><path d="M8 4.5V8l2.5 1.5"/>'),
 cog:sv('<circle cx="8" cy="8" r="2"/><path d="M8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2M3.4 3.4l1.4 1.4M11.2 11.2l1.4 1.4M3.4 12.6l1.4-1.4M11.2 4.8l1.4-1.4"/>'),
 db:sv('<rect x="2" y="2.5" width="12" height="11" rx="1.5"/><path d="M2 6h12M6 6v7.5"/>'),
-pages:sv('<path d="M4 1.5h5.5L13 5v9.5H4z"/><path d="M9.5 1.5V5H13"/>'),
-chat:sv('<path d="M2.5 3.5h11v7h-6l-3 2.5v-2.5h-2z"/>'),
 plus:sv('<path d="M8 3v10M3 8h10"/>'),
 };
 const em=e=>`<span class="em">${e}</span>`;
@@ -78,8 +60,7 @@ const body=(fold)=>`${sec('Private',true,nav(em('💰'),'Household budget',{on:1
 const foot=`<div class="foot">${nav(I.zap,'Automations')}${nav(I.clock,'History')}${nav(I.cog,'Settings')}</div>`;
 const av=(k,l)=>`<span class="av ${k}">${l}</span>`;
 const put=(id,html)=>document.getElementById(id).innerHTML=html;
-put('s1',`<div class="side"><div class="wsr"><span class="cur" style="background:none">${av('k1','B')}<span>Benni's Workspace</span></span></div>${srch}${body(true)}${foot}</div>`);
-put('s2a',`<div class="rail"><span class="wa k1 on">B</span><span class="wa k2">A</span><span class="wa k3">F</span><span class="add">${I.plus}</span><span class="sep"></span><span class="ri on">${I.pages}</span><span class="ri">${I.chat}</span></div><div class="side"><div class="ttl2">Benni's Workspace</div>${srch}${body(true)}${foot}</div><div class="tip" style="--y:46px">Acme · ⌘2</div>`);
+put('s1',`<div class="side"><div class="wsr"><span class="cur" style="background:none">${av('k1','B')}<span>Benni's Workspace</span></span><span class="more">${I.plus}</span></div>${srch}${body(true)}${foot}</div>`);
 put('s2b',`<div class="side"><div class="wsr"><span class="cur">${av('k1','B')}<span>Benni's Workspace</span></span><span class="o">${av('k2','A')}</span><span class="o">${av('k3','F')}</span><span class="more">${I.plus}</span></div>${srch}${sec('Private',true,nav(em('💰'),'Household budget',{on:1})+nav(em('📊'),'Monthly review'))}</div>`);
 put('s2c',`<div class="side"><div class="wsr"><span class="cur">${av('k1','B')}<span>Benni's Workspace</span></span><span class="o">${av('k2','A')}</span><span class="o">${av('k3','F')}</span><span class="o">${av('k4','H')}</span><span class="more">+2</span></div>${srch}</div>`);
 
