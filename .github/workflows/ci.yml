@@ -353,19 +353,6 @@ jobs:
           target/m12-standard/release/flow-executor --probe |
             python3 -c 'import json, sys; probe=json.load(sys.stdin); assert probe["ready"] is True, probe'
 
-      - &native-download
-        name: Package native download
-        shell: bash
-        run: |
-          case "$(uname -s)" in
-            Linux) platform=ubuntu-24.04-x86_64 ;;
-            Darwin) platform=macos-27-aarch64 ;;
-            *) exit 1 ;;
-          esac
-          node scripts/run-python.mjs scripts/package_flow_agent.py \
-            --binaries target/m12-standard/release --platform "$platform" \
-            --output target/m12-download
-
       - name: Stage native Executor installation
         shell: python
         run: |
@@ -416,13 +403,6 @@ jobs:
         shell: bash
         run: exit 1
 
-      - name: Retain tested native download
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: flow-agent-download-${{ matrix.os }}
-          path: target/m12-download/
-          if-no-files-found: error
-
   flow-coverage:
     name: Flow Agent coverage (${{ matrix.os }})
     needs: scope
@@ -448,7 +428,18 @@ jobs:
       - *test-tools
       - *linux-protection
       - *native-artifacts
-      - *native-download
+
+      - name: Package native download
+        shell: bash
+        run: |
+          case "$(uname -s)" in
+            Linux) platform=ubuntu-24.04-x86_64 ;;
+            Darwin) platform=macos-27-aarch64 ;;
+            *) exit 1 ;;
+          esac
+          node scripts/run-python.mjs scripts/package_flow_agent.py \
+            --binaries target/m12-standard/release --platform "$platform" \
+            --output target/m12-download
 
       - name: Check native coverage and installation acceptance
         shell: bash
@@ -464,6 +455,13 @@ jobs:
           /bin/sh scripts/run-m12-readiness-negatives.sh
           cargo llvm-cov report --fail-under-lines 88 \
             --ignore-filename-regex "$COVERAGE_EXCLUSIONS" --show-missing-lines
+
+      - name: Retain tested native download
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: flow-agent-download-${{ matrix.os }}
+          path: target/m12-download/
+          if-no-files-found: error
 
   m11-evidence:
     name: M1.1 performance evidence

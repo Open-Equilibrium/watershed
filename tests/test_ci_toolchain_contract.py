@@ -620,15 +620,14 @@ class CiWorkflowContractTest(unittest.TestCase):
 
     def assert_m12_release_boundary(self, workflow: str) -> None:
         job = "flow-agent"
-        for shared in ("Build native installation artifacts", "Package native download"):
-            self.assertEqual(job_of(workflow, shared), [job, "flow-coverage"], shared)
-            self.assertEqual(
-                [line for line in step_lines(workflow, shared) if line.startswith("        if:")], [])
+        self.assertEqual(job_of(workflow, "Build native installation artifacts"), [job, "flow-coverage"])
+        self.assertEqual([line for line in step_lines(workflow, "Build native installation artifacts")
+                          if line.startswith("        if:")], [])
         coverage_order = step_names(workflow, "flow-coverage")
-        self.assertLess(coverage_order.index("Build native installation artifacts"),
-                        coverage_order.index("Package native download"))
-        self.assertLess(coverage_order.index("Package native download"),
-                        coverage_order.index("Check native coverage and installation acceptance"))
+        accepted = ("Build native installation artifacts", "Package native download",
+                    "Check native coverage and installation acceptance", "Retain tested native download")
+        self.assertEqual([coverage_order.index(name) for name in accepted],
+                         sorted(coverage_order.index(name) for name in accepted))
         build = step_run(workflow, "Build native installation artifacts")
         self.assertIn("cargo build --locked --release -p flow-agent-cli -p flow-agent-executor "
                       "--target-dir target/m12-standard", build)
@@ -669,7 +668,8 @@ class CiWorkflowContractTest(unittest.TestCase):
         self.assertIn("scripts/package_flow_agent.py", package)
         self.assertIn("--binaries target/m12-standard/release", package)
         self.assertIn("--output target/m12-download", package)
-        retained = assert_step_state(self, workflow, "Retain tested native download", job=job)
+        assert_step_state(self, workflow, "Package native download", job="flow-coverage")
+        retained = assert_step_state(self, workflow, "Retain tested native download", job="flow-coverage")
         self.assertIn("          path: target/m12-download/", retained)
         self.assertIn("          if-no-files-found: error", retained)
 
