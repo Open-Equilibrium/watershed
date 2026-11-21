@@ -32,6 +32,18 @@ void main() {
     expect(reserved(Command.sessionDetails, commandOptionB), isNull);
   });
 
+  test('⌥⌘1–⌥⌘9 switch Workspaces, and no command takes them', () {
+    final keys = ShortcutSettings.standard();
+    const third = Keys(LogicalKeyboardKey.digit3, meta: true, alt: true);
+    expect(Fixed.switchWorkspace.keys, contains(third));
+    expect(reserved(Command.diff, third), 'switching Workspaces');
+    expect([
+      for (final command in Command.values)
+        for (final bound in keys.bindings(command))
+          if (Fixed.switchWorkspace.keys.contains(bound)) command,
+    ], isEmpty);
+  });
+
   test('the statistics open with ⌘U, as T3 Code usage does', () {
     expect(ShortcutSettings.standard().label(Command.statistics), '⌘U');
     expect(ShortcutSettings.liquidKey().bindings(Command.statistics), [

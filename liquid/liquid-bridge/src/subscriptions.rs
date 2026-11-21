@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
-use liquid_core::PageId;
+use liquid_core::{BlockId, PageId};
 
 use crate::api::workspace::{BridgeChange, BridgeResource};
 
@@ -86,6 +86,12 @@ impl Subscriptions {
         self.open
             .values()
             .any(|(other, _)| other.page() == Some(page.as_str()))
+    }
+
+    pub(crate) fn follows_table(&self, table: &BlockId) -> bool {
+        self.open
+            .values()
+            .any(|(other, _)| other.table() == Some(table.as_str()))
     }
 
     #[cfg(test)]

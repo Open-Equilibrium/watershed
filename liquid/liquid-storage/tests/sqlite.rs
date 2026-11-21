@@ -214,11 +214,10 @@ fn history_keeps_a_number_cell_exactly() {
     let Some(Created::Block { block, .. }) = apply(&mut workspace, add) else {
         panic!("a Database")
     };
-    let field = workspace.database(&page, &block).unwrap().unwrap().fields[0]
+    let field = workspace.database(&block).unwrap().unwrap().fields[0]
         .id
         .clone();
     let amount = Mutation::AddField {
-        page: page.clone(),
         block: block.clone(),
         place: Place::After(field),
         name: "Amount".into(),
@@ -228,7 +227,6 @@ fn history_keeps_a_number_cell_exactly() {
         panic!("a field")
     };
     let row = Mutation::AddRow {
-        page: page.clone(),
         block: block.clone(),
         place: Place::Last,
     };
@@ -237,7 +235,6 @@ fn history_keeps_a_number_cell_exactly() {
     };
     let value = 51.248178375505404;
     let set = Mutation::SetCell {
-        page,
         block,
         row,
         field: amount,

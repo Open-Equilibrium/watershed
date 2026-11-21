@@ -280,5 +280,6 @@ pub(crate) fn row_query(
         filter,
         start,
         limit,
+        search: None,
     })
 }

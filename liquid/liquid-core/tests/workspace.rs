@@ -743,3 +743,38 @@ fn a_code_block_neither_splits_joins_nor_takes_text_block_writes() {
         ["Shares round:", "share()", "Reports"]
     );
 }
+
+#[test]
+fn a_workspace_keeps_its_name_and_icon() {
+    let mut workspace = workspace();
+    assert_eq!(
+        workspace.name_and_icon().unwrap(),
+        (String::new(), String::new())
+    );
+    let named = apply(
+        &mut workspace,
+        Mutation::RenameWorkspace {
+            name: "Home".into(),
+        },
+    );
+    assert_eq!(named.changed, [liquid_core::Changed::Workspace]);
+    apply(
+        &mut workspace,
+        Mutation::SetWorkspaceIcon {
+            icon: "🏡".into()
+        },
+    );
+    assert_eq!(
+        workspace.name_and_icon().unwrap(),
+        ("Home".to_string(), "🏡".to_string())
+    );
+    assert_eq!(
+        edit(
+            &mut workspace,
+            Mutation::SetWorkspaceIcon {
+                icon: "x".repeat(65),
+            },
+        ),
+        Err(Error::TooLong)
+    );
+}

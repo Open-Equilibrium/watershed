@@ -2,7 +2,9 @@ use std::collections::HashMap;
 
 use automerge::AutoCommit;
 
-use crate::model::{self, BLOCK, BLOCKS, BOUNDARY, KIND, ROW_FILTER, ROW_SORT, VIEWS};
+use crate::model::{
+    self, BLOCK, BLOCKS, BOUNDARY, KIND, ROW_FILTER, ROW_SORT, TABLE, TITLE, VIEWS,
+};
 use crate::{BlockId, BlockKind, Error, Filter, Place, Sort, View, ViewId};
 
 struct Placed {
@@ -18,19 +20,26 @@ impl Order {
     pub(crate) fn read(doc: &AutoCommit) -> Self {
         let blocks: HashMap<String, BlockKind> = model::sorted(doc, BLOCKS)
             .into_iter()
-            .map(|entry| (entry.id.clone(), BlockKind::of(entry.get(KIND))))
+            .map(|entry| match BlockKind::of(entry.get(KIND)) {
+                BlockKind::Database => (entry.id.clone(), BlockKind::Unknown),
+                kind => (entry.id.clone(), kind),
+            })
             .collect();
         let placed = model::sorted(doc, VIEWS)
             .into_iter()
             .filter_map(|entry| {
-                let (block, kind) = entry
-                    .get(BLOCK)
-                    .and_then(|block| Some((block, *blocks.get(block)?)))?;
+                let (block, kind) = match entry.get(TABLE) {
+                    Some(table) => (table, BlockKind::Database),
+                    None => entry
+                        .get(BLOCK)
+                        .and_then(|block| Some((block, *blocks.get(block)?)))?,
+                };
                 Some(Placed {
                     sort: entry.sort().unwrap_or_default().to_string(),
                     view: View {
                         id: ViewId::stored(&entry.id),
                         block: BlockId::stored(block),
+                        title: entry.get(TITLE).unwrap_or_default().to_string(),
                         boundary: entry.get(BOUNDARY) == Some("true"),
                         kind,
                         sort: stored(entry.get(ROW_SORT)),
@@ -97,6 +106,12 @@ impl Order {
     pub(crate) fn set_sort(&mut self, view: &ViewId, sort: Option<Sort>) {
         if let Some(index) = self.position(view) {
             self.placed[index].view.sort = sort;
+        }
+    }
+
+    pub(crate) fn set_title(&mut self, view: &ViewId, title: &str) {
+        if let Some(index) = self.position(view) {
+            self.placed[index].view.title = title.to_string();
         }
     }
 

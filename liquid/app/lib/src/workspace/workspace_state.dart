@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 
 import '../rust/api/database.dart';
 import '../rust/api/replica.dart';
+import '../settings_file.dart';
 import '../rust/api/drawing.dart';
 import '../rust/api/workspace.dart';
 import 'follow.dart';
@@ -71,6 +72,7 @@ BridgeQuery query(
   int limit = window,
   BridgeSort? sort,
   BridgeFilter? filter,
+  String? search,
 }) => BridgeQuery(
   kind: kind,
   area: area,
@@ -80,6 +82,7 @@ BridgeQuery query(
   limit: limit,
   sort: sort,
   filter: filter,
+  search: search,
 );
 
 class EditChain {
@@ -88,12 +91,16 @@ class EditChain {
 
 @immutable
 class OpenPage {
-  const OpenPage(this.area, this.page, {this.fresh = false});
+  const OpenPage(this.area, this.page, {this.fresh = false}) : table = null;
+
+  const OpenPage.table(String this.table) : area = '', page = '', fresh = false;
 
   final String area;
   final String page;
 
   final bool fresh;
+
+  final String? table;
 }
 
 class _Reread {
@@ -124,11 +131,46 @@ class _Reread {
 }
 
 class WorkspaceState {
-  WorkspaceState(this.workspace);
+  WorkspaceState(this.workspace, {this.layout});
 
   final LiquidWorkspace workspace;
 
+  final SettingsFile? layout;
+
+  final folded = ValueNotifier<Set<String>>(const {});
+
+  Future<void> _loadLayout() async {
+    final json = await layout?.load();
+    if (json?['folded'] case final List<Object?> folded) {
+      this.folded.value = {...folded.whereType<String>()};
+    }
+  }
+
+  void toggleFold(String section) {
+    final folded = {...this.folded.value};
+    if (!folded.remove(section)) folded.add(section);
+    this.folded.value = folded;
+    final layout = this.layout;
+    if (layout == null) return;
+    final json = {'folded': folded.toList()};
+    _layoutSaving = _layoutSaving
+        .then((_) => layout.save(json))
+        .then<void>((_) {}, onError: (Object _) {});
+  }
+
+  Future<void> _layoutSaving = Future.value();
+
+  @visibleForTesting
+  Future<void> get layoutSaved => _layoutSaving;
+
   final areas = ValueNotifier<List<BridgeArea>>(const []);
+
+  final named = ValueNotifier<({String name, String icon})>((
+    name: '',
+    icon: '',
+  ));
+
+  final tables = ValueNotifier<List<BridgeTable>>(const []);
 
   final open = ValueNotifier<OpenPage?>(null);
 
@@ -206,8 +248,15 @@ class WorkspaceState {
   }
 
   Future<void> start({bool show = true}) async {
+    await _loadLayout();
     final areas = _Reread(_readAreas);
     _listen(const BridgeResource(kind: BridgeResourceKind.areas), areas);
+    final tables = _Reread(_readTables);
+    _listen(const BridgeResource(kind: BridgeResourceKind.tables), tables);
+    _listen(
+      const BridgeResource(kind: BridgeResourceKind.workspace),
+      _Reread(_readNamed),
+    );
     final first = await workspace.query(query: query(BridgeQueryKind.areas));
     if (first.count == 0) {
       final private = await apply(
@@ -236,6 +285,52 @@ class WorkspaceState {
       ),
     );
     if (show) open.value = OpenPage(area, created.page!, fresh: true);
+  }
+
+  Future<void> newTable(String area) async {
+    final created = await apply(
+      mutation(BridgeMutationKind.createTable, area: area, text: ''),
+    );
+    openTable(created.block!);
+  }
+
+  OpenPage? _back;
+
+  void openTable(String table) {
+    if (open.value case final page? when page.table == null) _back = page;
+    open.value = OpenPage.table(table);
+  }
+
+  Future<void> deleteTable(String table) async {
+    await apply(mutation(BridgeMutationKind.deleteTable, block: table));
+    if (open.value?.table == table) open.value = _back;
+  }
+
+  Future<void> _readNamed() async {
+    final answer = await read(query(BridgeQueryKind.workspace));
+    if (!_disposed) {
+      named.value = (name: answer.text ?? '', icon: answer.icon ?? '');
+    }
+  }
+
+  Future<void> renameWorkspace(String name) =>
+      apply(mutation(BridgeMutationKind.renameWorkspace, text: name));
+
+  Future<void> setWorkspaceIcon(String icon) =>
+      apply(mutation(BridgeMutationKind.setWorkspaceIcon, text: icon));
+
+  Future<void> _readTables() async {
+    final read = <BridgeTable>[];
+    var count = 0;
+    do {
+      final answer = await this.read(
+        query(BridgeQueryKind.tables, start: read.length),
+      );
+      count = answer.count;
+      if (answer.tables.isEmpty) break;
+      read.addAll(answer.tables);
+    } while (read.length < count);
+    if (!_disposed) tables.value = read;
   }
 
   Future<void> rename(String page, String title) =>
@@ -343,6 +438,9 @@ class WorkspaceState {
     _followed.clear();
     await Future.wait(followed.map((subscription) => subscription.cancel()));
     areas.dispose();
+    tables.dispose();
+    named.dispose();
+    folded.dispose();
     open.dispose();
     problem.dispose();
     for (final tree in _trees.values) {

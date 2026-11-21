@@ -126,6 +126,7 @@ pub(super) fn query(kind: BridgeQueryKind) -> BridgeQuery {
         limit: MAX_WINDOW,
         sort: None,
         filter: None,
+        search: None,
     }
 }
 

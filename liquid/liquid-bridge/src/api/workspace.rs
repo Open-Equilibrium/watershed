@@ -13,6 +13,8 @@ pub const MAX_WINDOW: i64 = 500;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BridgeMutationKind {
+    RenameWorkspace,
+    SetWorkspaceIcon,
     CreateArea,
     CreatePage,
     RenamePage,
@@ -33,6 +35,10 @@ pub enum BridgeMutationKind {
     SetDrawingStyle,
     EditDrawing,
     AddDatabaseBlock,
+    CreateTable,
+    AddTableView,
+    RenameView,
+    DeleteTable,
     RenameDatabase,
     AddField,
     RenameField,
@@ -129,6 +135,7 @@ pub struct BridgeApplied {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BridgeQueryKind {
+    Workspace,
     Areas,
     Pages,
     Views,
@@ -138,6 +145,8 @@ pub enum BridgeQueryKind {
     Drawing,
     Database,
     Rows,
+    Tables,
+    TableViews,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -150,6 +159,7 @@ pub struct BridgeQuery {
     pub limit: i64,
     pub sort: Option<BridgeSort>,
     pub filter: Option<BridgeFilter>,
+    pub search: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -163,6 +173,22 @@ pub struct BridgePage {
     pub id: String,
     pub parent: Option<String>,
     pub title: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BridgeTable {
+    pub id: String,
+    pub area: String,
+    pub name: String,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct BridgeShown {
+    pub page: String,
+    pub view: String,
+    pub title: String,
+    pub sort: Option<BridgeSort>,
+    pub filter: Option<BridgeFilter>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -179,6 +205,7 @@ pub enum BridgeBlockKind {
 pub struct BridgeView {
     pub id: String,
     pub block: String,
+    pub title: String,
     pub boundary: bool,
     pub kind: BridgeBlockKind,
     pub sort: Option<BridgeSort>,
@@ -198,14 +225,20 @@ pub struct BridgeAnswer {
     pub drawing: Option<BridgeDrawing>,
     pub database: Option<BridgeDatabase>,
     pub rows: Vec<BridgeRow>,
+    pub tables: Vec<BridgeTable>,
+    pub shown: Vec<BridgeShown>,
+    pub icon: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum BridgeResourceKind {
+    Workspace,
     Areas,
     Pages,
     Views,
     Block,
+    Tables,
+    Table,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -284,6 +317,8 @@ impl BridgeMutation {
         let field = || id(&self.field, FieldId::parse, "field");
         let row = || id(&self.row, RowId::parse, "row");
         Ok(match self.kind {
+            BridgeMutationKind::RenameWorkspace => Mutation::RenameWorkspace { name: text()? },
+            BridgeMutationKind::SetWorkspaceIcon => Mutation::SetWorkspaceIcon { icon: text()? },
             BridgeMutationKind::CreateArea => Mutation::CreateArea { name: text()? },
             BridgeMutationKind::CreatePage => Mutation::CreatePage {
                 area: id(&self.area, AreaId::parse, "area")?,
@@ -392,48 +427,58 @@ impl BridgeMutation {
                 after: optional_id(&self.after, ViewId::parse, "after")?,
                 name: text()?,
             },
-            BridgeMutationKind::RenameDatabase => Mutation::RenameDatabase {
+            BridgeMutationKind::CreateTable => Mutation::CreateTable {
+                area: id(&self.area, AreaId::parse, "area")?,
+                name: text()?,
+            },
+            BridgeMutationKind::AddTableView => Mutation::AddTableView {
                 page: page()?,
+                after: optional_id(&self.after, ViewId::parse, "after")?,
+                table: block()?,
+                title: text()?,
+                sort: row_query(&self.sort, &None, 0, 0)?.sort,
+                filter: row_query(&None, &self.filter, 0, 0)?.filter,
+            },
+            BridgeMutationKind::RenameView => Mutation::RenameView {
+                page: page()?,
+                view: id(&self.view, ViewId::parse, "view")?,
+                title: text()?,
+            },
+            BridgeMutationKind::DeleteTable => Mutation::DeleteTable { block: block()? },
+            BridgeMutationKind::RenameDatabase => Mutation::RenameDatabase {
                 block: block()?,
                 name: text()?,
             },
             BridgeMutationKind::AddField => Mutation::AddField {
-                page: page()?,
                 block: block()?,
                 place: self.place(FieldId::parse)?,
                 name: text()?,
                 kind: self.field_kind.ok_or("field kind is missing")?.to_core(),
             },
             BridgeMutationKind::RenameField => Mutation::RenameField {
-                page: page()?,
                 block: block()?,
                 field: field()?,
                 name: text()?,
             },
             BridgeMutationKind::RemoveField => Mutation::RemoveField {
-                page: page()?,
                 block: block()?,
                 field: field()?,
             },
             BridgeMutationKind::AddOption => Mutation::AddOption {
-                page: page()?,
                 block: block()?,
                 field: field()?,
                 name: text()?,
                 color: u8::try_from(self.color).map_err(|_| "color is out of range")?,
             },
             BridgeMutationKind::AddRow => Mutation::AddRow {
-                page: page()?,
                 block: block()?,
                 place: self.place(RowId::parse)?,
             },
             BridgeMutationKind::RemoveRow => Mutation::RemoveRow {
-                page: page()?,
                 block: block()?,
                 row: row()?,
             },
             BridgeMutationKind::SetCell => Mutation::SetCell {
-                page: page()?,
                 block: block()?,
                 row: row()?,
                 field: field()?,
@@ -450,10 +495,12 @@ impl BridgeResource {
         let block =
             || id(&self.block, BlockId::parse, "block").map(|block| Some(block.to_string()));
         let (area, page, block) = match self.kind {
-            BridgeResourceKind::Areas => (None, None, None),
+            BridgeResourceKind::Workspace | BridgeResourceKind::Areas => (None, None, None),
             BridgeResourceKind::Pages => (area()?, None, None),
             BridgeResourceKind::Views => (None, page()?, None),
             BridgeResourceKind::Block => (None, page()?, block()?),
+            BridgeResourceKind::Tables => (None, None, None),
+            BridgeResourceKind::Table => (None, None, block()?),
         };
         Ok(Self {
             kind: self.kind,
@@ -465,6 +512,7 @@ impl BridgeResource {
 
     pub(crate) fn of(changed: &Changed) -> Self {
         let (kind, area, page, block) = match changed {
+            Changed::Workspace => (BridgeResourceKind::Workspace, None, None, None),
             Changed::Areas => (BridgeResourceKind::Areas, None, None, None),
             Changed::Pages(area) => (
                 BridgeResourceKind::Pages,
@@ -484,6 +532,13 @@ impl BridgeResource {
                 Some(page.to_string()),
                 Some(block.to_string()),
             ),
+            Changed::Tables => (BridgeResourceKind::Tables, None, None, None),
+            Changed::Table(block) => (
+                BridgeResourceKind::Table,
+                None,
+                None,
+                Some(block.to_string()),
+            ),
         };
         Self {
             kind,
@@ -500,6 +555,12 @@ impl BridgeResource {
         )
         .then_some(self.page.as_deref())
         .flatten()
+    }
+
+    pub(crate) fn table(&self) -> Option<&str> {
+        (self.kind == BridgeResourceKind::Table)
+            .then_some(self.block.as_deref())
+            .flatten()
     }
 }
 

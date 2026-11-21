@@ -13,7 +13,10 @@ class AnchoredMenu extends StatefulWidget {
     this.height,
     this.gap = WsMetrics.space1,
     this.onTapOutside,
+    this.end = false,
   });
+
+  final bool end;
 
   final OverlayPortalController? controller;
 
@@ -55,7 +58,8 @@ class _AnchoredMenuState extends State<AnchoredMenu> {
           shown = TapRegion(groupId: _menu, onTapOutside: tapped, child: shown);
         }
         return Positioned(
-          left: anchor.left,
+          left: widget.end ? null : anchor.left,
+          right: widget.end ? window.width - anchor.right : null,
           top: up ? null : anchor.bottom + gap,
           bottom: up ? window.height - anchor.top + gap : null,
           child: ConstrainedBox(

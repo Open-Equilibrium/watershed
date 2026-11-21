@@ -10,8 +10,8 @@ import 'media.dart';
 
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `id`, `message`, `normalized`, `of`, `of`, `optional_id`, `page`, `place`, `to_core`, `to_core`, `units`, `window`
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `hash`, `hash`
+// These functions are ignored because they are not marked as `pub`: `id`, `message`, `normalized`, `of`, `of`, `optional_id`, `page`, `place`, `table`, `to_core`, `to_core`, `units`, `window`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `hash`, `hash`
 
 class BridgeAnswer {
   final List<BridgeArea> areas;
@@ -25,6 +25,9 @@ class BridgeAnswer {
   final BridgeDrawing? drawing;
   final BridgeDatabase? database;
   final List<BridgeRow> rows;
+  final List<BridgeTable> tables;
+  final List<BridgeShown> shown;
+  final String? icon;
 
   const BridgeAnswer({
     required this.areas,
@@ -38,6 +41,9 @@ class BridgeAnswer {
     this.drawing,
     this.database,
     required this.rows,
+    required this.tables,
+    required this.shown,
+    this.icon,
   });
 
   @override
@@ -52,7 +58,10 @@ class BridgeAnswer {
       media.hashCode ^
       drawing.hashCode ^
       database.hashCode ^
-      rows.hashCode;
+      rows.hashCode ^
+      tables.hashCode ^
+      shown.hashCode ^
+      icon.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -69,7 +78,10 @@ class BridgeAnswer {
           media == other.media &&
           drawing == other.drawing &&
           database == other.database &&
-          rows == other.rows;
+          rows == other.rows &&
+          tables == other.tables &&
+          shown == other.shown &&
+          icon == other.icon;
 }
 
 class BridgeApplied {
@@ -273,6 +285,8 @@ class BridgeMutation {
 }
 
 enum BridgeMutationKind {
+  renameWorkspace,
+  setWorkspaceIcon,
   createArea,
   createPage,
   renamePage,
@@ -293,6 +307,10 @@ enum BridgeMutationKind {
   setDrawingStyle,
   editDrawing,
   addDatabaseBlock,
+  createTable,
+  addTableView,
+  renameView,
+  deleteTable,
   renameDatabase,
   addField,
   renameField,
@@ -332,6 +350,7 @@ class BridgeQuery {
   final PlatformInt64 limit;
   final BridgeSort? sort;
   final BridgeFilter? filter;
+  final String? search;
 
   const BridgeQuery({
     required this.kind,
@@ -342,6 +361,7 @@ class BridgeQuery {
     required this.limit,
     this.sort,
     this.filter,
+    this.search,
   });
 
   @override
@@ -353,7 +373,8 @@ class BridgeQuery {
       start.hashCode ^
       limit.hashCode ^
       sort.hashCode ^
-      filter.hashCode;
+      filter.hashCode ^
+      search.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -367,10 +388,12 @@ class BridgeQuery {
           start == other.start &&
           limit == other.limit &&
           sort == other.sort &&
-          filter == other.filter;
+          filter == other.filter &&
+          search == other.search;
 }
 
 enum BridgeQueryKind {
+  workspace,
   areas,
   pages,
   views,
@@ -380,6 +403,8 @@ enum BridgeQueryKind {
   drawing,
   database,
   rows,
+  tables,
+  tableViews,
 }
 
 class BridgeResource {
@@ -405,7 +430,62 @@ class BridgeResource {
           block == other.block;
 }
 
-enum BridgeResourceKind { areas, pages, views, block }
+enum BridgeResourceKind { workspace, areas, pages, views, block, tables, table }
+
+class BridgeShown {
+  final String page;
+  final String view;
+  final String title;
+  final BridgeSort? sort;
+  final BridgeFilter? filter;
+
+  const BridgeShown({
+    required this.page,
+    required this.view,
+    required this.title,
+    this.sort,
+    this.filter,
+  });
+
+  @override
+  int get hashCode =>
+      page.hashCode ^
+      view.hashCode ^
+      title.hashCode ^
+      sort.hashCode ^
+      filter.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeShown &&
+          runtimeType == other.runtimeType &&
+          page == other.page &&
+          view == other.view &&
+          title == other.title &&
+          sort == other.sort &&
+          filter == other.filter;
+}
+
+class BridgeTable {
+  final String id;
+  final String area;
+  final String name;
+
+  const BridgeTable({required this.id, required this.area, required this.name});
+
+  @override
+  int get hashCode => id.hashCode ^ area.hashCode ^ name.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeTable &&
+          runtimeType == other.runtimeType &&
+          id == other.id &&
+          area == other.area &&
+          name == other.name;
+}
 
 enum BridgeTextStyle {
   paragraph,
@@ -422,6 +502,7 @@ enum BridgeTextStyle {
 class BridgeView {
   final String id;
   final String block;
+  final String title;
   final bool boundary;
   final BridgeBlockKind kind;
   final BridgeSort? sort;
@@ -430,6 +511,7 @@ class BridgeView {
   const BridgeView({
     required this.id,
     required this.block,
+    required this.title,
     required this.boundary,
     required this.kind,
     this.sort,
@@ -440,6 +522,7 @@ class BridgeView {
   int get hashCode =>
       id.hashCode ^
       block.hashCode ^
+      title.hashCode ^
       boundary.hashCode ^
       kind.hashCode ^
       sort.hashCode ^
@@ -452,6 +535,7 @@ class BridgeView {
           runtimeType == other.runtimeType &&
           id == other.id &&
           block == other.block &&
+          title == other.title &&
           boundary == other.boundary &&
           kind == other.kind &&
           sort == other.sort &&

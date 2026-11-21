@@ -141,7 +141,7 @@ fn main() {
     };
     let mut fields = vec![
         workspace
-            .database(&budget, &block)
+            .database(&block)
             .expect("the Database reads its Block")
             .expect("the Block has a Database")
             .fields[0]
@@ -154,7 +154,6 @@ fn main() {
         ("Paid", FieldKind::Checkbox),
     ] {
         let add = Mutation::AddField {
-            page: budget.clone(),
             block: block.clone(),
             place: Place::Last,
             name: name.into(),
@@ -172,7 +171,6 @@ fn main() {
     let (mut added, mut filled) = (Vec::with_capacity(ROWS), Vec::with_capacity(ROWS * 4));
     for i in 0..ROWS {
         let add = Mutation::AddRow {
-            page: budget.clone(),
             block: block.clone(),
             place: Place::Last,
         };
@@ -193,7 +191,6 @@ fn main() {
         ];
         for (field, value) in fields.iter().zip(values) {
             let set = Mutation::SetCell {
-                page: budget.clone(),
                 block: block.clone(),
                 row: row.clone(),
                 field: field.clone(),
@@ -222,10 +219,11 @@ fn main() {
         }),
         start: 0,
         limit: 100,
+        search: None,
     };
     let start = Instant::now();
     let window = workspace
-        .rows(&budget, &block, &query)
+        .rows(&block, &query)
         .expect("the Database reads its rows");
     println!(
         "a window of {} of its {} paid rows, sorted by amount: {:.2} ms",

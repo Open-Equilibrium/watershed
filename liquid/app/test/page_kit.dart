@@ -279,6 +279,7 @@ class PageKit {
             BridgeView(
               id: 'unknown-view',
               block: 'unknown-block',
+              title: '',
               boundary: boundary,
               kind: BridgeBlockKind.unknown,
             ),

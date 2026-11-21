@@ -135,29 +135,15 @@
         <p><strong>Recommendation:</strong> A.</p>
       </details>
 
-      <details id="d-112" class="decision wide">
-        <summary><h3>D-112 - Where A Table Lives Once It Shows On Several Pages</h3></summary>
-        <p><strong>Status:</strong> Open; blocks Views on several Pages (PLAN.md).</p>
-        <p><strong>Problem:</strong> A Block, with all a Table's rows, is stored inside the document of the Page it was made on, its home Page. A View on a second Page has to reach that other document. Each Page's document loads and syncs on its own, and access is granted per area, so the second Page may be in an area someone cannot read. It must also be settled what happens when the home Page's own View is removed, or the home Page is deleted, while other Views remain. Removing a Block's last View must still delete it in one revertible Action.</p>
-        <p><strong>Question:</strong> Where does a Block that shows on several Pages live?</p>
-        <div class="dia">
-          <div class="opt rec"><h4>A: It stays on its home Page <span class="tag">Recommended</span></h4>
-            <div class="b ws">The View on the other Page names the Block and its home Page</div>
-            <div class="a">opening that Page also loads the home Page's document; without access the View is a placeholder</div>
-            <ul><li>Pro: nothing moves, so History and merging stay simple; it matches how Blocks are stored and read today; the core's writes already span documents.</li><li>Con: a deleted home Page must keep its document while other Views remain; a large Table is loaded by every Page showing it.</li></ul>
-          </div>
-          <div class="opt"><h4>B: A shared Block gets its own document</h4>
-            <div class="b ws">The first View on a second Page moves the Block out of its home Page</div>
-            <ul><li>Pro: no Page depends on another; a large Table syncs alone; access can follow the Block.</li><li>Con: moving must carry the Block's history; a new kind of document for sync, keys and Roles.</li></ul>
-          </div>
-          <div class="opt"><h4>C: Views only inside one area</h4>
-            <div class="b ws">Option A, with a View refused on a Page of another area</div>
-            <ul><li>Pro: no placeholder and no access question.</li><li>Con: people cannot reuse a Table across areas, which Notion's linked views allow.</li></ul>
-          </div>
-        </div>
-        <p><strong>Recommendation:</strong> A; it needs the least new machinery, and B stays possible later for very large Tables.</p>
-        <p><strong>Acceptance criterion:</strong> a Table shown on two Pages reads and writes the same rows from both after a reload; removing its last View deletes it in one Action that a revert restores; once Roles and protection ship, a View without access to the home Page shows a placeholder.</p>
+      <details id="d-115" class="decision">
+        <summary><h3>D-115 - One View Over Several Tables</h3></summary>
+        <p><strong>Status:</strong> Open after Roles.</p>
+        <p><strong>Problem:</strong> A View shows one Table (ADR-0309). Access is granted per area, so teams that keep their tasks in their own areas cannot share one Table, and nobody can see all their tasks in one View.</p>
+        <p><strong>Question:</strong> May a View show the rows of several Tables?</p>
+        <ul><li><strong>A:</strong> No; data that belongs together lives in one Table, and Views filter it, as in Notion. Pro: nothing new. Con: no overview across areas.</li><li><strong>B:</strong> A read-only View over several Tables whose fields are matched by name, as Airtable's synced tables do. Pro: the overview across areas, and each row still edits in its own Table. Con: field matching, rows from Tables the viewer cannot read are left out, and no new rows from there.</li><li><strong>C:</strong> B, plus new rows that ask which Table they go into. Pro: a full View. Con: the most new rules.</li></ul>
+        <p><strong>Recommendation:</strong> B once Roles exist, if the cross-area overview is still missing.</p>
       </details>
+
     </div>
   </section>
 

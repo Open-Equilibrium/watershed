@@ -13,6 +13,8 @@ import '../theme/logo.dart';
 import '../theme/machine_icon.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
+import '../workspace/workspace_switcher.dart';
+import '../workspace/workspaces.dart';
 import '../workspace/explorer.dart';
 import '../workspace/workspace_state.dart';
 import 'session_menus.dart';
@@ -53,6 +55,7 @@ class Sidebar extends StatelessWidget {
     this.info,
     this.workspace,
     this.workspaceProblem,
+    this.workspaces,
     this.agentProblem,
     this.onSettings,
     this.onNewSession,
@@ -65,6 +68,8 @@ class Sidebar extends StatelessWidget {
 
   final WorkspaceState? workspace;
   final String? workspaceProblem;
+
+  final Workspaces? workspaces;
 
   final String? agentProblem;
   final VoidCallback? onSettings;
@@ -93,20 +98,27 @@ class Sidebar extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: WsMetrics.space3),
-            child: Row(
-              children: [
-                const LiquidMark(),
-                const SizedBox(width: WsMetrics.space3),
-                Text(
-                  'Liquid',
-                  style: Theme.of(context).textTheme.labelMedium
-                      ?.copyWith(fontWeight: WsMetrics.fwSemibold),
-                ),
-              ],
+          if (workspace != null || workspaces != null)
+            WorkspaceSwitcher(
+              key: ValueKey((workspace, workspaces)),
+              state: workspace,
+              workspaces: workspaces,
+            )
+          else
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: WsMetrics.space3),
+              child: Row(
+                children: [
+                  const LiquidMark(),
+                  const SizedBox(width: WsMetrics.space3),
+                  Text(
+                    'Liquid',
+                    style: Theme.of(context).textTheme.labelMedium
+                        ?.copyWith(fontWeight: WsMetrics.fwSemibold),
+                  ),
+                ],
+              ),
             ),
-          ),
           const SizedBox(height: WsMetrics.space3),
           Expanded(
             child: ListView(

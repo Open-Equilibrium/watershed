@@ -29,6 +29,11 @@ pub(crate) const LANGUAGE: &str = "language";
 pub(crate) const TYPE: &str = "type";
 pub(crate) const ATTACHMENT: &str = "attachment";
 pub(crate) const SIZE: &str = "size";
+pub(crate) const TABLES: &str = "tables";
+pub(crate) const TABLE: &str = "table";
+pub(crate) const AREA: &str = "area";
+pub(crate) const PAGE: &str = "page";
+pub(crate) const ICON: &str = "icon";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Area {
@@ -44,9 +49,17 @@ pub struct PageEntry {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TableEntry {
+    pub id: BlockId,
+    pub area: AreaId,
+    pub name: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct View {
     pub id: ViewId,
     pub block: BlockId,
+    pub title: String,
     pub boundary: bool,
     pub kind: BlockKind,
     pub sort: Option<crate::Sort>,
@@ -233,6 +246,17 @@ pub(crate) fn areas(doc: &AutoCommit) -> Vec<Area> {
         .into_iter()
         .map(|entry| Area {
             id: AreaId::stored(&entry.id),
+            name: entry.get(NAME).unwrap_or_default().to_string(),
+        })
+        .collect()
+}
+
+pub(crate) fn tables(doc: &AutoCommit) -> Vec<TableEntry> {
+    sorted(doc, TABLES)
+        .into_iter()
+        .map(|entry| TableEntry {
+            id: BlockId::stored(&entry.id),
+            area: AreaId::stored(entry.get(AREA).unwrap_or_default()),
             name: entry.get(NAME).unwrap_or_default().to_string(),
         })
         .collect()

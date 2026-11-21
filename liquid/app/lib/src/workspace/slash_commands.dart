@@ -14,7 +14,10 @@ class SlashCommand {
     this.style,
     this.block,
     this.description,
+    this.existing = false,
   });
+
+  final bool existing;
 
   final String label;
   final IconData icon;
@@ -82,7 +85,14 @@ const slashCommands = [
     'Table',
     LucideIcons.table,
     block: BridgeBlockKind.database,
-    description: 'Fields and rows',
+    description: 'New fields and rows',
+  ),
+  SlashCommand(
+    'Existing Table…',
+    LucideIcons.table,
+    block: BridgeBlockKind.database,
+    description: 'Another View of a Table',
+    existing: true,
   ),
   SlashCommand(
     'Whiteboard',

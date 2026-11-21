@@ -221,6 +221,17 @@ enum Fixed {
   ], repeats: false),
   turnMenu('Choose the turn', Area.diff, 'T', [
     Keys(LogicalKeyboardKey.keyT),
+  ], repeats: false),
+  switchWorkspace('Switch to a Workspace', Area.app, '⌥⌘1–⌥⌘9', [
+    Keys(LogicalKeyboardKey.digit1, meta: true, alt: true),
+    Keys(LogicalKeyboardKey.digit2, meta: true, alt: true),
+    Keys(LogicalKeyboardKey.digit3, meta: true, alt: true),
+    Keys(LogicalKeyboardKey.digit4, meta: true, alt: true),
+    Keys(LogicalKeyboardKey.digit5, meta: true, alt: true),
+    Keys(LogicalKeyboardKey.digit6, meta: true, alt: true),
+    Keys(LogicalKeyboardKey.digit7, meta: true, alt: true),
+    Keys(LogicalKeyboardKey.digit8, meta: true, alt: true),
+    Keys(LogicalKeyboardKey.digit9, meta: true, alt: true),
   ], repeats: false);
 
   const Fixed(
@@ -362,6 +373,8 @@ String? reserved(Command command, Keys keys) {
 }
 
 final _reserved = <(Area?, Keys, String)>[
+  for (final keys in Fixed.switchWorkspace.keys)
+    (null, keys, 'switching Workspaces'),
   (null, const Keys(LogicalKeyboardKey.keyQ, meta: true), 'Quit'),
   (null, const Keys(LogicalKeyboardKey.keyW, meta: true), 'Close'),
   (null, const Keys(LogicalKeyboardKey.keyH, meta: true), 'Hide'),

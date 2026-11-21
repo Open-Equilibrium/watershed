@@ -150,7 +150,7 @@ Canonical terms. Use these exactly; do not introduce synonyms. Tool names are fi
 - **Page** — Liquid's authored surface: an ordered composition of Block Views with responsive layout metadata. A Page starts as an empty flow and may later be arranged on a grid.
 - **Block** — A canonical, typed and addressable unit of content or functionality, such as text, database, code, formula, media, whiteboard, App or Chat. A text toggle is formatting inside a Text Block, not a Block Type.
 - **Block Type** — The versioned behavior, state contract, supported Views, ports/actions, permissions and responsive capabilities shared by Blocks of one kind.
-- **View** — One placement or representation of a Block. Several Views may expose the same Block on different Pages and stay synchronized because they share canonical Block state. Duplicating creates a new Block; adding a View does not.
+- **View** — One placement or representation of a Block. Several Views may expose the same Block on different Pages and stay synchronized because they share canonical Block state. Duplicating creates a new Block; adding a View does not. A View of a Table has its own title, sort and filter.
 - **Connection** — An explicit typed and permissioned data/action relation among Blocks and Sources. It addresses stable objects and ports independently of active View or layout; visual proximity never grants access.
 - **Automation** — A Workspace-owned event/condition/action rule over Liquid objects and permitted external actions. It is distinct from Meta-Harness agent scheduling and orchestration.
 - **Source** — An external or shared resource addressable from a Workspace. Sources appear beside Pages in the Explorer and use the same open/navigation flow, but are not authored Pages internally.
@@ -192,8 +192,8 @@ Canonical terms. Use these exactly; do not introduce synonyms. Tool names are fi
 - **Recovery key** — The second way to regain a Workspace's keys when no signed-in device can approve a new one. Area keys are also wrapped for it, and the person or their company holds it (ADR-0228).
 - **Headless replica** — A Liquid replica without UI, on a server for Automations and schedules or on a separate agent host. It holds only the Workspaces enabled for it and, once selective replication follows the complete M3 replicas, only the areas its Roles allow (ADR-0255).
 - **Text Block** — One paragraph, heading, list item, to-do or quote; ⏎ ends it and starts the next.
-- **Table** — The Block of typed fields and rows, kept in its home Page's document and shown through Views such as Table, Board and Calendar. The core calls it the Database Block (ADR-0244).
-- **Home Page** — The Page a Block was made on, whose document stores the Block.
+- **Table** — The Block of typed fields and rows, kept in a document of its own, listed in the sidebar's Tables section and shown on Pages through Views such as Table, Board and Calendar (ADR-0309). The core calls it the Database Block (ADR-0244).
+- **Home Page** — The Page a Block was made on, whose document stores the Block. A Table has none.
 - **Code Block** — A Block of code with syntax colors that Liquid never runs; a Text Block turns into one with ``` or the slash command Code (ADR-0302).
 - **Media Block** — A Block that shows an image or a file, kept as an attachment (ADR-0305).
 - **Whiteboard Block** — A Block whose Drawing lies on a canvas without edges, drawn on in place (ADR-0306).

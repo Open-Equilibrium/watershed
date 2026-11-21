@@ -12,6 +12,7 @@ import 'settings_page.dart';
 import 'shortcuts/shortcut_store.dart';
 import 'theme/theme.dart';
 import 'workspace/workspace_state.dart';
+import 'workspace/workspaces.dart';
 
 final _languages = kMaterialSupportedLanguages.intersection(
   kCupertinoSupportedLanguages,
@@ -28,7 +29,10 @@ class LiquidApp extends StatefulWidget {
     this.agentHosts,
     this.workspace,
     this.workspaceProblem,
+    this.workspaces,
   });
+
+  final Workspaces? workspaces;
 
   final ValueListenable<Launch> launch;
 
@@ -81,22 +85,37 @@ class _LiquidAppState extends State<LiquidApp> {
               const Locale('en'),
           builder: (context, child) =>
               UiScale(scale: chosen.textSize.scale, child: child!),
-          home: AgentShell(
-            key: ObjectKey(current),
-            state: current.state,
-            info: current.info,
-            workspace: widget.workspace,
-            workspaceProblem: widget.workspaceProblem,
-            agentProblem: current.problem,
-            shortcuts: widget.shortcuts,
-            diffSettings: widget.diffSettings,
-            cardSettings: widget.cardSettings,
-            appearance: appearance,
-            agentHosts: widget.agentHosts,
-            settings: _settings,
+          home: ListenableBuilder(
+            listenable: widget.workspaces ?? const _Still(),
+            builder: (context, _) => AgentShell(
+              key: ValueKey((current, widget.workspaces?.current)),
+              state: current.state,
+              info: current.info,
+              workspace: widget.workspaces?.current ?? widget.workspace,
+              workspaceProblem:
+                  widget.workspaces?.problem ?? widget.workspaceProblem,
+              workspaces: widget.workspaces,
+              agentProblem: current.problem,
+              shortcuts: widget.shortcuts,
+              diffSettings: widget.diffSettings,
+              cardSettings: widget.cardSettings,
+              appearance: appearance,
+              agentHosts: widget.agentHosts,
+              settings: _settings,
+            ),
           ),
         ),
       ),
     );
   }
+}
+
+class _Still implements Listenable {
+  const _Still();
+
+  @override
+  void addListener(VoidCallback listener) {}
+
+  @override
+  void removeListener(VoidCallback listener) {}
 }

@@ -41,6 +41,9 @@ void main() {
     (view) => view.kind == BridgeBlockKind.database,
   );
 
+  Finder shows(String control, String text) =>
+      find.descendant(of: find.byKey(Key(control)), matching: find.text(text));
+
   Future<void> filterHome(WidgetTester tester) async {
     await tap(tester, find.byKey(const Key('table filter')));
     await tap(tester, find.byKey(const Key('filter field')));
@@ -59,10 +62,10 @@ void main() {
     await tap(tester, menuText('Descending'));
     expect(view().sort?.descending, isTrue);
     expect(names(tester), ['Rent', 'Electricity', 'Groceries']);
-    expect(find.byKey(const Key('table sort chip')), findsOneWidget);
+    expect(shows('table sort', 'Amount, descending'), findsOneWidget);
     await tap(tester, menuText('Remove the sort'));
     expect(view().sort, isNull);
-    expect(find.byKey(const Key('table sort chip')), findsNothing);
+    expect(shows('table sort', 'Sort'), findsOneWidget);
   });
 
   testWidgets('a filter keeps its rows and says how many pass', (tester) async {
@@ -134,10 +137,10 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(names(tester), ['Rent', 'Electricity', 'Groceries']);
-    expect(find.byKey(const Key('table sort chip')), findsOneWidget);
+    expect(shows('table sort', 'Amount, descending'), findsOneWidget);
   });
 
-  testWidgets('a chip opens its menu again, and esc closes it', (tester) async {
+  testWidgets('Sort opens its menu again, and esc closes it', (tester) async {
     await kit.show(tester, [TablePart(rows)]);
     await kit.workspace.apply(
       mutation(
@@ -148,7 +151,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    await tap(tester, find.byKey(const Key('table sort chip')));
+    await tap(tester, find.byKey(const Key('table sort')));
     expect(menuText('Remove the sort'), findsOneWidget);
     await tester.sendKeyEvent(LogicalKeyboardKey.escape);
     await tester.pumpAndSettle();
@@ -242,7 +245,11 @@ void main() {
   ) async {
     await kit.show(tester, [TablePart(rows)]);
     await filterHome(tester);
-    await tap(tester, kit.inTable(find.text('Amount')));
+    await tester.tap(
+      kit.inTable(find.text('Amount')),
+      buttons: kSecondaryButton,
+    );
+    await tester.pumpAndSettle();
     await tap(tester, find.text('Delete field'));
     expect(find.textContaining('all 3 rows'), findsOneWidget);
   });
