@@ -74,14 +74,11 @@ function run(argv) {
     if (argv.length !== 2 || !/^[0-9]+$/.test(argv[0]) ||
         (argv[1] !== "public" && argv[1] !== "created-private")) throw Error("invalid ACL admission arguments");
     const uid = Number(argv[0]);
-    // sys/acl.h and sys/kauth.h: data, namespace, attribute and security mutation.
     const mutation = 0x3574;
     const known = 0x3ffe | (1 << 20) | (0xf << 21);
     const everyone = "abcdefabcdefabcdefabcdef0000000c";
     const owner = "abcdefabcdefabcdefabcdef0000000a";
     const nobody = "abcdefabcdefabcdefabcdeffffffffe";
-    // A newly created private directory is first admitted as public, then
-    // hardened through the same descriptor and checked for an empty ACL.
     for (let pass = 0; pass < 2; pass++) {
         const acl = $.acl_get_fd_np(0, 256);
         const aclError = $.__error()[0];
@@ -110,14 +107,12 @@ function run(argv) {
                 const inheritOnly = $.acl_get_flag_np(flags[0], 1 << 8);
                 if (inheritOnly === 1) continue;
                 if (inheritOnly !== 0) throw Error("ACL flags unavailable");
-                // kauth_acl_evaluate expands generic write/all before evaluating grants.
                 if (permissions & ((1 << 23) | (1 << 21))) permissions |= mutation & ~(1 << 13);
                 permissions &= mutation;
                 if (!permissions) continue;
                 const qualifier = $.acl_get_qualifier(entry[0]);
                 if (isNull(qualifier)) throw Error("ACL principal unavailable");
                 try {
-                    // acl_get_qualifier owns exactly one 16-byte Darwin UUID.
                     const principal = Array.from({length: 16}, (_,i) =>
                         qualifier[i].toString(16).padStart(2, "0")).join("");
                     if (principal === nobody) continue;
@@ -341,7 +336,6 @@ readiness_shell='
     helper_count=$#
     readiness_pid=$$
     readiness_group=$(/bin/ps -o pgid= -p "$$") || exit 1
-    # Preserve the literal helper arguments while checking exactly one group.
     readiness_pgid=$(set -- $readiness_group; [ "$#" -eq 1 ] && printf "%s" "$1") || exit 1
     case "$readiness_pgid" in ""|*[!0-9]*) exit 1 ;; esac
     [ "$readiness_pgid" -gt 1 ] && [ "$readiness_pgid" != "$installer_pgid" ] || exit 1
@@ -358,10 +352,7 @@ readiness_shell='
             return 0
         fi
     }
-    # A group TERM can end the scan or sleep of this wait; the shell would report
-    # that job on the installer stderr.
     wait_for_readiness_group() {
-        # Slow scans or late wakeups must not stretch the one-second grace.
         /bin/sleep 1 </dev/null >/dev/null 2>&1 &
         readiness_timer=$!
         wait_attempts=10
@@ -403,10 +394,8 @@ readiness_shell='
         ) </dev/null &
         IFS= read -r request || :
     fi
-    # The builtin avoids terminating a foreground kill helper in this group.
     kill -s TERM -- "-$readiness_pgid" 2>/dev/null || :
     wait_for_readiness_group && exit 0
-    # Stay in this shell so shutdown traps survive through the group KILL.
     kill -s KILL -- "-$readiness_pgid" 2>/dev/null
 '
 wait_for_readiness_status() {

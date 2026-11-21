@@ -490,9 +490,7 @@ class _TableBlockState extends State<TableBlock> implements CellDrop {
         const [],
       );
       await _takeFilterValue(added.row);
-    } on Object {
-      // The problem shows on the Page.
-    }
+    } on Object catch (_) {}
   }
 
   Future<void> _takeFilterValue(String? row) async {
