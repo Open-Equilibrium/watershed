@@ -12,3 +12,8 @@ t3-server = { max-threads = 2 }
 [[profile.default.overrides]]
 filter = 'binary(t3_contract) | (package(liquid_bridge) & test(/^tests::agent::/))'
 test-group = 't3-server'
+priority = 100
+
+[[profile.default.overrides]]
+filter = 'test(/ten_boards_of_elements/)'
+priority = 100
