@@ -278,6 +278,7 @@ class CiJobScopeTest(unittest.TestCase):
         "checks": "docs",
         "test": "product",
         "flow-agent": "flow_agent",
+        "flow-coverage": "flow_agent",
         "m11-evidence": "flow_agent",
         "liquid": "liquid",
     }
@@ -335,7 +336,7 @@ class CiJobScopeTest(unittest.TestCase):
             return result.returncode == 0
 
         self.assertTrue(verdict({}))
-        self.assertTrue(verdict({"flow-agent": "skipped", "m11-evidence": "skipped"},
+        self.assertTrue(verdict({"flow-agent": "skipped", "flow-coverage": "skipped", "m11-evidence": "skipped"},
                                 scope(True, "liquid")))
         self.assertTrue(verdict(dict.fromkeys(self.JOB_SCOPES, "skipped"), SETUP))
         for name, key in self.JOB_SCOPES.items():
