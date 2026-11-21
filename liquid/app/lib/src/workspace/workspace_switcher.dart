@@ -11,8 +11,22 @@ import 'workspace_state.dart';
 import 'workspaces.dart';
 
 const workspaceIcons = [
-  '🏡', '💼', '📚', '🧪', '🎨', '🧳', '💰', '⚽', //
-  '🎵', '🌱', '🚀', '🛠️', '📷', '🍳', '🐾', '❤️',
+  '🏡',
+  '💼',
+  '📚',
+  '🧪',
+  '🎨',
+  '🧳',
+  '💰',
+  '⚽',
+  '🎵',
+  '🌱',
+  '🚀',
+  '🛠️',
+  '📷',
+  '🍳',
+  '🐾',
+  '❤️',
 ];
 
 const _pill = 100.0;
@@ -42,7 +56,10 @@ class WorkspaceIcon extends StatelessWidget {
         width: 22,
         height: 22,
         child: Center(
-          child: Text(icon, style: const TextStyle(fontSize: WsMetrics.fsUi, height: 1)),
+          child: Text(
+            icon,
+            style: const TextStyle(fontSize: WsMetrics.fsUi, height: 1),
+          ),
         ),
       );
     }
@@ -333,7 +350,10 @@ class _CurrentState extends State<_Current> {
                         color: icon == named.icon ? ws.hover : null,
                         borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
                       ),
-                      child: Text(icon, style: const TextStyle(fontSize: WsMetrics.fsProse)),
+                      child: Text(
+                        icon,
+                        style: const TextStyle(fontSize: WsMetrics.fsProse),
+                      ),
                     ),
                   ),
               ],
