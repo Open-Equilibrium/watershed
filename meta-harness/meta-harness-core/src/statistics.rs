@@ -166,12 +166,19 @@ fn sort_models(models: &mut [ModelUsage]) {
 }
 
 pub(crate) fn context(projection: &Projection) -> Option<Context> {
-    let usage = projection
+    let turns = projection
         .provider_turns
         .iter()
-        .rev()
-        .map(|turn| &turn["tokenUsage"])
-        .find(|usage| usage["maxTokens"].is_u64())?;
+        .map(|turn| &turn["tokenUsage"]);
+    let threads = projection
+        .provider_threads
+        .iter()
+        .map(|thread| &thread["contextUsage"]);
+    reported(turns).or_else(|| reported(threads))
+}
+
+fn reported<'a>(usages: impl DoubleEndedIterator<Item = &'a Value>) -> Option<Context> {
+    let usage = usages.rev().find(|usage| usage["maxTokens"].is_u64())?;
     Some(Context {
         tokens: usage["usedTokens"].as_u64(),
         window: usage["maxTokens"].as_u64()?,

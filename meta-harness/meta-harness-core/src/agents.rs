@@ -9,8 +9,8 @@ use crate::{ModelChoice, Permissions};
 pub(crate) const SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS agent (
     name TEXT PRIMARY KEY, root TEXT NOT NULL, model TEXT NOT NULL, permissions TEXT NOT NULL,
-    instructions TEXT NOT NULL, thread TEXT, generation INTEGER NOT NULL,
-    created_ms INTEGER NOT NULL);
+    instructions TEXT NOT NULL, thread TEXT NOT NULL, previous TEXT,
+    generation INTEGER NOT NULL, created_ms INTEGER NOT NULL);
 ";
 
 const MAX_NAME_CHARS: usize = 40;
@@ -32,7 +32,8 @@ pub struct Agent {
     pub permissions: Permissions,
     pub instructions: String,
     pub memory: PathBuf,
-    pub thread: Option<String>,
+    pub thread: String,
+    pub previous: Option<String>,
     pub generation: u64,
 }
 
@@ -67,7 +68,12 @@ fn check_name(name: &str) -> Result<(), String> {
     }
 }
 
-pub(crate) fn create(db: &Connection, home: &Path, new: &NewAgent) -> Result<Agent, String> {
+pub(crate) fn create(
+    db: &Connection,
+    home: &Path,
+    new: &NewAgent,
+    thread: &str,
+) -> Result<Agent, String> {
     check_name(&new.name)?;
     if get(db, home, &new.name)?.is_some() {
         return Err(format!("An agent named {} already exists.", new.name));
@@ -75,14 +81,15 @@ pub(crate) fn create(db: &Connection, home: &Path, new: &NewAgent) -> Result<Age
     let memory = memory(home, &new.name);
     crate::service::create_private_dir(&memory)?;
     db.execute(
-        "INSERT INTO agent (name, root, model, permissions, instructions, thread, generation,
-         created_ms) VALUES (?1, ?2, ?3, ?4, ?5, NULL, 0, ?6)",
+        "INSERT INTO agent (name, root, model, permissions, instructions, thread, previous,
+         generation, created_ms) VALUES (?1, ?2, ?3, ?4, ?5, ?6, NULL, 0, ?7)",
         params![
             new.name,
             new.root,
             to_json(&new.model)?,
             to_json(&new.permissions)?,
             new.instructions,
+            thread,
             sql(now_ms())
         ],
     )
@@ -93,8 +100,8 @@ pub(crate) fn create(db: &Connection, home: &Path, new: &NewAgent) -> Result<Age
 pub(crate) fn list(db: &Connection, home: &Path) -> Result<Vec<Agent>, String> {
     let mut query = db
         .prepare(
-            "SELECT name, root, model, permissions, instructions, thread, generation FROM agent
-             ORDER BY name",
+            "SELECT name, root, model, permissions, instructions, thread, previous, generation
+             FROM agent ORDER BY name",
         )
         .map_err(failed)?;
     let rows = query
@@ -105,8 +112,8 @@ pub(crate) fn list(db: &Connection, home: &Path) -> Result<Vec<Agent>, String> {
 
 pub(crate) fn get(db: &Connection, home: &Path, name: &str) -> Result<Option<Agent>, String> {
     db.query_row(
-        "SELECT name, root, model, permissions, instructions, thread, generation FROM agent
-         WHERE name = ?1",
+        "SELECT name, root, model, permissions, instructions, thread, previous, generation
+         FROM agent WHERE name = ?1",
         [name],
         |row| row_of(row, home),
     )
@@ -115,17 +122,20 @@ pub(crate) fn get(db: &Connection, home: &Path, name: &str) -> Result<Option<Age
     .transpose()
 }
 
-pub(crate) fn set_thread(
-    db: &Connection,
-    name: &str,
-    thread: &str,
-    generation: u64,
-) -> Result<(), String> {
+pub(crate) fn advance(db: &Connection, name: &str, next: &str) -> Result<(), String> {
     let changed = db
         .execute(
-            "UPDATE agent SET thread = ?2, generation = ?3 WHERE name = ?1",
-            params![name, thread, sql(generation)],
+            "UPDATE agent SET previous = thread, thread = ?2, generation = generation + 1
+             WHERE name = ?1",
+            params![name, next],
         )
+        .map_err(failed)?;
+    found(changed, name)
+}
+
+pub(crate) fn settle(db: &Connection, name: &str) -> Result<(), String> {
+    let changed = db
+        .execute("UPDATE agent SET previous = NULL WHERE name = ?1", [name])
         .map_err(failed)?;
     found(changed, name)
 }
@@ -154,6 +164,15 @@ pub(crate) fn opening(agent: &Agent, handoff: Option<&str>) -> String {
     text
 }
 
+pub(crate) fn full(context: Option<crate::Context>) -> bool {
+    context.is_some_and(|context| {
+        context.window > 0
+            && context
+                .tokens
+                .is_some_and(|tokens| tokens.saturating_mul(5) >= context.window.saturating_mul(4))
+    })
+}
+
 pub(crate) fn message_id(name: &str, generation: u64) -> String {
     format!("agent-{name}-{generation}")
 }
@@ -174,7 +193,7 @@ fn row_of(row: &rusqlite::Row<'_>, home: &Path) -> rusqlite::Result<Result<Agent
     let name: String = row.get(0)?;
     let model: String = row.get(2)?;
     let permissions: String = row.get(3)?;
-    let generation: i64 = row.get(6)?;
+    let generation: i64 = row.get(7)?;
     Ok((|| {
         Ok(Agent {
             memory: memory(home, &name),
@@ -183,6 +202,7 @@ fn row_of(row: &rusqlite::Row<'_>, home: &Path) -> rusqlite::Result<Result<Agent
             permissions: serde_json::from_str(&permissions).map_err(|e| e.to_string())?,
             instructions: row.get(4).map_err(failed)?,
             thread: row.get(5).map_err(failed)?,
+            previous: row.get(6).map_err(failed)?,
             generation: u64::try_from(generation).map_err(|e| e.to_string())?,
             name,
         })

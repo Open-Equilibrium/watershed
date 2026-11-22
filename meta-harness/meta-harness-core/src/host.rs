@@ -318,7 +318,7 @@ pub enum Permissions {
 }
 
 impl Permissions {
-    pub(crate) fn from_mode(mode: &str) -> Option<Self> {
+    pub fn from_mode(mode: &str) -> Option<Self> {
         [
             Self::Supervised,
             Self::AutoAcceptEdits,

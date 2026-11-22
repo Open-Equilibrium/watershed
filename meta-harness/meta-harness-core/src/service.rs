@@ -14,6 +14,7 @@ use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::tungstenite::handshake::server::{ErrorResponse, Request, Response};
 
 mod admit;
+mod agents;
 mod listener;
 mod moves;
 pub(crate) mod transfers;
@@ -84,6 +85,8 @@ pub struct Service {
 
 struct Shared {
     host: Arc<Host>,
+    home: PathBuf,
+    agents: agents::Watchers,
     store: Store,
     homes: Homes,
     person_codex: PathBuf,
@@ -158,6 +161,8 @@ impl Service {
         let (revoked, _) = tokio::sync::broadcast::channel(REVOKED);
         let shared = Arc::new(Shared {
             host: host.clone(),
+            home: config.home.clone(),
+            agents: agents::Watchers::default(),
             store,
             homes,
             person_codex,
@@ -190,6 +195,7 @@ impl Service {
         ));
         let relink = tokio::spawn(relink(shared.clone()));
         tokio::spawn(moves::retry_pauses(shared.clone()));
+        agents::start_all(&shared);
         let retry = tokio::spawn(listener::retry(shared.clone()));
         Ok(Self {
             url,
@@ -217,6 +223,7 @@ impl Drop for Service {
         self.relink.abort();
         self.retry.abort();
         self.shared.links.stop();
+        self.shared.agents.stop_all();
         drop(crate::util::lock(&self.shared.remote).listening.take());
         let _ = self.stopping.send(true);
         let _ = std::fs::remove_file(&self.connection_file);
@@ -571,6 +578,7 @@ impl Session {
             Call::Thread { root, id, call } => self.thread_request(&root, &id, call).await,
             Call::Git { checkout, call } => git_call(&self.git(&checkout).await?, call).await,
             Call::Config(call) => self.config_call(call),
+            Call::Agents(call) => agents::call(&self.shared, call).await,
             Call::Remote(call) => listener::call(&self.shared, call).await,
             Call::Invite { kind, access } => to(hosts::invite(
                 &self.shared.store.db(),

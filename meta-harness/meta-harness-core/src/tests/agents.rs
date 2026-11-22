@@ -22,7 +22,7 @@ fn a_profile_keeps_a_private_memory_folder_and_outlives_a_restart() {
     let home = Dir::new();
     let store = Store::open(&home.join("meta-harness.sqlite")).unwrap();
 
-    let created = agents::create(&store.db(), &home, &new_agent("news-bot")).unwrap();
+    let created = agents::create(&store.db(), &home, &new_agent("news-bot"), "thread-1").unwrap();
 
     assert_eq!(created.memory, home.join("agents/news-bot/memory"));
     assert!(created.memory.is_dir());
@@ -32,20 +32,23 @@ fn a_profile_keeps_a_private_memory_folder_and_outlives_a_restart() {
             & 0o777,
         0o700
     );
-    assert_eq!((created.thread.as_deref(), created.generation), (None, 0));
+    assert_eq!(
+        (created.thread.as_str(), created.generation),
+        ("thread-1", 0)
+    );
     assert!(
-        agents::create(&store.db(), &home, &new_agent("news-bot"))
+        agents::create(&store.db(), &home, &new_agent("news-bot"), "thread-1")
             .unwrap_err()
             .contains("already")
     );
     for bad in ["", "News", "1st", "a/b", &"x".repeat(41)] {
         assert!(
-            agents::create(&store.db(), &home, &new_agent(bad)).is_err(),
+            agents::create(&store.db(), &home, &new_agent(bad), "thread-1").is_err(),
             "{bad:?} is refused"
         );
     }
 
-    agents::set_thread(&store.db(), "news-bot", "thread-7", 1).unwrap();
+    agents::advance(&store.db(), "news-bot", "thread-2").unwrap();
     drop(store);
     let store = Store::open(&home.join("meta-harness.sqlite")).unwrap();
     let listed = agents::list(&store.db(), &home).unwrap();
@@ -53,9 +56,15 @@ fn a_profile_keeps_a_private_memory_folder_and_outlives_a_restart() {
     assert_eq!(listed[0].name, "news-bot");
     assert_eq!(listed[0].model, new_agent("x").model);
     assert_eq!(
-        (listed[0].thread.as_deref(), listed[0].generation),
-        (Some("thread-7"), 1)
+        (
+            listed[0].thread.as_str(),
+            listed[0].previous.as_deref(),
+            listed[0].generation
+        ),
+        ("thread-2", Some("thread-1"), 1)
     );
+    agents::settle(&store.db(), "news-bot").unwrap();
+    assert_eq!(agents::list(&store.db(), &home).unwrap()[0].previous, None);
 
     agents::remove(&store.db(), "news-bot").unwrap();
     assert!(agents::list(&store.db(), &home).unwrap().is_empty());
@@ -66,7 +75,7 @@ fn a_profile_keeps_a_private_memory_folder_and_outlives_a_restart() {
 fn each_profile_thread_opens_with_the_agent_its_instructions_and_its_memory() {
     let home = Dir::new();
     let store = Store::open(&home.join("meta-harness.sqlite")).unwrap();
-    let agent = agents::create(&store.db(), &home, &new_agent("news-bot")).unwrap();
+    let agent = agents::create(&store.db(), &home, &new_agent("news-bot"), "thread-1").unwrap();
 
     let first = agents::opening(&agent, None);
     let next = agents::opening(&agent, Some("Imported conversation history\nlatest"));
@@ -121,7 +130,7 @@ async fn a_routine_wakes_the_profile_thread_and_moves_with_it_to_the_next_one() 
     .await;
     let home = Dir::new();
     let store = Store::open(&home.join("meta-harness.sqlite")).unwrap();
-    let agent = agents::create(&store.db(), &home, &new_agent("news-bot")).unwrap();
+    let agent = agents::create(&store.db(), &home, &new_agent("news-bot"), "thread-1").unwrap();
 
     let added = thread
         .add_routine(
@@ -161,4 +170,20 @@ async fn a_routine_wakes_the_profile_thread_and_moves_with_it_to_the_next_one() 
     assert_eq!(upserts[1]["requireExisting"], true);
     assert_eq!(upserts[1]["schedule"], bound_task("x", "y")["schedule"]);
     assert!(upserts[1].get("lastRunStatus").is_none());
+}
+
+#[test]
+fn a_profile_moves_on_once_its_context_is_four_fifths_full() {
+    let context = |tokens, window| {
+        Some(crate::Context {
+            tokens,
+            window,
+            compacts_at: None,
+        })
+    };
+    assert!(!agents::full(context(Some(799), 1000)));
+    assert!(agents::full(context(Some(800), 1000)));
+    assert!(!agents::full(context(None, 1000)));
+    assert!(!agents::full(context(Some(5), 0)));
+    assert!(!agents::full(None));
 }
