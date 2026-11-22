@@ -36,6 +36,7 @@ These hard capacity and liveness limits are not performance thresholds and are n
 - Direct fan-out: 32 Subflow references per Flow definition.
 - Cumulative invocations: 512 per Run, including failed starts.
 - Live invocations: 32 process-wide across all sessions.
+- Target, parallel subflows (ADR-0314): the tree of a root Run and its Subflow instances shares the depth of 16, the 512 cumulative invocations and 32 live Subflow instances; a Phase starts at most 32.
 - Canonical events: 155,750 per Run.
 - Canonical storage: 320 KiB per event including LF; 16 MiB per event or context-manifest segment; 352 MiB total event data; 48 MiB total context-manifest data; 16 MiB per immutable object; 131,072 immutable objects; 5,216 MiB object data; and 5.5 GiB per complete Run bundle.
 
