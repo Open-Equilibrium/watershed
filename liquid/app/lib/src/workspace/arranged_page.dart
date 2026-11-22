@@ -207,7 +207,11 @@ class _ArrangedPageState extends State<ArrangedPage> {
   void _move(List<TileSpec> tiles, int from, int? afterTile) {
     final tile = tiles[from];
     final after = afterTile == null ? null : tiles[afterTile];
-    if (afterTile == from || afterTile == from - 1) return;
+    if (afterTile == from ||
+        afterTile == from - 1 ||
+        (afterTile == null && from == 0)) {
+      return;
+    }
     final rest = [
       for (final (index, shown) in tiles.indexed)
         if (index != from) shown,

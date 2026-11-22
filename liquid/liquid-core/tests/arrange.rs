@@ -179,6 +179,13 @@ fn a_run_of_views_moves_after_another_or_to_the_start() {
         page.order(),
         [ideas.clone(), route.clone(), plan.clone(), flight.clone()]
     );
+    let in_place = Mutation::MoveViews {
+        page: page.page.clone(),
+        first: plan.clone(),
+        last: flight.clone(),
+        after: Some(route.clone()),
+    };
+    assert_eq!(page.edit(in_place), Err(Error::NoChange));
     assert_eq!(page.edit(into_itself), Err(Error::OutOfRange));
     assert_eq!(page.edit(backwards), Err(Error::OutOfRange));
 }

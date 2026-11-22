@@ -1348,6 +1348,9 @@ impl<S: Store> Workspace<S> {
     ) -> Result<Written, Error> {
         let (doc, order) = self.page(page)?;
         let run = order.run(first, last).ok_or(Error::OutOfRange)?;
+        if order.above(first).map(|above| &above.id) == after {
+            return Err(Error::NoChange);
+        }
         if let Some(after) = after {
             order.view(after).ok_or(Error::NotFound)?;
             if run.iter().any(|view| &view.id == after) {
