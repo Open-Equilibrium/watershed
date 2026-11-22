@@ -3,6 +3,7 @@ import 'dart:ui';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../agent_hosts/agent_hosts.dart';
 import '../agent_hosts/agent_hosts_pane.dart';
@@ -132,6 +133,7 @@ class _AgentShellState extends State<AgentShell> {
   @override
   void initState() {
     super.initState();
+    HardwareKeyboard.instance.addHandler(_liquidTap);
     _lifecycle;
     _diffSettings.addListener(_hideWhitespace);
     _hideWhitespace();
@@ -220,6 +222,8 @@ class _AgentShellState extends State<AgentShell> {
 
   @override
   void dispose() {
+    HardwareKeyboard.instance.removeHandler(_liquidTap);
+    _powerBar.dispose();
     widget.workspace?.open.removeListener(_pageOpened);
     _lifecycle.dispose();
     widget.state?.draft.removeListener(_applyDraft);
@@ -337,6 +341,23 @@ class _AgentShellState extends State<AgentShell> {
 
   final _powerBar = ValueNotifier(false);
 
+  bool _liquidAlone = false;
+
+  bool _liquidTap(KeyEvent event) {
+    if (widget.workspace == null || !_shortcuts.value.liquidKey) return false;
+    if (event.logicalKey != liquidKey) {
+      if (event is KeyDownEvent) _liquidAlone = false;
+      return false;
+    }
+    if (event is KeyDownEvent) {
+      _liquidAlone = true;
+    } else if (event is KeyUpEvent && _liquidAlone) {
+      _liquidAlone = false;
+      _powerBar.value = !_powerBar.value;
+    }
+    return false;
+  }
+
   Widget _menus(ShortcutSettings keys, Widget child) {
     if (defaultTargetPlatform != TargetPlatform.macOS) return child;
     PlatformMenuItem item(Command command) => PlatformMenuItem(
@@ -441,6 +462,9 @@ class _AgentShellState extends State<AgentShell> {
                       workspaces: widget.workspaces,
                       agentProblem: widget.agentProblem,
                       onSettings: _toggleSettings,
+                      onSearch: widget.workspace == null
+                          ? null
+                          : () => _powerBar.value = true,
                       onNewSession: _newSession,
                       onShowSession: _showSession,
                       onMove: widget.state == null

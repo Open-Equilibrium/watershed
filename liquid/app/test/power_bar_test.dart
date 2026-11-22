@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:liquid/src/rust/api/workspace.dart';
+import 'package:liquid/src/shortcuts/keymap.dart';
+import 'package:liquid/src/shortcuts/shortcut_store.dart';
 import 'package:liquid/src/workspace/workspace_state.dart';
 
 import 'page_kit.dart';
@@ -108,5 +110,27 @@ void main() {
       2,
       reason: 'the second action, New Page, ran',
     );
+  });
+
+  testWidgets('a tap of the Liquid key opens it, and the sidebar does too', (
+    tester,
+  ) async {
+    await kit.show(tester, [
+      const TextPart('Plan'),
+    ], shortcuts: ShortcutController.memory(ShortcutSettings.liquidKey()));
+    await tester.sendKeyDownEvent(liquidKey, platform: 'macos');
+    await tester.sendKeyUpEvent(liquidKey, platform: 'macos');
+    await tester.pumpAndSettle();
+    expect(bar(), findsOneWidget);
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape, platform: 'macos');
+    await tester.pumpAndSettle();
+    await tester.sendKeyDownEvent(liquidKey, platform: 'macos');
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyL, platform: 'macos');
+    await tester.sendKeyUpEvent(liquidKey, platform: 'macos');
+    await tester.pumpAndSettle();
+    expect(bar(), findsNothing, reason: 'the Liquid key held with another');
+    await tester.tap(find.text('Search or run a command'));
+    await tester.pumpAndSettle();
+    expect(bar(), findsOneWidget);
   });
 }

@@ -58,6 +58,7 @@ class Sidebar extends StatelessWidget {
     this.workspaces,
     this.agentProblem,
     this.onSettings,
+    this.onSearch,
     this.onNewSession,
     this.onShowSession,
     this.onMove,
@@ -73,6 +74,8 @@ class Sidebar extends StatelessWidget {
 
   final String? agentProblem;
   final VoidCallback? onSettings;
+
+  final VoidCallback? onSearch;
 
   final VoidCallback? onNewSession;
 
@@ -120,6 +123,42 @@ class Sidebar extends StatelessWidget {
               ),
             ),
           const SizedBox(height: WsMetrics.space3),
+          if (onSearch case final search?)
+            InkWell(
+              key: const Key('sidebar search'),
+              borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
+              onTap: search,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: WsMetrics.space3,
+                  vertical: WsMetrics.space2,
+                ),
+                child: Row(
+                  children: [
+                    Icon(LucideIcons.search, size: 14, color: ws.textFaint),
+                    const SizedBox(width: WsMetrics.space2),
+                    Expanded(
+                      child: Text(
+                        'Search or run a command',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: WsMetrics.fsCompact,
+                          color: ws.textMuted,
+                        ),
+                      ),
+                    ),
+                    Text(
+                      '⌘K',
+                      style: TextStyle(
+                        fontSize: WsMetrics.fsSmall,
+                        color: ws.textFaint,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
           Expanded(
             child: ListView(
               children: [
