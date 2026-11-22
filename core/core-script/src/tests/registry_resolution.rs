@@ -116,6 +116,22 @@ fn a_phase_declares_at_most_32_subflows() {
 }
 
 #[test]
+fn a_composite_phase_starts_no_subflows() {
+    let mut phase = starting_phase("chain-phase-000", vec!["flow-001".to_owned()]);
+    phase.phase_refs = vec!["child".to_owned()];
+    phase.result_from = Some("child".to_owned());
+    let mut blocks = flow_chain_blocks(2);
+    blocks[0] = RegistryBlock::Phase(phase);
+    blocks.push(simple_phase_block("child"));
+
+    let err = ResolvedRegistry::from_blocks(blocks)
+        .expect_err("a composite Phase makes no provider turn to start subflows");
+
+    assert!(err.to_string().contains("composite Phase must not declare"));
+    assert!(err.to_string().contains("subflows"));
+}
+
+#[test]
 fn a_subflow_started_per_item_names_a_field() {
     let mut phase = starting_phase("chain-phase-000", vec!["flow-001".to_owned()]);
     phase.subflows[0].start = SubflowStart::Each(String::new());
