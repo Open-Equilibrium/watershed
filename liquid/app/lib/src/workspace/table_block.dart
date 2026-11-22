@@ -159,13 +159,21 @@ class _TableBlockState extends State<TableBlock> implements CellDrop {
           'Previous month',
           -1,
         ),
-        QueryButton(
+        GestureDetector(
           key: const Key('this month'),
-          icon: LucideIcons.calendar,
-          label: 'Today',
-          on: false,
+          behavior: HitTestBehavior.opaque,
           onTap: () => setState(
             () => _month = DateTime(DateTime.now().year, DateTime.now().month),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: WsMetrics.space1),
+            child: Text(
+              'Today',
+              style: TextStyle(
+                fontSize: WsMetrics.fsCompact,
+                color: ws.textMuted,
+              ),
+            ),
           ),
         ),
         arrow(
@@ -1329,44 +1337,49 @@ class _TableBlockState extends State<TableBlock> implements CellDrop {
         height: 28,
         child: Row(
           children: [
-            Flexible(child: _groupControl(database)),
-            const SizedBox(width: WsMetrics.space2),
-            if (_tab.layout != BridgeLayout.calendar)
-              Flexible(
-                child: _sortAnchor(
-                  database.fields,
-                  (toggle, _) => SetupControl(
-                    key: const Key('table sort'),
-                    icon: LucideIcons.arrowDownUp,
-                    label: 'Sort',
-                    value: sort == null ? null : sortLabel(sort),
-                    onTap: toggle,
-                  ),
-                ),
-              ),
-            const SizedBox(width: WsMetrics.space2),
-            Flexible(
-              child: _filterAnchor(
-                database.fields,
-                numbers,
-                days,
-                (toggle, _) => SetupControl(
-                  key: const Key('table filter'),
-                  icon: LucideIcons.filter,
-                  label: 'Filter',
-                  value: filter == null
-                      ? null
-                      : filterLabel(
-                          filter,
-                          database.fields,
-                          numbers,
-                          shownDays(days),
+            Expanded(
+              child: Row(
+                children: [
+                  Flexible(child: _groupControl(database)),
+                  const SizedBox(width: WsMetrics.space2),
+                  if (_tab.layout != BridgeLayout.calendar)
+                    Flexible(
+                      child: _sortAnchor(
+                        database.fields,
+                        (toggle, _) => SetupControl(
+                          key: const Key('table sort'),
+                          icon: LucideIcons.arrowDownUp,
+                          label: 'Sort',
+                          value: sort == null ? null : sortLabel(sort),
+                          onTap: toggle,
                         ),
-                  onTap: toggle,
-                ),
+                      ),
+                    ),
+                  const SizedBox(width: WsMetrics.space2),
+                  Flexible(
+                    child: _filterAnchor(
+                      database.fields,
+                      numbers,
+                      days,
+                      (toggle, _) => SetupControl(
+                        key: const Key('table filter'),
+                        icon: LucideIcons.filter,
+                        label: 'Filter',
+                        value: filter == null
+                            ? null
+                            : filterLabel(
+                                filter,
+                                database.fields,
+                                numbers,
+                                shownDays(days),
+                              ),
+                        onTap: toggle,
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ),
-            const Spacer(),
             if (_tab.layout == BridgeLayout.calendar)
               _monthControls(days)
             else if (_searching)

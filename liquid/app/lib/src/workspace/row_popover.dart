@@ -471,7 +471,12 @@ class _RowPopoverState extends State<RowPopover> {
                         ),
                       ),
                       const SizedBox(width: WsMetrics.space2),
-                      Expanded(child: _value(field)),
+                      Expanded(
+                        child: DefaultTextStyle.merge(
+                          style: TextStyle(fontSize: WsMetrics.fsCompact),
+                          child: _value(field),
+                        ),
+                      ),
                     ],
                   ),
                 ),

@@ -1042,7 +1042,7 @@ impl<S: Store> Workspace<S> {
                 title: title.to_string(),
                 boundary: false,
                 kind: BlockKind::Database,
-                tabs: tab::read(doc, &entry),
+                tabs: tab::read(doc, &entry, view.as_str()),
             },
         );
         let mut written = Written::new(Document::Page(page.clone()), Changed::Views(page.clone()));
@@ -1215,8 +1215,9 @@ impl<S: Store> Workspace<S> {
         let (doc, order) = self.page(page)?;
         table_of(order, view)?;
         let entry = model::live(doc, VIEWS, view.as_str()).ok_or(Error::NotFound)?;
+        tab::keep(doc, &entry, view.as_str())?;
         let created = change(doc, &entry)?;
-        order.set_tabs(view, tab::read(doc, &entry));
+        order.set_tabs(view, tab::read(doc, &entry, view.as_str()));
         let mut written = Written::new(Document::Page(page.clone()), Changed::Views(page.clone()));
         written.created = created.map(Created::Tab);
         Ok(written)

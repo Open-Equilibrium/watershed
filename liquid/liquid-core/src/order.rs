@@ -30,7 +30,7 @@ impl Order {
                 let (block, kind) = match entry.get(TABLE) {
                     Some(table) => {
                         if let Some(view) = model::live(doc, VIEWS, &entry.id) {
-                            tabs = crate::tab::read(doc, &view);
+                            tabs = crate::tab::read(doc, &view, &entry.id);
                         }
                         (table, BlockKind::Database)
                     }

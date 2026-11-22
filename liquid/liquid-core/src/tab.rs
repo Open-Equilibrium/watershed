@@ -75,9 +75,9 @@ pub struct Tab {
     pub setup: TabSetup,
 }
 
-pub(crate) fn read(doc: &AutoCommit, view: &ObjId) -> Vec<Tab> {
+pub(crate) fn read(doc: &AutoCommit, view: &ObjId, id: &str) -> Vec<Tab> {
     let Some(tabs) = model::child(doc, view, TABS) else {
-        return Vec::new();
+        return vec![stored_before_tabs(doc, view, id)];
     };
     model::sorted_in(doc, &tabs)
         .into_iter()
@@ -94,6 +94,35 @@ pub(crate) fn read(doc: &AutoCommit, view: &ObjId) -> Vec<Tab> {
             },
         })
         .collect()
+}
+
+fn stored_before_tabs(doc: &AutoCommit, view: &ObjId, id: &str) -> Tab {
+    let key = |key| model::string(doc, view, key);
+    Tab {
+        id: TabId::stored(id),
+        setup: TabSetup {
+            sort: stored(key(ROW_SORT).as_deref()),
+            filter: stored(key(ROW_FILTER).as_deref()),
+            ..TabSetup::of(Layout::Table)
+        },
+    }
+}
+
+pub(crate) fn keep(doc: &mut AutoCommit, view: &ObjId, id: &str) -> Result<(), Error> {
+    if model::child(doc, view, TABS).is_some() {
+        return Ok(());
+    }
+    let tab = stored_before_tabs(doc, view, id);
+    let tabs = doc.put_object(view, TABS, ObjType::Map)?;
+    let sort = model::sort_at(&[], Place::First)?;
+    let entry = model::insert_in(doc, &tabs, id, &[(SORT, &sort)])?;
+    write(doc, &entry, None, &tab.setup)?;
+    for key in [ROW_SORT, ROW_FILTER] {
+        if doc.get(view, key)?.is_some() {
+            doc.delete(view, key)?;
+        }
+    }
+    Ok(())
 }
 
 fn stored<T: serde::de::DeserializeOwned>(json: Option<&str>) -> Option<T> {
@@ -191,7 +220,7 @@ pub(crate) fn move_after(
 
 pub(crate) fn remove(doc: &mut AutoCommit, view: &ObjId, tab: &TabId) -> Result<(), Error> {
     let entry = entry(doc, view, tab)?;
-    if read(doc, view).len() <= 1 {
+    if model::child(doc, view, TABS).map_or(0, |tabs| model::sorted_in(doc, &tabs).len()) <= 1 {
         return Err(Error::NotAllowed);
     }
     model::mark_deleted(doc, &entry)
@@ -242,4 +271,59 @@ fn values(setup: &TabSetup) -> Result<[(&'static str, Option<String>); 7], Error
 
 fn encode<T: Serialize>(value: &T) -> Result<String, Error> {
     serde_json::to_string(value).map_err(|_| Error::WrongKind)
+}
+
+#[cfg(test)]
+mod tests {
+    use automerge::{ActorId, ReadDoc};
+
+    use super::{Layout, TabSetup};
+    use crate::model::{self, ROW_FILTER, ROW_SORT, TABLE, VIEWS};
+    use crate::{FieldId, Filter, Match, Sort, TabId};
+
+    #[test]
+    fn a_view_stored_before_tabs_reads_as_one_table_tab_and_keeps_it_on_write() {
+        let mut doc = model::document(&ActorId::random());
+        model::create_maps(&mut doc, &[VIEWS]).unwrap();
+        let sort = Sort {
+            field: FieldId::stored("f"),
+            descending: true,
+        };
+        let filter = Filter {
+            field: FieldId::stored("f"),
+            matches: Match::NotEmpty,
+        };
+        let (sorted, filtered) = (
+            serde_json::to_string(&sort).unwrap(),
+            serde_json::to_string(&filter).unwrap(),
+        );
+        let view = model::insert(
+            &mut doc,
+            VIEWS,
+            "v",
+            &[(TABLE, "t"), (ROW_SORT, &sorted), (ROW_FILTER, &filtered)],
+        )
+        .unwrap();
+        let read = super::read(&doc, &view, "v");
+        let legacy = TabSetup {
+            sort: Some(sort.clone()),
+            filter: Some(filter),
+            ..TabSetup::of(Layout::Table)
+        };
+        assert_eq!(read.len(), 1);
+        assert_eq!(
+            (&read[0].id, &read[0].setup),
+            (&TabId::stored("v"), &legacy)
+        );
+
+        super::keep(&mut doc, &view, "v").unwrap();
+        let renamed = TabSetup {
+            name: "All".into(),
+            ..legacy.clone()
+        };
+        super::set(&mut doc, &view, &TabId::stored("v"), &legacy, &renamed).unwrap();
+        let kept = super::read(&doc, &view, "v");
+        assert_eq!((kept.len(), &kept[0].setup), (1, &renamed));
+        assert!(doc.get(&view, ROW_SORT).unwrap().is_none());
+    }
 }
