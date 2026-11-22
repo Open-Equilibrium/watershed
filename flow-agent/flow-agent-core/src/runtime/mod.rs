@@ -52,6 +52,7 @@ pub(crate) mod session_reading;
 pub(crate) mod session_reservation;
 pub(crate) mod session_store;
 pub(crate) mod stage_results;
+pub(crate) mod steering;
 pub(crate) mod stream_signature;
 pub(crate) mod tool_runner;
 pub(crate) mod types;
@@ -63,14 +64,17 @@ pub use auth::{
     logout_openai_compatible, openai_codex_auth_status, openai_compatible_auth_status,
 };
 pub use authoring::{
-    create_global_registry_block, initialize_global_config, read_authoring_file,
+    create_global_registry_block, initialize_global_config, list_global_flows, read_authoring_file,
     validate_global_registry,
 };
 pub use cancellation::{
     ProductiveInterruptAction, begin_productive_operation, request_productive_interrupt,
     settle_productive_operation,
 };
-pub use conversations::{conversation_status, project_tool_run_log};
+pub use conversations::{
+    ConversationState, conversation_flow, conversation_state, conversation_status,
+    project_tool_run_log,
+};
 pub use endpoint_credential::OPENAI_COMPATIBLE_PROVIDER_ID;
 pub use executor::{
     ExecutorSelection, ExecutorSelectionSource, configure_default_executor,
@@ -94,6 +98,10 @@ pub use session::{
 };
 pub use session_reading::{
     SessionEventReader, replay_conversation_run, replay_conversation_run_streaming,
+};
+pub use steering::{
+    MAX_PENDING_STEERING_MESSAGES, MAX_STEERING_MESSAGE_BYTES, drain_productive_steering,
+    request_productive_pause, steer_productive_run,
 };
 pub use types::{EmitMode, RunOutput, RuntimeError, render_human_failure_status};
 pub use validate::validate_protocol_jsonl_text;

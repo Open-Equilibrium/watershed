@@ -190,6 +190,9 @@ impl ContextHistory {
     }
 
     pub(crate) fn record(&mut self, event: &EventEnvelope) {
+        if event.payload["role"] == "user" {
+            return;
+        }
         match event.event_type {
             EventType::MessageDelta => {
                 if let Some(message_id) = event_payload_id(event, "message_id") {

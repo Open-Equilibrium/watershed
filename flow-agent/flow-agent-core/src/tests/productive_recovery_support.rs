@@ -76,6 +76,16 @@ impl<R: ProductiveRecovery> ProductiveRecovery for InterruptingProductiveRecover
             .transition_boundary(flow_execution_id, from_phase_id, to_phase_id)
     }
 
+    fn steering_boundary(
+        &mut self,
+        phase_execution_id: &str,
+        before_attempt_id: &str,
+        live: &mut dyn FnMut() -> Result<Option<String>, RuntimeError>,
+    ) -> Result<Option<String>, RuntimeError> {
+        self.inner
+            .steering_boundary(phase_execution_id, before_attempt_id, live)
+    }
+
     fn flow_boundary(
         &mut self,
         flow_execution_id: &str,

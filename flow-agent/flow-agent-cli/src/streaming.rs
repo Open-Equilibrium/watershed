@@ -62,6 +62,17 @@ pub(crate) fn stream_live_operation<F>(
 where
     F: FnOnce(LiveEventNotifier) -> Result<RunOutput, RuntimeError> + Send + 'static,
 {
+    stream_live_operation_into(workspace, operation, &mut io::stdout().lock())
+}
+
+pub(crate) fn stream_live_operation_into<F>(
+    workspace: PathBuf,
+    operation: F,
+    stdout: &mut impl Write,
+) -> Result<RunOutput, RuntimeError>
+where
+    F: FnOnce(LiveEventNotifier) -> Result<RunOutput, RuntimeError> + Send + 'static,
+{
     let (notifier, receiver) = flow_agent_core::live_event_channel();
     let mut reader: Option<SessionEventReader> = None;
     let mut cursor = 0;
@@ -74,7 +85,6 @@ where
             path: PathBuf::from("<cli-run-thread>"),
             source,
         })?;
-    let mut stdout = io::stdout().lock();
     let mut output_error = None;
 
     loop {
@@ -107,7 +117,7 @@ where
                     &mut cursor,
                     &mut first_committed_sequence,
                     &notification,
-                    &mut stdout,
+                    stdout,
                 ) {
                     Ok(true) => {
                         #[cfg(test)]
@@ -136,7 +146,7 @@ where
     if output_error.is_none()
         && let Some(reader) = &mut reader
         && let Err(err) =
-            write_verified_events(reader, &mut cursor, observed_high_watermark, &mut stdout)
+            write_verified_events(reader, &mut cursor, observed_high_watermark, stdout)
     {
         output_error = Some(err);
     }

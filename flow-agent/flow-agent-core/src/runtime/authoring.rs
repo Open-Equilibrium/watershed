@@ -16,7 +16,7 @@ pub(in crate::runtime) const fn registry_directory(kind: RegistryBlockKind) -> &
 #[cfg(any(test, feature = "m11-budget-evidence"))]
 pub(in crate::runtime) use init::DEFAULT_REGISTRY_ROOT;
 pub use init::initialize_global_config;
-pub use registry::{create_global_registry_block, validate_global_registry};
+pub use registry::{create_global_registry_block, list_global_flows, validate_global_registry};
 pub use storage::read_authoring_file;
 
 #[cfg(test)]

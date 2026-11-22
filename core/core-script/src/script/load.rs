@@ -12,8 +12,8 @@ pub(super) use self::storage::{
 use crate::script::canonical::{parse_error, registry_source_error};
 use crate::script::error::RegistryError;
 use crate::script::model::{
-    MAX_ACTIVE_REGISTRY_BYTES, MAX_REGISTRY_FILE_BYTES, MAX_REGISTRY_TOTAL_BYTES, RegistryBlock,
-    RegistryBlockKind, ResolvedRegistry,
+    BlockIdentity, MAX_ACTIVE_REGISTRY_BYTES, MAX_REGISTRY_FILE_BYTES, MAX_REGISTRY_TOTAL_BYTES,
+    RegistryBlock, RegistryBlockKind, ResolvedRegistry,
 };
 use crate::script::parser::deserialize_registry_block;
 use crate::script::semantics::{validate_registry_block_semantics, validate_registry_block_shape};
@@ -344,6 +344,14 @@ pub fn validate_registry_from_root_dir(
     root_path: impl AsRef<Path>,
     registry_root: impl AsRef<Path>,
 ) -> Result<(), RegistryError> {
+    list_registry_flows_from_root_dir(root_dir, root_path, registry_root).map(|_| ())
+}
+
+pub fn list_registry_flows_from_root_dir(
+    root_dir: &Dir,
+    root_path: impl AsRef<Path>,
+    registry_root: impl AsRef<Path>,
+) -> Result<Vec<BlockIdentity>, RegistryError> {
     ResolvedRegistry::load_all_from_root_dir_with_limits(
         root_dir,
         root_path.as_ref(),
@@ -351,7 +359,13 @@ pub fn validate_registry_from_root_dir(
         MAX_REGISTRY_FILE_BYTES,
         MAX_REGISTRY_TOTAL_BYTES,
     )
-    .map(|_| ())
+    .map(|registry| {
+        registry
+            .flows
+            .into_values()
+            .map(|flow| flow.identity)
+            .collect()
+    })
 }
 
 pub fn validate_registry_addition_from_root_dir(

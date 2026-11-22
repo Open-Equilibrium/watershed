@@ -478,9 +478,7 @@ where
     if let Err(err) = validation.validate_constructed_event(path, event, canonical_jsonl.len()) {
         return WriterOutcome::failed(err);
     }
-    if let Err(error) =
-        validate_context_manifest_pairing(&event.event_type, context_manifest.is_some())
-    {
+    if let Err(error) = validate_context_manifest_pairing(event, context_manifest.is_some()) {
         return WriterOutcome::failed(RuntimeError::Protocol(error.message().to_owned()));
     }
     if let Some(manifest) = context_manifest

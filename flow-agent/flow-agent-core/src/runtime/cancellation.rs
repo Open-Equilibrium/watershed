@@ -321,7 +321,9 @@ pub fn begin_productive_operation() -> Result<(), RuntimeError> {
 }
 
 pub fn request_productive_interrupt() -> ProductiveInterruptAction {
-    PRODUCTIVE_OPERATION.interrupt()
+    let action = PRODUCTIVE_OPERATION.interrupt();
+    crate::runtime::steering::wake_productive_steering();
+    action
 }
 
 pub(crate) fn claim_productive_terminal() -> ProductiveTerminalClaim {

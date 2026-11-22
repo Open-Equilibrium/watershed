@@ -198,10 +198,9 @@ impl ConversationWriterBackend {
         ) {
             return WriterOutcome::failed(error);
         }
-        if let Err(error) = validate_context_manifest_pairing(
-            &event.event.event_type,
-            event.context_manifest.is_some(),
-        ) {
+        if let Err(error) =
+            validate_context_manifest_pairing(&event.event, event.context_manifest.is_some())
+        {
             return WriterOutcome::failed(protocol(error.message()));
         }
         if let Some(checkpoint) = event.context_manifest.as_ref()

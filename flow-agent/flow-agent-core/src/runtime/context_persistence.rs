@@ -12,7 +12,7 @@ pub use objects::SessionObjectWriter;
 #[cfg(test)]
 pub use objects::ensure_session_object_size;
 
-use proto::EventType;
+use proto::{EventEnvelope, EventType};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum ContextManifestPairingError {
@@ -23,20 +23,23 @@ pub(crate) enum ContextManifestPairingError {
 impl ContextManifestPairingError {
     pub(crate) const fn message(self) -> &'static str {
         match self {
-            Self::Missing => "message.completed requires its context manifest",
-            Self::Unexpected => "context manifests are only valid for message.completed",
+            Self::Missing => "an agent message.completed requires its context manifest",
+            Self::Unexpected => "context manifests are only valid for an agent message.completed",
         }
     }
 }
 
+pub(crate) fn requires_context_manifest(event: &EventEnvelope) -> bool {
+    event.event_type == EventType::MessageCompleted && event.payload["role"] != "user"
+}
+
 pub(crate) fn validate_context_manifest_pairing(
-    event_type: &EventType,
+    event: &EventEnvelope,
     has_manifest: bool,
 ) -> Result<(), ContextManifestPairingError> {
-    match (event_type, has_manifest) {
-        (EventType::MessageCompleted, true) => Ok(()),
-        (EventType::MessageCompleted, false) => Err(ContextManifestPairingError::Missing),
-        (_, true) => Err(ContextManifestPairingError::Unexpected),
-        (_, false) => Ok(()),
+    match (requires_context_manifest(event), has_manifest) {
+        (true, true) | (false, false) => Ok(()),
+        (true, false) => Err(ContextManifestPairingError::Missing),
+        (false, true) => Err(ContextManifestPairingError::Unexpected),
     }
 }

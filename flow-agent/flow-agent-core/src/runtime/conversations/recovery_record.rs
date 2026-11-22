@@ -59,6 +59,12 @@ pub(crate) enum ProductiveRecoveryRecord {
         from_phase_id: String,
         to_phase_id: Option<String>,
     },
+    Steering {
+        schema: String,
+        phase_execution_id: String,
+        before_attempt_id: String,
+        message_object: String,
+    },
     Flow {
         schema: String,
         flow_execution_id: String,
@@ -211,6 +217,17 @@ pub(super) fn validate_productive_recovery_record(
             {
                 return Err(protocol("recovery Transition boundary is invalid"));
             }
+            schema
+        }
+        ProductiveRecoveryRecord::Steering {
+            schema,
+            phase_execution_id,
+            before_attempt_id,
+            message_object,
+        } => {
+            validate_id(phase_execution_id, "recovery Phase execution")?;
+            validate_attempt_id(before_attempt_id)?;
+            validate_recovery_object_uri(message_object)?;
             schema
         }
         ProductiveRecoveryRecord::Flow {

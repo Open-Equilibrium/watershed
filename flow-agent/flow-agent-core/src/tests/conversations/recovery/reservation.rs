@@ -16,7 +16,8 @@ use crate::runtime::{
         create_unpublished_productive_conversation_run, read_conversation_continuation_definition,
         read_conversation_history, reclaim_unpublished_productive_run,
         reserve_conversation_continuation, reserve_conversation_run_recovery,
-        reserve_new_conversation_run, set_status_transaction_crash_point,
+        reserve_named_conversation_run, reserve_new_conversation_run,
+        set_status_transaction_crash_point,
     },
     session_authority::set_session_ownership_release_failure_for_test,
     types::RuntimeError,
@@ -532,4 +533,98 @@ fn productive_reservation_keeps_an_active_unpublished_run() {
     );
     competing.release().expect("competing reservation releases");
     first.release().expect("first reservation releases");
+}
+
+#[test]
+fn a_named_conversation_takes_exactly_its_id_or_is_refused() {
+    let workspace = empty_workspace("named-conversation-reservation");
+
+    let first = reserve_named_conversation_run(&workspace, "chat-0123").expect("named reservation");
+    assert_eq!(first.conversation_id(), "chat-0123");
+    assert_eq!(first.run_session_id(), "chat-0123");
+    create_conversation_run(
+        &workspace,
+        first.conversation_id(),
+        first.run_session_id(),
+        "review",
+        REGISTRY_HASH,
+        FLOW_HASH,
+    )
+    .expect("named conversation");
+    first.release().expect("named release");
+
+    let Err(error) = reserve_named_conversation_run(&workspace, "chat-0123") else {
+        panic!("a taken conversation id is never suffixed")
+    };
+    assert!(error.to_string().contains("chat-0123"), "{error}");
+}
+
+#[test]
+fn a_conversation_is_absent_settled_or_has_its_newest_run_interrupted() {
+    let workspace = empty_workspace("conversation-interrupted-run");
+    create_flow_run(&workspace, "review", "review");
+    write_terminal_run(&workspace, "review", "review");
+    write_terminal_recovery_fixture(&workspace, "review", "review", "root");
+    assert_eq!(
+        crate::conversation_state(&workspace, "absent").expect("the store reads"),
+        crate::ConversationState::Absent
+    );
+    assert_eq!(
+        crate::conversation_flow(&workspace, "absent").expect("the store reads"),
+        None
+    );
+    assert_eq!(
+        crate::conversation_flow(&workspace, "review")
+            .expect("the definition reads")
+            .as_deref(),
+        Some("review-flow")
+    );
+    assert_eq!(
+        crate::conversation_state(&workspace, "review").expect("history reads"),
+        crate::ConversationState::Settled
+    );
+
+    create_flow_run(&workspace, "review", "review-2");
+
+    assert_eq!(
+        crate::conversation_state(&workspace, "review").expect("history reads"),
+        crate::ConversationState::Interrupted {
+            run_session_id: "review-2".to_owned()
+        }
+    );
+}
+
+#[test]
+fn a_run_that_was_never_published_does_not_count_as_interrupted() {
+    let workspace = empty_workspace("conversation-unpublished-run-state");
+    create_unpublished_productive_conversation_run(
+        &workspace,
+        "fresh",
+        "fresh",
+        "review-flow",
+        REGISTRY_HASH,
+        FLOW_HASH,
+    )
+    .expect("an unpublished first Run is staged");
+    assert_eq!(
+        crate::conversation_state(&workspace, "fresh").expect("the store reads"),
+        crate::ConversationState::Absent
+    );
+
+    create_flow_run(&workspace, "review", "review");
+    write_terminal_run(&workspace, "review", "review");
+    write_terminal_recovery_fixture(&workspace, "review", "review", "root");
+    create_unpublished_productive_conversation_run(
+        &workspace,
+        "review",
+        "review-2",
+        "review-flow",
+        REGISTRY_HASH,
+        FLOW_HASH,
+    )
+    .expect("an unpublished continuation is staged");
+    assert_eq!(
+        crate::conversation_state(&workspace, "review").expect("history reads"),
+        crate::ConversationState::Settled
+    );
 }

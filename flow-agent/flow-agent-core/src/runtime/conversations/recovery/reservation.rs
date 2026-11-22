@@ -14,11 +14,13 @@ use super::super::{
     run_log::inspect_run_attempts,
     status::{recover_status_transaction, status_recovery_is_required},
     storage::{
-        ensure_runtime_roots, existing_anchored_conversation, existing_anchored_run, required_child,
+        ensure_anchored_sessions, ensure_runtime_roots, existing_anchored_conversation,
+        existing_anchored_run, required_child,
     },
 };
 use crate::runtime::{
     context::ContextHistory,
+    fs_guards::DirectoryErrorMode,
     fs_guards::path_io_error,
     run_attempts::RunAttemptLifecycle,
     session_authority::{SessionOwnershipLease, conversation_ownership_key, run_ownership_key},
@@ -142,10 +144,25 @@ pub(crate) fn reserve_new_conversation_run(
     workspace: &Path,
     base_id: &str,
 ) -> Result<ProductiveConversationReservation, RuntimeError> {
+    reserve_conversation_candidates(workspace, base_id, MAX_UNIQUE_SESSION_CANDIDATES)
+}
+
+pub(crate) fn reserve_named_conversation_run(
+    workspace: &Path,
+    conversation_id: &str,
+) -> Result<ProductiveConversationReservation, RuntimeError> {
+    reserve_conversation_candidates(workspace, conversation_id, 1)
+}
+
+fn reserve_conversation_candidates(
+    workspace: &Path,
+    base_id: &str,
+    candidates: u32,
+) -> Result<ProductiveConversationReservation, RuntimeError> {
     validate_id(base_id, "conversation")?;
     let roots = ensure_runtime_roots(workspace)?;
     SessionOwnershipLease::ensure_store_available(workspace)?;
-    for ordinal in 1..=MAX_UNIQUE_SESSION_CANDIDATES {
+    for ordinal in 1..=candidates {
         let candidate = if ordinal == 1 {
             base_id.to_owned()
         } else {
@@ -198,6 +215,92 @@ pub(crate) fn reserve_new_conversation_run(
     Err(protocol(format!(
         "could not allocate a unique conversation id for {base_id}"
     )))
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ConversationState {
+    Absent,
+    Settled,
+    Interrupted { run_session_id: String },
+}
+
+pub fn conversation_state(
+    workspace: impl AsRef<Path>,
+    conversation_id: &str,
+) -> Result<ConversationState, RuntimeError> {
+    let workspace = workspace.as_ref();
+    validate_id(conversation_id, "conversation")?;
+    let Some(conversation) = ensure_anchored_sessions(workspace)?.child(
+        conversation_id,
+        false,
+        DirectoryErrorMode::Protocol,
+    )?
+    else {
+        return Ok(ConversationState::Absent);
+    };
+    let runs = required_child(
+        &conversation,
+        CONVERSATION_RUNS_DIR,
+        "conversation runs directory",
+    )?;
+    let mut newest = None;
+    for ordinal in 1..=MAX_UNIQUE_SESSION_CANDIDATES {
+        let candidate = if ordinal == 1 {
+            conversation_id.to_owned()
+        } else {
+            suffixed_session_id(conversation_id, ordinal)
+        };
+        match runs.dir.symlink_metadata(&candidate) {
+            Ok(metadata) if metadata.is_dir() => match runs
+                .dir
+                .symlink_metadata(Path::new(&candidate).join(UNPUBLISHED_PRODUCTIVE_RUN_MARKER))
+            {
+                Ok(_) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                    newest = Some(candidate);
+                }
+                Err(source) => {
+                    return Err(path_io_error(&runs.path.join(&candidate), source));
+                }
+            },
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => break,
+            Err(source) => return Err(path_io_error(&runs.path.join(&candidate), source)),
+        }
+    }
+    let Some(newest) = newest else {
+        return Ok(ConversationState::Absent);
+    };
+    let finished = with_conversation_history_index(
+        workspace,
+        conversation_id,
+        None,
+        Some(&newest),
+        #[cfg(test)]
+        None,
+        |_index, summary| Ok(summary.contains_run),
+    )?;
+    Ok(if finished {
+        ConversationState::Settled
+    } else {
+        ConversationState::Interrupted {
+            run_session_id: newest,
+        }
+    })
+}
+
+pub fn conversation_flow(
+    workspace: impl AsRef<Path>,
+    conversation_id: &str,
+) -> Result<Option<String>, RuntimeError> {
+    let workspace = workspace.as_ref();
+    if conversation_state(workspace, conversation_id)? == ConversationState::Absent {
+        return Ok(None);
+    }
+    Ok(
+        conversation_run_definition(workspace, conversation_id, conversation_id)?
+            .flow_definition_id,
+    )
 }
 
 pub(crate) fn reserve_conversation_continuation(

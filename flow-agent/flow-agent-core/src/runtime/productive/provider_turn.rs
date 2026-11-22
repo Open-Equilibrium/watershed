@@ -283,7 +283,35 @@ where
         .collect::<Vec<_>>();
     let mut provider_input = ProviderInput::new();
     let mut seen_call_ids = BTreeSet::new();
+    let mut completed_result = None;
     loop {
+        let before_attempt_id = format!(
+            "provider-{:06}",
+            context.provider_attempts.saturating_add(1)
+        );
+        let steering = mark_recovery_failure(
+            &mut context.recovery_failed,
+            context.recovery.steering_boundary(
+                phase_execution_id,
+                &before_attempt_id,
+                &mut crate::runtime::steering::take_productive_steering,
+            ),
+        )?;
+        match (completed_result.take(), steering) {
+            (Some((result, _)), None) => return Ok(result),
+            (completed, Some(message)) => {
+                for item in completed.into_iter().flat_map(|(_, retained)| retained) {
+                    provider_input.push(item)?;
+                }
+                emit_user_message(context, builder, invocation, &message)?;
+                provider_input.push(serde_json::json!({
+                    "content": [{"text": message, "type": "input_text"}],
+                    "role": "user",
+                    "type": "message",
+                }))?;
+            }
+            (None, None) => {}
+        }
         crate::runtime::cancellation::ensure_productive_dispatch_allowed()?;
         let build_request =
             |include_recent: bool| -> Result<(CompiledContext, serde_json::Value), RuntimeError> {
@@ -397,7 +425,8 @@ where
         if turn.tool_calls.is_empty() {
             let result = parse_provider_result(phase, &turn.output_text)?;
             verify_leaf_provider_result(phase, &result, context.recovery)?;
-            return Ok(result);
+            completed_result = Some((result, turn.retained_items));
+            continue;
         }
         for item in turn.retained_items {
             provider_input.push(item)?;
@@ -439,4 +468,44 @@ where
             }))?;
         }
     }
+}
+
+fn emit_user_message<P, A, S, T>(
+    context: &mut ProductiveContext<'_, P, A, S, T>,
+    builder: &mut RuntimeEventBuilder,
+    invocation: &FlowInvocation,
+    message: &str,
+) -> Result<(), RuntimeError>
+where
+    P: ProductiveProvider,
+    A: ProductiveAttemptLog,
+    S: RuntimeEventSink,
+    T: ProductiveToolExecutor,
+{
+    let message_id = builder.next_message_id();
+    for content_delta in message_delta_chunks(message) {
+        emit_and_commit(
+            builder,
+            Some(invocation),
+            EventType::MessageDelta,
+            serde_json::json!({
+                "content_delta": content_delta,
+                "message_id": message_id,
+                "role": "user",
+            }),
+            context.sink,
+            &mut context.event_commit_failed,
+        )?;
+    }
+    emit_and_commit(
+        builder,
+        Some(invocation),
+        EventType::MessageCompleted,
+        serde_json::json!({
+            "message_id": message_id,
+            "role": "user",
+        }),
+        context.sink,
+        &mut context.event_commit_failed,
+    )
 }

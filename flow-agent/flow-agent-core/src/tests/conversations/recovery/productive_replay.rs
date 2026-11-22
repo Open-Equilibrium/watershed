@@ -720,3 +720,57 @@ fn productive_recovery_truncates_only_an_uncommitted_tail_and_rejects_divergence
         .expect_err("deterministic divergence is rejected");
     assert!(error.to_string().contains("diverged"));
 }
+
+#[test]
+fn a_recorded_steering_message_replays_only_at_its_boundary() {
+    let workspace = empty_workspace("conversation-recovery-steering");
+    let mut recovery =
+        standard_review_recovery_writer(&workspace, None, &ContextHistory::default());
+    let recorded = recovery
+        .steering_boundary("phase-000001", "provider-000002", &mut || {
+            Ok(Some("Use British spelling".to_owned()))
+        })
+        .expect("the steering boundary commits");
+    assert_eq!(recorded.as_deref(), Some("Use British spelling"));
+    drop(recovery);
+
+    let mut resumed = open_recovery_snapshot(&workspace);
+    let mut live = || -> Result<Option<String>, crate::runtime::types::RuntimeError> {
+        panic!("replay never takes a live message")
+    };
+    assert_eq!(
+        resumed
+            .steering_boundary("phase-000001", "provider-000001", &mut live)
+            .expect("an earlier boundary replays"),
+        None
+    );
+    assert_eq!(
+        resumed
+            .steering_boundary("phase-000001", "provider-000002", &mut live)
+            .expect("the recorded boundary replays")
+            .as_deref(),
+        Some("Use British spelling")
+    );
+}
+
+#[test]
+fn a_steering_boundary_leaves_the_message_queued_while_a_completed_attempt_awaits_replay() {
+    let workspace = empty_workspace("conversation-recovery-steering-pending-attempt");
+    let recovery = standard_review_recovery_writer(&workspace, None, &ContextHistory::default());
+    let intent = provider_intent("provider-000001");
+    commit_intent(&workspace, &intent);
+    commit_result(
+        &workspace,
+        &completed_provider_result(&intent.attempt_id, "2026-01-01T00:00:01Z"),
+    );
+    drop(recovery);
+
+    let mut resumed = open_recovery_snapshot(&workspace);
+    let taken = resumed
+        .steering_boundary("phase-000001", "provider-000001", &mut || {
+            panic!("a live message is never taken before the completed attempt replays")
+        })
+        .expect("the boundary waits for the completed attempt");
+
+    assert_eq!(taken, None);
+}

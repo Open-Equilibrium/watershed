@@ -184,6 +184,22 @@ pub(in crate::runtime) fn create_global_registry_block_at(
     Ok(file.diagnostic_path().to_owned())
 }
 
+pub fn list_global_flows() -> Result<Vec<core_script::BlockIdentity>, RuntimeError> {
+    let authority = load_global_config_authority_at(&flow_agent_home_path()?)?;
+    let registry_root = &authority.config.registry_root;
+    core_script::list_registry_flows_from_root_dir(
+        &authority.home.dir,
+        &authority.home.path,
+        registry_root,
+    )
+    .map_err(|source| RuntimeError::InvalidDefinition {
+        definition_kind: None,
+        definition_id: None,
+        path: Some(authority.home.path.join(registry_root)),
+        source: Box::new(RuntimeError::Registry(source)),
+    })
+}
+
 pub fn validate_global_registry(flow_reference: Option<&str>) -> Result<(), RuntimeError> {
     let home_path = flow_agent_home_path()?;
     validate_global_registry_at(&home_path, flow_reference)

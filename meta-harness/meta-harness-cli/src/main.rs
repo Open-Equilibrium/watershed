@@ -4,7 +4,9 @@ mod login;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use meta_harness_core::{Change, Service, ServiceConfig, api, default_home, remote, t3_version};
+use meta_harness_core::{
+    AcpAgent, Change, Service, ServiceConfig, api, default_home, remote, t3_version,
+};
 
 const USAGE: &str = "\
 usage: meta <command>
@@ -138,7 +140,12 @@ async fn serve(home: PathBuf) -> Result<(), String> {
     let service = Service::start(ServiceConfig {
         home,
         t3: pinned_t3()?,
-        acp_agents: Vec::new(),
+        acp_agents: tokio::task::spawn_blocking(|| flow_agent(std::env::var_os("PATH")))
+            .await
+            .ok()
+            .flatten()
+            .into_iter()
+            .collect(),
     })
     .await?;
     eprintln!(
@@ -177,6 +184,79 @@ fn prefix() -> Result<PathBuf, String> {
         .filter(|prefix| prefix.join("lib/meta-harness").is_dir())
         .map(Path::to_path_buf)
         .ok_or_else(|| format!("{} is not an installed meta.", program.display()))
+}
+
+#[cfg(unix)]
+fn answers_as_flow_agent(flow: &Path) -> bool {
+    use std::io::Read;
+    use std::process::{Command, Stdio};
+    use std::time::{Duration, Instant};
+    const PROBE_OUTPUT_BYTES: u64 = 64 * 1024;
+    let Ok(mut child) = Command::new(flow)
+        .args(["acp", "--help"])
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+    else {
+        return false;
+    };
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let stdout = child.stdout.take();
+    let (sender, usage) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let mut text = Vec::new();
+        let read = stdout.is_some_and(|stdout| {
+            stdout
+                .take(PROBE_OUTPUT_BYTES)
+                .read_to_end(&mut text)
+                .is_ok()
+        });
+        let _ = sender.send(read.then_some(text));
+    });
+    let usage = usage
+        .recv_timeout(deadline.saturating_duration_since(Instant::now()))
+        .ok()
+        .flatten();
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                return status.success()
+                    && usage
+                        .is_some_and(|usage| String::from_utf8_lossy(&usage).contains("flow acp"));
+            }
+            Ok(None) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(20)),
+            _ => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return false;
+            }
+        }
+    }
+}
+
+#[cfg(not(unix))]
+fn flow_agent(_path: Option<std::ffi::OsString>) -> Option<AcpAgent> {
+    None
+}
+
+#[cfg(unix)]
+fn flow_agent(path: Option<std::ffi::OsString>) -> Option<AcpAgent> {
+    use std::os::unix::fs::PermissionsExt;
+    let command = std::env::split_paths(&path?)
+        .filter(|dir| dir.is_absolute())
+        .map(|dir| dir.join("flow"))
+        .find(|flow| {
+            flow.metadata()
+                .is_ok_and(|meta| meta.is_file() && meta.permissions().mode() & 0o111 != 0)
+                && answers_as_flow_agent(flow)
+        })?;
+    Some(AcpAgent {
+        id: "flow-agent".to_owned(),
+        command,
+        args: vec!["acp".to_owned()],
+        models: Vec::new(),
+    })
 }
 
 fn pinned_t3() -> Result<PathBuf, String> {
@@ -305,6 +385,43 @@ fn run_step(step: &login::Step) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn an_installed_flow_joins_t3_as_the_flow_agent() {
+        let dir = std::env::temp_dir().join(format!("meta-flow-agent-{}", std::process::id()));
+        let executable = |dir: &Path, script: &str| {
+            std::fs::create_dir_all(dir).unwrap();
+            let flow = dir.join("flow");
+            std::fs::write(&flow, script).unwrap();
+            std::fs::set_permissions(&flow, std::os::unix::fs::PermissionsExt::from_mode(0o755))
+                .unwrap();
+            flow
+        };
+        let empty = dir.join("empty");
+        std::fs::create_dir_all(&empty).unwrap();
+        std::fs::write(empty.join("flow"), "not runnable").unwrap();
+        let checker = dir.join("checker");
+        executable(&checker, "#!/bin/sh\necho 'Flow, a static type checker'\n");
+        let hanging = dir.join("hanging");
+        executable(&hanging, "#!/bin/sh\nexec sleep 60\n");
+        let holding = dir.join("holding");
+        executable(&holding, "#!/bin/sh\nsleep 60 &\necho '  flow acp'\n");
+        let bin = dir.join("bin");
+        let flow = executable(&bin, "#!/bin/sh\necho '  flow acp'\n");
+
+        assert!(flow_agent(None).is_none());
+        assert!(flow_agent(Some(empty.clone().into_os_string())).is_none());
+        assert!(flow_agent(Some("bin".into())).is_none());
+        let path = std::env::join_paths([&empty, &checker, &hanging, &holding, &bin]).unwrap();
+        let started = std::time::Instant::now();
+        let agent = flow_agent(Some(path)).expect("flow on the PATH is found");
+        assert!(started.elapsed() < std::time::Duration::from_secs(15));
+        assert_eq!(agent.id, "flow-agent");
+        assert_eq!(agent.command, flow);
+        assert_eq!(agent.args, ["acp"]);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
 
     #[test]
     fn uninstall_refuses_a_data_folder_inside_what_it_removes() {

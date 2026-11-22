@@ -57,7 +57,7 @@
           <p class="muted">Meta-Harness and Liquid responsibilities are canonical in <a href="../../VISION.md#integration-and-ownership">VISION.md</a>. Liquid may render Flow Agent sessions through Meta-Harness-backed Blocks.</p>
         </div>
       </div>
-      <p>Meta-Harness consumes Flow Agent's public surfaces from the same host (see <a href="V-Spec_MetaHarness.html">Meta-Harness V-Spec</a>); it does not own runtime internals or Executor selection. M1 ships the human CLI plus machine-readable event stream. Local machine control is a designed-for seam; direct Rust embedding remains <a href="../decisions/open-decisions.html#d-020">open</a>.</p>
+      <p>Meta-Harness consumes Flow Agent's public surfaces from the same host (see <a href="V-Spec_MetaHarness.html">Meta-Harness V-Spec</a>); it does not own runtime internals or Executor selection. M1 ships the human CLI plus machine-readable event stream. Machine control is <code>flow acp</code> (§3C); direct Rust embedding remains <a href="../decisions/open-decisions.html#d-020">open</a>.</p>
     </div></section>
 
     <section id="surfaces" class="section"><h2>3. Standalone runtime surfaces</h2><div class="body">
@@ -75,8 +75,7 @@ flow sessions status
 flow tail &lt;conversation-id&gt; &lt;run-session-id&gt;</code></pre><p>Direct human use; nice terminal rendering is allowed. <code>flow chat</code> reads exactly one nonblank Flow reference from stdin, accepts an optional leading <code>/</code> such as <code>/hello-flow</code>, runs it, then exits. One-id Resume continues the newest committed Conversation entry in a new Run; <code>--from-entry</code> branches from an older entry. The two-id form is exact interrupted-Run recovery. Replay and Tail always use the exact Conversation/Run pair. A future tree-navigation surface may expose the same Conversation entries and branches in the style of Pi's <code>/tree</code>; it is a view over this authority, and exact command spelling remains part of <a href="../decisions/open-decisions.html#d-058">D-058</a>.</p></div>
         <div class="card"><h3>B. Headless JSONL event stream</h3><pre><code>flow run smoke-flow --emit jsonl
 flow run hello-flow --emit jsonl</code></pre><p>The CLI owns stdout and streams newline-delimited committed events for automation, CI, custom terminal UIs and same-host Meta-Harness ingestion. Tests compare its stdout and the persisted session log exactly with the fixture-contract goldens.</p></div>
-        <div class="card"><h3>C. Local machine-control surface (designed-for)</h3><pre><code>flow --mode rpc
-# or: flow rpc</code></pre><p>Bidirectional external control is a post-M1 seam. It uses local JSON-RPC over stdio with a minimal <code>flow.start</code>, <code>flow.status</code>, <code>flow.cancel</code>, <code>flow.tail</code> and <code>flow.export</code> command set; it carries the same runtime events instead of adding <code>cmd.*</code> event types.</p></div>
+        <div class="card"><h3>C. Machine control over ACP</h3><pre><code>flow acp</code></pre><p>T3 Code runs Flow Agent as a local Agent Client Protocol agent: a chat picks a Flow, every message steers the active Run, and Phases show as T3's plan. It replaces the earlier <code>flow rpc</code> design (<a href="../adr/ADR-LOG.md">ADR-0313</a>); the binding is in <a href="../../PROTOCOL.md#acp-binding-flow-acp">PROTOCOL.md</a>.</p></div>
         <div class="card"><h3>D. Rust integration (open)</h3><p><a href="../decisions/open-decisions.html#d-020">D-020</a> will decide whether other Rust programs call Flow Agent in-process or through its command and protocol surfaces. M1 makes no external embedding commitment.</p></div>
       </div>
       <h3>E. Local conversation/session persistence</h3>
@@ -119,7 +118,7 @@ flow run hello-flow --emit jsonl</code></pre><p>The CLI owns stdout and streams 
       </div>
       <p><strong>M1.2 boundary:</strong> Flow Agent validates each Tool call and manages a fresh one-shot Executor. Shared validation, Ready/Start and result handling use Linux Bubblewrap/seccomp or macOS Seatbelt for mandatory Flow-owned write protection. Provider-only Flows do not use the Executor. Executor selection, the administrator-owned sibling, Custom Executor rules and the absence of runtime-profile, network-allowlist and systemd/cgroup contracts are canonical in <a href="../../SECURITY.md#flow-agent-security-contract">SECURITY.md</a> and <a href="../../PROTOCOL.md#m12-executor-protocol">PROTOCOL.md</a>. Native release targets, current capabilities and required verification are canonical in <a href="../../PLATFORMS.md">PLATFORMS.md</a>.</p>
       <ul>
-        <li><strong>CLI:</strong> accepts a selected Flow reference and implemented output/event mode (human or JSONL); future RPC/control mode follows <a href="../../PROTOCOL.md">PROTOCOL.md</a> after M1.</li>
+        <li><strong>CLI:</strong> accepts a selected Flow reference and implemented output/event mode (human or JSONL); machine control is <code>flow acp</code> (§3C).</li>
         <li><strong>Building-block registry:</strong> parses Tools, Instructions, recursive Phases and Flows; a referenced Flow is a subflow, not a fifth kind.</li>
         <li><strong>FSM engine:</strong> owns deterministic state transitions.</li>
         <li><strong>Instruction loader:</strong> loads optional global-home and harness-start Workspace <code>AGENTS.md</code> guidance in that order, separately from technical configuration, then resolves the active leaf Phase's declared Instructions.</li>
@@ -250,7 +249,7 @@ output_reserve: 16384</code></pre>
     </div></section>
 
     <section id="events" class="section"><h2>9. Events &amp; measurement</h2><div class="body">
-      <p>Flow Agent's event stream is a <strong>stable public runtime contract</strong>, not just an internal log. Every meaningful runtime transition appends one normalized event; JSONL mode (§3B), future RPC mode (§3C) and replay from the user-global session log (§3E) expose the same events. Live notifications report the earliest pending and highest committed sequences, never a second event copy. Golden flows compare expected event streams, which makes individual flows measurable and optimizable.</p>
+      <p>Flow Agent's event stream is a <strong>stable public runtime contract</strong>, not just an internal log. Every meaningful runtime transition appends one normalized event; JSONL mode (§3B) and replay from the user-global session log (§3E) expose the same events, and ACP (§3C) presents them. Live notifications report the earliest pending and highest committed sequences, never a second event copy. Golden flows compare expected event streams, which makes individual flows measurable and optimizable.</p>
       <p>Command/request shape is a separate post-M1 surface.</p>
       <p><a href="../../PROTOCOL.md">PROTOCOL.md</a> defines the envelope, canonical JSONL, event families and lifecycle; <a href="../../TESTING.md">TESTING.md</a> defines the emitted fixture-contract test subset; <a href="../../PERFORMANCE.md">PERFORMANCE.md</a> defines performance design and evidence.</p>
     </div></section>

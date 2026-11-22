@@ -68,7 +68,8 @@ impl ResumeInspectionBuilder {
             }
         };
         self.last_event_type = Some(event.event_type);
-        self.completed_turns += usize::from(event.event_type == EventType::MessageCompleted);
+        self.completed_turns +=
+            usize::from(crate::runtime::context_persistence::requires_context_manifest(event));
         if self.root_flow_definition_id.is_none()
             && event.event_type == EventType::FlowStarted
             && event.parent_flow_id.is_none()
