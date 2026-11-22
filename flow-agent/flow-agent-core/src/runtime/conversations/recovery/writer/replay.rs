@@ -5,7 +5,8 @@ use crate::runtime::{
         contract::protocol,
         recovery_record::{PRODUCTIVE_RECOVERY_SCHEMA_V0, ProductiveRecoveryRecord},
     },
-    run_attempts::{ProductiveRecovery, RunAttemptKind, RunAttemptResult},
+    run_attempts::{ProductiveRecovery, RecordedSubflowBatch, RunAttemptKind, RunAttemptResult},
+    subflows::{SubflowInstanceRequest, SubflowOutcome},
     types::RuntimeError,
 };
 
@@ -374,6 +375,101 @@ impl ProductiveRecovery for ProductiveRecoveryWriter {
             message_object,
         })?;
         Ok(Some(message))
+    }
+
+    fn subflow_batch(
+        &mut self,
+        phase_execution_id: &str,
+        before_attempt_id: &str,
+        live: &mut dyn FnMut() -> Result<Vec<SubflowInstanceRequest>, RuntimeError>,
+    ) -> Result<RecordedSubflowBatch, RuntimeError> {
+        self.ensure_usable()?;
+        if let Some(record) = self.next_replay_record() {
+            let ProductiveRecoveryRecord::SubflowBatch {
+                phase_execution_id: recorded_phase,
+                before_attempt_id: recorded_attempt,
+                instances_object,
+                ..
+            } = record
+            else {
+                return Err(protocol(
+                    "productive recovery replay reached a different boundary than a subflow start",
+                ));
+            };
+            if recorded_phase != phase_execution_id || recorded_attempt != before_attempt_id {
+                return Err(protocol(
+                    "productive recovery subflow start diverged from deterministic replay",
+                ));
+            }
+            let instances = serde_json::from_slice::<Vec<SubflowInstanceRequest>>(
+                &self.run_objects.read(&instances_object)?,
+            )
+            .map_err(|_| protocol("productive recovery subflow start is invalid"))?;
+            self.consume_replay_record();
+            let Some(ProductiveRecoveryRecord::SubflowOutcomes {
+                phase_execution_id: outcome_phase,
+                before_attempt_id: outcome_attempt,
+                outcomes_object,
+                ..
+            }) = self.next_replay_record()
+            else {
+                let names = instances
+                    .iter()
+                    .map(|instance| instance.name.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                return Err(protocol(format!(
+                    "subflow instances {names} started but have no recorded result; they are never started again automatically"
+                )));
+            };
+            if outcome_phase != phase_execution_id || outcome_attempt != before_attempt_id {
+                return Err(protocol(
+                    "productive recovery subflow result diverged from deterministic replay",
+                ));
+            }
+            let outcomes = serde_json::from_slice::<Vec<SubflowOutcome>>(
+                &self.run_objects.read(&outcomes_object)?,
+            )
+            .map_err(|_| protocol("productive recovery subflow result is invalid"))?;
+            self.consume_replay_record();
+            return Ok(RecordedSubflowBatch {
+                instances,
+                outcomes: Some(outcomes),
+            });
+        }
+        self.ensure_live_append()?;
+        self.ensure_completed_attempts_consumed()?;
+        let instances = live()?;
+        let instances_object =
+            self.persist_value(&serde_json::to_value(&instances).map_err(RuntimeError::Json)?)?;
+        self.append_record(&ProductiveRecoveryRecord::SubflowBatch {
+            schema: PRODUCTIVE_RECOVERY_SCHEMA_V0.to_owned(),
+            phase_execution_id: phase_execution_id.to_owned(),
+            before_attempt_id: before_attempt_id.to_owned(),
+            instances_object,
+        })?;
+        Ok(RecordedSubflowBatch {
+            instances,
+            outcomes: None,
+        })
+    }
+
+    fn subflow_outcomes(
+        &mut self,
+        phase_execution_id: &str,
+        before_attempt_id: &str,
+        outcomes: &[SubflowOutcome],
+    ) -> Result<(), RuntimeError> {
+        self.ensure_usable()?;
+        self.ensure_live_append()?;
+        let outcomes_object =
+            self.persist_value(&serde_json::to_value(outcomes).map_err(RuntimeError::Json)?)?;
+        self.append_record(&ProductiveRecoveryRecord::SubflowOutcomes {
+            schema: PRODUCTIVE_RECOVERY_SCHEMA_V0.to_owned(),
+            phase_execution_id: phase_execution_id.to_owned(),
+            before_attempt_id: before_attempt_id.to_owned(),
+            outcomes_object,
+        })
     }
 
     fn flow_boundary(

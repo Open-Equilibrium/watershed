@@ -54,6 +54,7 @@ pub(crate) mod session_store;
 pub(crate) mod stage_results;
 pub(crate) mod steering;
 pub(crate) mod stream_signature;
+pub(crate) mod subflows;
 pub(crate) mod tool_runner;
 pub(crate) mod types;
 pub(crate) mod validate;
@@ -102,6 +103,10 @@ pub use session_reading::{
 pub use steering::{
     MAX_PENDING_STEERING_MESSAGES, MAX_STEERING_MESSAGE_BYTES, drain_productive_steering,
     request_productive_pause, steer_productive_run,
+};
+pub use subflows::{
+    MAX_SUBFLOW_BATCH, SubflowInstanceRequest, SubflowLauncher, SubflowOutcome,
+    install_subflow_launcher,
 };
 pub use types::{EmitMode, RunOutput, RuntimeError, render_human_failure_status};
 pub use validate::validate_protocol_jsonl_text;
