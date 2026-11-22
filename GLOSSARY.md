@@ -193,6 +193,7 @@ Canonical terms. Use these exactly; do not introduce synonyms. Tool names are fi
 - **Compliance replica** — A replica a company runs with its own key for search, legal hold and data-loss checks (ADR-0228).
 - **Recovery key** — The second way to regain a Workspace's keys when no signed-in device can approve a new one. Area keys are also wrapped for it, and the person or their company holds it (ADR-0228).
 - **Headless replica** — A Liquid replica without UI, on a server for Automations and schedules or on a separate agent host. It holds only the Workspaces enabled for it and, once selective replication follows the complete M3 replicas, only the areas its Roles allow (ADR-0255).
+- **Text Block** — Today's implementation of one Paragraph as a Block of its own, which Sections replace (ADR-0317).
 - **Paragraph** — A body text, heading, list item, to-do or quote inside a Section, ended by ⏎, which starts the next; ⇧⏎ breaks its line without ending it (ADR-0317).
 - **Table** — The Block of typed fields and rows, kept in a document of its own, listed in the sidebar's Tables section and shown on Pages through Views, whose View tabs lay it out as Table, Board or Calendar (ADR-0309, ADR-0311). The core calls it the Database Block (ADR-0244).
 - **Home Page** — The Page a Block was made on, whose document stores the Block. A Table has none.
