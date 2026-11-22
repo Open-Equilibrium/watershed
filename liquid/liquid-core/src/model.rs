@@ -34,6 +34,25 @@ pub(crate) const TABLE: &str = "table";
 pub(crate) const AREA: &str = "area";
 pub(crate) const PAGE: &str = "page";
 pub(crate) const ICON: &str = "icon";
+pub(crate) const TILE: &str = "tile";
+pub(crate) const INNER: &str = "inner";
+pub const GRID_COLUMNS: u8 = 12;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct Tile {
+    pub column: u8,
+    pub span: u8,
+}
+
+impl Tile {
+    pub(crate) fn fits(self, columns: u8) -> bool {
+        self.span >= 1
+            && self
+                .column
+                .checked_add(self.span)
+                .is_some_and(|end| end <= columns)
+    }
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Area {
@@ -63,6 +82,8 @@ pub struct View {
     pub boundary: bool,
     pub kind: BlockKind,
     pub tabs: Vec<crate::Tab>,
+    pub tile: Option<Tile>,
+    pub inner: Option<Tile>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

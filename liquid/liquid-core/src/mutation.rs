@@ -141,6 +141,22 @@ pub enum Mutation {
         page: PageId,
         view: ViewId,
     },
+    SetTile {
+        page: PageId,
+        view: ViewId,
+        tile: Option<crate::Tile>,
+    },
+    SetInnerTile {
+        page: PageId,
+        view: ViewId,
+        tile: Option<crate::Tile>,
+    },
+    MoveViews {
+        page: PageId,
+        first: ViewId,
+        last: ViewId,
+        after: Option<ViewId>,
+    },
     AddTab {
         page: PageId,
         view: ViewId,

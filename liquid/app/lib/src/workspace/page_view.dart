@@ -10,6 +10,9 @@ import '../theme/tokens.g.dart';
 import 'code_block.dart';
 import 'explorer.dart';
 import 'media_block.dart';
+import 'arrange_bar.dart';
+import 'arrange_layout.dart' show arrangedWidth;
+import 'arranged_page.dart';
 import 'page_views.dart';
 import 'page_editor.dart';
 import 'stored_name.dart';
@@ -197,14 +200,19 @@ class _WorkspacePageState extends State<WorkspacePage> implements EditorSource {
     ),
   );
 
-  Widget _column(Widget child) => Center(
+  Widget _column(Widget child, {double maxWidth = readingWidth}) => Center(
     child: ConstrainedBox(
-      constraints: const BoxConstraints(maxWidth: readingWidth),
+      constraints: BoxConstraints(maxWidth: maxWidth),
       child: child,
     ),
   );
 
-  Widget _withUploads(BridgeView view, int index, Widget block) => _column(
+  Widget _withUploads(
+    BridgeView view,
+    int index,
+    Widget block, {
+    bool wide = false,
+  }) => (wide ? (Widget child) => child : _column)(
     ValueListenableBuilder(
       valueListenable: _views.uploads,
       builder: (context, uploads, child) => Column(
@@ -231,6 +239,52 @@ class _WorkspacePageState extends State<WorkspacePage> implements EditorSource {
     ),
   );
 
+  Widget _block(BridgeView view, int index, {required bool wide}) {
+    if (view.kind == BridgeBlockKind.text) {
+      return KeyedSubtree(
+        key: ValueKey(view.id),
+        child: _withUploads(
+          view,
+          index,
+          TextBlock(
+            key: _views.keyFor(view.id),
+            views: _views,
+            view: view,
+            index: index,
+          ),
+        ),
+      );
+    }
+    return KeyedSubtree(
+      key: ValueKey(view.id),
+      child: _withUploads(
+        view,
+        index,
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            if (view.boundary && index > 0) const SectionDivider(),
+            switch (view.kind) {
+              BridgeBlockKind.database => TableBlock(views: _views, view: view),
+              BridgeBlockKind.code => CodeBlock(
+                views: _views,
+                view: view,
+                index: index,
+              ),
+              BridgeBlockKind.media => MediaBlock(views: _views, view: view),
+              BridgeBlockKind.whiteboard => WhiteboardBlock(
+                views: _views,
+                view: view,
+              ),
+              _ => const _Placeholder(),
+            },
+          ],
+        ),
+        wide: wide,
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final ws = context.ws;
@@ -256,7 +310,16 @@ class _WorkspacePageState extends State<WorkspacePage> implements EditorSource {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        _Breadcrumb(state: widget.state, open: widget.open),
+        ValueListenableBuilder(
+          valueListenable: _views.arranging,
+          builder: (context, arranging, _) => arranging
+              ? ArrangeBar(views: _views, title: _title.controller.text)
+              : _Breadcrumb(
+                  state: widget.state,
+                  open: widget.open,
+                  onArrange: () => _views.arranging.value = true,
+                ),
+        ),
         ValueListenableBuilder(
           valueListenable: widget.state.problem,
           builder: (context, problem, _) => problem == null
@@ -275,6 +338,7 @@ class _WorkspacePageState extends State<WorkspacePage> implements EditorSource {
                 _views,
                 _views.editor.lingering,
                 _views.ready,
+                _views.arranging,
               ]),
               builder: (context, _) => CustomScrollView(
                 slivers: [
@@ -287,6 +351,9 @@ class _WorkspacePageState extends State<WorkspacePage> implements EditorSource {
                     ),
                     sliver: SliverToBoxAdapter(
                       child: _column(
+                        maxWidth: _views.arranged || _views.arranging.value
+                            ? arrangedWidth
+                            : readingWidth,
                         TextField(
                           key: const Key('page-title'),
                           controller: _title.take(),
@@ -346,69 +413,28 @@ class _WorkspacePageState extends State<WorkspacePage> implements EditorSource {
                               ),
                             ),
                           ),
-                        SliverList.builder(
-                          key: const ValueKey('Blocks'),
-                          itemCount: _views.count ?? 0,
-                          findChildIndexCallback: (key) =>
-                              _views.indexOf((key as ValueKey<String>).value),
-                          itemBuilder: (context, index) {
-                            final view = _views.at(index);
-                            if (view == null) {
-                              return const SizedBox(height: WsMetrics.lhProse);
-                            }
-                            if (view.kind == BridgeBlockKind.text) {
-                              return KeyedSubtree(
-                                key: ValueKey(view.id),
-                                child: _withUploads(
-                                  view,
-                                  index,
-                                  TextBlock(
-                                    key: _views.keyFor(view.id),
-                                    views: _views,
-                                    view: view,
-                                    index: index,
-                                  ),
-                                ),
-                              );
-                            }
-                            return KeyedSubtree(
-                              key: ValueKey(view.id),
-                              child: _withUploads(
-                                view,
-                                index,
-                                Column(
-                                  crossAxisAlignment:
-                                      CrossAxisAlignment.stretch,
-                                  children: [
-                                    if (view.boundary && index > 0)
-                                      const SectionDivider(),
-                                    switch (view.kind) {
-                                      BridgeBlockKind.database => TableBlock(
-                                        views: _views,
-                                        view: view,
-                                      ),
-                                      BridgeBlockKind.code => CodeBlock(
-                                        views: _views,
-                                        view: view,
-                                        index: index,
-                                      ),
-                                      BridgeBlockKind.media => MediaBlock(
-                                        views: _views,
-                                        view: view,
-                                      ),
-                                      BridgeBlockKind.whiteboard =>
-                                        WhiteboardBlock(
-                                          views: _views,
-                                          view: view,
-                                        ),
-                                      _ => const _Placeholder(),
-                                    },
-                                  ],
-                                ),
-                              ),
-                            );
-                          },
-                        ),
+                        if (_views.arranged || _views.arranging.value)
+                          ArrangedPage(
+                            key: const ValueKey('arranged'),
+                            views: _views,
+                            block: _block,
+                          )
+                        else
+                          SliverList.builder(
+                            key: const ValueKey('Blocks'),
+                            itemCount: _views.count ?? 0,
+                            findChildIndexCallback: (key) =>
+                                _views.indexOf((key as ValueKey<String>).value),
+                            itemBuilder: (context, index) {
+                              final view = _views.at(index);
+                              if (view == null) {
+                                return const SizedBox(
+                                  height: WsMetrics.lhProse,
+                                );
+                              }
+                              return _block(view, index, wide: false);
+                            },
+                          ),
                       ],
                     ),
                   ),
@@ -456,10 +482,15 @@ class _Placeholder extends StatelessWidget {
 }
 
 class _Breadcrumb extends StatelessWidget {
-  const _Breadcrumb({required this.state, required this.open});
+  const _Breadcrumb({
+    required this.state,
+    required this.open,
+    required this.onArrange,
+  });
 
   final WorkspaceState state;
   final OpenPage open;
+  final VoidCallback onArrange;
 
   @override
   Widget build(BuildContext context) {
@@ -467,7 +498,10 @@ class _Breadcrumb extends StatelessWidget {
     return Container(
       key: const Key('page-header'),
       height: WsMetrics.rowHeader,
-      padding: const EdgeInsets.only(left: WsMetrics.space7),
+      padding: const EdgeInsets.only(
+        left: WsMetrics.space7,
+        right: WsMetrics.space4,
+      ),
       alignment: Alignment.centerLeft,
       child: ListenableBuilder(
         listenable: Listenable.merge([state.areas, state.pages(open.area)]),
@@ -498,6 +532,36 @@ class _Breadcrumb extends StatelessWidget {
                   style: TextStyle(
                     color: ws.text,
                     fontWeight: WsMetrics.fwMedium,
+                  ),
+                ),
+              ),
+              const Spacer(),
+              InkWell(
+                key: const Key('arrange'),
+                borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
+                onTap: onArrange,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: WsMetrics.space2,
+                    vertical: WsMetrics.space1,
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        LucideIcons.layoutGrid,
+                        size: 14,
+                        color: ws.textMuted,
+                      ),
+                      const SizedBox(width: WsMetrics.space2),
+                      Text(
+                        'Arrange',
+                        style: TextStyle(
+                          fontSize: WsMetrics.fsCompact,
+                          color: ws.textMuted,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
               ),

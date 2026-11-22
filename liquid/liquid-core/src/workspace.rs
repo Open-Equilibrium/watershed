@@ -7,8 +7,8 @@ use automerge::{ActorId, AutoCommit, ObjType, ROOT, ReadDoc};
 use crate::history::Header;
 use crate::id::random_bytes;
 use crate::model::{
-    self, AREA, AREAS, BLOCK, BLOCKS, BOUNDARY, ICON, KIND, LANGUAGE, NAME, OWNER, PAGE, PAGES,
-    PARENT, SORT, STYLE, TABLE, TABLES, TEXT, TITLE, VIEWS,
+    self, AREA, AREAS, BLOCK, BLOCKS, BOUNDARY, GRID_COLUMNS, ICON, INNER, KIND, LANGUAGE, NAME,
+    OWNER, PAGE, PAGES, PARENT, SORT, STYLE, TABLE, TABLES, TEXT, TILE, TITLE, VIEWS,
 };
 
 const MAX_ICON: usize = 64;
@@ -18,7 +18,7 @@ use crate::{
     Action, ActionId, Actor, Applied, Area, AreaId, AttachmentId, BlockId, BlockKind, Cell,
     Changed, Code, Created, Document, Error, FieldId, FieldKind, Layout, Media, Mutation,
     Operation, Origin, PageEntry, PageId, Permission, PersonId, Place, Request, RowId, TabId,
-    TabSetup, TableEntry, TextStyle, View, ViewId,
+    TabSetup, TableEntry, TextStyle, Tile, View, ViewId,
 };
 use crate::{database, drawing, tab};
 
@@ -152,6 +152,10 @@ impl<S: Store> Workspace<S> {
 
     pub fn views(&mut self, page: &PageId, start: usize, limit: usize) -> Result<Vec<View>, Error> {
         Ok(self.page(page)?.1.window(start, limit))
+    }
+
+    pub fn arranged(&mut self, page: &PageId) -> Result<bool, Error> {
+        Ok(self.page(page)?.1.arranged())
     }
 
     pub fn view_count(&mut self, page: &PageId) -> Result<usize, Error> {
@@ -344,6 +348,117 @@ impl<S: Store> Workspace<S> {
     }
 
     fn write(&mut self, mutation: &Mutation) -> Result<Written, Error> {
+        let page = match mutation {
+            Mutation::AddTextBlock { page, .. }
+            | Mutation::SplitTextBlock { page, .. }
+            | Mutation::JoinTextBlock { page, .. }
+            | Mutation::SetSectionBoundary { page, .. }
+            | Mutation::TurnIntoCode { page, .. }
+            | Mutation::TurnIntoText { page, .. }
+            | Mutation::AddMediaBlock { page, .. }
+            | Mutation::AddWhiteboardBlock { page, .. }
+            | Mutation::AddDatabaseBlock { page, .. }
+            | Mutation::AddTableView { page, .. }
+            | Mutation::DuplicateTable { page, .. }
+            | Mutation::RemoveView { page, .. }
+            | Mutation::MoveViews { page, .. } => page,
+            Mutation::DeleteTable { block } => return self.write_across_pages(mutation, block),
+            _ => return self.write_mutation(mutation),
+        };
+        let order = self.page(page)?.1;
+        if !order.arranged() {
+            return self.write_mutation(mutation);
+        }
+        let before = order.sections();
+        let mut written = self.write_mutation(mutation)?;
+        if self.carry_tiles(page, &before)? {
+            let document = Document::Page(page.clone());
+            if !written.touched.contains(&document) {
+                written.touched.push(document);
+            }
+            written.changed.push(Changed::Views(page.clone()));
+        }
+        Ok(written)
+    }
+
+    fn write_across_pages(
+        &mut self,
+        mutation: &Mutation,
+        table: &BlockId,
+    ) -> Result<Written, Error> {
+        let mut pages: Vec<PageId> = self
+            .table_views(table)?
+            .into_iter()
+            .map(|(page, _)| page)
+            .collect();
+        pages.sort();
+        pages.dedup();
+        let mut before = Vec::new();
+        for page in pages {
+            let order = match self.page(&page) {
+                Ok((_, order)) => order,
+                Err(Error::NotFound) => continue,
+                Err(error) => return Err(error),
+            };
+            if order.arranged() {
+                before.push((page, order.sections()));
+            }
+        }
+        let mut written = self.write_mutation(mutation)?;
+        for (page, sections) in &before {
+            if self.carry_tiles(page, sections)? {
+                let document = Document::Page(page.clone());
+                if !written.touched.contains(&document) {
+                    written.touched.push(document);
+                }
+                written.changed.push(Changed::Views(page.clone()));
+            }
+        }
+        Ok(written)
+    }
+
+    fn carry_tiles(
+        &mut self,
+        page: &PageId,
+        before: &crate::order::Sections,
+    ) -> Result<bool, Error> {
+        let (doc, order) = self.page(page)?;
+        let mut carried = Vec::new();
+        let mut lead: Option<(&View, bool)> = None;
+        for (view, starts) in order.placed_views().zip(order.leads()) {
+            if view.kind != BlockKind::Text {
+                lead = None;
+                continue;
+            }
+            if starts {
+                lead = Some((view, false));
+            } else if view.tile.is_some() {
+                carried.push((view.id.clone(), None, view.inner));
+            }
+            if let Some((shown, false)) = lead
+                && let Some(tile) = before.tile_of(&view.id)
+            {
+                lead = Some((shown, true));
+                if shown.tile != tile {
+                    carried.push((shown.id.clone(), tile, shown.inner));
+                }
+            }
+        }
+        for (view, tile, inner) in &carried {
+            let entry = model::live(doc, VIEWS, view.as_str()).ok_or(Error::NotFound)?;
+            match tile {
+                Some(tile) => {
+                    let json = serde_json::to_string(tile).map_err(|_| Error::WrongKind)?;
+                    doc.put(&entry, TILE, json)?;
+                }
+                None => doc.delete(&entry, TILE)?,
+            }
+            order.set_tiles(view, *tile, *inner);
+        }
+        Ok(!carried.is_empty())
+    }
+
+    fn write_mutation(&mut self, mutation: &Mutation) -> Result<Written, Error> {
         match mutation {
             Mutation::CreateArea { name } => self.write_create_area(name),
             Mutation::RenameWorkspace { name } => self.write_workspace(NAME, name),
@@ -504,6 +619,14 @@ impl<S: Store> Workspace<S> {
                 value,
             } => self.write_set_cell(block, row, field, value),
             Mutation::RemoveView { page, view } => self.write_remove_view(page, view),
+            Mutation::SetTile { page, view, tile } => self.write_tile(page, view, *tile, false),
+            Mutation::SetInnerTile { page, view, tile } => self.write_tile(page, view, *tile, true),
+            Mutation::MoveViews {
+                page,
+                first,
+                last,
+                after,
+            } => self.write_move_views(page, first, last, after.as_ref()),
             Mutation::AddTab {
                 page,
                 view,
@@ -1046,6 +1169,8 @@ impl<S: Store> Workspace<S> {
                 boundary: false,
                 kind: BlockKind::Database,
                 tabs: tab::read(doc, &entry, view.as_str()),
+                tile: None,
+                inner: None,
             },
         );
         let mut written = Written::new(Document::Page(page.clone()), Changed::Views(page.clone()));
@@ -1169,6 +1294,86 @@ impl<S: Store> Workspace<S> {
         }
         order.remove(view);
         Ok(written)
+    }
+
+    fn write_tile(
+        &mut self,
+        page: &PageId,
+        view: &ViewId,
+        tile: Option<Tile>,
+        inner: bool,
+    ) -> Result<Written, Error> {
+        if tile.is_some_and(|tile| !tile.fits(GRID_COLUMNS)) {
+            return Err(Error::OutOfRange);
+        }
+        let (doc, order) = self.page(page)?;
+        let shown = order.view(view).ok_or(Error::NotFound)?;
+        let text = shown.kind == BlockKind::Text;
+        let starts_section = shown.boundary
+            || order
+                .above(view)
+                .is_none_or(|above| above.kind != BlockKind::Text);
+        match (inner, text) {
+            (true, false) => return Err(Error::WrongKind),
+            (false, true) if !starts_section => return Err(Error::NotAllowed),
+            _ => {}
+        }
+        let (mut placed, mut within) = (shown.tile, shown.inner);
+        if inner {
+            within = tile;
+        } else {
+            placed = tile;
+        }
+        let entry = model::live(doc, VIEWS, view.as_str()).ok_or(Error::NotFound)?;
+        let key = if inner { INNER } else { TILE };
+        match tile {
+            Some(tile) => {
+                let json = serde_json::to_string(&tile).map_err(|_| Error::WrongKind)?;
+                doc.put(&entry, key, json)?;
+            }
+            None if doc.get(&entry, key)?.is_some() => doc.delete(&entry, key)?,
+            None => {}
+        }
+        order.set_tiles(view, placed, within);
+        Ok(Written::new(
+            Document::Page(page.clone()),
+            Changed::Views(page.clone()),
+        ))
+    }
+
+    fn write_move_views(
+        &mut self,
+        page: &PageId,
+        first: &ViewId,
+        last: &ViewId,
+        after: Option<&ViewId>,
+    ) -> Result<Written, Error> {
+        let (doc, order) = self.page(page)?;
+        let run = order.run(first, last).ok_or(Error::OutOfRange)?;
+        if order.above(first).map(|above| &above.id) == after {
+            return Err(Error::NoChange);
+        }
+        if let Some(after) = after {
+            order.view(after).ok_or(Error::NotFound)?;
+            if run.iter().any(|view| &view.id == after) {
+                return Err(Error::OutOfRange);
+            }
+        }
+        for view in &run {
+            order.remove(&view.id);
+        }
+        let mut previous = after.cloned();
+        for view in run {
+            let key = order.key_after(previous.as_ref())?;
+            let entry = model::live(doc, VIEWS, view.id.as_str()).ok_or(Error::NotFound)?;
+            doc.put(&entry, SORT, key.clone())?;
+            previous = Some(view.id.clone());
+            order.insert(key, view);
+        }
+        Ok(Written::new(
+            Document::Page(page.clone()),
+            Changed::Views(page.clone()),
+        ))
     }
 
     fn write_add_tab(
@@ -1365,6 +1570,8 @@ fn add_view(
         boundary: false,
         kind,
         tabs: Vec::new(),
+        tile: None,
+        inner: None,
     };
     order.insert(sort, placed);
     Ok(view)

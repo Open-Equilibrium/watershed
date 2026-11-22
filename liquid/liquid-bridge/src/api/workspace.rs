@@ -1,6 +1,6 @@
 use liquid_core::{
     AreaId, AttachmentId, BlockId, Changed, Error, FieldId, Mutation, PageId, Place, RowId, TabId,
-    TextStyle, ViewId,
+    TextStyle, Tile, ViewId,
 };
 
 use super::database::{
@@ -22,6 +22,9 @@ pub enum BridgeMutationKind {
     AddTextBlock,
     EditText,
     RemoveView,
+    SetTile,
+    SetInnerTile,
+    MoveViews,
     AddTab,
     RenameTab,
     SetTabLayout,
@@ -126,6 +129,8 @@ pub struct BridgeMutation {
     pub sort: Option<BridgeSort>,
     pub filter: Option<BridgeFilter>,
     pub tab: Option<String>,
+    pub tile: Option<BridgeTile>,
+    pub last_view: Option<String>,
     pub layout: BridgeLayout,
     pub tabs: Vec<BridgeTab>,
     pub media_type: Option<String>,
@@ -226,6 +231,30 @@ pub struct BridgeView {
     pub boundary: bool,
     pub kind: BridgeBlockKind,
     pub tabs: Vec<BridgeTab>,
+    pub tile: Option<BridgeTile>,
+    pub inner: Option<BridgeTile>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BridgeTile {
+    pub column: u8,
+    pub span: u8,
+}
+
+impl BridgeTile {
+    pub(crate) fn of(tile: Tile) -> Self {
+        Self {
+            column: tile.column,
+            span: tile.span,
+        }
+    }
+
+    fn to_core(self) -> Tile {
+        Tile {
+            column: self.column,
+            span: self.span,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -234,6 +263,7 @@ pub struct BridgeAnswer {
     pub pages: Vec<BridgePage>,
     pub views: Vec<BridgeView>,
     pub count: i64,
+    pub arranged: bool,
     pub text: Option<String>,
     pub style: Option<BridgeTextStyle>,
     pub language: Option<String>,
@@ -369,6 +399,22 @@ impl BridgeMutation {
             BridgeMutationKind::RemoveView => Mutation::RemoveView {
                 page: id(&self.page, PageId::parse, "page")?,
                 view: id(&self.view, ViewId::parse, "view")?,
+            },
+            BridgeMutationKind::SetTile => Mutation::SetTile {
+                page: page()?,
+                view: view()?,
+                tile: self.tile.map(BridgeTile::to_core),
+            },
+            BridgeMutationKind::SetInnerTile => Mutation::SetInnerTile {
+                page: page()?,
+                view: view()?,
+                tile: self.tile.map(BridgeTile::to_core),
+            },
+            BridgeMutationKind::MoveViews => Mutation::MoveViews {
+                page: page()?,
+                first: view()?,
+                last: id(&self.last_view, ViewId::parse, "last view")?,
+                after: optional_id(&self.after, ViewId::parse, "after")?,
             },
             BridgeMutationKind::AddTab => Mutation::AddTab {
                 page: page()?,

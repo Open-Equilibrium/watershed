@@ -2,8 +2,8 @@ use std::collections::HashMap;
 
 use automerge::AutoCommit;
 
-use crate::model::{self, BLOCK, BLOCKS, BOUNDARY, KIND, TABLE, TITLE, VIEWS};
-use crate::{BlockId, BlockKind, Error, Place, Tab, View, ViewId};
+use crate::model::{self, BLOCK, BLOCKS, BOUNDARY, INNER, KIND, TABLE, TILE, TITLE, VIEWS};
+use crate::{BlockId, BlockKind, Error, Place, Tab, Tile, View, ViewId};
 
 struct Placed {
     sort: String,
@@ -47,6 +47,8 @@ impl Order {
                         boundary: entry.get(BOUNDARY) == Some("true"),
                         kind,
                         tabs,
+                        tile: stored(entry.get(TILE)),
+                        inner: stored(entry.get(INNER)),
                     },
                 })
             })
@@ -112,6 +114,23 @@ impl Order {
         }
     }
 
+    pub(crate) fn set_tiles(&mut self, view: &ViewId, tile: Option<Tile>, inner: Option<Tile>) {
+        if let Some(index) = self.position(view) {
+            self.placed[index].view.tile = tile;
+            self.placed[index].view.inner = inner;
+        }
+    }
+
+    pub(crate) fn run(&self, first: &ViewId, last: &ViewId) -> Option<Vec<View>> {
+        let (from, to) = (self.position(first)?, self.position(last)?);
+        (from <= to).then(|| {
+            self.placed[from..=to]
+                .iter()
+                .map(|placed| placed.view.clone())
+                .collect()
+        })
+    }
+
     pub(crate) fn set_tabs(&mut self, view: &ViewId, tabs: Vec<Tab>) {
         if let Some(index) = self.position(view) {
             self.placed[index].view.tabs = tabs;
@@ -124,6 +143,47 @@ impl Order {
                 placed.view.kind = kind;
             }
         }
+    }
+
+    pub(crate) fn leads(&self) -> Vec<bool> {
+        let mut above: Option<&View> = None;
+        self.placed
+            .iter()
+            .map(|placed| {
+                let view = &placed.view;
+                let lead = view.kind == BlockKind::Text
+                    && (view.boundary || above.is_none_or(|above| above.kind != BlockKind::Text));
+                above = Some(view);
+                lead
+            })
+            .collect()
+    }
+
+    pub(crate) fn sections(&self) -> Sections {
+        let mut members = HashMap::new();
+        let mut tiles = HashMap::new();
+        let mut lead = 0;
+        for (placed, starts) in self.placed.iter().zip(self.leads()) {
+            let id = hashed(&placed.view.id);
+            if starts {
+                lead = id;
+                tiles.insert(id, placed.view.tile);
+            }
+            if placed.view.kind == BlockKind::Text {
+                members.insert(id, lead);
+            }
+        }
+        Sections { members, tiles }
+    }
+
+    pub(crate) fn placed_views(&self) -> impl Iterator<Item = &View> {
+        self.placed.iter().map(|placed| &placed.view)
+    }
+
+    pub(crate) fn arranged(&self) -> bool {
+        self.placed
+            .iter()
+            .any(|placed| placed.view.tile.is_some() || placed.view.inner.is_some())
     }
 
     pub(crate) fn len(&self) -> usize {
@@ -144,6 +204,29 @@ impl Order {
             .iter()
             .position(|placed| &placed.view.id == view)
     }
+}
+
+pub(crate) struct Sections {
+    members: HashMap<u64, u64>,
+    tiles: HashMap<u64, Option<Tile>>,
+}
+
+impl Sections {
+    pub(crate) fn tile_of(&self, member: &ViewId) -> Option<Option<Tile>> {
+        let lead = self.members.get(&hashed(member))?;
+        self.tiles.get(lead).copied()
+    }
+}
+
+pub(crate) fn hashed(view: &ViewId) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    view.hash(&mut hasher);
+    hasher.finish()
+}
+
+fn stored<T: serde::de::DeserializeOwned>(json: Option<&str>) -> Option<T> {
+    serde_json::from_str(json?).ok()
 }
 
 #[cfg(test)]

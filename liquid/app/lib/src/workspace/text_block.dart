@@ -15,6 +15,7 @@ import 'follow.dart';
 import 'media_block.dart';
 import 'page_editor.dart';
 import 'page_views.dart';
+import 'arranged_page.dart' show InTile;
 import 'paste.dart';
 import 'slash_commands.dart';
 import 'table_pickers.dart';
@@ -1016,9 +1017,11 @@ class SectionDivider extends StatelessWidget {
   const SectionDivider({super.key = const Key('section-divider')});
 
   @override
-  Widget build(BuildContext context) => Container(
-    height: 1,
-    margin: const EdgeInsets.symmetric(vertical: WsMetrics.space4),
-    color: context.ws.border,
-  );
+  Widget build(BuildContext context) => InTile.of(context)
+      ? const SizedBox.shrink()
+      : Container(
+          height: 1,
+          margin: const EdgeInsets.symmetric(vertical: WsMetrics.space4),
+          color: context.ws.border,
+        );
 }
