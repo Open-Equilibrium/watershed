@@ -1,5 +1,6 @@
 mod attachment;
 mod calculation;
+mod chart;
 mod database;
 mod drawing;
 mod formula;
@@ -17,6 +18,9 @@ mod workspace;
 
 pub use attachment::{Attachment, AttachmentId, MAX_ATTACHMENT, Media, PART, Upload};
 pub use calculation::{Calculation, Line, LineSetup, LineStyle, MAX_LABEL, MAX_LINES};
+pub use chart::{
+    Chart, ChartKind, ChartPoint, ChartSetup, ChartSource, ChartValue, MAX_CHART_POINTS,
+};
 pub use database::{
     Database, Field, Filter, Group, MAX_FIELDS, MAX_FILES, MAX_FILTER_TEXT, MAX_OPTIONS, Match,
     Row, RowQuery, Rows, SelectOption, Sort,

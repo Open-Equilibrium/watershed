@@ -94,6 +94,7 @@ pub enum BlockKind {
     Media,
     Whiteboard,
     Calculation,
+    Chart,
     Unknown,
 }
 
@@ -106,6 +107,7 @@ impl BlockKind {
             Some("media") => Self::Media,
             Some("whiteboard") => Self::Whiteboard,
             Some("calculation") => Self::Calculation,
+            Some("chart") => Self::Chart,
             _ => Self::Unknown,
         }
     }

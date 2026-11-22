@@ -650,3 +650,148 @@ fn query(totals: Vec<liquid_core::FieldTotal>) -> liquid_core::RowQuery {
         totals,
     }
 }
+
+#[test]
+fn a_chart_draws_a_table_s_groups_or_a_calculation_s_lines() {
+    use liquid_core::{ChartKind, ChartSetup, ChartSource, ChartValue};
+    let mut home = Home::new();
+    let (table, amount, page) = (home.table.clone(), home.amount.clone(), home.page.clone());
+    let Some(Created::Field(paid)) = home
+        .edit(Mutation::AddField {
+            block: table.clone(),
+            place: Place::Last,
+            name: "Paid".into(),
+            kind: FieldKind::Checkbox,
+        })
+        .unwrap()
+        .created
+    else {
+        panic!("a field")
+    };
+    let first = home
+        .workspace
+        .rows(&table, &query(Vec::new()))
+        .unwrap()
+        .rows[0]
+        .id
+        .clone();
+    home.edit(Mutation::SetCell {
+        block: table.clone(),
+        row: first,
+        field: paid.clone(),
+        value: Cell::Checkbox(true),
+    })
+    .unwrap();
+    let Some(Created::Block { block: chart, .. }) = home
+        .edit(Mutation::AddChartBlock {
+            page: page.clone(),
+            after: None,
+        })
+        .unwrap()
+        .created
+    else {
+        panic!("a Chart")
+    };
+    let empty = home.workspace.chart(&page, &chart).unwrap().unwrap();
+    assert_eq!((empty.setup.source, empty.points.len()), (None, 0));
+
+    let set = |home: &mut Home, setup: ChartSetup| {
+        home.edit(Mutation::SetChart {
+            page: page.clone(),
+            block: chart.clone(),
+            setup,
+        })
+    };
+    let by_paid = ChartSetup {
+        kind: ChartKind::Bar,
+        source: Some(ChartSource::Table(table.clone())),
+        group: Some(paid.clone()),
+        value: ChartValue::Sum(amount.clone()),
+    };
+    set(&mut home, by_paid.clone()).unwrap();
+    let points = |home: &mut Home| {
+        let drawn = home.workspace.chart(&page, &chart).unwrap().unwrap();
+        (
+            drawn.source_name,
+            drawn
+                .points
+                .into_iter()
+                .map(|point| (point.label, point.value))
+                .collect::<Vec<_>>(),
+        )
+    };
+    assert_eq!(
+        points(&mut home),
+        (
+            Some("Expenses".to_string()),
+            vec![("No".to_string(), 384.5), ("Yes".to_string(), 900.0)]
+        )
+    );
+    set(
+        &mut home,
+        ChartSetup {
+            value: ChartValue::Count,
+            group: None,
+            ..by_paid.clone()
+        },
+    )
+    .unwrap();
+    assert_eq!(points(&mut home).1, [("Expenses".to_string(), 2.0)]);
+
+    let report = home.calculation(&page);
+    let lines = home
+        .workspace
+        .calculation(&page, &report)
+        .unwrap()
+        .unwrap()
+        .lines;
+    home.edit(Mutation::SetLine {
+        page: page.clone(),
+        block: report.clone(),
+        line: lines[0].id.clone(),
+        setup: line("Rent", "900", LineStyle::Plain),
+    })
+    .unwrap();
+    let mut last = lines[0].id.clone();
+    for setup in [
+        line("Food", "384.5", LineStyle::Plain),
+        line("Total", "SUM(ABOVE)", LineStyle::Total),
+    ] {
+        last = home.add(&page, &report, Some(&last), setup).unwrap();
+    }
+    set(
+        &mut home,
+        ChartSetup {
+            kind: ChartKind::Pie,
+            source: Some(ChartSource::Calculation {
+                page: page.clone(),
+                block: report.clone(),
+            }),
+            group: None,
+            value: ChartValue::Count,
+        },
+    )
+    .unwrap();
+    assert_eq!(
+        points(&mut home).1,
+        [("Rent".to_string(), 900.0), ("Food".to_string(), 384.5)],
+        "a total is not drawn"
+    );
+
+    for refused in [
+        ChartSetup {
+            group: Some(amount.clone()),
+            ..by_paid.clone()
+        },
+        ChartSetup {
+            value: ChartValue::Sum(paid.clone()),
+            ..by_paid.clone()
+        },
+        ChartSetup {
+            source: Some(ChartSource::Table(report.clone())),
+            ..by_paid
+        },
+    ] {
+        assert!(set(&mut home, refused).is_err());
+    }
+}

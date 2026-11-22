@@ -21,7 +21,7 @@ use crate::{
     Permission, PersonId, Place, Request, RowId, TabId, TabSetup, TableEntry, TextStyle, Tile,
     View, ViewId, search_words,
 };
-use crate::{calculation, database, drawing, tab};
+use crate::{calculation, chart, database, drawing, tab};
 
 const COMPACT_AFTER: usize = 1_000;
 pub const MAX_DEVICE_KEY: usize = 256;
@@ -344,6 +344,10 @@ impl<S: Store> Workspace<S> {
         calculation::read(self, page, block)
     }
 
+    pub fn chart(&mut self, page: &PageId, block: &BlockId) -> Result<Option<chart::Chart>, Error> {
+        chart::read(self, page, block)
+    }
+
     pub fn name_and_icon(&mut self) -> Result<(String, String), Error> {
         let doc = self.doc(&Document::Workspace)?;
         Ok((
@@ -541,6 +545,7 @@ impl<S: Store> Workspace<S> {
             | Mutation::AddMediaBlock { page, .. }
             | Mutation::AddWhiteboardBlock { page, .. }
             | Mutation::AddCalculationBlock { page, .. }
+            | Mutation::AddChartBlock { page, .. }
             | Mutation::AddDatabaseBlock { page, .. }
             | Mutation::AddTableView { page, .. }
             | Mutation::DuplicateTable { page, .. }
@@ -707,6 +712,21 @@ impl<S: Store> Workspace<S> {
             }
             Mutation::AddCalculationBlock { page, after } => {
                 self.write_add_calculation_block(page, after.as_ref())
+            }
+            Mutation::AddChartBlock { page, after } => {
+                let (doc, order) = self.page(page)?;
+                let block = BlockId::new()?;
+                chart::create(doc, &block)?;
+                let sort = order.key_after(after.as_ref())?;
+                let view = add_view(doc, order, sort, &block, BlockKind::Chart)?;
+                let mut written =
+                    Written::new(Document::Page(page.clone()), Changed::Views(page.clone()));
+                written.created = Some(Created::Block { block, view });
+                Ok(written)
+            }
+            Mutation::SetChart { page, block, setup } => {
+                chart::set(self, page, block, setup)?;
+                Ok(block_changed(page, block, None))
             }
             Mutation::AddLine {
                 page,

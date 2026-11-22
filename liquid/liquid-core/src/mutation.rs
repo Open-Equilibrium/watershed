@@ -277,6 +277,15 @@ pub enum Mutation {
         page: PageId,
         after: Option<ViewId>,
     },
+    AddChartBlock {
+        page: PageId,
+        after: Option<ViewId>,
+    },
+    SetChart {
+        page: PageId,
+        block: BlockId,
+        setup: crate::ChartSetup,
+    },
     AddLine {
         page: PageId,
         block: BlockId,
