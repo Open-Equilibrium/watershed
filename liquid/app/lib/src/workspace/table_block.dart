@@ -11,6 +11,7 @@ import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
 import 'anchored_menu.dart';
 import 'board_layout.dart';
+import 'calendar_layout.dart';
 import 'cell_pickers.dart';
 import 'explorer.dart' show untitled;
 import 'field_menu.dart';
@@ -103,6 +104,78 @@ class _TableBlockState extends State<TableBlock> implements CellDrop {
   GroupLines? _lines;
 
   int _revision = 0;
+
+  var _month = DateTime(DateTime.now().year, DateTime.now().month);
+
+  void _shiftMonth(int by) =>
+      setState(() => _month = DateTime(_month.year, _month.month + by));
+
+  Future<void> _addDateField() async {
+    try {
+      final added = await widget.views.write(
+        mutation(
+          BridgeMutationKind.addField,
+          page: _page,
+          block: _block,
+          text: 'Date',
+          fieldKind: BridgeFieldKind.date,
+          last: true,
+        ),
+        const [],
+      );
+      _setDate(added.field);
+    } on Object {
+      return;
+    }
+  }
+
+  Widget _monthControls(String locale) {
+    final ws = context.ws;
+    Widget arrow(Key key, IconData icon, String label, int by) => Semantics(
+      button: true,
+      label: label,
+      child: GestureDetector(
+        key: key,
+        behavior: HitTestBehavior.opaque,
+        onTap: () => _shiftMonth(by),
+        child: Padding(
+          padding: const EdgeInsets.all(WsMetrics.space1),
+          child: Icon(icon, size: 14, color: ws.textMuted),
+        ),
+      ),
+    );
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(
+          DateFormat.yMMMM(locale).format(_month),
+          style: TextStyle(fontSize: WsMetrics.fsCompact, color: ws.text),
+        ),
+        const SizedBox(width: WsMetrics.space2),
+        arrow(
+          const Key('previous month'),
+          LucideIcons.chevronLeft,
+          'Previous month',
+          -1,
+        ),
+        QueryButton(
+          key: const Key('this month'),
+          icon: LucideIcons.calendar,
+          label: 'Today',
+          on: false,
+          onTap: () => setState(
+            () => _month = DateTime(DateTime.now().year, DateTime.now().month),
+          ),
+        ),
+        arrow(
+          const Key('next month'),
+          LucideIcons.chevronRight,
+          'Next month',
+          1,
+        ),
+      ],
+    );
+  }
 
   TableData _data(BridgeDatabase database, NumberFormat numbers, String days) =>
       TableData(
@@ -1172,18 +1245,19 @@ class _TableBlockState extends State<TableBlock> implements CellDrop {
           children: [
             Flexible(child: _groupControl(database)),
             const SizedBox(width: WsMetrics.space2),
-            Flexible(
-              child: _sortAnchor(
-                database.fields,
-                (toggle, _) => SetupControl(
-                  key: const Key('table sort'),
-                  icon: LucideIcons.arrowDownUp,
-                  label: 'Sort',
-                  value: sort == null ? null : sortLabel(sort),
-                  onTap: toggle,
+            if (_tab.layout != BridgeLayout.calendar)
+              Flexible(
+                child: _sortAnchor(
+                  database.fields,
+                  (toggle, _) => SetupControl(
+                    key: const Key('table sort'),
+                    icon: LucideIcons.arrowDownUp,
+                    label: 'Sort',
+                    value: sort == null ? null : sortLabel(sort),
+                    onTap: toggle,
+                  ),
                 ),
               ),
-            ),
             const SizedBox(width: WsMetrics.space2),
             Flexible(
               child: _filterAnchor(
@@ -1207,7 +1281,9 @@ class _TableBlockState extends State<TableBlock> implements CellDrop {
               ),
             ),
             const Spacer(),
-            if (_searching)
+            if (_tab.layout == BridgeLayout.calendar)
+              _monthControls(days)
+            else if (_searching)
               SizedBox(width: 200, child: _searchField(boxed: true))
             else
               QueryButton(
@@ -1345,6 +1421,17 @@ class _TableBlockState extends State<TableBlock> implements CellDrop {
                     search: _search.isEmpty ? null : _search,
                     revision: _revision,
                     onAddGroup: () => unawaited(_addGroupField()),
+                  )
+                else if (database != null &&
+                    !widget.fullPage &&
+                    _tab.layout == BridgeLayout.calendar)
+                  CalendarLayout(
+                    data: _data(database, numberFormat, days),
+                    tab: _tab,
+                    date: _dateOf(database),
+                    month: _month,
+                    revision: _revision,
+                    onAddDate: () => unawaited(_addDateField()),
                   )
                 else if (database != null)
                   Focus(
