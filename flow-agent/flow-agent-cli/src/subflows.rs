@@ -407,27 +407,38 @@ impl ProcessLauncher {
             .stderr(Stdio::inherit())
             .spawn()
             .map_err(|error| format!("the subflow process does not start: {error}"))?;
-        let stdin = Arc::new(Mutex::new(
-            process
-                .stdin
+        let piped = (|| {
+            let stdin = Arc::new(Mutex::new(
+                process
+                    .stdin
+                    .take()
+                    .ok_or("the subflow process has no input")?,
+            ));
+            let stdout = process
+                .stdout
                 .take()
-                .ok_or("the subflow process has no input")?,
-        ));
-        let stdout = process
-            .stdout
-            .take()
-            .ok_or("the subflow process has no output")?;
-        write_line(
-            &stdin,
-            &json!({"start": {
-                "conversation_id": conversation_id,
-                "root_conversation_id": root,
-                "name": instance.name,
-                "flow": instance.flow,
-                "input": instance.input,
-            }}),
-        )
-        .map_err(|error| format!("the subflow process takes no input: {error}"))?;
+                .ok_or("the subflow process has no output")?;
+            write_line(
+                &stdin,
+                &json!({"start": {
+                    "conversation_id": conversation_id,
+                    "root_conversation_id": root,
+                    "name": instance.name,
+                    "flow": instance.flow,
+                    "input": instance.input,
+                }}),
+            )
+            .map_err(|error| format!("the subflow process takes no input: {error}"))?;
+            Ok::<_, String>((stdin, stdout))
+        })();
+        let (stdin, stdout) = match piped {
+            Ok(piped) => piped,
+            Err(error) => {
+                let _ = process.kill();
+                let _ = process.wait();
+                return Err(error);
+            }
+        };
         self.children
             .lock()
             .unwrap_or_else(PoisonError::into_inner)

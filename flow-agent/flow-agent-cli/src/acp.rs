@@ -643,7 +643,7 @@ fn user_text(prompt: &Value) -> Option<String> {
 
 fn mention(text: &str) -> Option<(&str, &str)> {
     let rest = text.strip_prefix('@')?;
-    let (target, message) = rest.split_once(char::is_whitespace)?;
+    let (target, message) = rest.split_once(char::is_whitespace).unwrap_or((rest, ""));
     (!target.is_empty()).then(|| (target, message.trim_start()))
 }
 
@@ -673,7 +673,7 @@ fn internal(error: impl ToString) -> (i64, String) {
 
 #[cfg(test)]
 mod tests {
-    use super::{Agent, Input, MAX_HELD_UPDATES, RunView};
+    use super::{Agent, Input, MAX_HELD_UPDATES, RunView, mention};
     use crate::subflows::InstanceEvent;
     use serde_json::json;
 
@@ -709,6 +709,13 @@ mod tests {
         assert_eq!(agent.held.len(), MAX_HELD_UPDATES);
         assert_eq!(agent.held[0]["toolCallId"], "tool-11");
         assert!(agent.out.is_empty());
+    }
+
+    #[test]
+    fn a_bare_mention_names_its_target_with_an_empty_message() {
+        assert_eq!(mention("@scraper-2"), Some(("scraper-2", "")));
+        assert_eq!(mention("@scraper-2 Go on"), Some(("scraper-2", "Go on")));
+        assert_eq!(mention("@ Go on"), None);
     }
 
     #[test]
