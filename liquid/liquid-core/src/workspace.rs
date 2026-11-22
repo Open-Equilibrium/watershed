@@ -375,6 +375,10 @@ impl<S: Store> Workspace<S> {
         let (doc, index) = self.database_index(table)?;
         let mut rows = database::rows(doc, index, table, query)?;
         calculation::fill(self, table, &mut rows.rows)?;
+        if !query.totals.is_empty() {
+            let all = self.all_rows(table, query)?;
+            rows.totals = crate::total::compute(&all, &query.totals);
+        }
         Ok(rows)
     }
 
@@ -392,7 +396,34 @@ impl<S: Store> Workspace<S> {
         for group in &mut groups {
             calculation::fill(self, table, &mut group.rows)?;
         }
+        if !query.totals.is_empty() {
+            let all = self.all_rows(table, query)?;
+            for group in &mut groups {
+                let within: Vec<_> = all
+                    .iter()
+                    .filter(|row| database::in_group(row.cell(field), &group.value))
+                    .cloned()
+                    .collect();
+                group.totals = crate::total::compute(&within, &query.totals);
+            }
+        }
         Ok(groups)
+    }
+
+    fn all_rows(
+        &mut self,
+        table: &BlockId,
+        query: &database::RowQuery,
+    ) -> Result<Vec<database::Row>, Error> {
+        let all = database::RowQuery {
+            start: 0,
+            limit: usize::MAX,
+            ..query.clone()
+        };
+        let (doc, index) = self.database_index(table)?;
+        let mut rows = database::rows(doc, index, table, &all)?.rows;
+        calculation::fill(self, table, &mut rows)?;
+        Ok(rows)
     }
 
     pub fn remembered(&mut self, key: &str) -> Result<Option<String>, Error> {
@@ -858,6 +889,21 @@ impl<S: Store> Workspace<S> {
                 tab,
                 filter,
             } => self.write_tab(page, view, tab, |setup| setup.filter.clone_from(filter)),
+            Mutation::SetTabTotal {
+                page,
+                view,
+                tab,
+                field,
+                total,
+            } => self.write_tab(page, view, tab, |setup| {
+                setup.totals.retain(|kept| kept.field != *field);
+                if let Some(total) = total {
+                    setup.totals.push(crate::FieldTotal {
+                        field: field.clone(),
+                        total: *total,
+                    });
+                }
+            }),
             Mutation::SetTabFolded {
                 page,
                 view,

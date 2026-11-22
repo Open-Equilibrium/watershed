@@ -69,6 +69,7 @@ pub struct RowQuery {
     pub start: usize,
     pub limit: usize,
     pub search: Option<String>,
+    pub totals: Vec<crate::FieldTotal>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -97,12 +98,14 @@ pub struct Group {
     pub value: Cell,
     pub count: usize,
     pub rows: Vec<Row>,
+    pub totals: Vec<(FieldId, crate::Value)>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Rows {
     pub count: usize,
     pub rows: Vec<Row>,
+    pub totals: Vec<(FieldId, crate::Value)>,
 }
 
 pub(crate) struct Index {
@@ -606,6 +609,7 @@ pub(crate) fn rows(
         return Ok(Rows {
             count: index.rows.len(),
             rows: window.map(|row| shown(&live, row)).collect(),
+            totals: Vec::new(),
         });
     }
     let rows = matching(&database, &live, index, query, true);
@@ -617,6 +621,7 @@ pub(crate) fn rows(
             .take(query.limit)
             .map(|row| shown(&live, row))
             .collect(),
+        totals: Vec::new(),
     })
 }
 
@@ -667,7 +672,12 @@ pub(crate) fn groups(
         .zip(counts)
         .zip(rows)
         .filter(|((value, count), _)| *value != Cell::Empty || *count > 0)
-        .map(|((value, count), rows)| Group { value, count, rows })
+        .map(|((value, count), rows)| Group {
+            value,
+            count,
+            rows,
+            totals: Vec::new(),
+        })
         .collect())
 }
 
@@ -838,6 +848,15 @@ fn cells(
         read.insert(field.clone(), cell);
     }
     read
+}
+
+pub(crate) fn in_group(cell: Option<&Cell>, group: &Cell) -> bool {
+    match group {
+        Cell::Checkbox(true) => cell == Some(&Cell::Checkbox(true)),
+        Cell::Checkbox(false) => cell != Some(&Cell::Checkbox(true)),
+        Cell::Empty => !matches!(cell, Some(Cell::Select(_))),
+        group => cell == Some(group),
+    }
 }
 
 fn matches(cell: Option<&Cell>, matches: &Match) -> bool {

@@ -389,20 +389,7 @@ fn a_formula_field_computes_each_row_from_the_row_s_fields() {
     formula(&mut home, &with_tip, format!("{{{amount}}} * 1.1")).unwrap();
     formula(&mut home, &share, format!("{{{with_tip}}} / 2")).unwrap();
     let computed = |home: &mut Home| {
-        let rows = home
-            .workspace
-            .rows(
-                &table,
-                &liquid_core::RowQuery {
-                    sort: None,
-                    filter: None,
-                    within: None,
-                    start: 0,
-                    limit: 10,
-                    search: None,
-                },
-            )
-            .unwrap();
+        let rows = home.workspace.rows(&table, &query(Vec::new())).unwrap();
         rows.rows
             .iter()
             .map(|row| {
@@ -492,5 +479,174 @@ fn a_formula_field_computes_each_row_from_the_row_s_fields() {
         ),
     ] {
         assert_eq!(refused.map(|_| ()), Err(error));
+    }
+}
+
+#[test]
+fn a_tab_s_total_row_counts_the_rows_it_shows() {
+    use liquid_core::{FieldTotal, Filter, Match, RowQuery, Total};
+    let mut home = Home::new();
+    let (table, amount, page) = (home.table.clone(), home.amount.clone(), home.page.clone());
+    home.row();
+    let Some(Created::Field(paid)) = home
+        .edit(Mutation::AddField {
+            block: table.clone(),
+            place: Place::Last,
+            name: "Paid".into(),
+            kind: FieldKind::Checkbox,
+        })
+        .unwrap()
+        .created
+    else {
+        panic!("a field")
+    };
+    let first = home
+        .workspace
+        .rows(&table, &query(Vec::new()))
+        .unwrap()
+        .rows[0]
+        .id
+        .clone();
+    home.edit(Mutation::SetCell {
+        block: table.clone(),
+        row: first,
+        field: paid.clone(),
+        value: Cell::Checkbox(true),
+    })
+    .unwrap();
+    let view = home
+        .workspace
+        .views(&page, 0, 10)
+        .unwrap()
+        .into_iter()
+        .find(|view| view.block == table)
+        .unwrap();
+    let tab = view.tabs[0].id.clone();
+    let totals = [
+        Total::Sum,
+        Total::Average,
+        Total::Count,
+        Total::Min,
+        Total::Max,
+        Total::Empty,
+        Total::Filled,
+    ];
+    for total in totals {
+        home.edit(Mutation::SetTabTotal {
+            page: page.clone(),
+            view: view.id.clone(),
+            tab: tab.clone(),
+            field: amount.clone(),
+            total: Some(total),
+        })
+        .unwrap();
+        let stored = home.workspace.view(&page, &view.id).unwrap().unwrap().tabs[0]
+            .setup
+            .totals
+            .clone();
+        assert_eq!(
+            stored,
+            [FieldTotal {
+                field: amount.clone(),
+                total
+            }]
+        );
+    }
+    let shown = |home: &mut Home, filter: Option<Filter>| {
+        let all: Vec<_> = totals
+            .iter()
+            .map(|total| FieldTotal {
+                field: amount.clone(),
+                total: *total,
+            })
+            .collect();
+        let rows = home
+            .workspace
+            .rows(
+                &table,
+                &RowQuery {
+                    filter,
+                    ..query(all)
+                },
+            )
+            .unwrap();
+        rows.totals
+            .iter()
+            .map(|(_, value)| value.to_string())
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        shown(&mut home, None),
+        ["1284.5", "642.25", "3", "384.5", "900", "1", "2"]
+    );
+    let unpaid = Filter {
+        field: paid.clone(),
+        matches: Match::Is(Cell::Checkbox(false)),
+    };
+    assert_eq!(
+        shown(&mut home, Some(unpaid)),
+        ["384.5", "384.5", "2", "384.5", "384.5", "1", "1"],
+        "a filter changes what it counts"
+    );
+    let groups = home
+        .workspace
+        .groups(
+            &table,
+            &query(vec![FieldTotal {
+                field: amount.clone(),
+                total: Total::Sum,
+            }]),
+            &paid,
+        )
+        .unwrap();
+    let sums: Vec<_> = groups
+        .iter()
+        .map(|group| (group.value.clone(), group.totals[0].1.to_string()))
+        .collect();
+    assert_eq!(
+        sums,
+        [
+            (Cell::Checkbox(false), "384.5".to_string()),
+            (Cell::Checkbox(true), "900".to_string())
+        ]
+    );
+
+    let refused = home.edit(Mutation::SetTabTotal {
+        page: page.clone(),
+        view: view.id.clone(),
+        tab: tab.clone(),
+        field: paid,
+        total: Some(Total::Sum),
+    });
+    assert_eq!(
+        refused.map(|_| ()),
+        Err(Error::WrongKind),
+        "a sum needs numbers"
+    );
+    home.edit(Mutation::SetTabTotal {
+        page: page.clone(),
+        view: view.id.clone(),
+        tab,
+        field: amount,
+        total: None,
+    })
+    .unwrap();
+    assert!(
+        home.workspace.view(&page, &view.id).unwrap().unwrap().tabs[0]
+            .setup
+            .totals
+            .is_empty()
+    );
+}
+
+fn query(totals: Vec<liquid_core::FieldTotal>) -> liquid_core::RowQuery {
+    liquid_core::RowQuery {
+        sort: None,
+        filter: None,
+        within: None,
+        start: 0,
+        limit: 10,
+        search: None,
+        totals,
     }
 }

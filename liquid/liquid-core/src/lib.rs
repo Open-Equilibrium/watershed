@@ -12,6 +12,7 @@ mod search;
 mod sort_key;
 mod store;
 mod tab;
+mod total;
 mod workspace;
 
 pub use attachment::{Attachment, AttachmentId, MAX_ATTACHMENT, Media, PART, Upload};
@@ -41,6 +42,7 @@ pub use mutation::{
 pub use search::{Found, Hit, INDEX_VERSION, IndexEntry, IndexWrite, search_words};
 pub use store::{Commit, MemoryStore, Store, Write};
 pub use tab::{Layout, MAX_TABS, Tab, TabSetup};
+pub use total::{FieldTotal, Total};
 pub use workspace::{MAX_DEVICE_KEY, MAX_DEVICE_VALUE, MAX_DEVICE_VALUES, Workspace};
 
 #[cfg(test)]

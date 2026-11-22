@@ -204,6 +204,13 @@ pub enum Mutation {
         tab: TabId,
         filter: Option<crate::Filter>,
     },
+    SetTabTotal {
+        page: PageId,
+        view: ViewId,
+        tab: TabId,
+        field: FieldId,
+        total: Option<crate::Total>,
+    },
     SetTabFolded {
         page: PageId,
         view: ViewId,
