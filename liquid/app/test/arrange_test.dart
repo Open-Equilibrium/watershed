@@ -204,6 +204,9 @@ void main() {
       const Offset(-40, 0),
     );
     await tester.pumpAndSettle();
+    await tap(tester, find.byKey(Key('select ${board.id}')));
+    await press(tester, LogicalKeyboardKey.arrowLeft);
+    await press(tester, LogicalKeyboardKey.arrowLeft, alt: true);
     expect(tiles(), hasLength(before));
   });
 

@@ -5,7 +5,7 @@ Observational evidence for `liquid-core`'s mutation pipeline and `liquid-storage
 ## Environment
 
 - Apple M6, 24 GB, macOS 27.0 (26A428), internal SSD; Rust 1.99.0, release build; `automerge` 0.12.0, `rusqlite` 0.41.1 with SQLCipher 4.19.0.
-- Observed on 2026-11-02 at commit `e095071`, three rounds; the Typing and Long Page workloads again on 2026-11-22 on the Arrange mode branch, three rounds, with an arranged Page added (ADR-0312). The Database workload was observed on 2026-11-03 at `6aa3f03`, three rounds, after its workload change on 2026-11-06 at `e4193e5`, three rounds, with rows added last (ADR-0247), and last on 2026-11-22 at `6de4f29d`, three rounds, with a Board's grouped read added (ADR-0311). The attachment workload was observed on 2026-11-17 at `1557b2a3`, three rounds, with `rusqlite` 0.42.0, and the Whiteboard workload on 2026-11-17 at `aa72dab6`, three rounds.
+- Observed on 2026-11-02 at commit `e095071`, three rounds; the Typing and Long Page workloads again on 2026-11-22 at `9f2b3e01`, three rounds, after the Long Page workload added an arranged Page (ADR-0312). The Database workload was observed on 2026-11-03 at `6aa3f03`, three rounds, after its workload change on 2026-11-06 at `e4193e5`, three rounds, with rows added last (ADR-0247), and last on 2026-11-22 at `6de4f29d`, three rounds, with a Board's grouped read added (ADR-0311). The attachment workload was observed on 2026-11-17 at `1557b2a3`, three rounds, with `rusqlite` 0.42.0, and the Whiteboard workload on 2026-11-17 at `aa72dab6`, three rounds.
 
 ## Workloads
 
@@ -23,10 +23,11 @@ Observational evidence for `liquid-core`'s mutation pipeline and `liquid-storage
 
 | Workload | Round 1 | Round 2 | Round 3 |
 | --- | --- | --- | --- |
-| Typing, per keystroke | median 11.2 µs, p99 45.3 µs, max 3.8 ms | median 11.0 µs, p99 13.1 µs, max 3.8 ms | median 11.1 µs, p99 13.4 µs, max 3.8 ms |
-| Adding a Text Block at the end of the long Page | median 138 µs, p99 173 µs | median 139 µs, p99 174 µs | median 140 µs, p99 173 µs |
-| … once the Page is arranged, up to 2,000 Text Blocks | median 192 µs, p99 245 µs | median 197 µs, p99 251 µs | median 197 µs, p99 250 µs |
-| Reading the long Page's 1,000 Views in order | 0.02 ms | 0.03 ms | 0.03 ms |
+| Typing, per keystroke | median 11.2 µs, p99 18.6 µs, max 3.8 ms | median 11.0 µs, p99 13.0 µs, max 3.8 ms | median 11.1 µs, p99 13.2 µs, max 3.8 ms |
+| Adding a Text Block at the end of the long Page, before the workload change (2026-11-02, `e095071`) | median 109 µs, p99 136 µs | median 108 µs, p99 132 µs | median 108 µs, p99 134 µs |
+| … after it (2026-11-22, `9f2b3e01`) | median 140 µs, p99 172 µs | median 141 µs, p99 176 µs | median 139 µs, p99 174 µs |
+| … once the Page is arranged, up to 2,000 Text Blocks | median 195 µs, p99 250 µs | median 195 µs, p99 251 µs | median 195 µs, p99 247 µs |
+| Reading the long Page's 1,000 Views in order | 0.03 ms | 0.02 ms | 0.02 ms |
 | Peak memory footprint of the pipeline process | 19.4 MB | 17.8 MB | 17.8 MB |
 | Adding a Database row at the end, before the workload change (2026-11-03, `6aa3f03`) | median 55.7 µs, p99 90.2 µs, max 13.0 ms | median 53.7 µs, p99 82.5 µs, max 12.7 ms | median 52.7 µs, p99 85.6 µs, max 12.6 ms |
 | … added last (2026-11-22, `6de4f29d`) | median 51.3 µs, p99 64.4 µs, max 0.15 ms | median 49.7 µs, p99 59.0 µs, max 0.15 ms | median 50.0 µs, p99 61.3 µs, max 0.15 ms |

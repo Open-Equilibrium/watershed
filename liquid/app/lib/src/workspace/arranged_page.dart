@@ -116,14 +116,14 @@ class _ArrangedPageState extends State<ArrangedPage> {
     setState(() => _all = views);
     for (final tile in tilesOf(views)) {
       final lead = tile.lead.id;
-      if (_heights.containsKey(lead)) continue;
+      if (_heights.containsKey('|$lead')) continue;
       try {
         final kept = await _views.state.workspace.remembered(
           key: 'height/$lead',
         );
         final height = double.tryParse(kept ?? '');
-        if (height != null && mounted && !_heights.containsKey(lead)) {
-          setState(() => _heights[lead] = _remembered[lead] = height);
+        if (height != null && mounted && !_heights.containsKey('|$lead')) {
+          setState(() => _heights['|$lead'] = _remembered[lead] = height);
         }
       } on Object {
         return;
@@ -131,7 +131,13 @@ class _ArrangedPageState extends State<ArrangedPage> {
     }
   }
 
-  void _measured(String key, double height) {
+  String get _mode =>
+      '${_views.arranging.value ? 'arranging' : ''}${_narrow ? ' narrow' : ''}|';
+
+  double? _heightOf(String key) => _heights['$_mode$key'] ?? _heights['|$key'];
+
+  void _measured(String measuredKey, double height) {
+    final key = '$_mode$measuredKey';
     if ((_heights[key] ?? -1) - height case final diff when diff.abs() < 1) {
       return;
     }
@@ -144,7 +150,9 @@ class _ArrangedPageState extends State<ArrangedPage> {
   }
 
   void _keepHeights() {
-    for (final MapEntry(:key, :value) in _heights.entries) {
+    for (final MapEntry(key: measured, :value) in _heights.entries) {
+      if (!measured.startsWith('|')) continue;
+      final key = measured.substring(1);
       if (key.startsWith('inner ') || _remembered[key] == value) continue;
       _remembered[key] = value;
       unawaited(
@@ -264,7 +272,8 @@ class _ArrangedPageState extends State<ArrangedPage> {
           _entered = tile.lead.id;
           _selected = null;
         });
-      case LogicalKeyboardKey.arrowLeft || LogicalKeyboardKey.arrowRight:
+      case LogicalKeyboardKey.arrowLeft || LogicalKeyboardKey.arrowRight
+          when !_narrow:
         final by = key == LogicalKeyboardKey.arrowLeft ? -1 : 1;
         final span = _spanOf(tile, inner: inner);
         if (resize) {
@@ -545,7 +554,7 @@ class _ArrangedPageState extends State<ArrangedPage> {
       innerTiles,
       width: width,
       columns: columns,
-      heightOf: (inner) => _heights['inner ${inner.lead.id}'] ?? 32,
+      heightOf: (inner) => _heightOf('inner ${inner.lead.id}') ?? 32,
     );
     final step = (width + tileGap) / columns;
     final height = rects.fold(0.0, (most, rect) => math.max(most, rect.bottom));
@@ -596,7 +605,7 @@ class _ArrangedPageState extends State<ArrangedPage> {
           tiles,
           width: width,
           narrow: narrow,
-          heightOf: (tile) => _heights[tile.lead.id] ?? _estimate(tile),
+          heightOf: (tile) => _heightOf(tile.lead.id) ?? _estimate(tile),
         );
         final step = (width + tileGap) / gridColumns;
         final total = rects.fold(
