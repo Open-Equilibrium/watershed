@@ -138,8 +138,9 @@ class _PowerBarState extends State<PowerBar> {
     }
   }
 
-  String? get _areaName {
-    final area = _state.open.value?.area;
+  String? get _areaName => _nameOf(_state.open.value?.area);
+
+  String? _nameOf(String? area) {
     return _state.areas.value
         .where((shown) => shown.id == area)
         .firstOrNull
@@ -295,7 +296,7 @@ class _PowerBarState extends State<PowerBar> {
               group: 'Pages',
               icon: LucideIcons.file,
               label: hit.text.isEmpty ? untitled : hit.text,
-              detail: _areaName,
+              detail: _nameOf(_areaOf(hit.id)),
               keys: null,
               run: () => _openPage(hit.id),
             ),
@@ -332,10 +333,7 @@ class _PowerBarState extends State<PowerBar> {
             group: 'Recent',
             icon: LucideIcons.file,
             label: _titleOf(page),
-            detail: _state.areas.value
-                .where((area) => area.id == _areaOf(page))
-                .firstOrNull
-                ?.name,
+            detail: _nameOf(_areaOf(page)),
             keys: null,
             run: () => _openPage(page),
           ),

@@ -56,16 +56,20 @@ void main() {
     tester,
   ) async {
     await kit.show(tester, [const TextPart('We expect rain on Tuesday.')]);
-    final area = kit.workspace.open.value!.area;
-    final trip = await kit.workspace.apply(
-      mutation(BridgeMutationKind.createPage, area: area, text: 'Trip'),
+    final shared = await kit.workspace.apply(
+      mutation(BridgeMutationKind.createArea, text: 'Shared'),
     );
+    final trip = await kit.workspace.apply(
+      mutation(BridgeMutationKind.createPage, area: shared.area, text: 'Trip'),
+    );
+    await tester.pumpAndSettle();
     await open(tester);
     await type(tester, 'tues');
     expect(inBar('Text'), findsOneWidget);
     expect(inBar('We expect rain on Tuesday.'), findsOneWidget);
     await type(tester, 'trip');
     expect(inBar('Pages'), findsOneWidget);
+    expect(inBar('Shared'), findsOneWidget, reason: 'the hit’s own area');
     await enter(tester);
     expect(bar(), findsNothing);
     expect(kit.workspace.open.value?.page, trip.page);

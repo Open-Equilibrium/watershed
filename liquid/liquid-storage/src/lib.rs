@@ -56,9 +56,11 @@ const DEVICE: &str = "
         row INTEGER NOT NULL,
         PRIMARY KEY (found, id)
     );
+    CREATE TABLE IF NOT EXISTS search_version (
+        one INTEGER PRIMARY KEY CHECK (one = 1),
+        version INTEGER NOT NULL
+    );
 ";
-
-const INDEXED: &str = "index-version";
 
 pub struct Sqlite {
     connection: Connection,
@@ -329,9 +331,9 @@ impl Store for Sqlite {
         if let Some(version) = version {
             transaction
                 .execute(
-                    "INSERT INTO device (key, value) VALUES (?1, ?2) \
-                     ON CONFLICT (key) DO UPDATE SET value = excluded.value",
-                    [INDEXED, &version.to_string()],
+                    "INSERT INTO search_version (one, version) VALUES (1, ?1) \
+                     ON CONFLICT (one) DO UPDATE SET version = excluded.version",
+                    [version],
                 )
                 .map_err(failed)?;
         }
@@ -341,14 +343,9 @@ impl Store for Sqlite {
     fn index_version(&mut self) -> Result<u32, Error> {
         Ok(self
             .connection
-            .query_row(
-                "SELECT value FROM device WHERE key = ?1",
-                [INDEXED],
-                |row| row.get::<_, String>(0),
-            )
+            .query_row("SELECT version FROM search_version", [], |row| row.get(0))
             .optional()
             .map_err(failed)?
-            .and_then(|version| version.parse().ok())
             .unwrap_or(0))
     }
 

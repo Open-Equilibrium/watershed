@@ -315,7 +315,15 @@ fn the_search_index_is_kept_in_the_encrypted_replica() {
             insert: ", then Porto \"by train\"".into(),
         },
     );
-    drop(workspace);
+    let mut store = workspace.into_store();
+    store.remember("recent", Some("p"), 1).unwrap();
+    store.remember("index-version", None, 1).unwrap();
+    assert_eq!(
+        store.index_version().unwrap(),
+        liquid_core::INDEX_VERSION,
+        "device values never evict the index version"
+    );
+    drop(store);
     let store = Sqlite::open(&scratch.db(), &KEY).unwrap();
     let mut workspace = Workspace::open(store).unwrap();
     let hits = workspace.search("port tra", Found::Text, 10).unwrap();
