@@ -130,4 +130,34 @@ void main() {
     expect(inText, findsOneWidget);
     expect(kit.fake.texts.values.first, r'The area is $A = \pi r^2$, so');
   });
+
+  testWidgets(r'deleting back to $$ leaves a Text Block as it is', (
+    tester,
+  ) async {
+    await kit.show(tester, [const TextPart(r'$$x')]);
+    await tester.tap(block(0));
+    await tester.pump();
+    await type(tester, r'$$');
+    expect(kinds(), [BridgeBlockKind.text]);
+  });
+
+  testWidgets('↓ from the Text Block above opens a Math Block', (tester) async {
+    await kit.show(tester, [const TextPart('Roots'), const TextPart('x')]);
+    await kit.workspace.apply(
+      mutation(
+        BridgeMutationKind.turnIntoMath,
+        page: kit.page,
+        block: kit.fake.views[kit.page]![1].block,
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(block(0));
+    await tester.pump();
+    field(tester, 0).controller!.selection = const TextSelection.collapsed(
+      offset: 5,
+    );
+    await tester.pump();
+    await key(tester, LogicalKeyboardKey.arrowDown);
+    expect(tester.widget<TextField>(source).focusNode!.hasFocus, isTrue);
+  });
 }

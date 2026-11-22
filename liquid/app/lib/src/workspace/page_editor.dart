@@ -29,7 +29,7 @@ bool codeTyped(String text, String before, int caret) =>
 const mathShortcut = r'$$';
 
 bool mathTyped(String text, String before, int caret) =>
-    text == mathShortcut && before != mathShortcut && caret == 2;
+    text == mathShortcut && (before.isEmpty || before == r'$') && caret == 2;
 
 const sectionBreak = '---';
 
