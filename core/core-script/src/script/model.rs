@@ -28,6 +28,8 @@ macro_rules! impl_token_serde {
 
 pub const MAX_FLOW_NESTING_DEPTH: usize = 16;
 pub const MAX_FLOW_FANOUT: usize = 32;
+pub const SUBFLOW_TOOL_PREFIX: &str = "subflow-";
+pub const MAX_SUBFLOW_TOOL_NAME_CHARS: usize = 64;
 pub const MAX_PHASE_NESTING_DEPTH: usize = 16;
 pub const MAX_PHASE_FANOUT: usize = 32;
 pub const MAX_PHASE_LOOP_ITERATIONS: u8 = 32;

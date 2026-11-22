@@ -1,4 +1,5 @@
 use crate::runtime::types::RuntimeError;
+use core_script::SUBFLOW_TOOL_PREFIX;
 use serde::{Deserialize, Serialize};
 use std::{
     path::Path,
@@ -6,7 +7,6 @@ use std::{
 };
 
 pub const MAX_SUBFLOW_BATCH: usize = core_script::MAX_FLOW_FANOUT;
-pub(crate) const SUBFLOW_TOOL_PREFIX: &str = "subflow-";
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct SubflowInstanceRequest {

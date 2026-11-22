@@ -17,10 +17,10 @@ pub use script::model::{
     MAX_FLOW_VALUE_NODES, MAX_PHASE_FANOUT, MAX_PHASE_ITERATIONS, MAX_PHASE_LOOP_ITERATIONS,
     MAX_PHASE_NESTING_DEPTH, MAX_REGISTRY_DEFINITION_BYTES, MAX_REGISTRY_ENTRIES,
     MAX_REGISTRY_FILE_BYTES, MAX_REGISTRY_TOTAL_BYTES, MAX_REGISTRY_TRAVERSAL_DEPTH,
-    ParameterValueType, PhaseBlock, PhaseLoop, PhaseSubflow, PhaseTransition, RegistryBlock,
-    RegistryBlockKind, ResolvedRegistry, ScriptRuntime, SubflowStart, ToolBlock, ToolCommand,
-    ToolKind, ValueContract, ValueFieldContract, ValuePathSegment, ValuePredicate,
-    own_script_command_id,
+    MAX_SUBFLOW_TOOL_NAME_CHARS, ParameterValueType, PhaseBlock, PhaseLoop, PhaseSubflow,
+    PhaseTransition, RegistryBlock, RegistryBlockKind, ResolvedRegistry, SUBFLOW_TOOL_PREFIX,
+    ScriptRuntime, SubflowStart, ToolBlock, ToolCommand, ToolKind, ValueContract,
+    ValueFieldContract, ValuePathSegment, ValuePredicate, own_script_command_id,
 };
 pub use script::parser::parse_safe_yaml_config;
 pub use script::paths::{

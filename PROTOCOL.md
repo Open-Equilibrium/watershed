@@ -429,7 +429,7 @@ All listed payload fields are strings unless noted otherwise; string arrays are 
 
 ## Subflow instances
 
-A Phase's `subflows` start as one batch before its first provider turn (`start: each`) or per provider turn whose calls name `subflow-<flow>` with a text `input` (`start: llm`). The batch's instance list, then its results, are recorded in `recovery.jsonl` as `subflow-batch` and `subflow-outcomes` before use; exact Resume replays them, and a batch without results fails as uncertain. An `each` batch reaches the provider as one user message `Subflow results: [...]`; an `llm` batch returns each result as that call's `function_call_output`, as `{"name", "result"}` or `{"name", "error"}`.
+A Phase's `subflows` start as one batch before its first provider turn (`start: each`) or per provider turn whose calls name `subflow-<flow>` with a text `input` (`start: llm`). A leaf Phase names each `llm` subflow once; its function name has at most 64 characters and is no Tool id of that Phase. The batch's instance list, then its results, are recorded in `recovery.jsonl` as `subflow-batch` and `subflow-outcomes` before use; exact Resume replays them, and a batch without results fails as uncertain. An `each` batch reaches the provider as one user message `Subflow results: [...]`; an `llm` batch returns each result as that call's `function_call_output`, as `{"name", "result"}` or `{"name", "error"}`.
 
 Each instance runs as the hidden `flow subflow-run` in the parent Run's Workspace, as the first Run of the Conversation `<root-conversation>__<name>`. Parent and child exchange JSON lines on the child's stdin and stdout:
 

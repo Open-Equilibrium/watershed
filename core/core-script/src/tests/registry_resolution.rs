@@ -116,6 +116,41 @@ fn a_phase_declares_at_most_32_subflows() {
 }
 
 #[test]
+fn a_phase_offers_each_llm_subflow_once_under_a_free_function_name() {
+    let refused = |phase: PhaseBlock, flow: &str, tool: Option<ToolBlock>| {
+        let mut blocks = flow_chain_blocks(2);
+        blocks[0] = RegistryBlock::Phase(phase);
+        if let RegistryBlock::Flow(child) = &mut blocks[3] {
+            child.identity.id = flow.to_owned();
+        }
+        blocks.extend(tool.map(RegistryBlock::Tool));
+        ResolvedRegistry::from_blocks(blocks)
+            .expect_err("the provider would see an ambiguous or invalid function name")
+            .to_string()
+    };
+    let llm = |phase: &mut PhaseBlock| {
+        for subflow in &mut phase.subflows {
+            subflow.start = SubflowStart::Llm;
+        }
+    };
+
+    let mut twice = starting_phase("chain-phase-000", vec!["flow-001".to_owned(); 2]);
+    llm(&mut twice);
+    assert!(refused(twice, "flow-001", None).contains("more than once"));
+
+    let mut shadowed = starting_phase("chain-phase-000", vec!["flow-001".to_owned()]);
+    llm(&mut shadowed);
+    shadowed.tool_refs = vec!["subflow-flow-001".to_owned()];
+    let tool = own_script_tool("subflow-flow-001", "script:subflow-flow-001");
+    assert!(refused(shadowed, "flow-001", Some(tool)).contains("Tool"));
+
+    let long = "f".repeat(57);
+    let mut too_long = starting_phase("chain-phase-000", vec![long.clone()]);
+    llm(&mut too_long);
+    assert!(refused(too_long, &long, None).contains("64"));
+}
+
+#[test]
 fn a_composite_phase_starts_no_subflows() {
     let mut phase = starting_phase("chain-phase-000", vec!["flow-001".to_owned()]);
     phase.phase_refs = vec!["child".to_owned()];

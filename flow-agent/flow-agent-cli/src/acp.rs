@@ -150,28 +150,29 @@ impl<W: Write> Agent<W> {
             Input::Malformed => self.fail(&Value::Null, PARSE_ERROR, "message is not JSON")?,
             Input::Event(event) => {
                 let updates = self.view.observe(&event);
-                if self.prompt.is_some() {
-                    for update in updates {
-                        self.update(update)?;
-                    }
-                } else {
-                    self.held.extend(updates);
-                    let excess = self.held.len().saturating_sub(MAX_HELD_UPDATES);
-                    self.held.drain(..excess);
-                }
+                self.forward(updates)?;
             }
             Input::Instance(event) => {
                 let update = self.view.instance(&event);
-                if self.prompt.is_some() {
-                    self.update(update)?;
-                } else {
-                    self.held.push(update);
-                }
+                self.forward(vec![update])?;
             }
             Input::Finished(result) => self.finished(result)?,
             Input::Closed => return Ok(false),
         }
         Ok(true)
+    }
+
+    fn forward(&mut self, updates: Vec<Value>) -> Result<(), RuntimeError> {
+        if self.prompt.is_some() {
+            for update in updates {
+                self.update(update)?;
+            }
+        } else {
+            self.held.extend(updates);
+            let excess = self.held.len().saturating_sub(MAX_HELD_UPDATES);
+            self.held.drain(..excess);
+        }
+        Ok(())
     }
 
     fn message(&mut self, message: Value) -> Result<(), RuntimeError> {
@@ -662,6 +663,7 @@ fn internal(error: impl ToString) -> (i64, String) {
 #[cfg(test)]
 mod tests {
     use super::{Agent, Input, MAX_HELD_UPDATES, RunView};
+    use crate::subflows::InstanceEvent;
     use serde_json::json;
 
     #[test]
@@ -687,8 +689,26 @@ mod tests {
                 .expect("the event is observed");
         }
 
+        agent
+            .handle(Input::Instance(InstanceEvent::Started {
+                name: "scraper-1".to_owned(),
+            }))
+            .expect("the instance is observed");
+
         assert_eq!(agent.held.len(), MAX_HELD_UPDATES);
-        assert_eq!(agent.held[0]["toolCallId"], "tool-10");
+        assert_eq!(agent.held[0]["toolCallId"], "tool-11");
         assert!(agent.out.is_empty());
+    }
+
+    #[test]
+    fn an_instance_that_never_started_adds_no_plan_entry() {
+        let mut view = RunView::default();
+
+        let plan = view.instance(&InstanceEvent::Finished {
+            name: "scraper-1".to_owned(),
+            failed: true,
+        });
+
+        assert_eq!(plan["entries"], json!([]));
     }
 }

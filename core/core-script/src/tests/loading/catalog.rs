@@ -55,7 +55,7 @@ fn flow_registry_retains_the_unique_transitive_definition_closure() {
         ),
         (
             "starting-phase.yaml",
-            "phase:\n  id: starting-phase\n  name: StartingPhase\n  instruction_refs: [shared-instruction]\n  tool_refs: [endpoint-tool]\n  subflows:\n    - flow: child\n      start: llm\n    - flow: child\n      start: llm\n  output:\n    type: string\n",
+            "phase:\n  id: starting-phase\n  name: StartingPhase\n  instruction_refs: [shared-instruction]\n  tool_refs: [endpoint-tool]\n  subflows:\n    - flow: child\n      start: llm\n    - flow: child\n      start:\n        each: items\n  output:\n    type: string\n",
         ),
         (
             "child.yaml",

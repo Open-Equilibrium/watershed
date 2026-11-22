@@ -4,8 +4,9 @@ use crate::script::canonical::{
 use crate::script::error::{RegistryError, SemanticValidationError};
 use crate::script::model::{
     FlowBlock, InstructionBlock, MAX_FLOW_FANOUT, MAX_FLOW_NESTING_DEPTH, MAX_FLOW_VALUE_KEY_CHARS,
-    MAX_PHASE_FANOUT, MAX_PHASE_NESTING_DEPTH, PhaseBlock, PhaseTransition, RegistryBlock,
-    RegistryBlockKind, ResolvedRegistry, SubflowStart, ToolBlock,
+    MAX_PHASE_FANOUT, MAX_PHASE_NESTING_DEPTH, MAX_SUBFLOW_TOOL_NAME_CHARS, PhaseBlock,
+    PhaseTransition, RegistryBlock, RegistryBlockKind, ResolvedRegistry, SUBFLOW_TOOL_PREFIX,
+    SubflowStart, ToolBlock,
 };
 use crate::script::naming::{insert_named_block, normalize_string};
 use crate::script::semantics::{validate_registry_block_semantics, validate_registry_block_shape};
@@ -486,19 +487,43 @@ impl ResolvedRegistry {
                 max: MAX_FLOW_FANOUT,
             });
         }
+        let invalid = |message: String| -> RegistryError {
+            SemanticValidationError::InvalidPhaseDefinition {
+                phase_id: phase.identity.id.clone(),
+                message,
+            }
+            .into()
+        };
+        let mut llm_flows = BTreeSet::new();
         for subflow in &phase.subflows {
             self.require_flow(&subflow.flow, RegistryBlockKind::Phase, &phase.identity.id)?;
+            if subflow.start == SubflowStart::Llm {
+                let tool_name = format!("{SUBFLOW_TOOL_PREFIX}{}", subflow.flow);
+                if !llm_flows.insert(subflow.flow.as_str()) {
+                    return Err(invalid(format!(
+                        "subflow {} is started by the LLM more than once",
+                        subflow.flow
+                    )));
+                }
+                if tool_name.chars().count() > MAX_SUBFLOW_TOOL_NAME_CHARS {
+                    return Err(invalid(format!(
+                        "subflow function name {tool_name} exceeds {MAX_SUBFLOW_TOOL_NAME_CHARS} characters"
+                    )));
+                }
+                if phase.tool_refs.contains(&tool_name) {
+                    return Err(invalid(format!(
+                        "Tool {tool_name} has the function name of subflow {}",
+                        subflow.flow
+                    )));
+                }
+            }
             if let SubflowStart::Each(field) = &subflow.start
                 && (field.is_empty() || field.chars().count() > MAX_FLOW_VALUE_KEY_CHARS)
             {
-                return Err(SemanticValidationError::InvalidPhaseDefinition {
-                    phase_id: phase.identity.id.clone(),
-                    message: format!(
-                        "subflow {} starts each item of a field name with 1 to {MAX_FLOW_VALUE_KEY_CHARS} characters",
-                        subflow.flow
-                    ),
-                }
-                .into());
+                return Err(invalid(format!(
+                    "subflow {} starts each item of a field name with 1 to {MAX_FLOW_VALUE_KEY_CHARS} characters",
+                    subflow.flow
+                )));
             }
         }
         Ok(())

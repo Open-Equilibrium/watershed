@@ -81,7 +81,15 @@ impl RunView {
                     instance: true,
                 });
             }
-            InstanceEvent::Finished { name, .. } => self.set_phase(name, "", "completed"),
+            InstanceEvent::Finished { name, .. } => {
+                if let Some(phase) = self
+                    .phases
+                    .iter_mut()
+                    .find(|phase| phase.instance && phase.execution_id == *name)
+                {
+                    phase.status = "completed";
+                }
+            }
         }
         self.plan()
     }

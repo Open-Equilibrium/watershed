@@ -116,7 +116,7 @@ fn test_phase() -> PhaseBlock {
 fn subflow(flow: &str) -> PhaseSubflow {
     PhaseSubflow {
         flow: flow.to_owned(),
-        start: SubflowStart::Llm,
+        start: SubflowStart::Each("items".to_owned()),
         continue_on_error: false,
     }
 }
