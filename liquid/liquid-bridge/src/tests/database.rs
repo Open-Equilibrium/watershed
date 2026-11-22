@@ -1,6 +1,7 @@
 use std::sync::{Arc, Mutex};
 
 use super::workspace::{Folder, Memory, lisbon, mutation, query, resource};
+use crate::api::calculation::BridgeValueKind;
 use crate::api::database::{
     BridgeCell, BridgeCellKind, BridgeFieldKind, BridgeFilter, BridgeLayout, BridgeMatch,
     BridgeSort, BridgeTab,
@@ -773,4 +774,43 @@ fn a_workspace_s_name_and_icon_are_read_and_announced() {
         (Some("Home"), Some("🏡"))
     );
     assert_eq!(*seen.lock().unwrap(), [0, 1, 2]);
+}
+
+#[test]
+fn a_formula_field_crosses_with_its_formula_and_each_row_s_value() {
+    let expenses = Expenses::new("formula-field");
+    let amount = expenses.field(&expenses.name, "Amount", BridgeFieldKind::Number);
+    let half = expenses.field(&amount, "Half", BridgeFieldKind::Formula);
+    let formula = format!("{{{amount}}} / 2");
+    expenses
+        .apply(BridgeMutation {
+            field: Some(half.clone()),
+            text: Some(formula.clone()),
+            ..mutation(BridgeMutationKind::SetFieldFormula)
+        })
+        .unwrap();
+    let rent = expenses.row(None);
+    expenses.set(&rent, &amount, number(950.5)).unwrap();
+    let field = &expenses.database().database.unwrap().fields[2];
+    assert_eq!(
+        (field.kind, field.formula.as_str()),
+        (BridgeFieldKind::Formula, formula.as_str())
+    );
+    let rows = expenses.rows(query(BridgeQueryKind::Rows)).unwrap().rows;
+    let computed: Vec<_> = rows[0]
+        .computed
+        .iter()
+        .map(|value| {
+            (
+                value.field.as_str(),
+                value.value.as_str(),
+                value.kind,
+                value.number,
+            )
+        })
+        .collect();
+    assert_eq!(
+        computed,
+        [(half.as_str(), "475.25", BridgeValueKind::Number, 475.25)]
+    );
 }

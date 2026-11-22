@@ -4,12 +4,13 @@
 // ignore_for_file: invalid_use_of_internal_member, unused_import, unnecessary_import
 
 import '../frb_generated.dart';
+import 'calculation.dart';
 import 'media.dart';
 
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
 // These functions are ignored because they are not marked as `pub`: `filter`, `of`, `of`, `of`, `of`, `of`, `of`, `of`, `of`, `sort`, `to_core`, `to_core`, `to_core`, `to_core`
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
 
 class BridgeCell {
   final BridgeCellKind kind;
@@ -48,6 +49,34 @@ class BridgeCell {
 
 enum BridgeCellKind { empty, text, number, select, date, checkbox, files }
 
+class BridgeComputed {
+  final String field;
+  final String value;
+  final BridgeValueKind kind;
+  final double number;
+
+  const BridgeComputed({
+    required this.field,
+    required this.value,
+    required this.kind,
+    required this.number,
+  });
+
+  @override
+  int get hashCode =>
+      field.hashCode ^ value.hashCode ^ kind.hashCode ^ number.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeComputed &&
+          runtimeType == other.runtimeType &&
+          field == other.field &&
+          value == other.value &&
+          kind == other.kind &&
+          number == other.number;
+}
+
 class BridgeDatabase {
   final String name;
   final List<BridgeField> fields;
@@ -71,17 +100,23 @@ class BridgeField {
   final String name;
   final BridgeFieldKind kind;
   final List<BridgeOption> options;
+  final String formula;
 
   const BridgeField({
     required this.id,
     required this.name,
     required this.kind,
     required this.options,
+    required this.formula,
   });
 
   @override
   int get hashCode =>
-      id.hashCode ^ name.hashCode ^ kind.hashCode ^ options.hashCode;
+      id.hashCode ^
+      name.hashCode ^
+      kind.hashCode ^
+      options.hashCode ^
+      formula.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -91,7 +126,8 @@ class BridgeField {
           id == other.id &&
           name == other.name &&
           kind == other.kind &&
-          options == other.options;
+          options == other.options &&
+          formula == other.formula;
 }
 
 class BridgeFieldCell {
@@ -112,7 +148,7 @@ class BridgeFieldCell {
           value == other.value;
 }
 
-enum BridgeFieldKind { text, number, select, date, checkbox, file }
+enum BridgeFieldKind { text, number, select, date, checkbox, file, formula }
 
 class BridgeFilter {
   final String field;
@@ -197,11 +233,16 @@ class BridgeOption {
 class BridgeRow {
   final String id;
   final List<BridgeFieldCell> cells;
+  final List<BridgeComputed> computed;
 
-  const BridgeRow({required this.id, required this.cells});
+  const BridgeRow({
+    required this.id,
+    required this.cells,
+    required this.computed,
+  });
 
   @override
-  int get hashCode => id.hashCode ^ cells.hashCode;
+  int get hashCode => id.hashCode ^ cells.hashCode ^ computed.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -209,7 +250,8 @@ class BridgeRow {
       other is BridgeRow &&
           runtimeType == other.runtimeType &&
           id == other.id &&
-          cells == other.cells;
+          cells == other.cells &&
+          computed == other.computed;
 }
 
 class BridgeSort {

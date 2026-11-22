@@ -421,6 +421,7 @@ enum BridgeMutationKind {
   renameDatabase,
   addField,
   renameField,
+  setFieldFormula,
   removeField,
   addOption,
   addRow,

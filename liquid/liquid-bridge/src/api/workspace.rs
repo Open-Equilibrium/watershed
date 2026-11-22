@@ -60,6 +60,7 @@ pub enum BridgeMutationKind {
     RenameDatabase,
     AddField,
     RenameField,
+    SetFieldFormula,
     RemoveField,
     AddOption,
     AddRow,
@@ -639,6 +640,11 @@ impl BridgeMutation {
                 place: self.place(FieldId::parse)?,
                 name: text()?,
                 kind: self.field_kind.ok_or("field kind is missing")?.to_core(),
+            },
+            BridgeMutationKind::SetFieldFormula => Mutation::SetFieldFormula {
+                block: block()?,
+                field: field()?,
+                formula: text()?,
             },
             BridgeMutationKind::RenameField => Mutation::RenameField {
                 block: block()?,

@@ -365,6 +365,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   BridgeCheckedOut dco_decode_bridge_checked_out(dynamic raw);
 
   @protected
+  BridgeComputed dco_decode_bridge_computed(dynamic raw);
+
+  @protected
   BridgeConfigChange dco_decode_bridge_config_change(dynamic raw);
 
   @protected
@@ -688,6 +691,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   List<BridgeCell> dco_decode_list_bridge_cell(dynamic raw);
+
+  @protected
+  List<BridgeComputed> dco_decode_list_bridge_computed(dynamic raw);
 
   @protected
   List<BridgeConfigChange> dco_decode_list_bridge_config_change(dynamic raw);
@@ -1266,6 +1272,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   BridgeCheckedOut sse_decode_bridge_checked_out(SseDeserializer deserializer);
 
   @protected
+  BridgeComputed sse_decode_bridge_computed(SseDeserializer deserializer);
+
+  @protected
   BridgeConfigChange sse_decode_bridge_config_change(
     SseDeserializer deserializer,
   );
@@ -1643,6 +1652,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   List<BridgeCell> sse_decode_list_bridge_cell(SseDeserializer deserializer);
+
+  @protected
+  List<BridgeComputed> sse_decode_list_bridge_computed(
+    SseDeserializer deserializer,
+  );
 
   @protected
   List<BridgeConfigChange> sse_decode_list_bridge_config_change(
@@ -2388,6 +2402,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_bridge_computed(
+    BridgeComputed self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_bridge_config_change(
     BridgeConfigChange self,
     SseSerializer serializer,
@@ -2894,6 +2914,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_list_bridge_cell(
     List<BridgeCell> self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_list_bridge_computed(
+    List<BridgeComputed> self,
     SseSerializer serializer,
   );
 

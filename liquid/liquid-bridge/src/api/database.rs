@@ -2,6 +2,7 @@ use liquid_core::{
     Cell, Database, FieldId, FieldKind, Filter, Layout, Match, OptionId, Row, Sort, Tab, TabSetup,
 };
 
+use super::calculation::BridgeValueKind;
 use super::media::BridgeMedia;
 use super::workspace::id;
 
@@ -13,6 +14,7 @@ pub enum BridgeFieldKind {
     Date,
     Checkbox,
     File,
+    Formula,
 }
 
 impl BridgeFieldKind {
@@ -24,6 +26,7 @@ impl BridgeFieldKind {
             Self::Date => FieldKind::Date,
             Self::Checkbox => FieldKind::Checkbox,
             Self::File => FieldKind::File,
+            Self::Formula => FieldKind::Formula,
         }
     }
 
@@ -35,6 +38,7 @@ impl BridgeFieldKind {
             FieldKind::Date => Self::Date,
             FieldKind::Checkbox => Self::Checkbox,
             FieldKind::File => Self::File,
+            FieldKind::Formula => Self::Formula,
         }
     }
 }
@@ -259,6 +263,7 @@ pub struct BridgeField {
     pub name: String,
     pub kind: BridgeFieldKind,
     pub options: Vec<BridgeOption>,
+    pub formula: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -272,6 +277,15 @@ pub struct BridgeOption {
 pub struct BridgeRow {
     pub id: String,
     pub cells: Vec<BridgeFieldCell>,
+    pub computed: Vec<BridgeComputed>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct BridgeComputed {
+    pub field: String,
+    pub value: String,
+    pub kind: BridgeValueKind,
+    pub number: f64,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -300,6 +314,7 @@ impl BridgeDatabase {
                             color: option.color.into(),
                         })
                         .collect(),
+                    formula: field.formula,
                 })
                 .collect(),
         }
@@ -316,6 +331,19 @@ impl BridgeRow {
                 .map(|(field, cell)| BridgeFieldCell {
                     field: field.to_string(),
                     value: BridgeCell::of(cell),
+                })
+                .collect(),
+            computed: row
+                .computed
+                .iter()
+                .map(|(field, value)| BridgeComputed {
+                    field: field.to_string(),
+                    value: value.to_string(),
+                    kind: BridgeValueKind::of(value),
+                    number: match value {
+                        liquid_core::Value::Number(number) => *number,
+                        _ => 0.0,
+                    },
                 })
                 .collect(),
         }

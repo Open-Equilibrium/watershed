@@ -5653,6 +5653,20 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  BridgeComputed dco_decode_bridge_computed(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 4)
+      throw Exception('unexpected arr length: expect 4 but see ${arr.length}');
+    return BridgeComputed(
+      field: dco_decode_String(arr[0]),
+      value: dco_decode_String(arr[1]),
+      kind: dco_decode_bridge_value_kind(arr[2]),
+      number: dco_decode_f_64(arr[3]),
+    );
+  }
+
+  @protected
   BridgeConfigChange dco_decode_bridge_config_change(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
@@ -5814,13 +5828,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   BridgeField dco_decode_bridge_field(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 4)
-      throw Exception('unexpected arr length: expect 4 but see ${arr.length}');
+    if (arr.length != 5)
+      throw Exception('unexpected arr length: expect 5 but see ${arr.length}');
     return BridgeField(
       id: dco_decode_String(arr[0]),
       name: dco_decode_String(arr[1]),
       kind: dco_decode_bridge_field_kind(arr[2]),
       options: dco_decode_list_bridge_option(arr[3]),
+      formula: dco_decode_String(arr[4]),
     );
   }
 
@@ -6579,11 +6594,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   BridgeRow dco_decode_bridge_row(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 2)
-      throw Exception('unexpected arr length: expect 2 but see ${arr.length}');
+    if (arr.length != 3)
+      throw Exception('unexpected arr length: expect 3 but see ${arr.length}');
     return BridgeRow(
       id: dco_decode_String(arr[0]),
       cells: dco_decode_list_bridge_field_cell(arr[1]),
+      computed: dco_decode_list_bridge_computed(arr[2]),
     );
   }
 
@@ -6955,6 +6971,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   List<BridgeCell> dco_decode_list_bridge_cell(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return (raw as List<dynamic>).map(dco_decode_bridge_cell).toList();
+  }
+
+  @protected
+  List<BridgeComputed> dco_decode_list_bridge_computed(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return (raw as List<dynamic>).map(dco_decode_bridge_computed).toList();
   }
 
   @protected
@@ -8183,6 +8205,21 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  BridgeComputed sse_decode_bridge_computed(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_field = sse_decode_String(deserializer);
+    var var_value = sse_decode_String(deserializer);
+    var var_kind = sse_decode_bridge_value_kind(deserializer);
+    var var_number = sse_decode_f_64(deserializer);
+    return BridgeComputed(
+      field: var_field,
+      value: var_value,
+      kind: var_kind,
+      number: var_number,
+    );
+  }
+
+  @protected
   BridgeConfigChange sse_decode_bridge_config_change(
     SseDeserializer deserializer,
   ) {
@@ -8380,11 +8417,13 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_name = sse_decode_String(deserializer);
     var var_kind = sse_decode_bridge_field_kind(deserializer);
     var var_options = sse_decode_list_bridge_option(deserializer);
+    var var_formula = sse_decode_String(deserializer);
     return BridgeField(
       id: var_id,
       name: var_name,
       kind: var_kind,
       options: var_options,
+      formula: var_formula,
     );
   }
 
@@ -9292,7 +9331,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     // Codec=Sse (Serialization based), see doc to use other codecs
     var var_id = sse_decode_String(deserializer);
     var var_cells = sse_decode_list_bridge_field_cell(deserializer);
-    return BridgeRow(id: var_id, cells: var_cells);
+    var var_computed = sse_decode_list_bridge_computed(deserializer);
+    return BridgeRow(id: var_id, cells: var_cells, computed: var_computed);
   }
 
   @protected
@@ -9726,6 +9766,20 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var ans_ = <BridgeCell>[];
     for (var idx_ = 0; idx_ < len_; ++idx_) {
       ans_.add(sse_decode_bridge_cell(deserializer));
+    }
+    return ans_;
+  }
+
+  @protected
+  List<BridgeComputed> sse_decode_list_bridge_computed(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    var len_ = sse_decode_i_32(deserializer);
+    var ans_ = <BridgeComputed>[];
+    for (var idx_ = 0; idx_ < len_; ++idx_) {
+      ans_.add(sse_decode_bridge_computed(deserializer));
     }
     return ans_;
   }
@@ -11441,6 +11495,18 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_bridge_computed(
+    BridgeComputed self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_String(self.field, serializer);
+    sse_encode_String(self.value, serializer);
+    sse_encode_bridge_value_kind(self.kind, serializer);
+    sse_encode_f_64(self.number, serializer);
+  }
+
+  @protected
   void sse_encode_bridge_config_change(
     BridgeConfigChange self,
     SseSerializer serializer,
@@ -11592,6 +11658,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_String(self.name, serializer);
     sse_encode_bridge_field_kind(self.kind, serializer);
     sse_encode_list_bridge_option(self.options, serializer);
+    sse_encode_String(self.formula, serializer);
   }
 
   @protected
@@ -12262,6 +12329,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_String(self.id, serializer);
     sse_encode_list_bridge_field_cell(self.cells, serializer);
+    sse_encode_list_bridge_computed(self.computed, serializer);
   }
 
   @protected
@@ -12604,6 +12672,18 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_i_32(self.length, serializer);
     for (final item in self) {
       sse_encode_bridge_cell(item, serializer);
+    }
+  }
+
+  @protected
+  void sse_encode_list_bridge_computed(
+    List<BridgeComputed> self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.length, serializer);
+    for (final item in self) {
+      sse_encode_bridge_computed(item, serializer);
     }
   }
 
