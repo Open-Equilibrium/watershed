@@ -628,10 +628,10 @@ pub(crate) fn groups(
             _ => Some(0),
         };
         if let Some(at) = at {
-            counts[at] += 1;
-            if rows[at].len() < query.limit {
+            if counts[at] >= query.start && rows[at].len() < query.limit {
                 rows[at].push(shown(&live, row));
             }
+            counts[at] += 1;
         }
     }
     Ok(values

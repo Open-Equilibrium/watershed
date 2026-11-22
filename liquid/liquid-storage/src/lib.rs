@@ -284,7 +284,7 @@ impl Store for Sqlite {
         transaction
             .execute("DELETE FROM device WHERE key = ?1", [key])
             .map_err(failed)?;
-        if let Some(value) = value {
+        if let Some(value) = value.filter(|_| most > 0) {
             transaction
                 .execute(
                     "DELETE FROM device WHERE rowid IN (SELECT rowid FROM device \

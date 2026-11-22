@@ -433,6 +433,17 @@ fn groups_count_rows_per_value_with_the_empty_group_first_when_it_holds_rows() {
         Some(&Cell::Checkbox(true)),
         "in the query's sort"
     );
+    let second = RowQuery {
+        start: 1,
+        ..first.clone()
+    };
+    let groups = home.workspace.groups(&table, &second, &category).unwrap();
+    assert_eq!(groups[2].count, 2, "the count stays whole");
+    assert_eq!(
+        groups[2].rows[0].cell(&paid),
+        None,
+        "the window starts inside each group"
+    );
     let counted = home
         .workspace
         .groups(&table, &RowQuery { limit: 0, ..all() }, &category);
@@ -660,6 +671,8 @@ fn a_copied_tab_drops_what_refers_to_a_removed_field() {
         }),
     })
     .unwrap();
+    let setup = home.tabs(&view)[0].setup.clone();
+    assert!(setup.group.is_some() && setup.sort.is_some());
     for field in [due, status] {
         home.edit(Mutation::RemoveField {
             block: table.clone(),
@@ -667,7 +680,6 @@ fn a_copied_tab_drops_what_refers_to_a_removed_field() {
         })
         .unwrap();
     }
-    let setup = home.tabs(&view)[0].setup.clone();
     let copied = home.add_tab(&view, None, setup.clone());
     let kept = home
         .tabs(&view)
@@ -687,7 +699,10 @@ fn a_copied_tab_drops_what_refers_to_a_removed_field() {
         after: Some(view),
         table,
         name: "Tasks (copy)".into(),
-        tabs: vec![setup],
+        tabs: vec![setup.clone()],
     };
-    home.edit(duplicate).unwrap();
+    let Some(Created::Block { view: copy, .. }) = home.edit(duplicate).unwrap().created else {
+        panic!("a View of the copy")
+    };
+    assert_eq!(home.tabs(&copy)[0].setup, kept.setup);
 }
