@@ -612,3 +612,52 @@ fn a_device_value_stays_out_of_history_and_the_oldest_makes_room() {
         Some("t")
     );
 }
+
+#[test]
+fn a_copied_tab_drops_what_refers_to_a_removed_field() {
+    let mut home = Home::new();
+    let (table, view) = home.table("Tasks", Layout::Board);
+    let due = home.field(&table, "Due", FieldKind::Date);
+    let status = home.tabs(&view)[0].setup.group.clone().unwrap();
+    let tab = home.tabs(&view)[0].id.clone();
+    home.edit(Mutation::SetTabSort {
+        page: home.page.clone(),
+        view: view.clone(),
+        tab,
+        sort: Some(Sort {
+            field: due.clone(),
+            descending: false,
+        }),
+    })
+    .unwrap();
+    for field in [due, status] {
+        home.edit(Mutation::RemoveField {
+            block: table.clone(),
+            field,
+        })
+        .unwrap();
+    }
+    let setup = home.tabs(&view)[0].setup.clone();
+    let copied = home.add_tab(&view, None, setup.clone());
+    let kept = home
+        .tabs(&view)
+        .into_iter()
+        .find(|tab| tab.id == copied)
+        .unwrap();
+    assert_eq!(
+        kept.setup,
+        TabSetup {
+            group: None,
+            sort: None,
+            ..setup.clone()
+        }
+    );
+    let duplicate = Mutation::DuplicateTable {
+        page: home.page.clone(),
+        after: Some(view),
+        table,
+        name: "Tasks (copy)".into(),
+        tabs: vec![setup],
+    };
+    home.edit(duplicate).unwrap();
+}

@@ -918,12 +918,16 @@ impl<S: Store> Workspace<S> {
         tabs: &[TabSetup],
     ) -> Result<Written, Error> {
         let doc = self.table_doc(source)?;
-        for setup in tabs {
+        let tabs: Vec<TabSetup> = tabs
+            .iter()
+            .map(|setup| tab::live(doc, source, setup))
+            .collect();
+        for setup in &tabs {
             tab::check(doc, source, None, setup)?;
         }
         let area = self.area_of(page)?;
         let (table, written) = self.write_create_table(&area, name, Some(source))?;
-        self.show_new_table(written, page, after, &table, name, tabs)
+        self.show_new_table(written, page, after, &table, name, &tabs)
     }
 
     fn show_new_table(
@@ -988,14 +992,19 @@ impl<S: Store> Workspace<S> {
         let first = [TabSetup::of(Layout::Table)];
         let tabs = if tabs.is_empty() { &first[..] } else { tabs };
         let view = ViewId::new()?;
-        {
+        let tabs: Vec<TabSetup> = {
             let doc = self.table_doc(table)?;
-            for setup in tabs {
+            let tabs: Vec<TabSetup> = tabs
+                .iter()
+                .map(|setup| tab::live(doc, table, setup))
+                .collect();
+            for setup in &tabs {
                 tab::check(doc, table, None, setup)?;
             }
             model::insert(doc, VIEWS, view.as_str(), &[(PAGE, page.as_str())])?;
-        }
-        let mut written = self.place_table_view(page, after, table, &view, title, tabs)?;
+            tabs
+        };
+        let mut written = self.place_table_view(page, after, table, &view, title, &tabs)?;
         written.touched.push(Document::Table(table.clone()));
         written.changed.push(Changed::Table(table.clone()));
         Ok(written)
@@ -1170,10 +1179,12 @@ impl<S: Store> Workspace<S> {
         setup: &TabSetup,
     ) -> Result<Written, Error> {
         let table = table_of(self.page(page)?.1, view)?;
-        tab::check(self.table_doc(&table)?, &table, None, setup)?;
+        let doc = self.table_doc(&table)?;
+        let setup = tab::live(doc, &table, setup);
+        tab::check(doc, &table, None, &setup)?;
         self.write_tabs(page, view, |doc, entry| {
             let place = after.map_or(Place::First, Place::After);
-            tab::add(doc, entry, place, setup).map(Some)
+            tab::add(doc, entry, place, &setup).map(Some)
         })
     }
 

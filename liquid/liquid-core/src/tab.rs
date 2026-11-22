@@ -129,6 +129,24 @@ fn stored<T: serde::de::DeserializeOwned>(json: Option<&str>) -> Option<T> {
     serde_json::from_str(json?).ok()
 }
 
+pub(crate) fn live(doc: &AutoCommit, table: &BlockId, setup: &TabSetup) -> TabSetup {
+    let gone = |checked: Result<(), Error>| checked == Err(Error::NotFound);
+    let field = |field: &FieldId| crate::database::field_kind(doc, table, field).map(|_| ());
+    TabSetup {
+        group: setup.group.clone().filter(|group| !gone(field(group))),
+        date: setup.date.clone().filter(|date| !gone(field(date))),
+        sort: setup
+            .sort
+            .clone()
+            .filter(|sort| !gone(crate::database::check_sort(doc, table, sort))),
+        filter: setup
+            .filter
+            .clone()
+            .filter(|filter| !gone(crate::database::check_filter(doc, table, filter))),
+        ..setup.clone()
+    }
+}
+
 pub(crate) fn check(
     doc: &AutoCommit,
     table: &BlockId,
