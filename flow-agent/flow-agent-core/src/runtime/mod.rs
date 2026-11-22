@@ -102,7 +102,7 @@ pub use session_reading::{
 };
 pub use steering::{
     MAX_PENDING_STEERING_MESSAGES, MAX_STEERING_MESSAGE_BYTES, drain_productive_steering,
-    request_productive_pause, steer_productive_run,
+    request_productive_pause, resume_productive_run, steer_productive_run,
 };
 pub use subflows::{
     MAX_SUBFLOW_BATCH, SubflowInstanceRequest, SubflowLauncher, SubflowOutcome,

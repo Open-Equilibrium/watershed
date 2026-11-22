@@ -1,3 +1,4 @@
+use crate::subflows::InstanceEvent;
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
 
@@ -11,6 +12,7 @@ struct Phase {
     execution_id: String,
     name: String,
     status: &'static str,
+    instance: bool,
 }
 
 impl RunView {
@@ -62,6 +64,28 @@ impl RunView {
         }
     }
 
+    pub(super) fn instance(&mut self, event: &InstanceEvent) -> Value {
+        match event {
+            InstanceEvent::Started { name } => {
+                let phase = self
+                    .phases
+                    .iter()
+                    .rev()
+                    .find(|phase| phase.status == "in_progress" && !phase.instance)
+                    .map(|phase| phase.name.clone())
+                    .unwrap_or_default();
+                self.phases.push(Phase {
+                    execution_id: name.clone(),
+                    name: format!("{phase} › {name}"),
+                    status: "in_progress",
+                    instance: true,
+                });
+            }
+            InstanceEvent::Finished { name, .. } => self.set_phase(name, "", "completed"),
+        }
+        self.plan()
+    }
+
     pub(super) fn plan(&self) -> Value {
         let entries = self
             .phases
@@ -82,6 +106,7 @@ impl RunView {
                 execution_id: execution_id.to_owned(),
                 name: name.to_owned(),
                 status,
+                instance: false,
             }),
         }
     }

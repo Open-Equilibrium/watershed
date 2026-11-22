@@ -42,6 +42,11 @@ pub fn request_productive_pause() {
     STEERING.changed.notify_all();
 }
 
+pub fn resume_productive_run() {
+    STEERING.lock().pause = false;
+    STEERING.changed.notify_all();
+}
+
 pub fn steer_productive_run(message: String) -> Result<(), RuntimeError> {
     if message.trim().is_empty() {
         return Err(RuntimeError::Protocol(

@@ -340,9 +340,9 @@ impl TryFrom<SubflowStartSource> for SubflowStart {
     fn try_from(source: SubflowStartSource) -> Result<Self, Self::Error> {
         match source {
             SubflowStartSource::Mode(mode) if mode == "llm" => Ok(Self::Llm),
-            SubflowStartSource::Mode(mode) => Err(format!(
-                "subflow start must be llm or each, not {mode}"
-            )),
+            SubflowStartSource::Mode(mode) => {
+                Err(format!("subflow start must be llm or each, not {mode}"))
+            }
             SubflowStartSource::Each { each } => Ok(Self::Each(each)),
         }
     }

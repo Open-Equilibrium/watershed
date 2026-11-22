@@ -1,4 +1,8 @@
-use crate::{interrupt::InterruptCoordinator, streaming::stream_live_operation_into};
+use crate::{
+    interrupt::InterruptCoordinator,
+    streaming::stream_live_operation_into,
+    subflows::{InstanceEvent, root_launcher},
+};
 use flow_agent_core::{ConversationState, EmitMode, RunOutput, RuntimeError};
 use serde_json::{Value, json};
 use std::{
@@ -31,6 +35,7 @@ enum Input {
     Message(Value),
     Malformed,
     Event(Value),
+    Instance(InstanceEvent),
     Finished(Result<RunOutput, RuntimeError>),
     Closed,
 }
@@ -62,6 +67,18 @@ pub(crate) fn acp_command() -> Result<ExitCode, RuntimeError> {
             path: PathBuf::from("<acp-input-thread>"),
             source,
         })?;
+    if let Some(launcher) = root_launcher() {
+        let (instances, observed) = mpsc::channel();
+        launcher.observe(instances);
+        let forward = sender.clone();
+        thread::spawn(move || {
+            for event in observed {
+                if forward.send(Input::Instance(event)).is_err() {
+                    return;
+                }
+            }
+        });
+    }
     let mut agent = Agent {
         out: io::stdout(),
         sender,
@@ -141,6 +158,14 @@ impl<W: Write> Agent<W> {
                     self.held.extend(updates);
                     let excess = self.held.len().saturating_sub(MAX_HELD_UPDATES);
                     self.held.drain(..excess);
+                }
+            }
+            Input::Instance(event) => {
+                let update = self.view.instance(&event);
+                if self.prompt.is_some() {
+                    self.update(update)?;
+                } else {
+                    self.held.push(update);
                 }
             }
             Input::Finished(result) => self.finished(result)?,
@@ -263,9 +288,39 @@ impl<W: Write> Agent<W> {
                 ),
             );
         }
+        if let Some((target, message)) = mention(&text) {
+            let live = root_launcher()
+                .map(|launcher| launcher.live_names())
+                .unwrap_or_default();
+            if !live.iter().any(|name| name == target) {
+                return self.fail(
+                    &id,
+                    INVALID_PARAMS,
+                    &format!(
+                        "no active subflow instance is named {target}; active: {}",
+                        if live.is_empty() {
+                            "none".to_owned()
+                        } else {
+                            live.join(", ")
+                        }
+                    ),
+                );
+            }
+            flow_agent_core::resume_productive_run();
+            if let Some(launcher) = root_launcher() {
+                launcher.resume_all();
+                launcher.steer(target, message);
+            }
+            self.prompt = Some(id);
+            self.update(self.view.plan())?;
+            return self.release_held();
+        }
         if self.running {
             if let Err(error) = flow_agent_core::steer_productive_run(text) {
                 return self.fail(&id, INVALID_PARAMS, &error.to_string());
+            }
+            if let Some(launcher) = root_launcher() {
+                launcher.resume_all();
             }
             self.prompt = Some(id);
             self.update(self.view.plan())?;
@@ -326,6 +381,9 @@ impl<W: Write> Agent<W> {
     fn cancel(&mut self) -> Result<(), RuntimeError> {
         if self.running {
             flow_agent_core::request_productive_pause();
+            if let Some(launcher) = root_launcher() {
+                launcher.pause_all();
+            }
         }
         match self.prompt.take() {
             Some(id) => self.respond(&id, json!({"stopReason": "cancelled"})),
@@ -569,6 +627,12 @@ fn user_text(prompt: &Value) -> Option<String> {
         _ => text,
     };
     (!request.trim().is_empty()).then(|| request.to_owned())
+}
+
+fn mention(text: &str) -> Option<(&str, &str)> {
+    let rest = text.strip_prefix('@')?;
+    let (target, message) = rest.split_once(char::is_whitespace)?;
+    (!target.is_empty()).then(|| (target, message.trim_start()))
 }
 
 fn new_session_id() -> io::Result<String> {

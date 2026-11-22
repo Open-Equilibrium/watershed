@@ -35,7 +35,7 @@ pub use runtime::{
     render_human_failure_status, replay_conversation_run, replay_conversation_run_streaming,
     request_productive_interrupt, request_productive_pause, resume_conversation_run,
     resume_conversation_run_with_execution_activation, resume_conversation_run_with_live_events,
-    run_flow, run_flow_with_execution_activation, run_flow_with_live_events,
+    resume_productive_run, run_flow, run_flow_with_execution_activation, run_flow_with_live_events,
     run_flow_with_root_input, run_flow_with_root_input_and_live_events,
     settle_productive_operation, steer_productive_run, validate_global_registry,
     validate_protocol_jsonl_text,

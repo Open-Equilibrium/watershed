@@ -108,7 +108,6 @@ fn collect_flow_policy_scope(
             .expect("resolved registry validates flow phase references");
         collect_phase_policy_scope(registry, phase, phase_tools, tool_ids, visited_phases);
     }
-
 }
 
 fn collect_phase_policy_scope(

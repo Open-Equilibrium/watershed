@@ -257,6 +257,9 @@ impl HistoryScratch {
     }
 }
 
+const ROOT_LEASE_ATTEMPTS: u32 = 100;
+const ROOT_LEASE_RETRY: std::time::Duration = std::time::Duration::from_millis(10);
+
 impl HistoryScratchRootLease {
     pub(super) fn acquire(root: &AnchoredDir) -> Result<Self, RuntimeError> {
         let path = root.file(LEASE_LEAF);
@@ -269,15 +272,22 @@ impl HistoryScratchRootLease {
             }
             Err(error) => return Err(error),
         };
-        match file.try_lock() {
-            Ok(()) => {}
-            Err(fs::TryLockError::WouldBlock) => {
-                #[cfg(test)]
-                observe_history_scratch_stage(HistoryScratchStage::RootLeaseContended);
-                return Err(protocol("history validation scratch is active"));
-            }
-            Err(fs::TryLockError::Error(source)) => {
-                return Err(path_io_error(path.diagnostic_path(), source));
+        let mut attempts = 0;
+        loop {
+            match file.try_lock() {
+                Ok(()) => break,
+                Err(fs::TryLockError::WouldBlock) => {
+                    #[cfg(test)]
+                    observe_history_scratch_stage(HistoryScratchStage::RootLeaseContended);
+                    attempts += 1;
+                    if attempts >= ROOT_LEASE_ATTEMPTS {
+                        return Err(protocol("history validation scratch is active"));
+                    }
+                    std::thread::sleep(ROOT_LEASE_RETRY);
+                }
+                Err(fs::TryLockError::Error(source)) => {
+                    return Err(path_io_error(path.diagnostic_path(), source));
+                }
             }
         }
         verify_owned_anchored_file(&path, &file, "history validation root lease")?;

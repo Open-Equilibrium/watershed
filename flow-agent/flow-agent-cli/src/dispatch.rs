@@ -162,6 +162,10 @@ fn dispatch_in_workspace(
             sessions_command(workspace, command)?;
             Ok(ExitCode::SUCCESS)
         }
+        "subflow-run" => {
+            reject_extra_args(args, 1)?;
+            crate::subflows::subflow_run_command()
+        }
         "acp" => {
             reject_extra_args(args, 1)?;
             crate::acp::acp_command()
