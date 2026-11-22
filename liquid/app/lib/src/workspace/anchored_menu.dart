@@ -69,15 +69,22 @@ class _AnchoredMenuState extends State<AnchoredMenu> {
         }
         if (widget.beside case final width?) {
           final right = anchor.right + gap + width <= window.width;
+          final tallest = window.height - 2 * WsMetrics.space1;
           return Positioned(
             left: right
                 ? anchor.right + gap
                 : math.max(0, anchor.left - gap - width),
             top: math.max(
               WsMetrics.space1,
-              math.min(anchor.top, window.height - (height ?? 0) - gap),
+              math.min(
+                anchor.top,
+                window.height - math.min(height ?? 0, tallest) - gap,
+              ),
             ),
-            child: shown,
+            child: ConstrainedBox(
+              constraints: BoxConstraints(maxHeight: tallest),
+              child: shown,
+            ),
           );
         }
         return Positioned(

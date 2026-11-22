@@ -220,6 +220,58 @@ void main() {
     );
   });
 
+  testWidgets('esc keeps a typed edit as it closes the row', (tester) async {
+    await board(tester, rows);
+    await tap(tester, card('Groceries'));
+    final popover = find.byKey(const Key('row popover'));
+    await tester.enterText(
+      find.descendant(of: popover, matching: find.byType(TextField)).first,
+      'Market',
+    );
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pumpAndSettle();
+    expect(popover, findsNothing);
+    final set = cellsSet().single;
+    expect((set.row, set.field, set.cell?.text), ('r1', 'name', 'Market'));
+  });
+
+  testWidgets('a row with many fields scrolls inside its popover', (
+    tester,
+  ) async {
+    final many = [
+      ...expenseFields,
+      for (var number = 1; number <= 40; number++)
+        BridgeField(
+          id: 'f$number',
+          name: 'Field $number',
+          kind: BridgeFieldKind.text,
+          options: const [],
+        ),
+    ];
+    await kit.show(tester, [TablePart(rows, fields: many)]);
+    await kit.workspace.apply(
+      mutation(
+        BridgeMutationKind.setTabLayout,
+        page: kit.page,
+        view: view().id,
+        tab: view().tabs.first.id,
+        layout: BridgeLayout.board,
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tap(tester, card('Rent'));
+    final popover = find.byKey(const Key('row popover'));
+    expect(tester.getSize(popover).height, lessThanOrEqualTo(900));
+    await tester.scrollUntilVisible(
+      find.text('Field 40'),
+      200,
+      scrollable: find
+          .descendant(of: popover, matching: find.byType(Scrollable))
+          .first,
+    );
+    expect(find.text('Field 40'), findsOneWidget);
+  });
+
   testWidgets('a Board without a Select field offers to add one', (
     tester,
   ) async {

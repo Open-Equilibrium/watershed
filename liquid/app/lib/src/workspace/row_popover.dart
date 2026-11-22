@@ -140,6 +140,9 @@ class _RowPopoverState extends State<RowPopover> {
 
   @override
   void dispose() {
+    for (final field in _data.database.fields) {
+      if (_texts[field.id] case final text?) _typed(field, text.text);
+    }
     _focus.dispose();
     _pickText.dispose();
     for (final text in _texts.values) {
@@ -441,45 +444,56 @@ class _RowPopoverState extends State<RowPopover> {
                 ],
               ),
               const SizedBox(height: WsMetrics.space2),
-              for (final field in _data.database.fields)
-                SizedBox(
-                  height: 30,
-                  child: Row(
+              Flexible(
+                child: SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
                     children: [
-                      SizedBox(
-                        width: 120,
-                        child: Row(
-                          children: [
-                            Icon(
-                              fieldKindIcon(field.kind),
-                              size: 14,
-                              color: ws.textFaint,
-                            ),
-                            const SizedBox(width: WsMetrics.space2),
-                            Flexible(
-                              child: Text(
-                                field.name,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: TextStyle(
-                                  fontSize: WsMetrics.fsCompact,
-                                  color: ws.textMuted,
+                      for (final field in _data.database.fields)
+                        SizedBox(
+                          height: 30,
+                          child: Row(
+                            children: [
+                              SizedBox(
+                                width: 120,
+                                child: Row(
+                                  children: [
+                                    Icon(
+                                      fieldKindIcon(field.kind),
+                                      size: 14,
+                                      color: ws.textFaint,
+                                    ),
+                                    const SizedBox(width: WsMetrics.space2),
+                                    Flexible(
+                                      child: Text(
+                                        field.name,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: TextStyle(
+                                          fontSize: WsMetrics.fsCompact,
+                                          color: ws.textMuted,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
                                 ),
                               ),
-                            ),
-                          ],
+                              const SizedBox(width: WsMetrics.space2),
+                              Expanded(
+                                child: DefaultTextStyle.merge(
+                                  style: TextStyle(
+                                    fontSize: WsMetrics.fsCompact,
+                                  ),
+                                  child: _value(field),
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
-                      ),
-                      const SizedBox(width: WsMetrics.space2),
-                      Expanded(
-                        child: DefaultTextStyle.merge(
-                          style: TextStyle(fontSize: WsMetrics.fsCompact),
-                          child: _value(field),
-                        ),
-                      ),
                     ],
                   ),
                 ),
+              ),
             ],
           ),
         ),
