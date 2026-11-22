@@ -139,12 +139,8 @@ impl Index {
         Ok(Self { rows })
     }
 
-    pub(crate) fn cell(&self, row: &RowId, field: &FieldId) -> Option<&Cell> {
-        self.rows[self.position(row)?].cells.get(field.as_str())
-    }
-
-    pub(crate) fn ids(&self) -> impl Iterator<Item = &RowId> {
-        self.rows.iter().map(|row| &row.id)
+    pub(crate) fn entries(&self) -> impl Iterator<Item = (&RowId, &HashMap<String, Cell>)> {
+        self.rows.iter().map(|row| (&row.id, &row.cells))
     }
 
     fn position(&self, row: &RowId) -> Option<usize> {

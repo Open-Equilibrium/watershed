@@ -238,8 +238,19 @@ struct Values<'w, S: Store> {
     fields: HashMap<BlockId, Vec<Field>>,
     lines: HashMap<(PageId, BlockId), Option<Rc<[Stored]>>>,
     columns: HashSet<(BlockId, FieldId)>,
+    read_columns: HashMap<(BlockId, FieldId), Rc<[Value]>>,
+    tables: HashMap<BlockId, Option<Rc<Snapshot>>>,
+    depth: usize,
     uses: BTreeSet<Used>,
 }
+
+struct Snapshot {
+    ids: Vec<RowId>,
+    at: HashMap<RowId, usize>,
+    cells: Vec<HashMap<String, Cell>>,
+}
+
+pub const MAX_DEPTH: usize = 256;
 
 #[derive(Clone)]
 enum Context {
@@ -259,8 +270,43 @@ impl<'w, S: Store> Values<'w, S> {
             fields: HashMap::new(),
             lines: HashMap::new(),
             columns: HashSet::new(),
+            read_columns: HashMap::new(),
+            tables: HashMap::new(),
+            depth: 0,
             uses: BTreeSet::new(),
         }
+    }
+
+    fn snapshot(&mut self, table: &BlockId) -> Option<Rc<Snapshot>> {
+        if !self.tables.contains_key(table) {
+            let read = self.workspace.database_index(table).ok().map(|(_, index)| {
+                let (ids, cells): (Vec<RowId>, Vec<HashMap<String, Cell>>) = index
+                    .entries()
+                    .map(|(id, cells)| (id.clone(), cells.clone()))
+                    .unzip();
+                let at = ids
+                    .iter()
+                    .cloned()
+                    .enumerate()
+                    .map(|(at, id)| (id, at))
+                    .collect();
+                Rc::new(Snapshot { ids, at, cells })
+            });
+            self.tables.insert(table.clone(), read);
+        }
+        self.tables[table].clone()
+    }
+
+    fn deeper(&mut self, formula: &Formula, context: Context) -> Value {
+        if self.depth >= MAX_DEPTH {
+            return MISSING;
+        }
+        self.depth += 1;
+        let outer = self.context.replace(context);
+        let value = formula.evaluate(self);
+        self.context = outer;
+        self.depth -= 1;
+        value
     }
 
     fn lines(&mut self, page: &PageId, block: &BlockId) -> Option<Rc<[Stored]>> {
@@ -299,17 +345,10 @@ impl<'w, S: Store> Values<'w, S> {
             Value::Blank
         } else {
             match Formula::parse(source) {
-                Ok(formula) => {
-                    let outer = self.context.replace(Context::Line(
-                        page.clone(),
-                        block.clone(),
-                        Rc::clone(lines),
-                        at,
-                    ));
-                    let value = formula.evaluate(self);
-                    self.context = outer;
-                    value
-                }
+                Ok(formula) => self.deeper(
+                    &formula,
+                    Context::Line(page.clone(), block.clone(), Rc::clone(lines), at),
+                ),
                 Err(_) => Value::Error(crate::Failure::Name),
             }
         };
@@ -371,10 +410,14 @@ impl<'w, S: Store> Values<'w, S> {
 
     fn field_value(&mut self, table: &BlockId, row: &RowId, field: &Field) -> Value {
         if field.kind != FieldKind::Formula {
-            let Ok((_, index)) = self.workspace.database_index(table) else {
+            let Some(snapshot) = self.snapshot(table) else {
                 return MISSING;
             };
-            return value_of(index.cell(row, &field.id), field);
+            let cell = snapshot
+                .at
+                .get(row)
+                .and_then(|at| snapshot.cells[*at].get(field.id.as_str()));
+            return value_of(cell, field);
         }
         let key = (
             table.as_str().to_string(),
@@ -389,14 +432,7 @@ impl<'w, S: Store> Values<'w, S> {
         }
         let value = match Formula::parse(&field.formula) {
             _ if field.formula.trim().is_empty() => Value::Blank,
-            Ok(formula) => {
-                let outer = self
-                    .context
-                    .replace(Context::Row(table.clone(), row.clone()));
-                let value = formula.evaluate(self);
-                self.context = outer;
-                value
-            }
+            Ok(formula) => self.deeper(&formula, Context::Row(table.clone(), row.clone())),
             Err(_) => Value::Error(crate::Failure::Name),
         };
         self.visiting.remove(&key);
@@ -412,22 +448,23 @@ impl<'w, S: Store> Values<'w, S> {
             return Operand::Value(MISSING);
         };
         let reading = (table.clone(), field.id.clone());
+        if let Some(read) = self.read_columns.get(&reading) {
+            return Operand::Range(read.to_vec());
+        }
+        let Some(snapshot) = self.snapshot(&table) else {
+            return Operand::Value(MISSING);
+        };
         if !self.columns.insert(reading.clone()) {
             return Operand::Value(MISSING);
         }
-        let rows: Vec<RowId> = match self.workspace.database_index(&table) {
-            Ok((_, index)) => index.ids().cloned().collect(),
-            Err(_) => {
-                self.columns.remove(&reading);
-                return Operand::Value(MISSING);
-            }
-        };
-        let values = rows
+        let values: Rc<[Value]> = snapshot
+            .ids
             .iter()
             .map(|row| self.field_value(&table, row, &field))
             .collect();
         self.columns.remove(&reading);
-        Operand::Range(values)
+        self.read_columns.insert(reading, Rc::clone(&values));
+        Operand::Range(values.to_vec())
     }
 
     fn own(&mut self, field: &str) -> Value {

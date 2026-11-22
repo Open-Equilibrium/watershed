@@ -925,3 +925,47 @@ fn a_computed_value_names_every_block_and_table_it_read() {
     expected.sort();
     assert_eq!(uses, expected);
 }
+
+#[test]
+fn a_chain_of_references_deeper_than_the_bound_stops_with_an_error() {
+    let mut home = Home::new();
+    let page = home.page.clone();
+    let report = home.calculation(&page);
+    let mut ids = vec![
+        home.workspace
+            .calculation(&page, &report)
+            .unwrap()
+            .unwrap()
+            .lines[0]
+            .id
+            .clone(),
+    ];
+    for _ in 0..liquid_core::MAX_DEPTH + 40 {
+        let after = ids.last().cloned();
+        ids.push(
+            home.add(
+                &page,
+                &report,
+                after.as_ref(),
+                line("", "1", LineStyle::Plain),
+            )
+            .unwrap(),
+        );
+    }
+    for pair in ids.windows(2) {
+        home.edit(Mutation::SetLine {
+            page: page.clone(),
+            block: report.clone(),
+            line: pair[0].clone(),
+            setup: line(
+                "",
+                &format!("{{{page}.{report}.{}}} + 1", pair[1]),
+                LineStyle::Plain,
+            ),
+        })
+        .unwrap();
+    }
+    let lines = home.lines(&page, &report);
+    assert_eq!(lines[0].1, "#REF!", "too deep to follow");
+    assert_eq!(lines.last().unwrap().1, "1");
+}
