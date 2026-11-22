@@ -97,6 +97,7 @@ BridgeQuery query(
 
 typedef CopiedView = ({
   String text,
+  int? change,
   String table,
   String title,
   List<BridgeTab> tabs,

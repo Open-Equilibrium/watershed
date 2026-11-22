@@ -9,11 +9,15 @@ import 'page_kit.dart';
 void main() {
   final kit = PageKit();
   String? copied;
+  var change = 0;
 
   setUp(() {
     copied = null;
-    writeClipboard = (text) async => copied = text;
-    readClipboard = () async => Pasted(text: copied);
+    writeClipboard = (text) async {
+      copied = text;
+      change++;
+    };
+    readClipboard = () async => Pasted(text: copied, change: change);
   });
 
   List<BridgeView> tables() => [
@@ -78,10 +82,13 @@ void main() {
     expect(find.text('Pasted as a copy'), findsNothing);
   });
 
-  testWidgets('text copied elsewhere pastes as text', (tester) async {
+  testWidgets('the same text copied elsewhere later pastes as text', (
+    tester,
+  ) async {
     await kit.show(tester, [TablePart(expenses), const TextPart('')]);
     await viewAction(tester, 'Copy');
-    copied = 'Expenses, by month';
+    copied = 'Expenses';
+    change++;
     await tester.tap(block(0));
     await tester.pump();
     await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
@@ -89,6 +96,6 @@ void main() {
     await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
     await tester.pumpAndSettle();
     expect(kit.applied(BridgeMutationKind.duplicateTable), isEmpty);
-    expect(field(tester, 0).controller!.text, 'Expenses, by month');
+    expect(field(tester, 0).controller!.text, 'Expenses');
   });
 }

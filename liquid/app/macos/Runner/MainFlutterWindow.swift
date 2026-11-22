@@ -86,6 +86,7 @@ private func readClipboard(_ call: FlutterMethodCall, result: @escaping FlutterR
   read["vscode"] = board.string(forType: NSPasteboard.PasteboardType("vscode-editor-data"))
   read["html"] = board.string(forType: .html)
   read["text"] = board.string(forType: .string)
+  read["change"] = board.changeCount
   result(read)
 }
 

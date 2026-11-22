@@ -1104,16 +1104,23 @@ class _TableBlockState extends State<TableBlock> implements CellDrop {
     );
   }
 
-  void _copy() {
+  Future<void> _copy() async {
     final name = _database?.name ?? widget.view.title;
     final text = name.isEmpty ? untitled : name;
-    _state.copiedView = (
-      text: text,
-      table: _block,
-      title: widget.view.title,
-      tabs: widget.view.tabs,
-    );
-    unawaited(writeClipboard(text).then((_) {}, onError: (Object _) {}));
+    _state.copiedView = null;
+    try {
+      await writeClipboard(text);
+      final written = await readClipboard();
+      _state.copiedView = (
+        text: text,
+        change: written.change,
+        table: _block,
+        title: widget.view.title,
+        tabs: widget.view.tabs,
+      );
+    } on Object catch (error) {
+      _state.report('Liquid could not copy the View: $error');
+    }
   }
 
   Future<void> _pasteAsView(CopiedView copied) async {
@@ -1303,7 +1310,7 @@ class _TableBlockState extends State<TableBlock> implements CellDrop {
               visible: _hovered || touchFirst,
               items: [
                 (LucideIcons.copy, 'Duplicate', _duplicate),
-                (LucideIcons.clipboardCopy, 'Copy', _copy),
+                (LucideIcons.clipboardCopy, 'Copy', () => unawaited(_copy())),
                 (LucideIcons.trash, 'Delete View', _deleteView),
               ],
             ),

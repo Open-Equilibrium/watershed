@@ -630,7 +630,8 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
     }
     if (pasted.code case final code?) return _pasteCode(code, pasted.language);
     final text = pasted.text;
-    if (_state.copiedView case final copied? when copied.text == text) {
+    if (_state.copiedView case final copied?
+        when copied.text == text && copied.change == pasted.change) {
       return _pasteView(copied);
     }
     final selection = _text.selection;

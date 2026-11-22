@@ -11,6 +11,7 @@ class Pasted {
     this.code,
     this.language = '',
     this.text,
+    this.change,
   });
 
   final List<String> files;
@@ -21,6 +22,8 @@ class Pasted {
   final String language;
 
   final String? text;
+
+  final int? change;
 }
 
 Future<void> Function(String text) writeClipboard = (text) =>
@@ -45,6 +48,19 @@ bool isPaste(KeyEvent event) {
 }
 
 Pasted pastedFrom(Map<String, Object?> read) {
+  final change = read['change'] as int?;
+  final pasted = _pastedFrom(read);
+  return Pasted(
+    files: pasted.files,
+    image: pasted.image,
+    code: pasted.code,
+    language: pasted.language,
+    text: pasted.text,
+    change: change,
+  );
+}
+
+Pasted _pastedFrom(Map<String, Object?> read) {
   final text = read['text'] as String?;
   final files = (read['files'] as List?)?.cast<String>() ?? const [];
   if (files.isNotEmpty) return Pasted(files: files, text: text);
