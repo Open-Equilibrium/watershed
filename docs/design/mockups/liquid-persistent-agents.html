@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Liquid persistent agents</title>
+<link rel="stylesheet" href="mockup.css">
+<style>
+.win{width:1180px}
+.body{--h:560px}
+.side .row{height:var(--ws-row-side);display:flex;align-items:center;gap:8px;padding:0 8px;border-radius:6px;color:var(--ws-text-muted);white-space:nowrap}
+.side .row.on{background:var(--ws-selected);color:var(--ws-text)}
+.side .row .r{margin-left:auto;font-size:12px;color:var(--ws-text-faint)}
+.side .row .r.warn{color:var(--ws-warning)}
+.ini{width:20px;height:20px;border-radius:5px;display:grid;place-items:center;font-size:11px;font-weight:600;color:var(--ws-on-accent);background:var(--ws-accent);flex:none}
+.ini.b{background:var(--ws-data-3,#7b5ea7)}
+.chat{flex:1;display:flex;min-width:0}
+.thread{flex:1;padding:24px 32px;display:flex;flex-direction:column;gap:12px;font-size:var(--ws-fs-ui)}
+.um{align-self:flex-end;max-width:70%;background:var(--ws-hover);border-radius:var(--ws-radius-xl);padding:8px 12px}
+.card{width:320px;flex:none;margin:12px 12px 12px 0;background:var(--ws-surface);border-radius:var(--ws-radius-lg);box-shadow:var(--ws-shadow);padding:6px 0;font-size:13px;align-self:flex-start}
+.card h5{margin:10px 14px 6px;font-size:12px;color:var(--ws-text-faint);font-weight:500;display:flex;align-items:center}
+.card h5 .a{margin-left:auto;color:var(--ws-accent);font-weight:500}
+.crow{display:flex;align-items:center;gap:8px;min-height:30px;padding:0 14px;white-space:nowrap}
+.crow .r{margin-left:auto;color:var(--ws-text-faint);font-size:12px}
+.crow .mono{font-size:12px;color:var(--ws-text-muted);overflow:hidden;text-overflow:ellipsis}
+.crow .link{color:var(--ws-accent)}
+.crow .ph{color:var(--ws-text-faint);width:14px;text-align:center}
+.note{padding:2px 14px 8px;color:var(--ws-text-muted);line-height:1.45}
+.sw{width:26px;height:16px;border-radius:8px;background:var(--ws-accent);position:relative;flex:none}
+.sw::after{content:"";position:absolute;right:2px;top:2px;width:12px;height:12px;border-radius:50%;background:#fff}
+.sw.off{background:var(--ws-border-strong)}.sw.off::after{right:auto;left:2px}
+hr.d{border:0;height:1px;background:var(--ws-border);margin:6px 0}
+.dlg{position:relative;width:660px;margin:24px auto;background:var(--ws-canvas);border-radius:12px;box-shadow:var(--ws-shadow);overflow:hidden;font-size:var(--ws-fs-ui)}
+.dlg .mh{font-size:15px}
+.form{padding:16px 20px;display:flex;flex-direction:column;gap:14px}
+.fld{display:flex;align-items:center;gap:12px}
+.fld>label{width:120px;flex:none;color:var(--ws-text-muted);font-size:13px}
+.fld.top{align-items:flex-start}
+.in{flex:1;height:30px;border-radius:6px;box-shadow:inset 0 0 0 1px var(--ws-border-strong);display:flex;align-items:center;padding:0 10px;gap:8px;color:var(--ws-text)}
+.in.area{height:72px;align-items:flex-start;padding-top:6px;line-height:1.45}
+.in .ph{color:var(--ws-text-faint)}
+.segs{display:inline-flex;background:var(--ws-subtle);border-radius:6px;padding:2px;gap:2px}
+.segs span{white-space:nowrap;padding:3px 10px;border-radius:5px;font-size:13px;color:var(--ws-text-muted)}
+.segs span.on{background:var(--ws-surface);color:var(--ws-text);box-shadow:var(--ws-shadow)}
+.hintline{font-size:12px;color:var(--ws-text-faint);margin:-6px 0 0 132px}
+.foot2{display:flex;gap:8px;padding:12px 20px;box-shadow:inset 0 1px 0 var(--ws-border)}
+.foot2 .sp{flex:1}
+.notes{font-size:13px;color:var(--muted-foreground);line-height:1.5;max-width:1000px;margin:0;padding-left:18px}
+</style>
+</head>
+<body class="theme-light chrome">
+<div class="page">
+<div>
+<h1>Persistent agents in Liquid</h1>
+<p class="sub">Liquid's screens for Agent profiles (ADR-0283). Meta-Harness already provides them: <code>meta agent create</code>, routines that wake the agent's current thread, a private memory folder, and a new thread when the context is 80% full. The agent Chat itself stays T3's. These screens add only what T3 lacks.</p>
+</div>
+
+<div>
+<h3 class="sec">A · Sidebar and an agent's Chat</h3>
+<p class="sub">An <b>Agents</b> section sits above <b>Threads</b>. Each row shows the agent's state, in the words the session rows use, or when it next wakes up. Selecting an agent opens its current thread in the usual Chat. The session card gains an <b>Agent</b> section (instructions, memory folder, earlier threads) above T3's Automations, which list the agent's routines.</p>
+<div class="stage"><div class="win"><div class="tbar"><div class="lights"><i style="background:#ff5f57"></i><i style="background:#febc2e"></i><i style="background:#28c840"></i></div></div>
+<div class="body">
+<div class="side">
+<div class="wsw"><span class="av">W</span>Watershed</div>
+<h6>Agents <span class="a">+</span></h6>
+<div class="row on"><span class="ini">N</span>news-bot<span class="r">next 07:30</span></div>
+<div class="row"><span class="ini b">R</span>release-watch<span class="r">Working</span></div>
+<div class="row"><span class="ini b">I</span>inbox-triage<span class="r warn">Waiting for you</span></div>
+<h6>Threads <span class="a">+</span></h6>
+<div class="row">watershed</div>
+<div class="row" style="padding-left:26px">Fix the move dialog</div>
+<div class="row" style="padding-left:26px">Liquid tree for subflows</div>
+</div>
+<div class="main">
+<div class="head"><div class="crumb"><b>news-bot</b><span>· watershed · gpt-6.1</span></div><div class="end"><span class="ib">⋯</span></div></div>
+<div class="chat">
+<div class="thread">
+<div class="um" style="max-width:85%">You are news-bot, a persistent agent. Your instructions: Keep the news page current… Your memory folder is ~/.meta-harness/agents/news-bot/memory…</div>
+<div>Read my notes: yesterday's feeds were summarized. Checking today's sources now.</div>
+<div class="um">Check the feeds.</div>
+<div style="color:var(--ws-text-muted)">Updated the news page with 4 new items and saved what I saw to memory/2026-11-23.md.</div>
+</div>
+<div class="card">
+<h5>Agent</h5>
+<div class="note">Keep the news page current: read the feeds, add new items, drop stale ones.</div>
+<div class="crow">Memory<span class="mono">~/.meta-harness/agents/news-bot/memory</span><span class="r link">Show in Finder</span></div>
+<div class="crow">Earlier threads<span class="r link">2 ›</span></div>
+<hr class="d">
+<h5>Automations <span class="a">Add routine</span></h5>
+<div class="crow"><span class="ph">◷</span>Morning news<span class="r">Mon–Fri 07:30</span><span class="sw"></span></div>
+<div class="crow"><span class="ph">↯</span>New feed item<span class="r">Webhook</span><span class="sw"></span></div>
+<div class="crow"><span class="ph">◷</span>Weekly digest<span class="r">Sun 18:00</span><span class="sw off"></span></div>
+</div>
+</div>
+</div>
+</div></div></div>
+</div>
+
+<div>
+<h3 class="sec">B · New agent</h3>
+<p class="sub">Opened from <b>+</b> beside Agents. It has the same fields as <code>meta agent create</code>. Project and model use the pickers of a new thread. The permission mode starts at Approval required, so an agent that is not watched asks before it acts.</p>
+<div class="stage"><div class="dlg">
+<div class="mh">New agent</div>
+<div class="form">
+<div class="fld"><label>Name</label><div class="in">news-bot</div></div>
+<div class="hintline">Lowercase letters, digits and dashes.</div>
+<div class="fld"><label>Project</label><div class="in">watershed<span class="ph" style="margin-left:auto">⌄</span></div></div>
+<div class="fld"><label>Model</label><div class="in">Codex · gpt-6.1<span class="ph" style="margin-left:auto">⌄</span></div></div>
+<div class="fld"><label>Permissions</label><span class="segs"><span class="on">Approval required</span><span>Auto-accept edits</span><span>Auto</span><span>Full access</span></span></div>
+<div class="fld top"><label>Instructions</label><div class="in area">Keep the news page current: read the feeds, add new items, drop stale ones.</div></div>
+<div class="hintline">Its memory folder stays private on this host, outside any repository.</div>
+</div>
+<div class="foot2"><span class="btn ghost">Cancel</span><span class="sp"></span><span class="btn pri">Create agent</span></div>
+</div></div>
+</div>
+
+<div>
+<h3 class="sec">C · Add routine</h3>
+<p class="sub">Opened from <b>Add routine</b> in the card. The schedule is one of T3's four kinds. A webhook routine shows its URL once it is saved, with Copy.</p>
+<div class="stage">
+<div class="dlg">
+<div class="mh">Add routine · news-bot</div>
+<div class="form">
+<div class="fld"><label>Runs</label><span class="segs"><span>Every</span><span class="on">At a time</span><span>Once</span><span>Webhook</span></span></div>
+<div class="fld"><label>Time</label><div class="in" style="flex:none;width:90px">07:30</div><span class="segs"><span class="on">Mon</span><span class="on">Tue</span><span class="on">Wed</span><span class="on">Thu</span><span class="on">Fri</span><span>Sat</span><span>Sun</span></span></div>
+<div class="fld"><label>Title</label><div class="in">Morning news</div></div>
+<div class="fld top"><label>Prompt</label><div class="in area">Check the feeds.</div></div>
+</div>
+<div class="foot2"><span class="btn ghost">Cancel</span><span class="sp"></span><span class="btn pri">Add routine</span></div>
+</div>
+<div class="dlg">
+<div class="mh">Add routine · news-bot</div>
+<div class="form">
+<div class="fld"><label>Runs</label><span class="segs"><span>Every</span><span>At a time</span><span>Once</span><span class="on">Webhook</span></span></div>
+<div class="fld"><label>Title</label><div class="in">New feed item</div></div>
+<div class="fld top"><label>Prompt</label><div class="in area">A feed sent: {{body}}</div></div>
+<div class="hintline">The prompt can use {{body.path}}, {{headers.name}}, {{query.name}} and {{body}}.</div>
+<div class="fld"><label>URL</label><div class="in"><span class="mono" style="font-size:12px">http://127.0.0.1:…/api/hooks/task-9/••••</span><span class="ph" style="margin-left:auto">Copy</span></div></div>
+</div>
+<div class="foot2"><span class="sp"></span><span class="btn pri">Done</span></div>
+</div>
+</div>
+</div>
+
+<ul class="notes">
+<li>The agent row's menu (⋯) has <b>Remove agent…</b>. Its confirmation says that the routines end and that the memory folder stays.</li>
+<li><b>Earlier threads</b> opens the agent's previous threads read-only, newest first, as T3 lists a thread's forks.</li>
+<li>A webhook URL reaches only this host, because T3 listens on loopback. Public URLs come with host links through the Liquid account (ADR-0285).</li>
+</ul>
+</div>
+</body>
+</html>

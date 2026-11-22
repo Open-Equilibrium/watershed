@@ -377,7 +377,15 @@ meta uninstall</code></pre>
         </div>
       </div>
       <h3 id="persistent-agents">Persistent agents</h3>
-      <p>Accepted target (ADR-0283), once host moves and host links work: an agent profile has a name, a memory folder, its central configuration and its own T3 routines and webhooks. Each wake-up is a turn in the profile's thread; a full context hands off to a new thread, as Grok Bot keeps the bot, not a thread, as its lasting unit.</p>
+      <p>Built on macOS and Linux (ADR-0283). The agent profile, not a thread, is the lasting unit, as with Grok Bot.</p>
+      <ul>
+        <li><strong>Profile:</strong> <code>meta agent create</code> stores a name, a project, a model, a permission mode (approval-required by default) and instructions in the service's SQLite. It also creates a private memory folder, <code>&lt;home&gt;/agents/&lt;name&gt;/memory</code> (mode 0700), outside any repository.</li>
+        <li><strong>Thread:</strong> the profile owns one current T3 thread in the project's checkout. Its first message names the agent and gives its instructions and memory folder.</li>
+        <li><strong>Routines:</strong> T3 scheduled tasks bound to that thread in <code>continue</code> mode. A routine runs on an interval of at least a minute, at a time on chosen weekdays, once, or per webhook request on T3's <code>/api/hooks/&lt;task&gt;/&lt;token&gt;</code> path. Each wake-up is a turn in the current thread.</li>
+        <li><strong>Full context:</strong> when a turn ends and T3 reports the context window at least 80% full, Meta-Harness opens the next thread. The new thread starts with the same opening plus the host-move handoff text (ADR-0231), the routines move to it, and the old thread stays. A next thread is stored before it starts, so a restart finishes the switch.</li>
+        <li><strong>Removal:</strong> <code>meta agent remove</code> deletes the profile's routines and keeps its memory folder.</li>
+        <li><strong>Open:</strong> Liquid's screens, and moving a profile with its memory to another host.</li>
+      </ul>
       <p><strong>Another harness</strong> (ADR-0231): a session moves to another harness, such as from Claude Code to Codex, only as a handoff, as in T3 Code. The target starts a new session that receives the conversation so far as text, at most 16,000 tokens by default, marked as context, not a new request; attachments and the provider's tool and reasoning state do not move. A target that already saw part of the conversation receives only what followed; the files come from T3's Git checkpoint ref.</p>
     </div></section>
 
