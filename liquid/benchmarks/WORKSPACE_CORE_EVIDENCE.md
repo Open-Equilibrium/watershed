@@ -28,7 +28,7 @@ Observational evidence for `liquid-core`'s mutation pipeline and `liquid-storage
 | … after it (2026-11-22, `9f2b3e01`) | median 140 µs, p99 172 µs | median 141 µs, p99 176 µs | median 139 µs, p99 174 µs |
 | … once the Page is arranged, up to 2,000 Text Blocks | median 195 µs, p99 250 µs | median 195 µs, p99 251 µs | median 195 µs, p99 247 µs |
 | Reading the long Page's 1,000 Views in order | 0.03 ms | 0.02 ms | 0.02 ms |
-| Peak memory footprint of the pipeline process | 19.4 MB | 17.8 MB | 17.8 MB |
+| Peak memory footprint of the pipeline process, before the Database (2026-11-02, `e095071`) | 19.4 MB | 17.8 MB | 17.8 MB |
 | Adding a Database row at the end, before the workload change (2026-11-03, `6aa3f03`) | median 55.7 µs, p99 90.2 µs, max 13.0 ms | median 53.7 µs, p99 82.5 µs, max 12.7 ms | median 52.7 µs, p99 85.6 µs, max 12.6 ms |
 | … added last (2026-11-22, `6de4f29d`) | median 51.3 µs, p99 64.4 µs, max 0.15 ms | median 49.7 µs, p99 59.0 µs, max 0.15 ms | median 50.0 µs, p99 61.3 µs, max 0.15 ms |
 | Setting one cell | median 36.2 µs, p99 50.9 µs | median 35.9 µs, p99 50.4 µs | median 35.4 µs, p99 51.0 µs |
@@ -51,9 +51,9 @@ Observational evidence for `liquid-core`'s mutation pipeline and `liquid-storage
 
 Each loaded Database Block keeps its rows with their cells as an index beside the Page's document, as the View order is kept, so adding a row does not read every row and a window is filtered and sorted from memory (client architecture rule 13). The maximum while adding rows is the snapshot written after every 1,000 chunks, which grows with the Database. With the Database, the pipeline process holds 25,000 more Actions with their changes in the in-memory store, which accounts for most of its larger footprint.
 
-Each loaded Page keeps its View order as an index, so adding a Text Block at the end does not read every View, and readers take a window of the order rather than all of it.
+Each loaded Page keeps its View order as an index, so adding a Text Block at the end reads no View's content, and readers take a window of the order rather than all of it. The step scans the order once to see whether the Page is arranged; on an arranged Page it also compares the Sections before and after, to carry their tiles. The rise from 109 µs to 140 µs predates Arrange mode: `main` before it measured 139 µs.
 
-A keystroke through the pipeline with the in-memory store costs about 10 µs. The 3.7 ms maximum is the snapshot the pipeline writes after every 1,000 chunks of a document. The pipeline checks a text position against the elements beside it rather than reading the whole text.
+A keystroke through the pipeline with the in-memory store costs about 11 µs. The 3.8 ms maximum is the snapshot the pipeline writes after every 1,000 chunks of a document. The pipeline checks a text position against the elements beside it rather than reading the whole text.
 
 A durable commit is almost entirely the flush to the storage medium: F_FULLFSYNC, which macOS needs for a commit to survive a power loss (ADR-0237). The editor may group consecutive keystrokes into one commit (client architecture rule 9; the approved History mockup shows one entry per pause), and typing is designed not to wait for a commit (rule 7).
 

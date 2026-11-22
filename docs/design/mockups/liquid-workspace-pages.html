@@ -59,24 +59,19 @@
     <div class="gal" id="gal"></div>
   </section>
   <section>
-    <h3 class="sec">8 · Arrange mode</h3>
-    <p class="sub">"Arrange" in the Page header, or the PowerBar, switches the Page into Arrange mode. A 12-column grid appears; each Section of text and each other Block becomes a tile that moves by its top handle and resizes by its right edge in whole columns, and the selected tile shows its width. Arrow keys move the selected tile, ⌥ and the arrow keys resize it. Done or esc ends it. An arranged Page uses the main column's width, up to 1120 px; text inside a tile keeps the reading width.</p>
-    <div class="stage"><div class="scaler"><div class="win" id="w-arr" data-w="1240"></div></div></div>
-  </section>
-  <section>
-    <h3 class="sec">9 · The same Page in a narrow window and on a phone</h3>
-    <p class="sub">The order of Blocks is the same on every device. In a narrow window, tiles narrower than half the grid become half width and the rest full width. On a phone every Block stacks in Page order and stays visible; a Database, a Whiteboard and Code show a preview that opens a focused full-screen surface. Arrange mode on a phone starts with a long press.</p>
+    <h3 class="sec">8 · The same Page on a phone</h3>
+    <p class="sub">The order of Blocks is the same on every device. On a phone every Block stacks in Page order and stays visible; a Database, a Whiteboard and Code show a preview that opens a focused full-screen surface. Arrange mode on a phone starts with a long press. Arrange mode itself is built (ADR-0312).</p>
     <div class="stage"><div class="scaler"><div class="win bare" id="w-resp" data-w="1240"></div></div></div>
   </section>
   <section>
-    <h3 class="sec">10 · PowerBar</h3>
+    <h3 class="sec">9 · PowerBar</h3>
     <p class="sub">⌘K, or a tap of the Liquid key, opens the PowerBar over the current Page, as T3 Code's command palette works: one field and grouped results. Without a prefix it searches Pages, Sources, Blocks and text and jumps to the result, as ⌘P does in VS Code. <code>/</code> lists the Blocks to add to the current Page, as on the Page, and <code>&gt;</code> lists only actions, as in T3 Code and VS Code. <code>@</code> stays reserved for people, for chat after Release 1. It runs only actions the current Role allows; the footer names the prefixes.</p>
     <div class="stage"><div class="scaler"><div class="win" id="w-pb1" data-w="1240"></div></div></div>
     <div class="stage" style="margin-top:16px"><div class="scaler"><div class="win bare" id="w-pb23" data-w="1320"></div></div></div>
     <div class="stage" style="margin-top:16px"><div class="scaler"><div class="win bare" id="w-pb45" data-w="1320"></div></div></div>
   </section>
   <section>
-    <h3 class="sec">11 · A Source</h3>
+    <h3 class="sec">10 · A Source</h3>
     <p class="sub">A Source opens like a Page. In M3a it is a local file or folder that Liquid reads but never writes (ADR-0235); Liquid rereads it when the file changes. "Use in a Block…" creates a Connection, and "Used by" lists them. The area's <b>+</b> menu adds it.</p>
     <div class="stage"><div class="scaler"><div class="win" id="w-src" data-w="1240"></div></div></div>
   </section>
@@ -92,7 +87,7 @@
     <ol class="qs">
       <li>The deterministic mapping of section 4, including a dropped CSV becoming a Database copy and ``` starting a Code Block.</li>
       <li>Database Views are Table, Board and Calendar; the Code Block shows code and never runs it.</li>
-      <li>Arrange mode arranges Sections and other Blocks on 12 columns; narrow windows use half or full width; phones stack in Page order. An arranged Page widens to at most 1120 px.</li>
+      <li>Phones stack every Block in Page order.</li>
       <li>⇧⌘N creates a new Page in the current area; ⌘N stays with agent sessions.</li>
     </ol>
     <h4 class="qh">Added on request, approved the same day</h4>
@@ -223,23 +218,8 @@ document.getElementById('gal').innerHTML=G.map(([i,n,k,b,c])=>`<div class="win g
 
 // 7 · Arrange
 const tile=(span,body,o={})=>`<div class="tile ${o.sel?'sel':''}" style="grid-column:span ${span}"><span class="mv">• • •</span><span class="rs"></span>${o.sel?`<span class="span">${span} of 12</span>`:''}${body}</div>`;
-frame('w-arr',{h:640,head:`<div class="armode"><b>${I.grid}</b><b>Arranging Household budget</b><span>Drag the top handle to move, the right edge to resize</span><span class="end"><span class="sg2"><span class="on">Desktop</span><span>Narrow</span><span>Phone</span></span><span class="btn pri">Done <kbd>esc</kbd></span></span></div>`,main:`<div class="pg" style="padding:28px 32px 0"><div style="max-width:1120px;margin:0 auto">
-<div class="ttl" style="font-size:24px;line-height:32px">Household budget</div>
-<div class="grid12 lines" style="margin-top:14px">
-${tile(8,`<div class="prose" style="font-size:15px;line-height:22px">October is almost done. Rent is the largest share, as every month; the trip to Porto stayed under € 50.</div>`)}
-${tile(4,fxBlk({f:false}).replace('class="card"','style=""'))}
-${tile(7,`${dbHead()}${dbTable({n:4})}`,{sel:true})}
-${tile(5,chartBlk)}
-</div></div></div>`});
 
 // 8 · Responsive
-const narrow=`<div class="win" style="width:700px;flex:none"><div class="tbar"><div class="lights"><i style="background:#ff5f57"></i><i style="background:#febc2e"></i><i style="background:#28c840"></i></div></div><div style="padding:20px 24px 24px;height:560px;overflow:hidden;box-sizing:border-box;-webkit-mask-image:linear-gradient(to top,transparent 0,#000 40px);mask-image:linear-gradient(to top,transparent 0,#000 40px)">
-<div class="ttl" style="font-size:24px;line-height:32px">Household budget</div>
-<div class="grid12" style="grid-template-columns:repeat(2,1fr);margin-top:12px">
-<div style="grid-column:span 2" class="prose">October is almost done. Rent is the largest share, as every month.</div>
-<div>${fxBlk({f:false})}</div><div></div>
-<div style="grid-column:span 2">${dbHead()}${dbTable({n:3})}</div>
-<div class="card">${chartBlk.replace('<span class="chip">Bar ⌄</span>','').replace('<span class="end"><span class="cap">from Expenses</span></span>','')}${''}</div></div></div></div>`;
 const phone=`<div class="phone" style="flex:none"><div class="sb"><span>9:41</span><span>●●●</span></div><div class="ph"><span>‹</span><span>Private › <b style="color:var(--ws-text);font-weight:500">Household budget</b></span><span style="margin-left:auto">${I.more}</span></div>
 <div class="st" style="height:520px;overflow:hidden;-webkit-mask-image:linear-gradient(to top,transparent 0,#000 40px);mask-image:linear-gradient(to top,transparent 0,#000 40px)"><div class="ttl" style="font-size:24px;line-height:32px;margin:0">Household budget</div>
 <div class="prose" style="font-size:15px;line-height:22px">October is almost done. Rent is the largest share, as every month.</div>
@@ -247,7 +227,7 @@ ${fxBlk({f:false})}
 <div class="card" style="padding:10px 12px"><div class="bh" style="height:24px"><span class="ico">${I.db}</span><b>Expenses</b><span class="end cap">5 rows</span></div>
 ${rows.slice(0,3).map(r=>`<div style="display:flex;justify-content:space-between;font-size:14px;height:30px;align-items:center;box-shadow:inset 0 -1px 0 var(--ws-border)"><span>${r[1]}</span><span style="font-variant-numeric:tabular-nums">€ ${r[4]}</span></div>`).join('')}<div class="opn"><span>Open table</span><span>›</span></div></div>
 <div class="card">${chartBlk}</div></div></div>`;
-document.getElementById('w-resp').innerHTML=`<div style="display:flex;gap:32px;align-items:flex-start">${narrow}${phone}</div>`;
+document.getElementById('w-resp').innerHTML=`<div style="display:flex;gap:32px;align-items:flex-start">${phone}</div>`;
 
 // 9 · PowerBar
 const pbItem=(ic,label,d,r,on)=>`<div class="it ${on?'on':''}"><span class="ico">${ic}</span><span>${label}</span>${d?`<span class="d">${d}</span>`:''}${r?`<span class="r">${r}</span>`:''}</div>`;
