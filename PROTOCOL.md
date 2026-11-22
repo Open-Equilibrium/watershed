@@ -414,7 +414,7 @@ All listed payload fields are strings unless noted otherwise; string arrays are 
 
 ## ACP binding (`flow acp`)
 
-`flow acp` serves one T3 Code thread over the [Agent Client Protocol](https://agentclientprotocol.com) version 1: newline-delimited JSON-RPC 2.0 on stdin and stdout, at most 8 MiB per line. Meta-Harness registers an installed `flow` as the provider instance `flow-agent` ([V-Spec](docs/concept/V-Spec_MetaHarness.html#t3-stack), [ADR-0312](docs/adr/ADR-LOG.md)).
+`flow acp` serves one T3 Code thread over the [Agent Client Protocol](https://agentclientprotocol.com) version 1: newline-delimited JSON-RPC 2.0 on stdin and stdout, at most 8 MiB per line. Meta-Harness registers an installed `flow` as the provider instance `flow-agent` ([V-Spec](docs/concept/V-Spec_MetaHarness.html#t3-stack), [ADR-0313](docs/adr/ADR-LOG.md)).
 
 - `initialize` reports `loadSession` and text-only prompts and needs no authentication.
 - `session/new` names the chat `chat-` and 32 lowercase hex digits; the first Run creates its Conversation under exactly that id. `session/load` reopens it. Both report one select config option, `flow`, listing up to 64 installed Flows by id and set to the Conversation's Flow once it exists; `session/set_config_option` changes it until then.
