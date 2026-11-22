@@ -289,10 +289,14 @@ impl<W: Write> Agent<W> {
                 ),
             );
         }
-        if let Some((target, message)) = mention(&text) {
-            let live = root_launcher()
+        let live = if self.running {
+            root_launcher()
                 .map(|launcher| launcher.live_names())
-                .unwrap_or_default();
+                .unwrap_or_default()
+        } else {
+            Vec::new()
+        };
+        if let Some((target, message)) = mention(&text).filter(|_| !live.is_empty()) {
             if !live.iter().any(|name| name == target) {
                 return self.fail(
                     &id,
@@ -305,6 +309,13 @@ impl<W: Write> Agent<W> {
                             live.join(", ")
                         }
                     ),
+                );
+            }
+            if message.trim().is_empty() {
+                return self.fail(
+                    &id,
+                    INVALID_PARAMS,
+                    "a message to an instance must contain text",
                 );
             }
             flow_agent_core::resume_productive_run();

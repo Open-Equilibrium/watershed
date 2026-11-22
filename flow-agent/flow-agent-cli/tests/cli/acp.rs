@@ -771,7 +771,7 @@ fn a_mention_steers_one_running_instance_and_an_unknown_name_is_refused() {
     let mut seen = Vec::new();
     let first = acp.send(
         "session/prompt",
-        json!({"sessionId": session_id, "prompt": [{"type": "text", "text": "Compare Rust and Dart"}]}),
+        json!({"sessionId": session_id, "prompt": [{"type": "text", "text": "@team Compare Rust and Dart"}]}),
     );
     acp.next(
         |message| {
@@ -812,6 +812,11 @@ fn a_mention_steers_one_running_instance_and_an_unknown_name_is_refused() {
             .contains("scraper-2"),
         "{refused}"
     );
+    let empty = acp.send(
+        "session/prompt",
+        json!({"sessionId": session_id, "prompt": [{"type": "text", "text": "@scraper-2  "}]}),
+    );
+    assert!(acp.reply(empty, &mut seen)["error"]["message"].is_string());
     let steer = acp.send(
         "session/prompt",
         json!({"sessionId": session_id, "prompt": [{"type": "text", "text": "@scraper-2 Focus on Flutter"}]}),
