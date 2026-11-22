@@ -183,7 +183,12 @@ class _TableBlockState extends State<TableBlock> implements CellDrop {
           child: set == null
               ? Opacity(
                   opacity: _footerHovered || touchFirst ? 1 : 0,
-                  child: Text('Calculate', style: faint),
+                  child: Text(
+                    'Calculate',
+                    style: faint,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
                 )
               : Text.rich(
                   TextSpan(

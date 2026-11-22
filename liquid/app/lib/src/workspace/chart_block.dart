@@ -243,6 +243,7 @@ class _ChartBlockState extends State<ChartBlock> {
       controller: _panel,
       group: _panel,
       beside: chartPanelWidth,
+      height: 600,
       onTapOutside: (_) {
         if (_panel.isShowing) setState(_panel.hide);
       },
@@ -353,7 +354,11 @@ class _ChartBlockState extends State<ChartBlock> {
                     points: chart.points,
                     kind: chart.setup.kind,
                     colors: [ws.data1, ws.data2, ws.data3],
-                    text: ws.textFaint,
+                    text: DefaultTextStyle.of(context).style.copyWith(
+                      fontSize: WsMetrics.fsCaption,
+                      color: ws.textFaint,
+                      fontFeatures: const [FontFeature.tabularFigures()],
+                    ),
                     line: ws.border,
                     numbers: numbers,
                   ),
@@ -536,144 +541,146 @@ class ChartPanel extends StatelessWidget {
       ),
       child: DefaultTextStyle.merge(
         style: TextStyle(fontSize: WsMetrics.fsCompact, color: ws.text),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          spacing: WsMetrics.space4,
-          children: [
-            Row(
-              children: [
-                Icon(LucideIcons.barChart3, size: 16, color: ws.textFaint),
-                const SizedBox(width: WsMetrics.space3),
-                Expanded(
-                  child: Text(
-                    title.isEmpty ? untitled : title,
-                    style: const TextStyle(
-                      fontSize: WsMetrics.fsUi,
-                      fontWeight: WsMetrics.fwSemibold,
-                    ),
-                  ),
-                ),
-                GestureDetector(
-                  onTap: onClose,
-                  child: Icon(LucideIcons.x, size: 16, color: ws.textFaint),
-                ),
-              ],
-            ),
-            Text('Data', style: heading),
-            _Field(
-              group: group,
-              label: 'From',
-              value: chart?.source ?? 'None',
-              choices: [
-                (
-                  'None',
-                  setup?.table == null && setup?.block == null,
-                  () => onSource(null),
-                ),
-                for (final source in sources)
-                  (
-                    '${source.name} · ${source.detail}',
-                    source.table != null
-                        ? source.table == setup?.table
-                        : source.block == setup?.block,
-                    () => onSource(source),
-                  ),
-              ],
-            ),
-            if (table) ...[
-              _Field(
-                group: group,
-                label: 'Group by',
-                value: nameOf(setup?.group) ?? 'None',
-                choices: [
-                  ('None', setup?.group == null, () => onGroup(null)),
-                  for (final field in groups)
-                    (
-                      field.name,
-                      field.id == setup?.group,
-                      () => onGroup(field.id),
-                    ),
-                ],
-              ),
-              _Field(
-                group: group,
-                label: 'Value',
-                value: valueName(
-                  setup?.value ?? BridgeChartValue.count,
-                  setup?.field,
-                ),
-                choices: [
-                  (
-                    'Count of rows',
-                    setup?.value == BridgeChartValue.count,
-                    () => onValue(BridgeChartValue.count, null),
-                  ),
-                  for (final measure in [
-                    BridgeChartValue.sum,
-                    BridgeChartValue.average,
-                  ])
-                    for (final field in numbers)
-                      (
-                        valueName(measure, field.id),
-                        setup?.value == measure && setup?.field == field.id,
-                        () => onValue(measure, field.id),
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            spacing: WsMetrics.space4,
+            children: [
+              Row(
+                children: [
+                  Icon(LucideIcons.barChart3, size: 16, color: ws.textFaint),
+                  const SizedBox(width: WsMetrics.space3),
+                  Expanded(
+                    child: Text(
+                      title.isEmpty ? untitled : title,
+                      style: const TextStyle(
+                        fontSize: WsMetrics.fsUi,
+                        fontWeight: WsMetrics.fwSemibold,
                       ),
+                    ),
+                  ),
+                  GestureDetector(
+                    onTap: onClose,
+                    child: Icon(LucideIcons.x, size: 16, color: ws.textFaint),
+                  ),
                 ],
               ),
-            ],
-            _Field(
-              group: group,
-              label: 'Kind',
-              value: chartKindName(setup?.kind ?? BridgeChartKind.bar),
-              choices: [
-                for (final kind in BridgeChartKind.values)
+              Text('Data', style: heading),
+              _Field(
+                group: group,
+                label: 'From',
+                value: chart?.source ?? 'None',
+                choices: [
                   (
-                    chartKindName(kind),
-                    kind == setup?.kind,
-                    () => onKind(kind),
+                    'None',
+                    setup?.table == null && setup?.block == null,
+                    () => onSource(null),
                   ),
-              ],
-            ),
-            Text('Uses', style: heading),
-            switch (chart?.source) {
-              final source? => Container(
-                height: 32,
-                padding: const EdgeInsets.symmetric(
-                  horizontal: WsMetrics.space3,
-                ),
-                decoration: BoxDecoration(
-                  color: ws.subtle,
-                  borderRadius: BorderRadius.circular(WsMetrics.radiusLg),
-                ),
-                child: Row(
-                  children: [
-                    Icon(
-                      table ? LucideIcons.table : LucideIcons.calculator,
-                      size: 14,
-                      color: ws.textFaint,
+                  for (final source in sources)
+                    (
+                      '${source.name} · ${source.detail}',
+                      source.table != null
+                          ? source.table == setup?.table
+                          : source.block == setup?.block,
+                      () => onSource(source),
                     ),
-                    const SizedBox(width: WsMetrics.space3),
-                    Expanded(
-                      child: Text(source, overflow: TextOverflow.ellipsis),
-                    ),
-                    Text(table ? 'Table' : 'Calculation', style: caption),
+                ],
+              ),
+              if (table) ...[
+                _Field(
+                  group: group,
+                  label: 'Group by',
+                  value: nameOf(setup?.group) ?? 'None',
+                  choices: [
+                    ('None', setup?.group == null, () => onGroup(null)),
+                    for (final field in groups)
+                      (
+                        field.name,
+                        field.id == setup?.group,
+                        () => onGroup(field.id),
+                      ),
                   ],
                 ),
+                _Field(
+                  group: group,
+                  label: 'Value',
+                  value: valueName(
+                    setup?.value ?? BridgeChartValue.count,
+                    setup?.field,
+                  ),
+                  choices: [
+                    (
+                      'Count of rows',
+                      setup?.value == BridgeChartValue.count,
+                      () => onValue(BridgeChartValue.count, null),
+                    ),
+                    for (final measure in [
+                      BridgeChartValue.sum,
+                      BridgeChartValue.average,
+                    ])
+                      for (final field in numbers)
+                        (
+                          valueName(measure, field.id),
+                          setup?.value == measure && setup?.field == field.id,
+                          () => onValue(measure, field.id),
+                        ),
+                  ],
+                ),
+              ],
+              _Field(
+                group: group,
+                label: 'Kind',
+                value: chartKindName(setup?.kind ?? BridgeChartKind.bar),
+                choices: [
+                  for (final kind in BridgeChartKind.values)
+                    (
+                      chartKindName(kind),
+                      kind == setup?.kind,
+                      () => onKind(kind),
+                    ),
+                ],
               ),
-              null => Text('Nothing yet.', style: caption),
-            },
-            Text('Used by', style: heading),
-            Text(
-              'Nothing yet. A formula or Automation that reads this Chart appears here.',
-              style: caption,
-            ),
-            Text(
-              'The data list offers Tables and Calculation Blocks you may read. '
-              'Removing a Connection leaves both Blocks in place.',
-              style: caption,
-            ),
-          ],
+              Text('Uses', style: heading),
+              switch (chart?.source) {
+                final source? => Container(
+                  height: 32,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: WsMetrics.space3,
+                  ),
+                  decoration: BoxDecoration(
+                    color: ws.subtle,
+                    borderRadius: BorderRadius.circular(WsMetrics.radiusLg),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(
+                        table ? LucideIcons.table : LucideIcons.calculator,
+                        size: 14,
+                        color: ws.textFaint,
+                      ),
+                      const SizedBox(width: WsMetrics.space3),
+                      Expanded(
+                        child: Text(source, overflow: TextOverflow.ellipsis),
+                      ),
+                      Text(table ? 'Table' : 'Calculation', style: caption),
+                    ],
+                  ),
+                ),
+                null => Text('Nothing yet.', style: caption),
+              },
+              Text('Used by', style: heading),
+              Text(
+                'Nothing yet. A formula or Automation that reads this Chart appears here.',
+                style: caption,
+              ),
+              Text(
+                'The data list offers Tables and Calculation Blocks you may read. '
+                'Removing a Connection leaves both Blocks in place.',
+                style: caption,
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -777,7 +784,7 @@ class ChartPainter extends CustomPainter {
   final List<BridgeChartPoint> points;
   final BridgeChartKind kind;
   final List<Color> colors;
-  final Color text;
+  final TextStyle text;
   final Color line;
   final NumberFormat numbers;
 
@@ -785,14 +792,7 @@ class ChartPainter extends CustomPainter {
   static const _values = 16.0;
 
   TextPainter _text(String shown, double width) => TextPainter(
-    text: TextSpan(
-      text: shown,
-      style: TextStyle(
-        fontSize: WsMetrics.fsCaption,
-        color: text,
-        fontFeatures: const [FontFeature.tabularFigures()],
-      ),
-    ),
+    text: TextSpan(text: shown, style: text),
     maxLines: 1,
     ellipsis: '…',
     textDirection: TextDirection.ltr,
@@ -865,7 +865,9 @@ class ChartPainter extends CustomPainter {
         canvas,
         numbers.format(point.value),
         x,
-        y(math.max(point.value, 0)) - _values + 2,
+        y(math.max(point.value, 0)) -
+            _values +
+            (kind == BridgeChartKind.line ? -4 : 2),
         step,
       );
       _centered(canvas, point.label, x, size.height - _labels + 4, step);
