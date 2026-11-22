@@ -1,6 +1,7 @@
 mod attachment;
 mod database;
 mod drawing;
+mod formula;
 mod history;
 mod id;
 mod model;
@@ -21,6 +22,9 @@ pub use drawing::{
     Content, Drawing, DrawingStyle, Element, ElementChange, Frame, InkColor, MAX_BOARD_POINTS,
     MAX_DOC_PAGES, MAX_DRAWING_ELEMENTS, MAX_DRAWING_POINTS, MAX_ELEMENT_TEXT, MAX_ELEMENTS,
     MAX_POINTS, Pen, Shape,
+};
+pub use formula::{
+    Failure, Formula, MAX_FORMULA, MAX_NESTING, Operand, Reference, Resolve, Syntax, Value,
 };
 pub use history::{Action, Document, Operation, Permission};
 pub use id::{
