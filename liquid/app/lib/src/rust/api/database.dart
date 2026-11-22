@@ -145,11 +145,16 @@ class BridgeFilter {
 class BridgeGroup {
   final BridgeCell value;
   final PlatformInt64 count;
+  final List<BridgeRow> rows;
 
-  const BridgeGroup({required this.value, required this.count});
+  const BridgeGroup({
+    required this.value,
+    required this.count,
+    required this.rows,
+  });
 
   @override
-  int get hashCode => value.hashCode ^ count.hashCode;
+  int get hashCode => value.hashCode ^ count.hashCode ^ rows.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -157,7 +162,8 @@ class BridgeGroup {
       other is BridgeGroup &&
           runtimeType == other.runtimeType &&
           value == other.value &&
-          count == other.count;
+          count == other.count &&
+          rows == other.rows;
 }
 
 enum BridgeLayout { table, board, calendar }

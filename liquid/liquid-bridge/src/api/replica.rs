@@ -330,12 +330,13 @@ impl LiquidWorkspace {
                 let block = id(&query.block, BlockId::parse, "block")?;
                 let field = id(&query.field, FieldId::parse, "field")?;
                 answer.groups = workspace
-                    .groups(&block, &row_query(query, 0, 0)?, &field)
+                    .groups(&block, &row_query(query, 0, limit)?, &field)
                     .map_err(message)?
                     .into_iter()
                     .map(|group| BridgeGroup {
                         value: BridgeCell::of(&group.value),
                         count: group.count as i64,
+                        rows: group.rows.into_iter().map(BridgeRow::of).collect(),
                     })
                     .collect();
             }

@@ -1017,6 +1017,7 @@ class FakeWorkspace implements LiquidWorkspace {
         block: query.block,
         start: 0,
         limit: 0,
+        sort: query.sort,
         filter: query.filter,
         search: query.search,
       ),
@@ -1029,18 +1030,24 @@ class FakeWorkspace implements LiquidWorkspace {
             emptyCell,
             for (final option in field.options) selectCell(option.id),
           ];
-    int count(BridgeCell value) => shown.where((row) {
-      final cell = held(row);
-      return switch (value.kind) {
-        BridgeCellKind.checkbox => (cell?.checked ?? false) == value.checked,
-        BridgeCellKind.empty => cell == null,
-        _ => cell?.text == value.text,
-      };
-    }).length;
+    List<BridgeRow> within(BridgeCell value) => [
+      for (final row in shown)
+        if (switch (value.kind) {
+          BridgeCellKind.checkbox =>
+            (held(row)?.checked ?? false) == value.checked,
+          BridgeCellKind.empty => held(row) == null,
+          _ => held(row)?.text == value.text,
+        })
+          row,
+    ];
     return [
       for (final value in values)
-        if (value.kind != BridgeCellKind.empty || count(value) > 0)
-          BridgeGroup(value: value, count: count(value)),
+        if (value.kind != BridgeCellKind.empty || within(value).isNotEmpty)
+          BridgeGroup(
+            value: value,
+            count: within(value).length,
+            rows: within(value).take(query.limit).toList(),
+          ),
     ];
   }
 

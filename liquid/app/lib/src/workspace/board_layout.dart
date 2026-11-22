@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
@@ -84,26 +85,22 @@ class _BoardLayoutState extends State<BoardLayout> {
         query(
           BridgeQueryKind.groups,
           block: data.block,
+          limit: _limits.values.fold(_cardsShown, math.max),
           field: group.id,
+          sort: tab.sort,
           filter: tab.filter,
           search: widget.search,
         ),
       )).groups;
-      final columns = <_Column>[];
-      for (final shown in groups) {
-        final rows = (await data.read(
-          query(
-            BridgeQueryKind.rows,
-            block: data.block,
-            limit: _limits[_key(shown.value)] ?? _cardsShown,
-            sort: tab.sort,
-            filter: tab.filter,
-            within: groupFilter(group, shown.value),
-            search: widget.search,
+      final columns = [
+        for (final shown in groups)
+          (
+            group: shown,
+            rows: shown.rows
+                .take(_limits[_key(shown.value)] ?? _cardsShown)
+                .toList(),
           ),
-        )).rows;
-        columns.add((group: shown, rows: rows));
-      }
+      ];
       if (mounted && read == _reads) setState(() => _columns = columns);
     } on Object {
       return;

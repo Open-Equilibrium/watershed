@@ -5912,11 +5912,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   BridgeGroup dco_decode_bridge_group(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 2)
-      throw Exception('unexpected arr length: expect 2 but see ${arr.length}');
+    if (arr.length != 3)
+      throw Exception('unexpected arr length: expect 3 but see ${arr.length}');
     return BridgeGroup(
       value: dco_decode_bridge_cell(arr[0]),
       count: dco_decode_i_64(arr[1]),
+      rows: dco_decode_list_bridge_row(arr[2]),
     );
   }
 
@@ -8364,7 +8365,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     // Codec=Sse (Serialization based), see doc to use other codecs
     var var_value = sse_decode_bridge_cell(deserializer);
     var var_count = sse_decode_i_64(deserializer);
-    return BridgeGroup(value: var_value, count: var_count);
+    var var_rows = sse_decode_list_bridge_row(deserializer);
+    return BridgeGroup(value: var_value, count: var_count, rows: var_rows);
   }
 
   @protected
@@ -11370,6 +11372,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_bridge_cell(self.value, serializer);
     sse_encode_i_64(self.count, serializer);
+    sse_encode_list_bridge_row(self.rows, serializer);
   }
 
   @protected

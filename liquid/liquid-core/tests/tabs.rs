@@ -407,6 +407,36 @@ fn groups_count_rows_per_value_with_the_empty_group_first_when_it_holds_rows() {
         home.workspace.groups(&table, &all(), &note),
         Err(Error::WrongKind)
     );
+    let first = RowQuery {
+        limit: 1,
+        sort: Some(Sort {
+            field: paid.clone(),
+            descending: true,
+        }),
+        ..all()
+    };
+    let groups = home.workspace.groups(&table, &first, &category).unwrap();
+    let shown: Vec<_> = groups
+        .iter()
+        .map(|group| {
+            (
+                group.count,
+                group.rows.iter().map(|r| r.id.clone()).collect::<Vec<_>>(),
+            )
+        })
+        .collect();
+    assert_eq!(shown[0], (1, vec![blank]), "the empty group");
+    assert_eq!(shown[2].0, 2);
+    assert_eq!(shown[2].1.len(), 1, "a group's first rows, up to the limit");
+    assert_eq!(
+        groups[2].rows[0].cell(&paid),
+        Some(&Cell::Checkbox(true)),
+        "in the query's sort"
+    );
+    let counted = home
+        .workspace
+        .groups(&table, &RowQuery { limit: 0, ..all() }, &category);
+    assert!(counted.unwrap().iter().all(|group| group.rows.is_empty()));
 }
 
 #[test]

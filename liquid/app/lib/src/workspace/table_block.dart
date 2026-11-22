@@ -254,6 +254,7 @@ class _TableBlockState extends State<TableBlock> implements CellDrop {
         query(
           BridgeQueryKind.groups,
           block: _block,
+          limit: 0,
           field: grouped.id,
           filter: filter,
           search: search,

@@ -157,6 +157,7 @@ pub struct BridgeTab {
 pub struct BridgeGroup {
     pub value: BridgeCell,
     pub count: i64,
+    pub rows: Vec<BridgeRow>,
 }
 
 impl BridgeLayout {

@@ -6820,9 +6820,11 @@ impl SseDecode for crate::api::database::BridgeGroup {
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
         let mut var_value = <crate::api::database::BridgeCell>::sse_decode(deserializer);
         let mut var_count = <i64>::sse_decode(deserializer);
+        let mut var_rows = <Vec<crate::api::database::BridgeRow>>::sse_decode(deserializer);
         return crate::api::database::BridgeGroup {
             value: var_value,
             count: var_count,
+            rows: var_rows,
         };
     }
 }
@@ -10533,6 +10535,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::database::BridgeGroup {
         [
             self.value.into_into_dart().into_dart(),
             self.count.into_into_dart().into_dart(),
+            self.rows.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -13023,6 +13026,7 @@ impl SseEncode for crate::api::database::BridgeGroup {
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
         <crate::api::database::BridgeCell>::sse_encode(self.value, serializer);
         <i64>::sse_encode(self.count, serializer);
+        <Vec<crate::api::database::BridgeRow>>::sse_encode(self.rows, serializer);
     }
 }
 

@@ -93,6 +93,7 @@ pub enum Match {
 pub struct Group {
     pub value: Cell,
     pub count: usize,
+    pub rows: Vec<Row>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -619,7 +620,8 @@ pub(crate) fn groups(
         .collect();
     let live: Vec<&FieldId> = database.fields.iter().map(|field| &field.id).collect();
     let mut counts = vec![0; values.len()];
-    for row in matching(&database, &live, index, query, false) {
+    let mut rows: Vec<Vec<Row>> = vec![Vec::new(); values.len()];
+    for row in matching(&database, &live, index, query, query.limit > 0) {
         let at = match cell(&live, row, field) {
             Some(Cell::Select(option)) => positions.get(option.as_str()).copied(),
             Some(Cell::Checkbox(true)) => Some(1),
@@ -627,13 +629,17 @@ pub(crate) fn groups(
         };
         if let Some(at) = at {
             counts[at] += 1;
+            if rows[at].len() < query.limit {
+                rows[at].push(shown(&live, row));
+            }
         }
     }
     Ok(values
         .into_iter()
         .zip(counts)
-        .filter(|(value, count)| *value != Cell::Empty || *count > 0)
-        .map(|(value, count)| Group { value, count })
+        .zip(rows)
+        .filter(|((value, count), _)| *value != Cell::Empty || *count > 0)
+        .map(|((value, count), rows)| Group { value, count, rows })
         .collect())
 }
 
