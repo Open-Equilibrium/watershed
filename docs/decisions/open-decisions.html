@@ -146,7 +146,7 @@
 
       <details id="d-116" class="decision wide">
         <summary><h3>D-116 - The Editor For A Section's Text</h3></summary>
-        <p><strong>Status:</strong> Open; both spikes reported on 2026-11-23 (branch <code>spike/liquid-section-editor</code>, its README compares them), and a person still has to type German dead keys and Japanese on a real Mac with each.</p>
+        <p><strong>Status:</strong> Open; both spikes reported, A on 2026-11-22 and C on 2026-11-23 (branch <code>spike/liquid-section-editor</code>, its README compares them), and a person still has to type German dead keys and Japanese on a real Mac with each.</p>
         <p><strong>Problem:</strong> A Section becomes one rich text with paragraph markers (ADR-0317), so selection, ⏎ and ⌫ work across Paragraphs as in Google Docs. Flutter's <code>TextField</code>, which each Text Block uses today, shows one plain text with one style; it cannot show several Paragraphs with their own styles and marks in one selection. Liquid needs a text editor that can, with input methods (IME) for accents and Asian scripts, and typing that stays responsive.</p>
         <p><strong>Question:</strong> Which editor shows and edits a Section?</p>
         <div class="dia">
