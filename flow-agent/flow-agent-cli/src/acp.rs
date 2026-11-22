@@ -335,10 +335,14 @@ impl<W: Write> Agent<W> {
         };
         let result = match result {
             Ok(_) if !waiting.is_empty() => {
+                let count = waiting.len();
                 let text = waiting.remove(0);
                 match self.start(text, waiting) {
                     Ok(()) => return Ok(()),
-                    Err(error) => Err(error),
+                    Err((code, message)) => Err((
+                        code,
+                        format!("{message}; {count} waiting message(s) were not delivered"),
+                    )),
                 }
             }
             Ok(_) => Ok(()),

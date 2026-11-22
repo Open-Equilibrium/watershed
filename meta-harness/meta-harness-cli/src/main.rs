@@ -140,7 +140,12 @@ async fn serve(home: PathBuf) -> Result<(), String> {
     let service = Service::start(ServiceConfig {
         home,
         t3: pinned_t3()?,
-        acp_agents: flow_agent(std::env::var_os("PATH")).into_iter().collect(),
+        acp_agents: tokio::task::spawn_blocking(|| flow_agent(std::env::var_os("PATH")))
+            .await
+            .ok()
+            .flatten()
+            .into_iter()
+            .collect(),
     })
     .await?;
     eprintln!(
