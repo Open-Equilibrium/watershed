@@ -17,11 +17,11 @@ impl Sheet {
         Self(HashMap::from([
             (
                 AMOUNT.into(),
-                Operand::Range(vec![n(900.0), n(84.5), Value::Blank, n(300.0), t("n/a")]),
+                Operand::Range(vec![n(900.0), n(84.5), Value::Blank, n(300.0), t("n/a")].into()),
             ),
             (
                 CATEGORY.into(),
-                Operand::Range(vec![t("Rent"), t("Food"), t("Food"), t("rent"), t("Fun")]),
+                Operand::Range(vec![t("Rent"), t("Food"), t("Food"), t("rent"), t("Fun")].into()),
             ),
             (LEFT.into(), Operand::Value(n(715.5))),
         ]))

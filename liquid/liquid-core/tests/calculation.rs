@@ -969,3 +969,91 @@ fn a_chain_of_references_deeper_than_the_bound_stops_with_an_error() {
     assert_eq!(lines[0].1, "#REF!", "too deep to follow");
     assert_eq!(lines.last().unwrap().1, "1");
 }
+
+#[test]
+fn nested_formulas_along_a_long_chain_stop_within_one_budget() {
+    let mut home = Home::new();
+    let page = home.page.clone();
+    let report = home.calculation(&page);
+    let mut ids = vec![
+        home.workspace
+            .calculation(&page, &report)
+            .unwrap()
+            .unwrap()
+            .lines[0]
+            .id
+            .clone(),
+    ];
+    for _ in 0..liquid_core::MAX_DEPTH {
+        let after = ids.last().cloned();
+        ids.push(
+            home.add(
+                &page,
+                &report,
+                after.as_ref(),
+                line("", "1", LineStyle::Plain),
+            )
+            .unwrap(),
+        );
+    }
+    let nested = liquid_core::MAX_NESTING - 1;
+    for pair in ids.windows(2) {
+        let reference = format!("{{{page}.{report}.{}}}", pair[1]);
+        let formula = format!("{}{reference}{}", "SUM(".repeat(nested), ")".repeat(nested));
+        home.edit(Mutation::SetLine {
+            page: page.clone(),
+            block: report.clone(),
+            line: pair[0].clone(),
+            setup: line("", &formula, LineStyle::Plain),
+        })
+        .unwrap();
+    }
+    let lines = home.lines(&page, &report);
+    assert_eq!(lines[0].1, "#REF!");
+    assert_eq!(lines[lines.len() - 2].1, "1");
+}
+
+#[test]
+fn lines_that_each_read_the_next_two_stop_without_blowing_up() {
+    let mut home = Home::new();
+    let page = home.page.clone();
+    let report = home.calculation(&page);
+    let mut ids = vec![
+        home.workspace
+            .calculation(&page, &report)
+            .unwrap()
+            .unwrap()
+            .lines[0]
+            .id
+            .clone(),
+    ];
+    for _ in 0..liquid_core::MAX_DEPTH {
+        let after = ids.last().cloned();
+        ids.push(
+            home.add(
+                &page,
+                &report,
+                after.as_ref(),
+                line("", "1", LineStyle::Plain),
+            )
+            .unwrap(),
+        );
+    }
+    for at in 0..ids.len() - 2 {
+        let formula = format!(
+            "{{{page}.{report}.{}}} + {{{page}.{report}.{}}}",
+            ids[at + 1],
+            ids[at + 2]
+        );
+        home.edit(Mutation::SetLine {
+            page: page.clone(),
+            block: report.clone(),
+            line: ids[at].clone(),
+            setup: line("", &formula, LineStyle::Plain),
+        })
+        .unwrap();
+    }
+    let lines = home.lines(&page, &report);
+    assert_eq!(lines[0].1, "#REF!");
+    assert_eq!(lines[lines.len() - 3].1, "2");
+}

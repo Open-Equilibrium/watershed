@@ -1,6 +1,7 @@
 use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::fmt;
+use std::rc::Rc;
 
 pub const MAX_FORMULA: usize = 8_192;
 pub const MAX_NESTING: usize = 64;
@@ -26,7 +27,7 @@ pub enum Value {
 #[derive(Clone, Debug, PartialEq)]
 pub enum Operand {
     Value(Value),
-    Range(Vec<Value>),
+    Range(Rc<[Value]>),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -44,6 +45,12 @@ pub trait Resolve {
     fn above(&mut self) -> Operand {
         Operand::Value(Value::Error(Failure::Name))
     }
+
+    fn enter(&mut self) -> bool {
+        true
+    }
+
+    fn leave(&mut self) {}
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -432,6 +439,21 @@ impl Eval<'_> {
     }
 
     fn value(&self, expr: &Expr) -> Value {
+        if !matches!(
+            expr,
+            Expr::Chain(..) | Expr::Call(..) | Expr::Sign { .. } | Expr::Percent { .. }
+        ) {
+            return self.leaf(expr);
+        }
+        if !self.resolver.borrow_mut().enter() {
+            return Value::Error(Failure::Ref);
+        }
+        let value = self.leaf(expr);
+        self.resolver.borrow_mut().leave();
+        value
+    }
+
+    fn leaf(&self, expr: &Expr) -> Value {
         match expr {
             Expr::Value(value) => value.clone(),
             Expr::Ref(_) | Expr::Above => match self.operand(expr) {
@@ -466,31 +488,27 @@ impl Eval<'_> {
         }
     }
 
-    fn values(&self, args: &[Expr]) -> Vec<(Value, bool)> {
-        args.iter()
-            .flat_map(|arg| match self.operand(arg) {
-                Operand::Value(value) => vec![(value, true)],
-                Operand::Range(values) => values.into_iter().map(|v| (v, false)).collect(),
-            })
-            .collect()
+    fn operands(&self, args: &[Expr]) -> Vec<Operand> {
+        args.iter().map(|arg| self.operand(arg)).collect()
     }
 
     fn numbers(&self, args: &[Expr]) -> Outcome<Vec<f64>> {
+        let operands = self.operands(args);
         let mut numbers = Vec::new();
-        for (value, direct) in self.values(args) {
+        for (value, direct) in each(&operands) {
             match value {
-                Value::Error(failure) => return Err(failure),
-                Value::Number(n) => numbers.push(n),
-                value if direct => numbers.push(number(&value)?),
+                Value::Error(failure) => return Err(*failure),
+                Value::Number(n) => numbers.push(*n),
+                value if direct => numbers.push(number(value)?),
                 _ => {}
             }
         }
         Ok(numbers)
     }
 
-    fn range(&self, expr: &Expr) -> Vec<Value> {
+    fn range(&self, expr: &Expr) -> Rc<[Value]> {
         match self.operand(expr) {
-            Operand::Value(value) => vec![value],
+            Operand::Value(value) => Rc::from(vec![value]),
             Operand::Range(values) => values,
         }
     }
@@ -500,7 +518,7 @@ impl Eval<'_> {
         let criterion = Criterion::new(self.scalar(&args[1])?);
         let summed = args
             .get(2)
-            .map_or_else(|| tested.clone(), |arg| self.range(arg));
+            .map_or_else(|| Rc::clone(&tested), |arg| self.range(arg));
         let mut numbers = Vec::new();
         for (index, value) in tested.iter().enumerate() {
             if criterion.matches(value) {
@@ -565,19 +583,15 @@ impl Eval<'_> {
                     _ => n(numbers[middle]),
                 }
             }
-            "COUNT" => n(self
-                .values(args)
-                .iter()
+            "COUNT" => n(each(&self.operands(args))
                 .filter(|(value, direct)| match value {
                     Value::Number(_) => true,
                     Value::Error(_) | Value::Blank => false,
                     value => *direct && number(value).is_ok(),
                 })
                 .count() as f64),
-            "COUNTA" => n(self
-                .values(args)
-                .iter()
-                .filter(|(value, _)| *value != Value::Blank)
+            "COUNTA" => n(each(&self.operands(args))
+                .filter(|(value, _)| **value != Value::Blank)
                 .count() as f64),
             "COUNTBLANK" => n(self
                 .range(arg(0))
@@ -610,12 +624,13 @@ impl Eval<'_> {
             },
             "AND" | "OR" => {
                 let mut found = Vec::new();
-                for (value, direct) in self.values(args) {
+                let operands = self.operands(args);
+                for (value, direct) in each(&operands) {
                     match value {
-                        Value::Error(failure) => return Err(failure),
+                        Value::Error(failure) => return Err(*failure),
                         Value::Text(_) if direct => return Err(Failure::Value),
                         Value::Text(_) | Value::Blank => {}
-                        value => found.push(number(&value)? != 0.0),
+                        value => found.push(number(value)? != 0.0),
                     }
                 }
                 if found.is_empty() {
@@ -677,17 +692,14 @@ impl Eval<'_> {
             }
             "CONCAT" => {
                 let mut joined = String::new();
-                for (value, _) in self.values(args) {
-                    joined.push_str(&text(&value)?);
+                for (value, _) in each(&self.operands(args)) {
+                    joined.push_str(&text(value)?);
                 }
                 Value::Text(joined)
             }
             "INDEX" => {
                 let row = whole(count(1, 1.0)? - 1.0)?;
-                self.range(arg(0))
-                    .into_iter()
-                    .nth(row)
-                    .ok_or(Failure::Ref)?
+                self.range(arg(0)).get(row).cloned().ok_or(Failure::Ref)?
             }
             "ISBLANK" => Value::Bool(self.value(arg(0)) == Value::Blank),
             "ISNUMBER" => Value::Bool(matches!(self.value(arg(0)), Value::Number(_))),
@@ -696,6 +708,16 @@ impl Eval<'_> {
             _ => return Err(Failure::Name),
         })
     }
+}
+
+fn each(operands: &[Operand]) -> impl Iterator<Item = (&Value, bool)> {
+    operands.iter().flat_map(|operand| {
+        let (values, direct) = match operand {
+            Operand::Value(value) => (std::slice::from_ref(value), true),
+            Operand::Range(values) => (&values[..], false),
+        };
+        values.iter().map(move |value| (value, direct))
+    })
 }
 
 fn arity(name: &str) -> Option<(usize, usize)> {

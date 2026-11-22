@@ -241,6 +241,8 @@ struct Values<'w, S: Store> {
     read_columns: HashMap<(BlockId, FieldId), Rc<[Value]>>,
     tables: HashMap<BlockId, Option<Rc<Snapshot>>>,
     depth: usize,
+    cuts: usize,
+    cut: HashMap<Key, usize>,
     uses: BTreeSet<Used>,
 }
 
@@ -250,7 +252,7 @@ struct Snapshot {
     cells: Vec<HashMap<String, Cell>>,
 }
 
-pub const MAX_DEPTH: usize = 256;
+pub const MAX_DEPTH: usize = 128;
 
 #[derive(Clone)]
 enum Context {
@@ -273,6 +275,8 @@ impl<'w, S: Store> Values<'w, S> {
             read_columns: HashMap::new(),
             tables: HashMap::new(),
             depth: 0,
+            cuts: 0,
+            cut: HashMap::new(),
             uses: BTreeSet::new(),
         }
     }
@@ -298,14 +302,13 @@ impl<'w, S: Store> Values<'w, S> {
     }
 
     fn deeper(&mut self, formula: &Formula, context: Context) -> Value {
-        if self.depth >= MAX_DEPTH {
+        if !self.enter() {
             return MISSING;
         }
-        self.depth += 1;
         let outer = self.context.replace(context);
         let value = formula.evaluate(self);
         self.context = outer;
-        self.depth -= 1;
+        self.leave();
         value
     }
 
@@ -337,9 +340,14 @@ impl<'w, S: Store> Values<'w, S> {
         if let Some(value) = self.memo.get(&key) {
             return value.clone();
         }
+        if self.cut.get(&key).is_some_and(|depth| self.depth >= *depth) {
+            self.cuts += 1;
+            return MISSING;
+        }
         if !self.visiting.insert(key.clone()) {
             return MISSING;
         }
+        let cuts = self.cuts;
         let source = lines[at].setup.formula.trim();
         let value = if source.is_empty() {
             Value::Blank
@@ -353,7 +361,11 @@ impl<'w, S: Store> Values<'w, S> {
             }
         };
         self.visiting.remove(&key);
-        self.memo.insert(key, value.clone());
+        if self.cuts == cuts {
+            self.memo.insert(key, value.clone());
+        } else {
+            self.cut.insert(key, self.depth);
+        }
         value
     }
 
@@ -427,16 +439,25 @@ impl<'w, S: Store> Values<'w, S> {
         if let Some(value) = self.memo.get(&key) {
             return value.clone();
         }
+        if self.cut.get(&key).is_some_and(|depth| self.depth >= *depth) {
+            self.cuts += 1;
+            return MISSING;
+        }
         if !self.visiting.insert(key.clone()) {
             return MISSING;
         }
+        let cuts = self.cuts;
         let value = match Formula::parse(&field.formula) {
             _ if field.formula.trim().is_empty() => Value::Blank,
             Ok(formula) => self.deeper(&formula, Context::Row(table.clone(), row.clone())),
             Err(_) => Value::Error(crate::Failure::Name),
         };
         self.visiting.remove(&key);
-        self.memo.insert(key, value.clone());
+        if self.cuts == cuts {
+            self.memo.insert(key, value.clone());
+        } else {
+            self.cut.insert(key, self.depth);
+        }
         value
     }
 
@@ -449,7 +470,7 @@ impl<'w, S: Store> Values<'w, S> {
         };
         let reading = (table.clone(), field.id.clone());
         if let Some(read) = self.read_columns.get(&reading) {
-            return Operand::Range(read.to_vec());
+            return Operand::Range(Rc::clone(read));
         }
         let Some(snapshot) = self.snapshot(&table) else {
             return Operand::Value(MISSING);
@@ -457,14 +478,17 @@ impl<'w, S: Store> Values<'w, S> {
         if !self.columns.insert(reading.clone()) {
             return Operand::Value(MISSING);
         }
+        let cuts = self.cuts;
         let values: Rc<[Value]> = snapshot
             .ids
             .iter()
             .map(|row| self.field_value(&table, row, &field))
             .collect();
         self.columns.remove(&reading);
-        self.read_columns.insert(reading, Rc::clone(&values));
-        Operand::Range(values.to_vec())
+        if self.cuts == cuts {
+            self.read_columns.insert(reading, Rc::clone(&values));
+        }
+        Operand::Range(values)
     }
 
     fn own(&mut self, field: &str) -> Value {
@@ -540,6 +564,19 @@ impl<S: Store> Resolve for Values<'_, S> {
             [page, block, line] => Operand::Value(self.line(page, block, line)),
             _ => Operand::Value(MISSING),
         }
+    }
+
+    fn enter(&mut self) -> bool {
+        if self.depth >= MAX_DEPTH {
+            self.cuts += 1;
+            return false;
+        }
+        self.depth += 1;
+        true
+    }
+
+    fn leave(&mut self) {
+        self.depth -= 1;
     }
 
     fn above(&mut self) -> Operand {

@@ -61,7 +61,16 @@ class Suggestion {
   final Reference? reference;
 }
 
-final _token = RegExp(r'\{[0-9a-f.]+\}');
+final _token = RegExp(r'"(?:[^"]|"")*"|\{[0-9a-f.]+\}');
+
+String _tokens(String formula, String Function(String token, int at) chip) {
+  var at = 0;
+  return formula.replaceAllMapped(
+    _token,
+    (match) => match[0]!.startsWith('"') ? match[0]! : chip(match[0]!, at++),
+  );
+}
+
 final _number = RegExp(r'^-?\d+(\.\d+)?([eE][+-]?\d+)?$');
 final _stop = RegExp(r'[(),+\-−*/^&=<>%￼]');
 
@@ -92,10 +101,9 @@ bool isComputed(String formula) {
     return (_literal(source) ?? source, const []);
   }
   final chips = <Reference>[];
-  final text = source.replaceAllMapped(_token, (match) {
-    final at = chips.length;
+  final text = _tokens(source, (token, at) {
     chips.add(
-      Reference(match[0]!, at < names.length ? names[at] ?? '#REF!' : '#REF!'),
+      Reference(token, at < names.length ? names[at] ?? '#REF!' : '#REF!'),
     );
     return chipMark;
   });
@@ -125,19 +133,19 @@ String storedFormula(
 List<String?> tokenNames(
   String formula,
   String? Function(List<String> ids) name,
-) => [
-  for (final token in _token.allMatches(formula))
-    name(token[0]!.substring(1, token[0]!.length - 1).split('.')),
-];
-
-String namedFormula(String formula, List<String?> names) {
-  var at = 0;
-  return formula.replaceAllMapped(_token, (_) {
-    final name = at < names.length ? names[at] : null;
-    at++;
-    return name ?? '#REF!';
+) {
+  final names = <String?>[];
+  _tokens(formula, (token, _) {
+    names.add(name(token.substring(1, token.length - 1).split('.')));
+    return token;
   });
+  return names;
 }
+
+String namedFormula(String formula, List<String?> names) => _tokens(
+  formula,
+  (_, at) => (at < names.length ? names[at] : null) ?? '#REF!',
+);
 
 class FormulaText extends TextEditingController {
   bool always = false;
