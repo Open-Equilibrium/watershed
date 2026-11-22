@@ -6166,6 +6166,7 @@ impl SseDecode for crate::api::workspace::BridgeAnswer {
             <Option<crate::api::database::BridgeDatabase>>::sse_decode(deserializer);
         let mut var_rows = <Vec<crate::api::database::BridgeRow>>::sse_decode(deserializer);
         let mut var_groups = <Vec<crate::api::database::BridgeGroup>>::sse_decode(deserializer);
+        let mut var_hits = <Vec<crate::api::workspace::BridgeHit>>::sse_decode(deserializer);
         let mut var_tables = <Vec<crate::api::workspace::BridgeTable>>::sse_decode(deserializer);
         let mut var_shown = <Vec<crate::api::workspace::BridgeShown>>::sse_decode(deserializer);
         let mut var_icon = <Option<String>>::sse_decode(deserializer);
@@ -6183,6 +6184,7 @@ impl SseDecode for crate::api::workspace::BridgeAnswer {
             database: var_database,
             rows: var_rows,
             groups: var_groups,
+            hits: var_hits,
             tables: var_tables,
             shown: var_shown,
             icon: var_icon,
@@ -6730,6 +6732,19 @@ impl SseDecode for crate::api::database::BridgeFilter {
     }
 }
 
+impl SseDecode for crate::api::workspace::BridgeFound {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut inner = <i32>::sse_decode(deserializer);
+        return match inner {
+            0 => crate::api::workspace::BridgeFound::Page,
+            1 => crate::api::workspace::BridgeFound::Table,
+            2 => crate::api::workspace::BridgeFound::Text,
+            _ => unreachable!("Invalid variant for BridgeFound: {}", inner),
+        };
+    }
+}
+
 impl SseDecode for crate::api::git::BridgeGitAction {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -6827,6 +6842,22 @@ impl SseDecode for crate::api::database::BridgeGroup {
             value: var_value,
             count: var_count,
             rows: var_rows,
+        };
+    }
+}
+
+impl SseDecode for crate::api::workspace::BridgeHit {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_found = <crate::api::workspace::BridgeFound>::sse_decode(deserializer);
+        let mut var_id = <String>::sse_decode(deserializer);
+        let mut var_page = <Option<String>>::sse_decode(deserializer);
+        let mut var_text = <String>::sse_decode(deserializer);
+        return crate::api::workspace::BridgeHit {
+            found: var_found,
+            id: var_id,
+            page: var_page,
+            text: var_text,
         };
     }
 }
@@ -7563,8 +7594,9 @@ impl SseDecode for crate::api::workspace::BridgeQueryKind {
             8 => crate::api::workspace::BridgeQueryKind::Database,
             9 => crate::api::workspace::BridgeQueryKind::Rows,
             10 => crate::api::workspace::BridgeQueryKind::Groups,
-            11 => crate::api::workspace::BridgeQueryKind::Tables,
-            12 => crate::api::workspace::BridgeQueryKind::TableViews,
+            11 => crate::api::workspace::BridgeQueryKind::Search,
+            12 => crate::api::workspace::BridgeQueryKind::Tables,
+            13 => crate::api::workspace::BridgeQueryKind::TableViews,
             _ => unreachable!("Invalid variant for BridgeQueryKind: {}", inner),
         };
     }
@@ -8328,6 +8360,18 @@ impl SseDecode for Vec<crate::api::database::BridgeGroup> {
             ans_.push(<crate::api::database::BridgeGroup>::sse_decode(
                 deserializer,
             ));
+        }
+        return ans_;
+    }
+}
+
+impl SseDecode for Vec<crate::api::workspace::BridgeHit> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut len_ = <i32>::sse_decode(deserializer);
+        let mut ans_ = Vec::with_capacity(len_ as usize);
+        for idx_ in 0..len_ {
+            ans_.push(<crate::api::workspace::BridgeHit>::sse_decode(deserializer));
         }
         return ans_;
     }
@@ -9680,6 +9724,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::workspace::BridgeAnswer {
             self.database.into_into_dart().into_dart(),
             self.rows.into_into_dart().into_dart(),
             self.groups.into_into_dart().into_dart(),
+            self.hits.into_into_dart().into_dart(),
             self.tables.into_into_dart().into_dart(),
             self.shown.into_into_dart().into_dart(),
             self.icon.into_into_dart().into_dart(),
@@ -10463,6 +10508,28 @@ impl flutter_rust_bridge::IntoIntoDart<crate::api::database::BridgeFilter>
     }
 }
 // Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::workspace::BridgeFound {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        match self {
+            Self::Page => 0.into_dart(),
+            Self::Table => 1.into_dart(),
+            Self::Text => 2.into_dart(),
+            _ => unreachable!(),
+        }
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::workspace::BridgeFound
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::workspace::BridgeFound>
+    for crate::api::workspace::BridgeFound
+{
+    fn into_into_dart(self) -> crate::api::workspace::BridgeFound {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
 impl flutter_rust_bridge::IntoDart for crate::api::git::BridgeGitAction {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         match self {
@@ -10587,6 +10654,29 @@ impl flutter_rust_bridge::IntoIntoDart<crate::api::database::BridgeGroup>
     for crate::api::database::BridgeGroup
 {
     fn into_into_dart(self) -> crate::api::database::BridgeGroup {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::workspace::BridgeHit {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.found.into_into_dart().into_dart(),
+            self.id.into_into_dart().into_dart(),
+            self.page.into_into_dart().into_dart(),
+            self.text.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::workspace::BridgeHit
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::workspace::BridgeHit>
+    for crate::api::workspace::BridgeHit
+{
+    fn into_into_dart(self) -> crate::api::workspace::BridgeHit {
         self
     }
 }
@@ -11521,8 +11611,9 @@ impl flutter_rust_bridge::IntoDart for crate::api::workspace::BridgeQueryKind {
             Self::Database => 8.into_dart(),
             Self::Rows => 9.into_dart(),
             Self::Groups => 10.into_dart(),
-            Self::Tables => 11.into_dart(),
-            Self::TableViews => 12.into_dart(),
+            Self::Search => 11.into_dart(),
+            Self::Tables => 12.into_dart(),
+            Self::TableViews => 13.into_dart(),
             _ => unreachable!(),
         }
     }
@@ -12582,6 +12673,7 @@ impl SseEncode for crate::api::workspace::BridgeAnswer {
         <Option<crate::api::database::BridgeDatabase>>::sse_encode(self.database, serializer);
         <Vec<crate::api::database::BridgeRow>>::sse_encode(self.rows, serializer);
         <Vec<crate::api::database::BridgeGroup>>::sse_encode(self.groups, serializer);
+        <Vec<crate::api::workspace::BridgeHit>>::sse_encode(self.hits, serializer);
         <Vec<crate::api::workspace::BridgeTable>>::sse_encode(self.tables, serializer);
         <Vec<crate::api::workspace::BridgeShown>>::sse_encode(self.shown, serializer);
         <Option<String>>::sse_encode(self.icon, serializer);
@@ -13016,6 +13108,23 @@ impl SseEncode for crate::api::database::BridgeFilter {
     }
 }
 
+impl SseEncode for crate::api::workspace::BridgeFound {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(
+            match self {
+                crate::api::workspace::BridgeFound::Page => 0,
+                crate::api::workspace::BridgeFound::Table => 1,
+                crate::api::workspace::BridgeFound::Text => 2,
+                _ => {
+                    unimplemented!("");
+                }
+            },
+            serializer,
+        );
+    }
+}
+
 impl SseEncode for crate::api::git::BridgeGitAction {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
@@ -13095,6 +13204,16 @@ impl SseEncode for crate::api::database::BridgeGroup {
         <crate::api::database::BridgeCell>::sse_encode(self.value, serializer);
         <i64>::sse_encode(self.count, serializer);
         <Vec<crate::api::database::BridgeRow>>::sse_encode(self.rows, serializer);
+    }
+}
+
+impl SseEncode for crate::api::workspace::BridgeHit {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <crate::api::workspace::BridgeFound>::sse_encode(self.found, serializer);
+        <String>::sse_encode(self.id, serializer);
+        <Option<String>>::sse_encode(self.page, serializer);
+        <String>::sse_encode(self.text, serializer);
     }
 }
 
@@ -13674,8 +13793,9 @@ impl SseEncode for crate::api::workspace::BridgeQueryKind {
                 crate::api::workspace::BridgeQueryKind::Database => 8,
                 crate::api::workspace::BridgeQueryKind::Rows => 9,
                 crate::api::workspace::BridgeQueryKind::Groups => 10,
-                crate::api::workspace::BridgeQueryKind::Tables => 11,
-                crate::api::workspace::BridgeQueryKind::TableViews => 12,
+                crate::api::workspace::BridgeQueryKind::Search => 11,
+                crate::api::workspace::BridgeQueryKind::Tables => 12,
+                crate::api::workspace::BridgeQueryKind::TableViews => 13,
                 _ => {
                     unimplemented!("");
                 }
@@ -14243,6 +14363,16 @@ impl SseEncode for Vec<crate::api::database::BridgeGroup> {
         <i32>::sse_encode(self.len() as _, serializer);
         for item in self {
             <crate::api::database::BridgeGroup>::sse_encode(item, serializer);
+        }
+    }
+}
+
+impl SseEncode for Vec<crate::api::workspace::BridgeHit> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(self.len() as _, serializer);
+        for item in self {
+            <crate::api::workspace::BridgeHit>::sse_encode(item, serializer);
         }
     }
 }

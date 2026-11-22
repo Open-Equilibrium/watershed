@@ -415,6 +415,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   BridgeFilter dco_decode_bridge_filter(dynamic raw);
 
   @protected
+  BridgeFound dco_decode_bridge_found(dynamic raw);
+
+  @protected
   BridgeGitAction dco_decode_bridge_git_action(dynamic raw);
 
   @protected
@@ -428,6 +431,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   BridgeGroup dco_decode_bridge_group(dynamic raw);
+
+  @protected
+  BridgeHit dco_decode_bridge_hit(dynamic raw);
 
   @protected
   BridgeHostProject dco_decode_bridge_host_project(dynamic raw);
@@ -687,6 +693,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   List<BridgeGroup> dco_decode_list_bridge_group(dynamic raw);
+
+  @protected
+  List<BridgeHit> dco_decode_list_bridge_hit(dynamic raw);
 
   @protected
   List<BridgeHostProject> dco_decode_list_bridge_host_project(dynamic raw);
@@ -1291,6 +1300,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   BridgeFilter sse_decode_bridge_filter(SseDeserializer deserializer);
 
   @protected
+  BridgeFound sse_decode_bridge_found(SseDeserializer deserializer);
+
+  @protected
   BridgeGitAction sse_decode_bridge_git_action(SseDeserializer deserializer);
 
   @protected
@@ -1308,6 +1320,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   BridgeGroup sse_decode_bridge_group(SseDeserializer deserializer);
+
+  @protected
+  BridgeHit sse_decode_bridge_hit(SseDeserializer deserializer);
 
   @protected
   BridgeHostProject sse_decode_bridge_host_project(
@@ -1617,6 +1632,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   List<BridgeGroup> sse_decode_list_bridge_group(SseDeserializer deserializer);
+
+  @protected
+  List<BridgeHit> sse_decode_list_bridge_hit(SseDeserializer deserializer);
 
   @protected
   List<BridgeHostProject> sse_decode_list_bridge_host_project(
@@ -2401,6 +2419,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_bridge_filter(BridgeFilter self, SseSerializer serializer);
 
   @protected
+  void sse_encode_bridge_found(BridgeFound self, SseSerializer serializer);
+
+  @protected
   void sse_encode_bridge_git_action(
     BridgeGitAction self,
     SseSerializer serializer,
@@ -2426,6 +2447,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_bridge_group(BridgeGroup self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_bridge_hit(BridgeHit self, SseSerializer serializer);
 
   @protected
   void sse_encode_bridge_host_project(
@@ -2832,6 +2856,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_list_bridge_group(
     List<BridgeGroup> self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_list_bridge_hit(
+    List<BridgeHit> self,
     SseSerializer serializer,
   );
 

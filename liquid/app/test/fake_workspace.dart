@@ -943,6 +943,7 @@ class FakeWorkspace implements LiquidWorkspace {
       BridgeDatabase? database,
       List<BridgeRow> rows = const [],
       List<BridgeGroup> groups = const [],
+      List<BridgeHit> hits = const [],
       List<BridgeTable> tables = const [],
       List<BridgeShown> shown = const [],
       String? icon,
@@ -960,6 +961,7 @@ class FakeWorkspace implements LiquidWorkspace {
       database: database,
       rows: rows,
       groups: groups,
+      hits: hits,
       tables: tables,
       shown: shown,
       icon: icon,
@@ -1017,6 +1019,7 @@ class FakeWorkspace implements LiquidWorkspace {
         return answer(count: shown.length, rows: window(shown));
       }(),
       BridgeQueryKind.groups => answer(groups: _groups(query)),
+      BridgeQueryKind.search => answer(hits: _search(query)),
       BridgeQueryKind.workspace => answer(text: name, icon: icon),
       BridgeQueryKind.tables => answer(
         count: tables.length,
@@ -1064,6 +1067,46 @@ class FakeWorkspace implements LiquidWorkspace {
     tile: view.tile,
     inner: view.inner,
   );
+
+  List<BridgeHit> _search(BridgeQuery query) {
+    final words = (query.search ?? '')
+        .toLowerCase()
+        .split(RegExp(r'[^\p{L}\p{N}]+', unicode: true))
+        .where((word) => word.isNotEmpty)
+        .toList();
+    if (words.isEmpty) return const [];
+    bool found(String text) {
+      final held = text
+          .toLowerCase()
+          .split(RegExp(r'[^\p{L}\p{N}]+', unicode: true));
+      return words.every((word) => held.any((one) => one.startsWith(word)));
+    }
+
+    return [
+      for (final tree in pages.values)
+        for (final page in tree)
+          if (found(page.title))
+            BridgeHit(
+              found: BridgeFound.page,
+              id: page.id,
+              page: page.id,
+              text: page.title,
+            ),
+      for (final table in tables)
+        if (found(table.name))
+          BridgeHit(found: BridgeFound.table, id: table.id, text: table.name),
+      for (final MapEntry(key: page, value: shown) in views.entries)
+        for (final view in shown)
+          if (view.kind == BridgeBlockKind.text &&
+              found(texts[view.block] ?? ''))
+            BridgeHit(
+              found: BridgeFound.text,
+              id: view.block,
+              page: page,
+              text: texts[view.block]!,
+            ),
+    ];
+  }
 
   List<BridgeGroup> _groups(BridgeQuery query) {
     final field = databases[query.block]!.fields.firstWhere(

@@ -166,6 +166,7 @@ pub enum BridgeQueryKind {
     Database,
     Rows,
     Groups,
+    Search,
     Tables,
     TableViews,
 }
@@ -236,6 +237,21 @@ pub struct BridgeView {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BridgeFound {
+    Page,
+    Table,
+    Text,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BridgeHit {
+    pub found: BridgeFound,
+    pub id: String,
+    pub page: Option<String>,
+    pub text: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BridgeTile {
     pub column: u8,
     pub span: u8,
@@ -272,6 +288,7 @@ pub struct BridgeAnswer {
     pub database: Option<BridgeDatabase>,
     pub rows: Vec<BridgeRow>,
     pub groups: Vec<BridgeGroup>,
+    pub hits: Vec<BridgeHit>,
     pub tables: Vec<BridgeTable>,
     pub shown: Vec<BridgeShown>,
     pub icon: Option<String>,

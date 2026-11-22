@@ -3,8 +3,8 @@
 use std::path::{Path, PathBuf};
 
 use liquid_core::{
-    Actor, Created, Document, Error, Mutation, Operation, Origin, PageId, PersonId, Place, Request,
-    Store, Workspace,
+    Actor, Created, Document, Error, Found, Mutation, Operation, Origin, PageId, PersonId, Place,
+    Request, Store, Workspace,
 };
 use liquid_storage::Sqlite;
 
@@ -299,4 +299,34 @@ fn a_device_value_is_there_after_a_reopen_and_the_oldest_makes_room() {
             "no room keeps nothing"
         );
     }
+}
+
+#[test]
+fn the_search_index_is_kept_in_the_encrypted_replica() {
+    let scratch = Scratch::new("search");
+    let (mut workspace, page, block) = lisbon(&scratch.db());
+    apply(
+        &mut workspace,
+        Mutation::EditText {
+            page,
+            block: block.clone(),
+            at: 19,
+            delete: 0,
+            insert: ", then Porto \"by train\"".into(),
+        },
+    );
+    drop(workspace);
+    let store = Sqlite::open(&scratch.db(), &KEY).unwrap();
+    let mut workspace = Workspace::open(store).unwrap();
+    let hits = workspace.search("port tra", Found::Text, 10).unwrap();
+    assert_eq!(hits.len(), 1);
+    assert_eq!(hits[0].id, block.to_string());
+    assert!(hits[0].text.contains("Porto"));
+    assert_eq!(workspace.search("lisb", Found::Page, 10).unwrap().len(), 1);
+    assert!(workspace.search("\"", Found::Text, 10).unwrap().is_empty());
+    drop(workspace);
+    assert!(
+        !scratch.on_disk().windows(5).any(|bytes| bytes == b"Porto"),
+        "the index is encrypted with the rest"
+    );
 }

@@ -5,8 +5,8 @@ use std::sync::{Arc, Mutex};
 use crate::api::database::BridgeLayout;
 use crate::api::replica::LiquidWorkspace;
 use crate::api::workspace::{
-    BridgeChange, BridgeMutation, BridgeMutationKind, BridgeQuery, BridgeQueryKind, BridgeResource,
-    BridgeResourceKind, BridgeTextStyle, BridgeTile, MAX_WINDOW,
+    BridgeChange, BridgeFound, BridgeMutation, BridgeMutationKind, BridgeQuery, BridgeQueryKind,
+    BridgeResource, BridgeResourceKind, BridgeTextStyle, BridgeTile, MAX_WINDOW,
 };
 use crate::keys::{KEY_NAME_FILE, Keys, path_name};
 
@@ -960,4 +960,33 @@ fn a_tile_and_a_move_cross_the_bridge() {
             (first.clone(), None, Some(tile))
         ]
     );
+}
+
+#[test]
+fn search_finds_pages_and_text_across_the_bridge() {
+    let folder = Folder::new("search");
+    let workspace = LiquidWorkspace::open_with(&folder.0, &Memory::default()).unwrap();
+    let (_, page, block, _) = lisbon(&workspace);
+    let hits = workspace
+        .query(BridgeQuery {
+            search: Some("five da".into()),
+            limit: 5,
+            ..query(BridgeQueryKind::Search)
+        })
+        .unwrap()
+        .hits;
+    assert_eq!(
+        hits.iter()
+            .map(|hit| (hit.found, hit.id.as_str(), hit.page.as_deref()))
+            .collect::<Vec<_>>(),
+        [(BridgeFound::Text, block.as_str(), Some(page.as_str()))]
+    );
+    let pages = workspace
+        .query(BridgeQuery {
+            search: Some("lis".into()),
+            ..query(BridgeQueryKind::Search)
+        })
+        .unwrap()
+        .hits;
+    assert_eq!(pages[0].found, BridgeFound::Page);
 }

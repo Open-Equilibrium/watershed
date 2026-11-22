@@ -159,6 +159,23 @@ impl Store for Flaky {
     fn remember(&mut self, key: &str, value: Option<&str>, most: usize) -> Result<(), Error> {
         self.inner.remember(key, value, most)
     }
+
+    fn index(&mut self, writes: &[crate::IndexWrite], version: Option<u32>) -> Result<(), Error> {
+        self.inner.index(writes, version)
+    }
+
+    fn index_version(&mut self) -> Result<u32, Error> {
+        self.inner.index_version()
+    }
+
+    fn search(
+        &mut self,
+        words: &[String],
+        found: crate::Found,
+        limit: usize,
+    ) -> Result<Vec<crate::Hit>, Error> {
+        self.inner.search(words, found, limit)
+    }
 }
 
 #[test]
