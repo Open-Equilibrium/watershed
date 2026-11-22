@@ -33,6 +33,7 @@ struct Tree {
     counts: BTreeMap<String, usize>,
     started: usize,
     live: BTreeSet<String>,
+    subtrees: BTreeMap<String, Vec<String>>,
 }
 
 type NamesReply = Sender<Result<Vec<String>, String>>;
@@ -180,8 +181,24 @@ impl ProcessLauncher {
         Ok(names)
     }
 
+    fn child_ended(&self, child_name: &str) {
+        let orphans = {
+            let mut tree = self.tree.lock().unwrap_or_else(PoisonError::into_inner);
+            tree.subtrees
+                .remove(child_name)
+                .unwrap_or_default()
+                .into_iter()
+                .filter(|name| tree.live.contains(name))
+                .collect::<Vec<_>>()
+        };
+        for name in orphans {
+            self.report(InstanceEvent::Finished { name, failed: true });
+        }
+    }
+
     fn handle_child_line(
         &self,
+        child_name: &str,
         child: &Arc<Mutex<ChildStdin>>,
         message: &Value,
     ) -> Option<SubflowOutcome> {
@@ -194,7 +211,16 @@ impl ProcessLauncher {
                 request["conversation_id"].as_str().unwrap_or_default(),
                 &flows,
             ) {
-                Ok(names) => json!({"names": {"id": id, "names": names}}),
+                Ok(names) => {
+                    self.tree
+                        .lock()
+                        .unwrap_or_else(PoisonError::into_inner)
+                        .subtrees
+                        .entry(child_name.to_owned())
+                        .or_default()
+                        .extend(names.iter().cloned());
+                    json!({"names": {"id": id, "names": names}})
+                }
                 Err(error) => json!({"names": {"id": id, "error": error.to_string()}}),
             };
             let _ = write_line(child, &reply);
@@ -234,6 +260,14 @@ impl ProcessLauncher {
 }
 
 impl SubflowLauncher for ProcessLauncher {
+    fn run_started(&self) {
+        if self.upstream.is_none() {
+            let mut tree = self.tree.lock().unwrap_or_else(PoisonError::into_inner);
+            tree.counts.clear();
+            tree.started = 0;
+        }
+    }
+
     fn release(&self, names: &[String]) {
         match &self.upstream {
             Some(upstream) => {
@@ -410,11 +444,12 @@ impl ProcessLauncher {
                 let Ok(message) = serde_json::from_str::<Value>(&line) else {
                     continue;
                 };
-                if let Some(result) = launcher.handle_child_line(&stdin, &message) {
+                if let Some(result) = launcher.handle_child_line(&name, &stdin, &message) {
                     outcome = Some(result);
                 }
             }
             let _ = process.wait();
+            launcher.child_ended(&name);
             launcher
                 .children
                 .lock()
@@ -615,5 +650,48 @@ impl Write for ResultCapture {
 
     fn flush(&mut self) -> io::Result<()> {
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{InstanceEvent, ProcessLauncher};
+    use flow_agent_core::SubflowLauncher;
+    use std::sync::mpsc;
+
+    #[test]
+    fn each_root_run_numbers_from_one_and_a_dead_child_frees_its_subtree() {
+        let workspace = crate::test_support::empty_workspace();
+        let launcher = ProcessLauncher::default();
+        let (events, observed) = mpsc::channel();
+        launcher.observe(events);
+        let flows = vec!["scraper".to_owned(); 2];
+
+        let first = launcher
+            .names(&workspace, "chat-root", &flows)
+            .expect("names are free");
+        launcher.release(&first);
+        launcher.run_started();
+        let again = launcher
+            .names(&workspace, "chat-root", &flows)
+            .expect("a new Run numbers again");
+        assert_eq!(again, ["scraper-1", "scraper-2"]);
+
+        launcher
+            .tree
+            .lock()
+            .expect("tree lock")
+            .subtrees
+            .insert("scraper-1".to_owned(), vec!["scraper-2".to_owned()]);
+        launcher.child_ended("scraper-1");
+
+        assert!(!launcher.live_names().contains(&"scraper-2".to_owned()));
+        assert_eq!(
+            observed.try_recv().expect("the orphan is reported"),
+            InstanceEvent::Finished {
+                name: "scraper-2".to_owned(),
+                failed: true,
+            }
+        );
     }
 }

@@ -33,6 +33,8 @@ pub trait SubflowLauncher: Send + Sync {
 
     fn release(&self, names: &[String]);
 
+    fn run_started(&self) {}
+
     fn run(
         &self,
         workspace: &Path,

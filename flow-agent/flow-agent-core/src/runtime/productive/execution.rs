@@ -116,6 +116,9 @@ where
     T: ProductiveToolExecutor,
 {
     execution.workspace.verify_binding()?;
+    if let Ok(launcher) = crate::runtime::subflows::subflow_launcher() {
+        launcher.run_started();
+    }
     if let ProviderCredential::OpenAiCodex(credential) = execution.credential {
         validate_credential_record(credential)?;
     }
