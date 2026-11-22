@@ -20,6 +20,7 @@ import 'stored_name.dart';
 import 'table_cells.dart';
 import 'table_query.dart';
 import 'table_selection.dart';
+import 'table_tabs.dart';
 import 'table_view_parts.dart';
 import 'follow.dart';
 import 'page_views.dart';
@@ -64,8 +65,8 @@ class _TableBlockState extends State<TableBlock> implements CellDrop {
   BridgeDatabase? _database;
   late final _rows = WindowedList<BridgeRow>(
     (start, limit) async {
-      final sort = widget.fullPage ? _pageSort : widget.view.sort;
-      final filter = widget.fullPage ? null : widget.view.filter;
+      final sort = widget.fullPage ? _pageSort : _tab.sort;
+      final filter = widget.fullPage ? null : _tab.filter;
       final search = _search.isEmpty ? null : _search;
       final answer = await _state.read(
         query(
@@ -216,6 +217,125 @@ class _TableBlockState extends State<TableBlock> implements CellDrop {
 
   int _reads = 0;
 
+  String? _tabId;
+
+  BridgeTab get _tab => _tabIn(widget.view);
+
+  BridgeTab _tabIn(BridgeView view) =>
+      view.tabs.where((tab) => tab.id == _tabId).firstOrNull ??
+      view.tabs.firstOrNull ??
+      tabOfLayout(BridgeLayout.table);
+
+  String get _remembered => 'tab/${widget.view.id}';
+
+  Future<void> _recall() async {
+    try {
+      final id = await _state.workspace.remembered(key: _remembered);
+      if (!mounted || id == null || _tabId != null) return;
+      if (widget.view.tabs.any((tab) => tab.id == id)) _choose(id);
+    } on Object {
+      return;
+    }
+  }
+
+  void _choose(String id) {
+    if (id == _tab.id && _tabId != null) return;
+    final before = _tab;
+    setState(() => _tabId = id);
+    if (!sameSetup(before, _tab)) _tabChanged();
+  }
+
+  void _select(String id) {
+    _choose(id);
+    unawaited(
+      _state.workspace
+          .remember(key: _remembered, value: id)
+          .then((_) {}, onError: (Object _) {}),
+    );
+  }
+
+  void _tabChanged() {
+    if (_down.hasClients) {
+      _scrollingItself = true;
+      _down.jumpTo(0);
+      _scrollingItself = false;
+    }
+    unawaited(_rows.reread());
+  }
+
+  BridgeMutation _tabWrite(
+    BridgeMutationKind kind, {
+    String? tab,
+    String? text,
+    String? field,
+    BridgeLayout layout = BridgeLayout.table,
+    BridgeSort? sort,
+    BridgeFilter? filter,
+    String? after,
+    List<BridgeTab> tabs = const [],
+  }) => mutation(
+    kind,
+    page: _page,
+    view: widget.view.id,
+    tab: tab ?? _tab.id,
+    text: text,
+    field: field,
+    layout: layout,
+    sort: sort,
+    filter: filter,
+    after: after,
+    tabs: tabs,
+  );
+
+  Future<void> _addTab(BridgeTab tab, {String? after}) async {
+    try {
+      final added = await widget.views.write(
+        _tabWrite(
+          BridgeMutationKind.addTab,
+          after: after ?? widget.view.tabs.lastOrNull?.id,
+          tabs: [tab],
+        ),
+        const [],
+      );
+      if (mounted && added.tab != null) _select(added.tab!);
+    } on Object {
+      return;
+    }
+  }
+
+  void _deleteTab(String id) {
+    final tabs = widget.view.tabs;
+    if (id == _tab.id) {
+      final at = tabs.indexWhere((tab) => tab.id == id);
+      final next = at > 0 ? tabs[at - 1] : tabs.elementAtOrNull(at + 1);
+      if (next != null) _select(next.id);
+    }
+    _setQuery(_tabWrite(BridgeMutationKind.removeTab, tab: id));
+  }
+
+  Widget _tabStrip() => TabStrip(
+    tabs: widget.view.tabs,
+    active: _tab.id,
+    onSelect: _select,
+    onAdd: (layout) => unawaited(_addTab(tabOfLayout(layout))),
+    onRename: (tab, name) => _setQuery(
+      _tabWrite(BridgeMutationKind.renameTab, tab: tab, text: name),
+    ),
+    onLayout: (tab, layout) => _setQuery(
+      _tabWrite(BridgeMutationKind.setTabLayout, tab: tab, layout: layout),
+    ),
+    onDuplicate: (tab) => unawaited(
+      _addTab(
+        widget.view.tabs.firstWhere((shown) => shown.id == tab),
+        after: tab,
+      ),
+    ),
+    onDelete: _deleteTab,
+    onMove: (tab, after) => _setQuery(
+      _tabWrite(BridgeMutationKind.moveTab, tab: tab, after: after),
+    ),
+  );
+
   WorkspaceState get _state => widget.views.state;
   String get _page => widget.views.page;
   String get _block => widget.view.block;
@@ -240,6 +360,7 @@ class _TableBlockState extends State<TableBlock> implements CellDrop {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _takeCaret();
     });
+    unawaited(_recall());
     _followed = follow(
       _state.workspace,
       BridgeResource(kind: BridgeResourceKind.table, block: _block),
@@ -254,16 +375,8 @@ class _TableBlockState extends State<TableBlock> implements CellDrop {
         widget.views.pending(widget.view.id) == 0) {
       _name.show(widget.view.title);
     }
-    if (widget.view.sort == old.view.sort &&
-        sameFilter(widget.view.filter, old.view.filter)) {
-      return;
-    }
-    if (_down.hasClients) {
-      _scrollingItself = true;
-      _down.jumpTo(0);
-      _scrollingItself = false;
-    }
-    unawaited(_rows.reread());
+    if (sameSetup(_tabIn(old.view), _tab)) return;
+    _tabChanged();
   }
 
   void _setQuery(BridgeMutation change) => unawaited(
@@ -307,27 +420,23 @@ class _TableBlockState extends State<TableBlock> implements CellDrop {
       unawaited(_rows.reread());
       return;
     }
-    if (sort == widget.view.sort) return;
-    _setQuery(
-      mutation(
-        BridgeMutationKind.setViewSort,
-        page: _page,
-        view: widget.view.id,
-        sort: sort,
-      ),
-    );
+    if (sort == _tab.sort) return;
+    _setQuery(_tabWrite(BridgeMutationKind.setTabSort, sort: sort));
   }
 
   void _setFilter(BridgeFilter? filter) {
-    if (sameFilter(filter, widget.view.filter)) return;
-    _setQuery(
-      mutation(
-        BridgeMutationKind.setViewFilter,
-        page: _page,
-        view: widget.view.id,
-        filter: filter,
-      ),
-    );
+    if (sameFilter(filter, _tab.filter)) return;
+    _setQuery(_tabWrite(BridgeMutationKind.setTabFilter, filter: filter));
+  }
+
+  void _setGroup(String? field) {
+    if (field == _tab.group) return;
+    _setQuery(_tabWrite(BridgeMutationKind.setTabGroup, field: field));
+  }
+
+  void _setDate(String? field) {
+    if (field == _tab.date) return;
+    _setQuery(_tabWrite(BridgeMutationKind.setTabDate, field: field));
   }
 
   Widget _sortAnchor(
@@ -364,11 +473,11 @@ class _TableBlockState extends State<TableBlock> implements CellDrop {
       _database?.fields.any((field) => field.id == id) ?? false;
 
   BridgeSort? get _liveSort =>
-      switch (widget.fullPage ? _pageSort : widget.view.sort) {
+      switch (widget.fullPage ? _pageSort : _tab.sort) {
         final sort? when _isField(sort.field) => sort,
         _ => null,
       };
-  BridgeFilter? get _liveFilter => switch (widget.view.filter) {
+  BridgeFilter? get _liveFilter => switch (_tab.filter) {
     final filter? when _isField(filter.field) => filter,
     _ => null,
   };
@@ -774,6 +883,93 @@ class _TableBlockState extends State<TableBlock> implements CellDrop {
     );
   }
 
+  void _duplicate() {
+    final name = _database?.name ?? widget.view.title;
+    unawaited(
+      _write(
+        mutation(
+          BridgeMutationKind.duplicateTable,
+          page: _page,
+          after: widget.view.id,
+          block: _block,
+          text: '${name.isEmpty ? untitled : name} (copy)',
+          tabs: widget.view.tabs,
+        ),
+      ),
+    );
+  }
+
+  BridgeField? _groupOf(BridgeDatabase database) {
+    bool groups(BridgeField field) =>
+        field.kind == BridgeFieldKind.select ||
+        field.kind == BridgeFieldKind.checkbox;
+    return database.fields
+            .where((field) => field.id == _tab.group && groups(field))
+            .firstOrNull ??
+        (_tab.layout == BridgeLayout.board
+            ? database.fields
+                  .where((field) => field.kind == BridgeFieldKind.select)
+                  .firstOrNull
+            : null);
+  }
+
+  BridgeField? _dateOf(BridgeDatabase database) {
+    final dates = database.fields.where(
+      (field) => field.kind == BridgeFieldKind.date,
+    );
+    return dates.where((field) => field.id == _tab.date).firstOrNull ??
+        dates.firstOrNull;
+  }
+
+  Widget _groupControl(BridgeDatabase database) {
+    final calendar = _tab.layout == BridgeLayout.calendar;
+    final chosen = calendar ? _dateOf(database) : _groupOf(database);
+    final eligible = [
+      for (final field in database.fields)
+        if (calendar
+            ? field.kind == BridgeFieldKind.date
+            : field.kind == BridgeFieldKind.select ||
+                  field.kind == BridgeFieldKind.checkbox)
+          field,
+    ];
+    return QueryAnchor(
+      anchor: (toggle, _) => SetupControl(
+        key: Key(calendar ? 'table date' : 'table group'),
+        icon: calendar ? LucideIcons.calendar : LucideIcons.layoutList,
+        label: calendar ? 'Date' : 'Group',
+        value: chosen?.name,
+        onTap: toggle,
+      ),
+      menu: (close) => ChoiceMenu(
+        title: calendar ? 'Date' : 'Group by',
+        onClose: close,
+        hint: calendar ? 'Date fields' : 'Select and Checkbox fields',
+        sections: [
+          (
+            label: null,
+            choices: [
+              if (!calendar && _tab.layout == BridgeLayout.table)
+                (
+                  icon: LucideIcons.x,
+                  label: 'None',
+                  checked: chosen == null,
+                  onTap: () => _setGroup(null),
+                ),
+              for (final field in eligible)
+                (
+                  icon: fieldKindIcon(field.kind),
+                  label: field.name,
+                  checked: field.id == chosen?.id,
+                  onTap: () =>
+                      calendar ? _setDate(field.id) : _setGroup(field.id),
+                ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
   Future<void> _write(BridgeMutation change) =>
       widget.views.write(change, const []).then((_) {}, onError: (Object _) {});
 
@@ -816,7 +1012,10 @@ class _TableBlockState extends State<TableBlock> implements CellDrop {
             MoreMenu(
               label: 'View actions',
               visible: _hovered || touchFirst,
-              items: [(LucideIcons.trash, 'Delete View', _deleteView)],
+              items: [
+                (LucideIcons.copy, 'Duplicate', _duplicate),
+                (LucideIcons.trash, 'Delete View', _deleteView),
+              ],
             ),
           ],
         ),
@@ -848,6 +1047,8 @@ class _TableBlockState extends State<TableBlock> implements CellDrop {
         height: 28,
         child: Row(
           children: [
+            Flexible(child: _groupControl(database)),
+            const SizedBox(width: WsMetrics.space2),
             Flexible(
               child: _sortAnchor(
                 database.fields,
@@ -1000,6 +1201,7 @@ class _TableBlockState extends State<TableBlock> implements CellDrop {
                   )
                 else ...[
                   _titleLine(database),
+                  _tabStrip(),
                   if (database != null && database.fields.isNotEmpty)
                     _setupLine(database, sort, filter, numberFormat, days),
                   if (database == null && _read1)
@@ -1219,6 +1421,7 @@ class _TableBlockState extends State<TableBlock> implements CellDrop {
     );
 
     return SingleChildScrollView(
+      key: const Key('table columns'),
       controller: _sideways,
       scrollDirection: Axis.horizontal,
       child: SizedBox(

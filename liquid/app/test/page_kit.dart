@@ -282,6 +282,7 @@ class PageKit {
               title: '',
               boundary: boundary,
               kind: BridgeBlockKind.unknown,
+              tabs: const [],
             ),
           );
           after = 'unknown-view';

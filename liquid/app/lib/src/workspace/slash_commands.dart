@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../rust/api/database.dart';
 import '../rust/api/workspace.dart';
 import '../theme/icons.dart';
 import '../theme/theme.dart';
@@ -15,9 +16,12 @@ class SlashCommand {
     this.block,
     this.description,
     this.existing = false,
+    this.layout = BridgeLayout.table,
   });
 
   final bool existing;
+
+  final BridgeLayout layout;
 
   final String label;
   final IconData icon;
@@ -86,6 +90,20 @@ const slashCommands = [
     LucideIcons.table,
     block: BridgeBlockKind.database,
     description: 'New fields and rows',
+  ),
+  SlashCommand(
+    'Board',
+    LucideIcons.kanban,
+    block: BridgeBlockKind.database,
+    description: 'New Table as a Board',
+    layout: BridgeLayout.board,
+  ),
+  SlashCommand(
+    'Calendar',
+    LucideIcons.calendar,
+    block: BridgeBlockKind.database,
+    description: 'New Table as a Calendar',
+    layout: BridgeLayout.calendar,
   ),
   SlashCommand(
     'Existing Table…',

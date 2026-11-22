@@ -250,9 +250,7 @@ void main() {
     await key(tester, LogicalKeyboardKey.enter);
     await tester.enterText(editor(), '7');
     final sideways = tester
-        .widget<SingleChildScrollView>(
-          kit.inTable(find.byType(SingleChildScrollView)),
-        )
+        .widget<SingleChildScrollView>(find.byKey(const Key('table columns')))
         .controller!;
     sideways.jumpTo(150);
     await tester.pumpAndSettle();

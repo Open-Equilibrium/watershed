@@ -5,6 +5,7 @@ import 'package:liquid/src/rust/api/database.dart';
 import 'package:liquid/src/rust/api/workspace.dart';
 import 'package:liquid/src/workspace/workspace_state.dart';
 
+import 'fake_workspace.dart';
 import 'page_kit.dart';
 
 void main() {
@@ -43,7 +44,7 @@ void main() {
     await tester.pumpAndSettle();
   }
 
-  testWidgets('Existing Table… adds a View of a chosen Table with no setup', (
+  testWidgets('Existing Table… adds a View with one tab of a chosen layout', (
     tester,
   ) async {
     await kit.show(tester, [TablePart(expenses), const TextPart('')]);
@@ -54,11 +55,15 @@ void main() {
       tester,
       find.descendant(of: find.byType(Dialog), matching: find.text('Expenses')),
     );
+    expect(find.text('Add a View of “Expenses”'), findsOneWidget);
+    await pick(tester, find.byKey(const Key('layout Board')));
+    await pick(tester, find.text('Add View'));
     final added = kit.fake.applied.last;
     expect(added.kind, BridgeMutationKind.addTableView);
+    expect((added.block, added.text), (table, 'Expenses'));
     expect(
-      (added.block, added.text, added.sort, added.filter),
-      (table, 'Expenses', null, null),
+      [for (final tab in added.tabs) (tab.name, tab.layout)],
+      [('Board', BridgeLayout.board)],
     );
     expect(
       kit.fake.views[kit.page]!.where((view) => view.block == table),
@@ -66,7 +71,7 @@ void main() {
     );
   });
 
-  testWidgets('a new View may copy the setup of another, once', (tester) async {
+  testWidgets('a new View may copy the tabs of another, once', (tester) async {
     await kit.show(tester, [TablePart(expenses), const TextPart('')]);
     final table = kit.fake.tables.single.id;
     final review = await secondPage();
@@ -77,7 +82,7 @@ void main() {
         page: review,
         block: table,
         text: 'Big costs',
-        sort: sort,
+        tabs: [tabOf(BridgeLayout.table, name: 'By amount', sort: sort)],
       ),
     );
     await choose(tester);
@@ -85,16 +90,15 @@ void main() {
       tester,
       find.descendant(of: find.byType(Dialog), matching: find.text('Expenses')),
     );
-    expect(find.text('Add a View of “Expenses”'), findsOneWidget);
-    expect(find.text('Amount, descending'), findsOneWidget);
-    expect(
-      find.descendant(of: find.byType(Dialog), matching: find.text('Review')),
-      findsOneWidget,
-    );
-    await pick(tester, find.byKey(const Key('setup 0')));
+    expect(find.text('Review › Big costs'), findsOneWidget);
+    await pick(tester, find.text('Review › Big costs'));
     await pick(tester, find.text('Add View'));
     final added = kit.fake.applied.last;
-    expect((added.kind, added.sort), (BridgeMutationKind.addTableView, sort));
+    expect(added.kind, BridgeMutationKind.addTableView);
+    expect(
+      [for (final tab in added.tabs) (tab.name, tab.sort)],
+      [('By amount', sort)],
+    );
   });
 
   testWidgets('cancel adds no View', (tester) async {

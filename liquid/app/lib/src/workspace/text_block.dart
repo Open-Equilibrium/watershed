@@ -209,14 +209,14 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
           after: after,
           block: existing.table,
           text: existing.title,
-          sort: existing.sort,
-          filter: existing.filter,
+          tabs: existing.tabs,
         ),
         null => mutation(
           BridgeMutationKind.addDatabaseBlock,
           page: _page,
           after: after,
           text: '',
+          layout: choice.layout,
         ),
       }, const []);
     } on Object {

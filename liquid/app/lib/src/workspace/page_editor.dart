@@ -199,6 +199,7 @@ class PageEditor {
         title: '',
         boundary: target.boundary,
         kind: BridgeBlockKind.text,
+        tabs: const [],
       ),
       target.index,
     );

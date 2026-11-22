@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../controls.dart';
+import '../rust/api/database.dart';
 import '../rust/api/workspace.dart';
 import '../theme/icons.dart';
 import '../theme/theme.dart';
@@ -12,6 +13,7 @@ import 'follow.dart';
 import 'page_views.dart';
 import 'stored_name.dart';
 import 'table_block.dart';
+import 'table_tabs.dart';
 import 'table_view_parts.dart';
 import 'workspace_state.dart';
 
@@ -260,6 +262,7 @@ class _TablePageState extends State<TablePage> {
                           title: table.name,
                           boundary: false,
                           kind: BridgeBlockKind.database,
+                          tabs: [tabOfLayout(BridgeLayout.table)],
                         ),
                       ),
                     ],
