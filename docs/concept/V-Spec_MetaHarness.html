@@ -78,7 +78,7 @@
 
     <section id="flow-agent" class="section"><h2>3. Relationship to Flow Agent</h2><div class="body">
       <p><strong>Meta-Harness consumes Flow Agent; it does not own it.</strong> Flow Agent is a <a href="V-Spec_FlowAgent.html">standalone CLI product</a> usable without Meta-Harness or Liquid.</p>
-      <p>Flow Agent's ownership is in its <a href="V-Spec_FlowAgent.html">V-Spec</a>. Meta-Harness launches it on the same host and integrates through its <strong>public runtime surfaces</strong>: run/replay/tail/resume and JSONL now; RPC/control and export when implemented; embedding only if D-020 selects it. Its agent executor and each whole CLI agent process share a host, but Meta-Harness never reads Flow Agent's private session store directly or reaches into Flow Agent internals. It does not replace Flow Agent's runtime kernel, deterministic FSM or transcript persistence. Cross-host process control is outside the architecture.</p>
+      <p>Flow Agent's ownership is in its <a href="V-Spec_FlowAgent.html">V-Spec</a>. Meta-Harness launches it on the same host and integrates through its <strong>public runtime surfaces</strong>: run/replay/tail/resume, JSONL and <code>flow acp</code> now; export when implemented; embedding only if D-020 selects it. Its agent executor and each whole CLI agent process share a host, but Meta-Harness never reads Flow Agent's private session store directly or reaches into Flow Agent internals. It does not replace Flow Agent's runtime kernel, deterministic FSM or transcript persistence. Cross-host process control is outside the architecture.</p>
     </div></section>
 
     <section id="liquid" class="section"><h2>4. Relationship to Liquid</h2><div class="body">
@@ -221,7 +221,7 @@ meta uninstall</code></pre>
         <li><strong>Control plane:</strong> session registry, task state, attention state and schedules for this instance/host.</li>
         <li><strong>Config resolver:</strong> writes the configuration blocks into each harness home (<a href="#config">central config</a>).</li>
         <li><strong>Meta-Harness agent executor:</strong> host-local supervisor for whole CLI agents (<a href="../../GLOSSARY.md">GLOSSARY.md</a>); cross-host execution is outside the architecture.</li>
-        <li><strong>Adapters:</strong> T3 Code runs each harness through its built-in providers or as a local ACP command (ADR-0282).</li>
+        <li><strong>Adapters:</strong> T3 Code runs each harness through its built-in providers or as a local ACP command (ADR-0282). When <code>meta serve</code> starts on Unix, it registers the first <code>flow</code> in an absolute <code>PATH</code> folder whose <code>flow acp --help</code> exits successfully within 5 s and names <code>flow acp</code>, as the provider instance <code>flow-agent</code> running <code>flow acp</code>; a <code>flow</code> installed later joins at the next start (ADR-0312).</li>
         <li><strong>Artifact index:</strong> logs, summaries, checkpoints, handoff packs and host-provided diffs.</li>
         <li><strong>Policy gate:</strong> every configuration change is a proposal that needs approval (<a href="#policy-gate">approval and log</a>); control commands leave governance to the harness (ADR-0252).</li>
       </ul>

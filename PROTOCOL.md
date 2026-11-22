@@ -2,7 +2,7 @@
 
 The protocol is the **integration seam** between the tools. Tools are protocol clients, not compiled-in modules. This file is the canonical contract; build tools against it, not against each other's internals. Designed control/RPC surfaces use local JSON-RPC over stdio, but the implemented runtime stream is bare JSONL events. The envelope is transport-agnostic and all cross-tool state is addressed by IDs.
 
-Flow Agent is a **standalone host-local product**, and its event stream is a public runtime contract in its own right (CLI JSONL mode, future RPC mode and local session log all carry these events — see [`docs/concept/V-Spec_FlowAgent.html`](docs/concept/V-Spec_FlowAgent.html)). A Meta-Harness on the same host consumes that contract; neither Meta-Harness nor Liquid is required to run Flow Agent.
+Flow Agent is a **standalone host-local product**, and its event stream is a public runtime contract in its own right (CLI JSONL mode, the `flow acp` binding and local session log all carry these events — see [`docs/concept/V-Spec_FlowAgent.html`](docs/concept/V-Spec_FlowAgent.html)). A Meta-Harness on the same host consumes that contract; neither Meta-Harness nor Liquid is required to run Flow Agent.
 
 ## Participants
 
@@ -55,7 +55,7 @@ Command/request messages are not runtime event types; the control surface is the
 
 ## Required v0 event-envelope fields
 
-The v0 wire format is one UTF-8 JSON object per event. JSONL mode and the session's ordered event segments store one event object per line; future RPC event delivery carries the same object in JSON-RPC payloads. Protocol v0 has an exclusive JSON container-recursion limit of 128 across the complete event object: the envelope root counts, a path containing at most 127 arrays or objects is accepted, and entering the 128th is rejected before recursive processing. Constructed payloads, additive fields, ordinary and canonical event serialization, and the public canonical-JSON helper enforce the same boundary; for the helper, the supplied value is the root.
+The v0 wire format is one UTF-8 JSON object per event. JSONL mode and the session's ordered event segments store one event object per line. Protocol v0 has an exclusive JSON container-recursion limit of 128 across the complete event object: the envelope root counts, a path containing at most 127 arrays or objects is accepted, and entering the 128th is rejected before recursive processing. Constructed payloads, additive fields, ordinary and canonical event serialization, and the public canonical-JSON helper enforce the same boundary; for the helper, the supplied value is the root.
 
 | Field | Type / rule |
 | --- | --- |
@@ -414,12 +414,13 @@ All listed payload fields are strings unless noted otherwise; string arrays are 
 
 ## ACP binding (`flow acp`)
 
-`flow acp` serves one T3 Code thread over the [Agent Client Protocol](https://agentclientprotocol.com) version 1: newline-delimited JSON-RPC 2.0 on stdin and stdout, at most 8 MiB per line. Meta-Harness registers an installed `flow` as the provider instance `flow-agent` ([ADR-0312](docs/adr/ADR-LOG.md)).
+`flow acp` serves one T3 Code thread over the [Agent Client Protocol](https://agentclientprotocol.com) version 1: newline-delimited JSON-RPC 2.0 on stdin and stdout, at most 8 MiB per line. Meta-Harness registers an installed `flow` as the provider instance `flow-agent` ([V-Spec](docs/concept/V-Spec_MetaHarness.html#t3-stack), [ADR-0312](docs/adr/ADR-LOG.md)).
 
 - `initialize` reports `loadSession` and text-only prompts and needs no authentication.
 - `session/new` names the chat `chat-` and 32 lowercase hex digits; the first Run creates its Conversation under exactly that id. `session/load` reopens it. Both report one select config option, `flow`, listing up to 64 installed Flows by id and set to the Conversation's Flow once it exists; `session/set_config_option` changes it until then.
 - `session/prompt` reads the first text block, or the text inside its last `<user_request>` element, and refuses more than 1 MiB. With no Run active, it starts the chosen Flow with the text as its string root input, continues the Conversation in a new Run when the last Run ended, or resumes an interrupted Run exactly with the text as a steering message.
-- While a Run is active, `session/cancel` for the open session answers its prompt `cancelled` at once and asks the Run to pause, and the next `session/prompt` is a steering message of at most 1 MiB; at most 16 wait at once. The Run takes it after its running provider turn, records it in `recovery.jsonl`, emits it as a `user` message and passes it to the active leaf Phase's next provider turn; a Phase that has its result takes one more turn instead. A paused Run waits for the next message, even when an earlier one is still queued, and then takes them in order. A message no Run took starts the next Run after a Run that ended; after a failed Run, the prompt's error counts the messages not delivered.
+- While a Run is active, `session/cancel` for the open session answers its prompt `cancelled` at once and asks the Run to pause, and the next `session/prompt` is a steering message of at most 1 MiB; at most 16 wait at once. The Run takes it after its running provider turn, records it in `recovery.jsonl`, emits it as a `user` message and passes it to the active leaf Phase's next provider turn; a Phase that has its result takes one more turn instead. A paused Run waits, without emitting `session.paused`, for the next message, even when an earlier one is still queued, and then takes them in order. A message no Run took starts the next Run after a Run that ended; after a failed Run, the prompt's error counts the messages not delivered.
+- Refused with `-32602`: `session/new` or `session/load` while a Run is active, a second open prompt, a relative `cwd` and a `session/load` id not in the `chat-` form. A line that is too long or not JSON gets `-32700` with a null id; other methods get `-32601`.
 - Updates: Phases as `plan` entries, each agent message as one `agent_message_chunk` (a string result shown as its value, Tool-request summaries left out), Tools as `tool_call` and `tool_call_update`, and `error` events as text; the newest 256 updates made while no prompt is open follow when the next one opens. The prompt answers `end_turn` when its Run ends, or a JSON-RPC error.
 
 ## CLI exit status
