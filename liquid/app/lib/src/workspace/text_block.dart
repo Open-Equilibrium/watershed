@@ -180,6 +180,7 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
       return;
     }
     if (choice.block == BridgeBlockKind.code) return _turnIntoCode();
+    if (choice.block == BridgeBlockKind.math) return _turnIntoMath();
     if (choice.block == BridgeBlockKind.media) return _addMedia(_pickFiles);
     if (choice.block == BridgeBlockKind.whiteboard) {
       return _addBlock(BridgeMutationKind.addWhiteboardBlock, 'Whiteboard');
@@ -475,6 +476,12 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
     if (_composing && !_state.quitting) return;
     final text = _text.text;
     if (text == stored) return;
+    if (mathTyped(text, stored, _text.selection.baseOffset)) {
+      _set('', 0);
+      _send('');
+      _turnIntoMath();
+      return;
+    }
     if (codeTyped(text, stored, _text.selection.baseOffset)) {
       final rest = text.substring(codeShortcut.length);
       _set(rest, 0);
@@ -731,6 +738,15 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
     );
     widget.views.moveCaret(
       Caret(widget.view.id, 0, kind: BridgeBlockKind.code),
+    );
+  }
+
+  void _turnIntoMath() {
+    _write(
+      mutation(BridgeMutationKind.turnIntoMath, page: _page, block: block),
+    );
+    widget.views.moveCaret(
+      Caret(widget.view.id, 0, kind: BridgeBlockKind.math),
     );
   }
 

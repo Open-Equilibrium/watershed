@@ -253,13 +253,23 @@ class FakeWorkspace implements LiquidWorkspace {
         );
         _viewsChanged(mutation.page);
         return BridgeApplied(elements: const [], action: _id());
-      case BridgeMutationKind.turnIntoCode || BridgeMutationKind.turnIntoText:
-        final code = mutation.kind == BridgeMutationKind.turnIntoCode;
-        final (from, to) = code
-            ? (BridgeBlockKind.text, BridgeBlockKind.code)
-            : (BridgeBlockKind.code, BridgeBlockKind.text);
+      case BridgeMutationKind.turnIntoCode ||
+          BridgeMutationKind.turnIntoMath ||
+          BridgeMutationKind.turnIntoText:
+        final kind = _kindOf(mutation.page!, mutation.block!);
+        final to = switch (mutation.kind) {
+          BridgeMutationKind.turnIntoCode => BridgeBlockKind.code,
+          BridgeMutationKind.turnIntoMath => BridgeBlockKind.math,
+          _ => BridgeBlockKind.text,
+        };
+        final from = to == BridgeBlockKind.text ? kind : BridgeBlockKind.text;
+        if (kind != from ||
+            (to == BridgeBlockKind.text &&
+                kind != BridgeBlockKind.code &&
+                kind != BridgeBlockKind.math)) {
+          throw 'not found';
+        }
         final page = views[mutation.page]!;
-        if (_kindOf(mutation.page!, mutation.block!) != from) throw 'not found';
         for (final (at, shown) in page.indexed) {
           if (shown.block != mutation.block) continue;
           page[at] = BridgeView(
@@ -274,7 +284,9 @@ class FakeWorkspace implements LiquidWorkspace {
           );
         }
         languages.remove(mutation.block);
-        if (!code) styles[mutation.block!] = BridgeTextStyle.paragraph;
+        if (to == BridgeBlockKind.text) {
+          styles[mutation.block!] = BridgeTextStyle.paragraph;
+        }
         _viewsChanged(mutation.page);
         _changed(_blockResource(mutation));
         return BridgeApplied(elements: const [], action: _id());
@@ -1174,6 +1186,11 @@ class FakeWorkspace implements LiquidWorkspace {
       BridgeQueryKind.code => answer(
         text: code ? texts[query.block] : null,
         language: code ? languages[query.block] ?? '' : null,
+      ),
+      BridgeQueryKind.math => answer(
+        text: _kindOf(query.page!, query.block!) == BridgeBlockKind.math
+            ? texts[query.block]
+            : null,
       ),
       BridgeQueryKind.media => answer(media: media[query.block]),
       BridgeQueryKind.drawing => answer(
