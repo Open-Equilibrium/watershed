@@ -485,11 +485,20 @@ pub(crate) fn copy(
             continue;
         };
         let text = |key| field.get(key).unwrap_or_default();
+        let formula = text(FORMULA).replace(
+            &format!("{{{}.", from_block.as_str()),
+            &format!("{{{}.", to_block.as_str()),
+        );
         let entry = model::insert_in(
             to,
             &fields,
             &field.id,
-            &[(NAME, text(NAME)), (KIND, text(KIND)), (SORT, text(SORT))],
+            &[
+                (NAME, text(NAME)),
+                (KIND, text(KIND)),
+                (SORT, text(SORT)),
+                (FORMULA, &formula),
+            ],
         )?;
         let options = to.put_object(&entry, OPTIONS, ObjType::Map)?;
         let source_options = fields_entry(from, &source, &field.id)

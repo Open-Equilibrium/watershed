@@ -258,7 +258,7 @@ fn table_points<S: Store>(
         .into_iter()
         .zip(sums)
         .zip(held)
-        .filter(|(_, held)| *held > 0)
+        .filter(|((_, (sum, _)), held)| *held > 0 && sum.is_finite())
         .map(|((label, (sum, count)), _)| ChartPoint {
             label: if label.is_empty() {
                 "Empty".into()
