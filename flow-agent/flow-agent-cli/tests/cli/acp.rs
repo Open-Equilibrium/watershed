@@ -161,6 +161,24 @@ fn a_chat_offers_the_installed_flows_and_keeps_its_choice_until_it_starts() {
 }
 
 #[test]
+fn an_oversized_line_is_refused_and_the_chat_goes_on() {
+    if run_current_test_isolated_session_home() {
+        return;
+    }
+    let workspace = workspace_copy("hello-flow");
+    let config_root = empty_workspace_under(Path::new(env!("CARGO_TARGET_TMPDIR")));
+    let mut acp = Acp::start(&workspace, &config_root);
+
+    let oversized = "x".repeat(8 * 1024 * 1024 + 1);
+    writeln!(acp.stdin, "{oversized}").expect("the oversized line is written");
+
+    let refused = acp.next(|_| true, &mut Vec::new());
+    assert_eq!(refused["error"]["code"], -32700);
+    let (session_id, _) = acp.open(&workspace);
+    assert!(session_id.starts_with("chat-"));
+}
+
+#[test]
 fn a_chat_needs_a_productive_provider() {
     if run_current_test_isolated_session_home() {
         return;

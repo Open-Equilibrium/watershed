@@ -86,8 +86,13 @@ fn read_messages(mut input: impl BufRead, sender: &Sender<Input>) {
             Ok(_) => {}
         }
         if line.len() > MAX_ACP_LINE_BYTES {
-            let _ = sender.send(Input::Malformed);
-            break;
+            if !line.ends_with(b"\n") && !skip_line(&mut input) {
+                break;
+            }
+            if sender.send(Input::Malformed).is_err() {
+                return;
+            }
+            continue;
         }
         if line.iter().all(u8::is_ascii_whitespace) {
             continue;
@@ -98,6 +103,23 @@ fn read_messages(mut input: impl BufRead, sender: &Sender<Input>) {
         }
     }
     let _ = sender.send(Input::Closed);
+}
+
+fn skip_line(input: &mut impl BufRead) -> bool {
+    loop {
+        let Ok(buffer) = input.fill_buf() else {
+            return false;
+        };
+        if buffer.is_empty() {
+            return false;
+        }
+        if let Some(end) = buffer.iter().position(|byte| *byte == b'\n') {
+            input.consume(end + 1);
+            return true;
+        }
+        let length = buffer.len();
+        input.consume(length);
+    }
 }
 
 impl<W: Write> Agent<W> {
@@ -268,16 +290,14 @@ impl<W: Write> Agent<W> {
     fn finished(&mut self, result: Result<RunOutput, RuntimeError>) -> Result<(), RuntimeError> {
         self.running = false;
         let mut waiting = flow_agent_core::drain_productive_steering();
-        let result = match result {
-            Ok(_) if !waiting.is_empty() => {
-                let text = waiting.remove(0);
-                match self.start(text, waiting) {
-                    Ok(()) => return Ok(()),
-                    Err(error) => Err(error),
-                }
+        let result = if waiting.is_empty() {
+            result.map(|_| ()).map_err(internal)
+        } else {
+            let text = waiting.remove(0);
+            match self.start(text, waiting) {
+                Ok(()) => return Ok(()),
+                Err(error) => Err(error),
             }
-            Ok(_) => Ok(()),
-            Err(error) => Err(internal(error)),
         };
         let Some(id) = self.prompt.take() else {
             return Ok(());
