@@ -57,6 +57,7 @@ ids! {
     RowId,
     OptionId,
     ElementId,
+    LineId,
     #[derive(Default)]
     TabId,
 }

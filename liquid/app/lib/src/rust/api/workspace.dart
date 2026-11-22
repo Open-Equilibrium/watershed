@@ -4,13 +4,15 @@
 // ignore_for_file: invalid_use_of_internal_member, unused_import, unnecessary_import
 
 import '../frb_generated.dart';
+import 'calculation.dart';
+import 'chart.dart';
 import 'database.dart';
 import 'drawing.dart';
 import 'media.dart';
 
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `id`, `message`, `normalized`, `of`, `of`, `of`, `optional_id`, `page`, `place`, `table`, `to_core`, `to_core`, `to_core`, `units`, `window`
+// These functions are ignored because they are not marked as `pub`: `follows`, `id`, `line_setup`, `message`, `normalized`, `of`, `of`, `of`, `optional_id`, `page`, `place`, `table`, `to_core`, `to_core`, `to_core`, `units`, `window`
 // These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `hash`, `hash`
 
 class BridgeAnswer {
@@ -31,6 +33,10 @@ class BridgeAnswer {
   final List<BridgeTable> tables;
   final List<BridgeShown> shown;
   final String? icon;
+  final List<BridgeLine> lines;
+  final List<BridgeComputed> totals;
+  final BridgeChart? chart;
+  final List<BridgeResource> follows;
 
   const BridgeAnswer({
     required this.areas,
@@ -50,6 +56,10 @@ class BridgeAnswer {
     required this.tables,
     required this.shown,
     this.icon,
+    required this.lines,
+    required this.totals,
+    this.chart,
+    required this.follows,
   });
 
   @override
@@ -70,7 +80,11 @@ class BridgeAnswer {
       hits.hashCode ^
       tables.hashCode ^
       shown.hashCode ^
-      icon.hashCode;
+      icon.hashCode ^
+      lines.hashCode ^
+      totals.hashCode ^
+      chart.hashCode ^
+      follows.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -93,7 +107,11 @@ class BridgeAnswer {
           hits == other.hits &&
           tables == other.tables &&
           shown == other.shown &&
-          icon == other.icon;
+          icon == other.icon &&
+          lines == other.lines &&
+          totals == other.totals &&
+          chart == other.chart &&
+          follows == other.follows;
 }
 
 class BridgeApplied {
@@ -107,6 +125,7 @@ class BridgeApplied {
   final String? option;
   final String? tab;
   final List<String> elements;
+  final String? line;
 
   const BridgeApplied({
     required this.action,
@@ -119,6 +138,7 @@ class BridgeApplied {
     this.option,
     this.tab,
     required this.elements,
+    this.line,
   });
 
   @override
@@ -132,7 +152,8 @@ class BridgeApplied {
       row.hashCode ^
       option.hashCode ^
       tab.hashCode ^
-      elements.hashCode;
+      elements.hashCode ^
+      line.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -148,7 +169,8 @@ class BridgeApplied {
           row == other.row &&
           option == other.option &&
           tab == other.tab &&
-          elements == other.elements;
+          elements == other.elements &&
+          line == other.line;
 }
 
 class BridgeArea {
@@ -169,7 +191,16 @@ class BridgeArea {
           name == other.name;
 }
 
-enum BridgeBlockKind { text, database, code, media, whiteboard, unknown }
+enum BridgeBlockKind {
+  text,
+  database,
+  code,
+  media,
+  whiteboard,
+  calculation,
+  chart,
+  unknown,
+}
 
 class BridgeChange {
   final BridgeResource resource;
@@ -249,6 +280,10 @@ class BridgeMutation {
   final String? attachment;
   final BridgeDrawingStyle? drawingStyle;
   final BridgeDrawingEdit? drawing;
+  final String? line;
+  final BridgeLineSetup? lineSetup;
+  final BridgeTotal? total;
+  final BridgeChartSetup? chart;
 
   const BridgeMutation({
     required this.kind,
@@ -280,6 +315,10 @@ class BridgeMutation {
     this.attachment,
     this.drawingStyle,
     this.drawing,
+    this.line,
+    this.lineSetup,
+    this.total,
+    this.chart,
   });
 
   @override
@@ -312,7 +351,11 @@ class BridgeMutation {
       mediaType.hashCode ^
       attachment.hashCode ^
       drawingStyle.hashCode ^
-      drawing.hashCode;
+      drawing.hashCode ^
+      line.hashCode ^
+      lineSetup.hashCode ^
+      total.hashCode ^
+      chart.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -347,7 +390,11 @@ class BridgeMutation {
           mediaType == other.mediaType &&
           attachment == other.attachment &&
           drawingStyle == other.drawingStyle &&
-          drawing == other.drawing;
+          drawing == other.drawing &&
+          line == other.line &&
+          lineSetup == other.lineSetup &&
+          total == other.total &&
+          chart == other.chart;
 }
 
 enum BridgeMutationKind {
@@ -369,6 +416,7 @@ enum BridgeMutationKind {
   setTabDate,
   setTabSort,
   setTabFilter,
+  setTabTotal,
   setTabFolded,
   moveTab,
   removeTab,
@@ -381,6 +429,12 @@ enum BridgeMutationKind {
   setCodeLanguage,
   addMediaBlock,
   addWhiteboardBlock,
+  addCalculationBlock,
+  addChartBlock,
+  setChart,
+  addLine,
+  setLine,
+  removeLine,
   setDrawingStyle,
   editDrawing,
   addDatabaseBlock,
@@ -392,6 +446,7 @@ enum BridgeMutationKind {
   renameDatabase,
   addField,
   renameField,
+  setFieldFormula,
   removeField,
   addOption,
   addRow,
@@ -432,6 +487,7 @@ class BridgeQuery {
   final BridgeFilter? filter;
   final BridgeFilter? within;
   final String? search;
+  final List<BridgeFieldTotal> totals;
 
   const BridgeQuery({
     required this.kind,
@@ -445,6 +501,7 @@ class BridgeQuery {
     this.filter,
     this.within,
     this.search,
+    required this.totals,
   });
 
   @override
@@ -459,7 +516,8 @@ class BridgeQuery {
       sort.hashCode ^
       filter.hashCode ^
       within.hashCode ^
-      search.hashCode;
+      search.hashCode ^
+      totals.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -476,7 +534,8 @@ class BridgeQuery {
           sort == other.sort &&
           filter == other.filter &&
           within == other.within &&
-          search == other.search;
+          search == other.search &&
+          totals == other.totals;
 }
 
 enum BridgeQueryKind {
@@ -488,6 +547,8 @@ enum BridgeQueryKind {
   code,
   media,
   drawing,
+  calculation,
+  chart,
   database,
   rows,
   groups,

@@ -149,7 +149,7 @@ Canonical terms. Use these exactly; do not introduce synonyms. Tool names are fi
 
 - **Workspace** — Top-level owner of Pages, Blocks, Sources, Connections, Automations, Roles, History and settings.
 - **Page** — Liquid's authored surface: an ordered composition of Block Views with responsive layout metadata. A Page starts as an empty flow and may later be arranged on a grid.
-- **Block** — A canonical, typed and addressable unit of content or functionality, such as text, database, code, formula, media, whiteboard, App or Chat. A text toggle is formatting inside a Text Block, not a Block Type.
+- **Block** — A canonical, typed and addressable unit of content or functionality, such as text, database, code, calculation, media, whiteboard, App or Chat. A text toggle is formatting inside a Text Block, not a Block Type.
 - **Block Type** — The versioned behavior, state contract, supported Views, ports/actions, permissions and responsive capabilities shared by Blocks of one kind.
 - **View** — One placement or representation of a Block. Several Views may expose the same Block on different Pages and stay synchronized because they share canonical Block state. Duplicating creates a new Block; adding a View does not. A View of a Table has its own title and View tabs.
 - **View tab** — One tab of a View of a Table, as Notion's database views: its own name, layout (Table, Board or Calendar), group, sort and filter over the View's Table. The UI says tab; the app's tabs (ADR-0241) are another thing.
@@ -201,6 +201,10 @@ Canonical terms. Use these exactly; do not introduce synonyms. Tool names are fi
 - **Whiteboard Block** — A Block whose Drawing lies on a canvas without edges, drawn on in place (ADR-0306).
 - **Drawing** — The strokes, shapes and text of a Whiteboard Block, or the ink on an annotated Media Block's pages, each an element that merges on its own (ADR-0306, ADR-0307).
 - **Attachment** — A file's bytes in a Workspace, kept in the encrypted replica in parts and named by the SHA-256 of its bytes, so a file added twice is kept once (ADR-0305).
+- **Math Block** — A Block that shows one LaTeX formula typeset and never computes it; `$…$` in a Text Block typesets one inside a sentence (ADR-0316).
+- **Chart Block** — A Block that draws a Table's groups or a Calculation Block's lines as bars, a line or a pie, through a Connection (ADR-0315).
+- **Formula field** — A Table field whose formula computes each row's value from the row's other fields or a Table's columns; it takes no typing (ADR-0244).
+- **Total row** — A Table tab's footer: its row count and, per field, a total over the rows the tab shows (ADR-0244).
 - **Calculation Block** — A Block of lines that each pair a label with a value or formula, laid out as labels left and values right, for reports in Excel's layout (ADR-0244).
 - **Section** — Consecutive Text Blocks up to `---`, a Block of another type or the Page's edge; Arrange mode places it as one tile, inside which its Text Blocks can be arranged in columns. It is layout only and owns no content, rights or Views (ADR-0235).
 - **Chat** — Liquid's one kind of conversation, as in WhatsApp: one-to-one or a group, whose participants are people or agents alike; a Block that Pages can show. A planned replacement for separate agent sessions and projects (ADR-0239, ADR-0241).

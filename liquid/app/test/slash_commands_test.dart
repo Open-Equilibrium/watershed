@@ -644,7 +644,7 @@ void main() {
       lessThanOrEqualTo(shown.bottom),
     );
     await key(tester, LogicalKeyboardKey.arrowUp);
-    final table = tester.getRect(item('Table'));
+    final table = tester.getRect(item('Whiteboard'));
     expect(table.top, greaterThanOrEqualTo(shown.top));
     expect(table.bottom, lessThanOrEqualTo(shown.bottom));
     await key(tester, LogicalKeyboardKey.arrowDown);

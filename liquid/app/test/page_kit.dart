@@ -5,6 +5,8 @@ import 'package:liquid/src/agent/shell.dart';
 import 'package:liquid/src/agent/sidebar.dart';
 import 'package:liquid/src/app.dart';
 import 'package:liquid/src/launch.dart';
+import 'package:liquid/src/rust/api/calculation.dart';
+import 'package:liquid/src/rust/api/chart.dart';
 import 'package:liquid/src/rust/api/database.dart';
 import 'package:liquid/src/rust/api/drawing.dart';
 import 'package:liquid/src/rust/api/workspace.dart';
@@ -53,6 +55,18 @@ class WhiteboardPart extends Part {
   final List<BridgeElement> elements;
 }
 
+class CalculationPart extends Part {
+  const CalculationPart(this.lines, {this.title = ''});
+  final List<BridgeLineSetup> lines;
+  final String title;
+}
+
+class ChartPart extends Part {
+  const ChartPart(this.setup, this.points);
+  final BridgeChartSetup setup;
+  final List<BridgeChartPoint> points;
+}
+
 class UnknownPart extends Part {
   const UnknownPart({this.boundary = false});
   final bool boundary;
@@ -77,12 +91,14 @@ const expenseFields = [
     name: 'Name',
     kind: BridgeFieldKind.text,
     options: [],
+    formula: '',
   ),
   BridgeField(
     id: 'date',
     name: 'Date',
     kind: BridgeFieldKind.date,
     options: [],
+    formula: '',
   ),
   BridgeField(
     id: 'category',
@@ -92,18 +108,21 @@ const expenseFields = [
       BridgeOption(id: 'food', name: 'Food', color: 5),
       BridgeOption(id: 'home', name: 'Home', color: 6),
     ],
+    formula: '',
   ),
   BridgeField(
     id: 'amount',
     name: 'Amount',
     kind: BridgeFieldKind.number,
     options: [],
+    formula: '',
   ),
   BridgeField(
     id: 'paid',
     name: 'Paid',
     kind: BridgeFieldKind.checkbox,
     options: [],
+    formula: '',
   ),
 ];
 
@@ -138,6 +157,7 @@ BridgeRow expenseRow(
       value: cell(BridgeCellKind.checkbox, checked: paid),
     ),
   ],
+  computed: const [],
 );
 
 final expenses = [
@@ -153,6 +173,7 @@ BridgeRow namedRow(int number) => BridgeRow(
       value: cell(BridgeCellKind.text, text: 'Row $number'),
     ),
   ],
+  computed: const [],
 );
 
 class PageKit {
@@ -269,6 +290,26 @@ class PageKit {
                 withId(element, 'element $index'),
             ],
           );
+        case CalculationPart(:final lines, :final title):
+          final added = await add(BridgeMutationKind.addCalculationBlock);
+          fake.calculations[added.block!] = [
+            for (final (index, setup) in lines.indexed)
+              fake.line('line $index', setup),
+          ];
+          if (title.isNotEmpty) {
+            await workspace.apply(
+              mutation(
+                BridgeMutationKind.renameView,
+                page: page,
+                view: added.view,
+                text: title,
+              ),
+            );
+          }
+        case ChartPart(:final setup, :final points):
+          final added = await add(BridgeMutationKind.addChartBlock);
+          fake.charts[added.block!] = setup;
+          fake.chartPoints[added.block!] = points;
         case UnknownPart(:final boundary):
           final views = fake.views[page] ??= [];
           final at = after == null

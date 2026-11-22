@@ -34,6 +34,7 @@ pub enum FieldKind {
     Date,
     Checkbox,
     File,
+    Formula,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -203,6 +204,13 @@ pub enum Mutation {
         tab: TabId,
         filter: Option<crate::Filter>,
     },
+    SetTabTotal {
+        page: PageId,
+        view: ViewId,
+        tab: TabId,
+        field: FieldId,
+        total: Option<crate::Total>,
+    },
     SetTabFolded {
         page: PageId,
         view: ViewId,
@@ -264,6 +272,36 @@ pub enum Mutation {
     AddWhiteboardBlock {
         page: PageId,
         after: Option<ViewId>,
+    },
+    AddCalculationBlock {
+        page: PageId,
+        after: Option<ViewId>,
+    },
+    AddChartBlock {
+        page: PageId,
+        after: Option<ViewId>,
+    },
+    SetChart {
+        page: PageId,
+        block: BlockId,
+        setup: crate::ChartSetup,
+    },
+    AddLine {
+        page: PageId,
+        block: BlockId,
+        after: Option<crate::LineId>,
+        line: crate::LineSetup,
+    },
+    SetLine {
+        page: PageId,
+        block: BlockId,
+        line: crate::LineId,
+        setup: crate::LineSetup,
+    },
+    RemoveLine {
+        page: PageId,
+        block: BlockId,
+        line: crate::LineId,
     },
     #[serde(alias = "SetWhiteboardStyle")]
     SetDrawingStyle {
@@ -329,6 +367,11 @@ pub enum Mutation {
         field: FieldId,
         name: String,
     },
+    SetFieldFormula {
+        block: BlockId,
+        field: FieldId,
+        formula: String,
+    },
     RemoveField {
         block: BlockId,
         field: FieldId,
@@ -379,6 +422,7 @@ pub enum Created {
     Option(OptionId),
     Tab(TabId),
     Elements(Vec<crate::ElementId>),
+    Line(crate::LineId),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -410,6 +454,7 @@ pub enum Error {
     TooMany,
     TooLong,
     TooLarge,
+    Formula { at: usize },
     Changed,
     Random,
     Document(String),

@@ -124,7 +124,14 @@
         <div class="card"><h3>3 — App logic</h3><p>App Blocks cover custom interactive functionality that would be awkward as formulas or rules.</p></div>
       </div>
       <p>Connections and Automations are the medium through which Pages, Blocks and Sources communicate. Layout proximity never creates a Connection or permission. Liquid Automations may call a Meta-Harness public action, while Meta-Harness separately owns agent-process schedules and orchestration on its host.</p>
-      <p>Formulas use Excel function names with references as chips bound to stable IDs. The Automation editor reads as sentences, as Trello's Butler rules do. M3a Automations start on events and buttons only; schedules follow the headless replica, so no two devices run one (ADR-0235).</p>
+      <p>Formulas use Excel's functions and operators, as <code>= 2000 − SUM(Expenses.Amount)</code>, with references as chips bound to stable IDs, so renaming keeps a formula (ADR-0315). <code>liquid-core</code> parses and computes them over 64-bit floats shown to 15 significant digits, with Excel's error values #DIV/0!, #VALUE!, #REF!, #NAME? and #NUM!: a deleted reference, two formulas that need each other, or formulas and the references they follow nested more than 128 levels deep give #REF!. A formula holds at most 8,192 characters and 64 nested brackets, and text it builds at most 32,767 characters, as in Excel.</p>
+      <ul>
+        <li><b>Calculation Block:</b> lines of a label and a value or formula, values right-aligned; a line is plain, a heading, a subtotal or the total, and <code>SUM(ABOVE)</code> adds the plain lines up to the heading above. A value typed without <code>=</code> stays a number or text. Typing a formula suggests the Block's lines, the fields of up to 50 Tables and the functions; a chosen one becomes a chip. "Add a line" grows one value into a report, up to 500 lines.</li>
+        <li><b>Formula field:</b> computes each row from its fields and is edited in the field menu; it takes no typing and is not sorted, filtered or grouped by.</li>
+        <li><b>Total row:</b> a Table's footer shows its row count and, per field, Sum, Average, Count, Min, Max, Empty or Filled over the rows the tab shows, so a filter or search changes it; a sum, an average, a minimum or a maximum needs a number or formula field. Each tab keeps its own.</li>
+        <li><b>Chart Block:</b> bars, a line or a pie, drawn by Liquid itself, from a Table, grouped by a select, checkbox or text field and counting rows or adding or averaging a number, or from a Calculation Block's plain lines in their order. A line needs two points, and a Chart draws at most 100. Its panel picks the data and lists what it uses and what uses it; the data list offers the Tables and this Page's Calculation Blocks.</li>
+      </ul>
+      <p>The Automation editor reads as sentences, as Trello's Butler rules do. M3a Automations start on events and buttons only; schedules follow the headless replica, so no two devices run one (ADR-0235).</p>
     </div></section>
 
     <section id="apps" class="section"><h2>5. Apps, extensions and MCP</h2><div class="body">

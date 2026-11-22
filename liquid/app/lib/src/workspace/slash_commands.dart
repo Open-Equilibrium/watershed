@@ -113,6 +113,18 @@ const slashCommands = [
     existing: true,
   ),
   SlashCommand(
+    'Chart',
+    LucideIcons.barChart3,
+    block: BridgeBlockKind.chart,
+    description: 'Draws data from a Table or a Calculation',
+  ),
+  SlashCommand(
+    'Calculation',
+    LucideIcons.calculator,
+    block: BridgeBlockKind.calculation,
+    description: 'Labeled values, from one line to a report',
+  ),
+  SlashCommand(
     'Whiteboard',
     LucideIcons.presentation,
     block: BridgeBlockKind.whiteboard,

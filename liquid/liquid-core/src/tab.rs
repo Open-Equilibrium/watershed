@@ -12,6 +12,7 @@ const LAYOUT: &str = "layout";
 const GROUP: &str = "group";
 const DATE: &str = "date";
 const FOLDED: &str = "folded";
+const TOTALS: &str = "totals";
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Layout {
@@ -48,6 +49,8 @@ pub struct TabSetup {
     pub sort: Option<Sort>,
     pub filter: Option<Filter>,
     pub folded: Vec<Cell>,
+    #[serde(default)]
+    pub totals: Vec<crate::FieldTotal>,
 }
 
 impl TabSetup {
@@ -65,6 +68,7 @@ impl TabSetup {
             sort: None,
             filter: None,
             folded: Vec::new(),
+            totals: Vec::new(),
         }
     }
 }
@@ -91,6 +95,7 @@ pub(crate) fn read(doc: &AutoCommit, view: &ObjId, id: &str) -> Vec<Tab> {
                 sort: stored(entry.get(ROW_SORT)),
                 filter: stored(entry.get(ROW_FILTER)),
                 folded: stored(entry.get(FOLDED)).unwrap_or_default(),
+                totals: stored(entry.get(TOTALS)).unwrap_or_default(),
             },
         })
         .collect()
@@ -143,6 +148,12 @@ pub(crate) fn live(doc: &AutoCommit, table: &BlockId, setup: &TabSetup) -> TabSe
             .filter
             .clone()
             .filter(|filter| !gone(crate::database::check_filter(doc, table, filter))),
+        totals: setup
+            .totals
+            .iter()
+            .filter(|total| !gone(field(&total.field)))
+            .cloned()
+            .collect(),
         ..setup.clone()
     }
 }
@@ -176,6 +187,17 @@ pub(crate) fn check(
         && !kept(|a, b| a.filter == b.filter)
     {
         crate::database::check_filter(doc, table, filter)?;
+    }
+    if !kept(|a, b| a.totals == b.totals) {
+        if after.totals.len() > crate::MAX_FIELDS {
+            return Err(Error::TooMany);
+        }
+        for total in &after.totals {
+            let numbers = matches!(kind(&total.field)?, FieldKind::Number | FieldKind::Formula);
+            if total.total.numeric() && !numbers {
+                return Err(Error::WrongKind);
+            }
+        }
     }
     if !kept(|a, b| a.folded == b.folded) {
         if after.folded.len() > MAX_OPTIONS + 1 {
@@ -269,7 +291,7 @@ fn write(
     Ok(())
 }
 
-fn values(setup: &TabSetup) -> Result<[(&'static str, Option<String>); 7], Error> {
+fn values(setup: &TabSetup) -> Result<[(&'static str, Option<String>); 8], Error> {
     let id = |field: &Option<FieldId>| field.as_ref().map(|field| field.as_str().to_string());
     Ok([
         (NAME, Some(setup.name.clone())),
@@ -282,6 +304,12 @@ fn values(setup: &TabSetup) -> Result<[(&'static str, Option<String>); 7], Error
             FOLDED,
             (!setup.folded.is_empty())
                 .then(|| encode(&setup.folded))
+                .transpose()?,
+        ),
+        (
+            TOTALS,
+            (!setup.totals.is_empty())
+                .then(|| encode(&setup.totals))
                 .transpose()?,
         ),
     ])

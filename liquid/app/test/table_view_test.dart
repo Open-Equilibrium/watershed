@@ -27,6 +27,7 @@ void main() {
         name: 'Shop',
         kind: BridgeFieldKind.text,
         options: [],
+        formula: '',
       ),
     ],
   );
@@ -42,6 +43,7 @@ void main() {
         name: 'Field $number',
         kind: BridgeFieldKind.text,
         options: const [],
+        formula: '',
       ),
   ];
 
@@ -292,6 +294,7 @@ void main() {
           value: cell(BridgeCellKind.number, number: number),
         ),
       ],
+      computed: const [],
     );
     await kit.show(tester, [
       TablePart([

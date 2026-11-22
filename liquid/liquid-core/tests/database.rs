@@ -149,6 +149,7 @@ fn all() -> RowQuery {
         start: 0,
         limit: usize::MAX,
         search: None,
+        totals: Vec::new(),
     }
 }
 

@@ -1,9 +1,10 @@
 use std::sync::{Arc, Mutex};
 
 use super::workspace::{Folder, Memory, lisbon, mutation, query, resource};
+use crate::api::calculation::BridgeValueKind;
 use crate::api::database::{
-    BridgeCell, BridgeCellKind, BridgeFieldKind, BridgeFilter, BridgeLayout, BridgeMatch,
-    BridgeSort, BridgeTab,
+    BridgeCell, BridgeCellKind, BridgeFieldKind, BridgeFieldTotal, BridgeFilter, BridgeLayout,
+    BridgeMatch, BridgeSort, BridgeTab, BridgeTotal,
 };
 use crate::api::replica::LiquidWorkspace;
 use crate::api::workspace::{
@@ -669,6 +670,7 @@ fn a_table_shows_on_two_pages_keeps_its_name_and_goes_with_all_its_views() {
                 }),
                 filter: None,
                 folded: Vec::new(),
+                totals: Vec::new(),
             }],
             ..mutation(BridgeMutationKind::AddTableView)
         })
@@ -773,4 +775,108 @@ fn a_workspace_s_name_and_icon_are_read_and_announced() {
         (Some("Home"), Some("🏡"))
     );
     assert_eq!(*seen.lock().unwrap(), [0, 1, 2]);
+}
+
+#[test]
+fn a_formula_field_crosses_with_its_formula_and_each_row_s_value() {
+    let expenses = Expenses::new("formula-field");
+    let amount = expenses.field(&expenses.name, "Amount", BridgeFieldKind::Number);
+    let half = expenses.field(&amount, "Half", BridgeFieldKind::Formula);
+    let formula = format!("{{{amount}}} / 2");
+    expenses
+        .apply(BridgeMutation {
+            field: Some(half.clone()),
+            text: Some(formula.clone()),
+            ..mutation(BridgeMutationKind::SetFieldFormula)
+        })
+        .unwrap();
+    let rent = expenses.row(None);
+    expenses.set(&rent, &amount, number(950.5)).unwrap();
+    let field = &expenses.database().database.unwrap().fields[2];
+    assert_eq!(
+        (field.kind, field.formula.as_str()),
+        (BridgeFieldKind::Formula, formula.as_str())
+    );
+    let rows = expenses.rows(query(BridgeQueryKind::Rows)).unwrap().rows;
+    let computed: Vec<_> = rows[0]
+        .computed
+        .iter()
+        .map(|value| {
+            (
+                value.field.as_str(),
+                value.value.as_str(),
+                value.kind,
+                value.number,
+            )
+        })
+        .collect();
+    assert_eq!(
+        computed,
+        [(half.as_str(), "475.25", BridgeValueKind::Number, 475.25)]
+    );
+}
+
+#[test]
+fn a_tab_s_totals_cross_as_set_and_come_back_counted() {
+    let expenses = Expenses::new("totals");
+    let amount = expenses.field(&expenses.name, "Amount", BridgeFieldKind::Number);
+    for value in [900.0, 384.5] {
+        let row = expenses.row(None);
+        expenses.set(&row, &amount, number(value)).unwrap();
+    }
+    let view = expenses
+        .workspace
+        .query(BridgeQuery {
+            page: Some(expenses.page.clone()),
+            ..query(BridgeQueryKind::Views)
+        })
+        .unwrap()
+        .views
+        .into_iter()
+        .find(|view| view.block == expenses.block)
+        .unwrap();
+    expenses
+        .apply(BridgeMutation {
+            view: Some(view.id.clone()),
+            tab: Some(view.tabs[0].id.clone()),
+            field: Some(amount.clone()),
+            total: Some(BridgeTotal::Sum),
+            ..mutation(BridgeMutationKind::SetTabTotal)
+        })
+        .unwrap();
+    let tabs = expenses
+        .workspace
+        .query(BridgeQuery {
+            page: Some(expenses.page.clone()),
+            ..query(BridgeQueryKind::Views)
+        })
+        .unwrap()
+        .views
+        .into_iter()
+        .find(|shown| shown.id == view.id)
+        .unwrap()
+        .tabs;
+    let totals = tabs[0].totals.clone();
+    assert_eq!(
+        totals,
+        [BridgeFieldTotal {
+            field: amount.clone(),
+            total: BridgeTotal::Sum
+        }]
+    );
+    let counted = expenses
+        .rows(BridgeQuery {
+            totals,
+            limit: 1,
+            ..query(BridgeQueryKind::Rows)
+        })
+        .unwrap()
+        .totals;
+    assert_eq!(
+        counted
+            .iter()
+            .map(|total| (total.field.as_str(), total.value.as_str(), total.number))
+            .collect::<Vec<_>>(),
+        [(amount.as_str(), "1284.5", 1284.5)]
+    );
 }

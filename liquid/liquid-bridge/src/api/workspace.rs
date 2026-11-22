@@ -1,11 +1,13 @@
 use liquid_core::{
-    AreaId, AttachmentId, BlockId, Changed, Error, FieldId, Mutation, PageId, Place, RowId, TabId,
-    TextStyle, Tile, ViewId,
+    AreaId, AttachmentId, BlockId, Changed, Error, FieldId, LineId, Mutation, PageId, Place, RowId,
+    TabId, TextStyle, Tile, ViewId,
 };
 
+use super::calculation::{BridgeLine, BridgeLineSetup};
+use super::chart::{BridgeChart, BridgeChartSetup};
 use super::database::{
-    BridgeCell, BridgeDatabase, BridgeFieldKind, BridgeFilter, BridgeGroup, BridgeLayout,
-    BridgeRow, BridgeSort, BridgeTab, filter, sort,
+    BridgeCell, BridgeComputed, BridgeDatabase, BridgeFieldKind, BridgeFieldTotal, BridgeFilter,
+    BridgeGroup, BridgeLayout, BridgeRow, BridgeSort, BridgeTab, BridgeTotal, filter, sort,
 };
 use super::drawing::{BridgeDrawing, BridgeDrawingEdit, BridgeDrawingStyle};
 use super::media::BridgeMedia;
@@ -32,6 +34,7 @@ pub enum BridgeMutationKind {
     SetTabDate,
     SetTabSort,
     SetTabFilter,
+    SetTabTotal,
     SetTabFolded,
     MoveTab,
     RemoveTab,
@@ -44,6 +47,12 @@ pub enum BridgeMutationKind {
     SetCodeLanguage,
     AddMediaBlock,
     AddWhiteboardBlock,
+    AddCalculationBlock,
+    AddChartBlock,
+    SetChart,
+    AddLine,
+    SetLine,
+    RemoveLine,
     SetDrawingStyle,
     EditDrawing,
     AddDatabaseBlock,
@@ -55,6 +64,7 @@ pub enum BridgeMutationKind {
     RenameDatabase,
     AddField,
     RenameField,
+    SetFieldFormula,
     RemoveField,
     AddOption,
     AddRow,
@@ -137,6 +147,10 @@ pub struct BridgeMutation {
     pub attachment: Option<String>,
     pub drawing_style: Option<BridgeDrawingStyle>,
     pub drawing: Option<BridgeDrawingEdit>,
+    pub line: Option<String>,
+    pub line_setup: Option<BridgeLineSetup>,
+    pub total: Option<BridgeTotal>,
+    pub chart: Option<BridgeChartSetup>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -151,6 +165,7 @@ pub struct BridgeApplied {
     pub option: Option<String>,
     pub tab: Option<String>,
     pub elements: Vec<String>,
+    pub line: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -163,6 +178,8 @@ pub enum BridgeQueryKind {
     Code,
     Media,
     Drawing,
+    Calculation,
+    Chart,
     Database,
     Rows,
     Groups,
@@ -184,6 +201,7 @@ pub struct BridgeQuery {
     pub filter: Option<BridgeFilter>,
     pub within: Option<BridgeFilter>,
     pub search: Option<String>,
+    pub totals: Vec<BridgeFieldTotal>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -221,6 +239,8 @@ pub enum BridgeBlockKind {
     Code,
     Media,
     Whiteboard,
+    Calculation,
+    Chart,
     Unknown,
 }
 
@@ -292,6 +312,10 @@ pub struct BridgeAnswer {
     pub tables: Vec<BridgeTable>,
     pub shown: Vec<BridgeShown>,
     pub icon: Option<String>,
+    pub lines: Vec<BridgeLine>,
+    pub totals: Vec<BridgeComputed>,
+    pub chart: Option<BridgeChart>,
+    pub follows: Vec<BridgeResource>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -319,6 +343,25 @@ pub struct BridgeChange {
     pub seq: i64,
 }
 
+pub(crate) fn follows(uses: &[liquid_core::Used]) -> Vec<BridgeResource> {
+    uses.iter()
+        .map(|used| match used {
+            liquid_core::Used::Table(table) => BridgeResource {
+                kind: BridgeResourceKind::Table,
+                area: None,
+                page: None,
+                block: Some(table.to_string()),
+            },
+            liquid_core::Used::Block(page, block) => BridgeResource {
+                kind: BridgeResourceKind::Block,
+                area: None,
+                page: Some(page.to_string()),
+                block: Some(block.to_string()),
+            },
+        })
+        .collect()
+}
+
 pub(crate) fn message(error: Error) -> String {
     match error {
         Error::NotAllowed => "not allowed".into(),
@@ -330,6 +373,7 @@ pub(crate) fn message(error: Error) -> String {
         Error::TooMany => "it holds the most it may".into(),
         Error::TooLong => "no more fit at this spot; move one of its neighbors first".into(),
         Error::TooLarge => "a file can be at most 5 GiB".into(),
+        Error::Formula { at } => format!("the formula can't be read from character {}", at + 1),
         Error::Changed => "the file changed while it was added; add it again".into(),
         Error::Random => "the random source failed".into(),
         Error::Document(message) | Error::Storage(message) => message,
@@ -355,6 +399,14 @@ fn optional_id<T>(
 }
 
 impl BridgeMutation {
+    fn line_setup(&self) -> Result<liquid_core::LineSetup, String> {
+        Ok(self
+            .line_setup
+            .as_ref()
+            .ok_or("line_setup is missing")?
+            .to_core())
+    }
+
     fn place<T>(&self, parse: fn(&str) -> Option<T>) -> Result<Place<T>, String> {
         match (self.last, optional_id(&self.after, parse, "after")?) {
             (true, Some(_)) => Err("after and last cannot both be set".into()),
@@ -475,6 +527,13 @@ impl BridgeMutation {
                 tab: tab()?,
                 filter: filter(&self.filter)?,
             },
+            BridgeMutationKind::SetTabTotal => Mutation::SetTabTotal {
+                page: page()?,
+                view: view()?,
+                tab: tab()?,
+                field: field()?,
+                total: self.total.map(BridgeTotal::to_core),
+            },
             BridgeMutationKind::SetTabFolded => Mutation::SetTabFolded {
                 page: page()?,
                 view: view()?,
@@ -537,6 +596,36 @@ impl BridgeMutation {
                 page: page()?,
                 after: optional_id(&self.after, ViewId::parse, "after")?,
             },
+            BridgeMutationKind::AddCalculationBlock => Mutation::AddCalculationBlock {
+                page: page()?,
+                after: optional_id(&self.after, ViewId::parse, "after")?,
+            },
+            BridgeMutationKind::AddChartBlock => Mutation::AddChartBlock {
+                page: page()?,
+                after: optional_id(&self.after, ViewId::parse, "after")?,
+            },
+            BridgeMutationKind::SetChart => Mutation::SetChart {
+                page: page()?,
+                block: block()?,
+                setup: self.chart.as_ref().ok_or("chart is missing")?.to_core()?,
+            },
+            BridgeMutationKind::AddLine => Mutation::AddLine {
+                page: page()?,
+                block: block()?,
+                after: optional_id(&self.after, LineId::parse, "after")?,
+                line: self.line_setup()?,
+            },
+            BridgeMutationKind::SetLine => Mutation::SetLine {
+                page: page()?,
+                block: block()?,
+                line: id(&self.line, LineId::parse, "line")?,
+                setup: self.line_setup()?,
+            },
+            BridgeMutationKind::RemoveLine => Mutation::RemoveLine {
+                page: page()?,
+                block: block()?,
+                line: id(&self.line, LineId::parse, "line")?,
+            },
             BridgeMutationKind::SetDrawingStyle => Mutation::SetDrawingStyle {
                 page: page()?,
                 block: block()?,
@@ -598,6 +687,11 @@ impl BridgeMutation {
                 place: self.place(FieldId::parse)?,
                 name: text()?,
                 kind: self.field_kind.ok_or("field kind is missing")?.to_core(),
+            },
+            BridgeMutationKind::SetFieldFormula => Mutation::SetFieldFormula {
+                block: block()?,
+                field: field()?,
+                formula: text()?,
             },
             BridgeMutationKind::RenameField => Mutation::RenameField {
                 block: block()?,

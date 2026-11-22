@@ -241,7 +241,7 @@ mod tests {
     fn a_block_of_an_unknown_kind_keeps_its_view() {
         let mut doc = model::document(&ActorId::random());
         model::create_maps(&mut doc, &[BLOCKS, VIEWS]).unwrap();
-        for (block, kind, sort) in [("b1", "text", "a0"), ("b2", "chart", "a1")] {
+        for (block, kind, sort) in [("b1", "text", "a0"), ("b2", "app", "a1")] {
             model::insert(&mut doc, BLOCKS, block, &[(KIND, kind)]).unwrap();
             let view = format!("v-{block}");
             model::insert(&mut doc, VIEWS, &view, &[(BLOCK, block), (SORT, sort)]).unwrap();

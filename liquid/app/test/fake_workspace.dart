@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'dart:typed_data';
 
+import 'package:liquid/src/rust/api/calculation.dart';
+import 'package:liquid/src/rust/api/chart.dart';
 import 'package:liquid/src/rust/api/database.dart';
 import 'package:liquid/src/rust/api/media.dart';
 import 'package:liquid/src/rust/api/replica.dart';
@@ -36,6 +38,49 @@ class FakeWorkspace implements LiquidWorkspace {
   final rows = <String, List<BridgeRow>>{};
 
   final whiteboards = <String, BridgeDrawing>{};
+
+  final calculations = <String, List<BridgeLine>>{};
+
+  final charts = <String, BridgeChartSetup>{};
+
+  final chartPoints = <String, List<BridgeChartPoint>>{};
+
+  String? chartSource(BridgeChartSetup setup) => switch (setup) {
+    BridgeChartSetup(:final table?) => databases[table]?.name,
+    BridgeChartSetup(:final page?, :final block?) =>
+      views[page]?.where((view) => view.block == block).firstOrNull?.title,
+    _ => null,
+  };
+
+  final computed = <String, String>{};
+
+  final referenceNames = <String, String>{};
+
+  BridgeLine line(String id, BridgeLineSetup setup) {
+    final formula = setup.formula.trim();
+    final literal = RegExp(r'^"(.*)"$').firstMatch(formula);
+    final value =
+        computed[formula] ??
+        (double.tryParse(formula) != null ? formula : literal?[1] ?? '');
+    return BridgeLine(
+      id: id,
+      label: setup.label,
+      formula: setup.formula,
+      style: setup.style,
+      value: value,
+      kind: value.isEmpty
+          ? BridgeValueKind.blank
+          : value.startsWith('#')
+          ? BridgeValueKind.error
+          : double.tryParse(value) != null
+          ? BridgeValueKind.number
+          : BridgeValueKind.text,
+      references: [
+        for (final token in RegExp(r'\{[0-9a-f.]+\}').allMatches(formula))
+          referenceNames[token[0]],
+      ],
+    );
+  }
 
   var readBudget = 1 << 30;
 
@@ -272,6 +317,7 @@ class FakeWorkspace implements LiquidWorkspace {
           BridgeMutationKind.setTabSort ||
           BridgeMutationKind.setTabFilter ||
           BridgeMutationKind.setTabFolded ||
+          BridgeMutationKind.setTabTotal ||
           BridgeMutationKind.moveTab ||
           BridgeMutationKind.removeTab:
         final page = views[mutation.page]!;
@@ -326,6 +372,14 @@ class FakeWorkspace implements LiquidWorkspace {
                 : null,
             folded: mutation.kind == BridgeMutationKind.setTabFolded
                 ? mutation.tabs.first.folded
+                : null,
+            totals: mutation.kind == BridgeMutationKind.setTabTotal
+                ? [
+                    for (final total in tab.totals)
+                      if (total.field != mutation.field) total,
+                    if (mutation.total case final total?)
+                      BridgeFieldTotal(field: mutation.field!, total: total),
+                  ]
                 : null,
           );
         }
@@ -387,7 +441,7 @@ class FakeWorkspace implements LiquidWorkspace {
             when !table.any((row) => row.id == after)) {
           throw 'not found';
         }
-        final row = BridgeRow(id: _id(), cells: const []);
+        final row = BridgeRow(id: _id(), cells: const [], computed: const []);
         table.insert(
           mutation.last
               ? table.length
@@ -432,6 +486,7 @@ class FakeWorkspace implements LiquidWorkspace {
           name: mutation.text!,
           kind: mutation.fieldKind!,
           options: const [],
+          formula: '',
         );
         fields.insert(
           mutation.last
@@ -473,6 +528,7 @@ class FakeWorkspace implements LiquidWorkspace {
             if (cell.kind != BridgeCellKind.empty)
               BridgeFieldCell(field: mutation.field!, value: cell),
           ],
+          computed: table[at].computed,
         );
         _changed(_tableResource(mutation.block));
         return BridgeApplied(elements: const [], action: _id());
@@ -493,6 +549,7 @@ class FakeWorkspace implements LiquidWorkspace {
                       name: field.name,
                       kind: field.kind,
                       options: [...field.options, option],
+                      formula: '',
                     )
                   : field,
           ],
@@ -503,6 +560,33 @@ class FakeWorkspace implements LiquidWorkspace {
           action: _id(),
           option: option.id,
         );
+      case BridgeMutationKind.setFieldFormula:
+        final database = databases[mutation.block]!;
+        final at = database.fields.indexWhere(
+          (field) => field.id == mutation.field,
+        );
+        if (at < 0) throw 'not found';
+        final field = database.fields[at];
+        if (field.kind != BridgeFieldKind.formula) {
+          throw 'the value is not of its kind or not valid';
+        }
+        databases[mutation.block!] = BridgeDatabase(
+          name: database.name,
+          fields: [
+            for (final known in database.fields)
+              known.id == field.id
+                  ? BridgeField(
+                      id: field.id,
+                      name: field.name,
+                      kind: field.kind,
+                      options: field.options,
+                      formula: mutation.text!,
+                    )
+                  : known,
+          ],
+        );
+        _changed(_tableResource(mutation.block));
+        return BridgeApplied(elements: const [], action: _id());
       case BridgeMutationKind.renameField || BridgeMutationKind.removeField:
         final database = databases[mutation.block]!;
         if (!database.fields.any((field) => field.id == mutation.field)) {
@@ -521,6 +605,7 @@ class FakeWorkspace implements LiquidWorkspace {
                   name: mutation.text!,
                   kind: field.kind,
                   options: field.options,
+                  formula: field.formula,
                 ),
           ],
         );
@@ -533,6 +618,7 @@ class FakeWorkspace implements LiquidWorkspace {
                   for (final cell in row.cells)
                     if (cell.field != mutation.field) cell,
                 ],
+                computed: row.computed,
               ),
           ];
         }
@@ -564,6 +650,58 @@ class FakeWorkspace implements LiquidWorkspace {
           elements: [],
         );
         return _placeView(mutation, view);
+      case BridgeMutationKind.addCalculationBlock:
+        final view = _newView(BridgeBlockKind.calculation);
+        calculations[view.block] = [
+          line(
+            _id(),
+            const BridgeLineSetup(
+              label: '',
+              formula: '',
+              style: BridgeLineStyle.plain,
+            ),
+          ),
+        ];
+        return _placeView(mutation, view);
+      case BridgeMutationKind.addChartBlock:
+        final view = _newView(BridgeBlockKind.chart);
+        charts[view.block] = const BridgeChartSetup(
+          kind: BridgeChartKind.bar,
+          value: BridgeChartValue.count,
+        );
+        return _placeView(mutation, view);
+      case BridgeMutationKind.setChart:
+        if (!charts.containsKey(mutation.block)) throw 'not found';
+        charts[mutation.block!] = mutation.chart!;
+        _changed(_blockResource(mutation));
+        return BridgeApplied(elements: const [], action: _id());
+      case BridgeMutationKind.addLine:
+        final lines = calculations[mutation.block] ?? (throw 'not found');
+        final at = mutation.after == null
+            ? 0
+            : lines.indexWhere((line) => line.id == mutation.after) + 1;
+        final id = _id();
+        lines.insert(at, line(id, mutation.lineSetup!));
+        _changed(_blockResource(mutation));
+        return BridgeApplied(elements: const [], action: _id(), line: id);
+      case BridgeMutationKind.setLine:
+        final lines = calculations[mutation.block] ?? (throw 'not found');
+        final at = lines.indexWhere((line) => line.id == mutation.line);
+        if (at < 0) throw 'not found';
+        final formula = mutation.lineSetup!.formula;
+        if (formula.trimRight().endsWith('+')) {
+          throw "the formula can't be read from character ${formula.length + 1}";
+        }
+        lines[at] = line(mutation.line!, mutation.lineSetup!);
+        _changed(_blockResource(mutation));
+        return BridgeApplied(elements: const [], action: _id());
+      case BridgeMutationKind.removeLine:
+        final lines = calculations[mutation.block] ?? (throw 'not found');
+        final before = lines.length;
+        lines.removeWhere((line) => line.id == mutation.line);
+        if (lines.length == before) throw 'not found';
+        _changed(_blockResource(mutation));
+        return BridgeApplied(elements: const [], action: _id());
       case BridgeMutationKind.setDrawingStyle:
         final board = whiteboards[mutation.block] ?? (throw 'not found');
         if (board.style == mutation.drawingStyle) {
@@ -622,12 +760,14 @@ class FakeWorkspace implements LiquidWorkspace {
               ].indexed)
                 BridgeOption(id: _id(), name: name, color: color),
             ],
+            formula: '',
           ),
           BridgeLayout.calendar => BridgeField(
             id: _id(),
             name: 'Date',
             kind: BridgeFieldKind.date,
             options: const [],
+            formula: '',
           ),
         };
         final view = _newView(
@@ -651,6 +791,7 @@ class FakeWorkspace implements LiquidWorkspace {
               name: 'Name',
               kind: BridgeFieldKind.text,
               options: const [],
+              formula: '',
             ),
             ?extra,
           ],
@@ -682,6 +823,7 @@ class FakeWorkspace implements LiquidWorkspace {
               name: 'Name',
               kind: BridgeFieldKind.text,
               options: const [],
+              formula: '',
             ),
           ],
         );
@@ -929,6 +1071,34 @@ class FakeWorkspace implements LiquidWorkspace {
     return answer;
   }
 
+  BridgeComputed _total(List<BridgeRow> rows, BridgeFieldTotal total) {
+    final cells = [
+      for (final row in rows)
+        row.cells.where((cell) => cell.field == total.field).firstOrNull?.value,
+    ];
+    final numbers = [
+      for (final cell in cells)
+        if (cell?.kind == BridgeCellKind.number) cell!.number,
+    ];
+    final filled = cells.where((cell) => cell != null).length;
+    final number = switch (total.total) {
+      BridgeTotal.count => rows.length.toDouble(),
+      BridgeTotal.empty => (rows.length - filled).toDouble(),
+      BridgeTotal.filled => filled.toDouble(),
+      BridgeTotal.sum => numbers.fold(0.0, (sum, n) => sum + n),
+      BridgeTotal.average =>
+        numbers.fold(0.0, (sum, n) => sum + n) / numbers.length,
+      BridgeTotal.min => numbers.reduce((a, b) => a < b ? a : b),
+      BridgeTotal.max => numbers.reduce((a, b) => a > b ? a : b),
+    };
+    return BridgeComputed(
+      field: total.field,
+      value: '$number',
+      kind: BridgeValueKind.number,
+      number: number,
+    );
+  }
+
   BridgeAnswer _answer(BridgeQuery query) {
     List<T> window<T>(List<T> all) =>
         all.skip(query.start).take(query.limit).toList();
@@ -950,6 +1120,10 @@ class FakeWorkspace implements LiquidWorkspace {
       List<BridgeTable> tables = const [],
       List<BridgeShown> shown = const [],
       String? icon,
+      List<BridgeLine> lines = const [],
+      List<BridgeComputed> totals = const [],
+      BridgeChart? chart,
+      List<BridgeResource> follows = const [],
     }) => BridgeAnswer(
       areas: areas,
       pages: pages,
@@ -968,6 +1142,10 @@ class FakeWorkspace implements LiquidWorkspace {
       tables: tables,
       shown: shown,
       icon: icon,
+      lines: lines,
+      totals: totals,
+      chart: chart,
+      follows: follows,
     );
     final code = _isCode(query.block);
     return switch (query.kind) {
@@ -1017,9 +1195,45 @@ class FakeWorkspace implements LiquidWorkspace {
         },
       ),
       BridgeQueryKind.database => answer(database: databases[query.block]),
+      BridgeQueryKind.chart => answer(
+        chart: switch (charts[query.block]) {
+          final setup? => BridgeChart(
+            setup: setup,
+            source: chartSource(setup),
+            points: chartSource(setup) == null
+                ? const []
+                : chartPoints[query.block] ?? const [],
+          ),
+          null => null,
+        },
+      ),
+      BridgeQueryKind.calculation => answer(
+        lines: [
+          for (final kept in calculations[query.block] ?? const <BridgeLine>[])
+            line(
+              kept.id,
+              BridgeLineSetup(
+                label: kept.label,
+                formula: kept.formula,
+                style: kept.style,
+              ),
+            ),
+        ],
+        follows: {
+          for (final kept in calculations[query.block] ?? const <BridgeLine>[])
+            for (final token in RegExp(
+              r'\{([^}.]+)\.[^}.]+\}',
+            ).allMatches(kept.formula))
+              BridgeResource(kind: BridgeResourceKind.table, block: token[1]),
+        }.toList(),
+      ),
       BridgeQueryKind.rows => () {
         final shown = _shownRows(query);
-        return answer(count: shown.length, rows: window(shown));
+        return answer(
+          count: shown.length,
+          rows: window(shown),
+          totals: [for (final total in query.totals) _total(shown, total)],
+        );
       }(),
       BridgeQueryKind.groups => answer(groups: _groups(query)),
       BridgeQueryKind.search => answer(hits: _search(query)),
@@ -1124,6 +1338,7 @@ class FakeWorkspace implements LiquidWorkspace {
         sort: query.sort,
         filter: query.filter,
         search: query.search,
+        totals: const [],
       ),
     );
     BridgeCell? held(BridgeRow row) =>
@@ -1151,6 +1366,9 @@ class FakeWorkspace implements LiquidWorkspace {
             value: value,
             count: within(value).length,
             rows: within(value).take(query.limit).toList(),
+            totals: [
+              for (final total in query.totals) _total(within(value), total),
+            ],
           ),
     ];
   }
@@ -1380,6 +1598,7 @@ BridgeTab tabOf(
   sort: sort,
   filter: filter,
   folded: const [],
+  totals: const [],
 );
 
 BridgeTab withTabId(BridgeTab tab, String id) => changedTab(tab, id: id);
@@ -1394,6 +1613,7 @@ BridgeTab changedTab(
   (BridgeSort?,)? sort,
   (BridgeFilter?,)? filter,
   List<BridgeCell>? folded,
+  List<BridgeFieldTotal>? totals,
 }) => BridgeTab(
   id: id ?? tab.id,
   name: name ?? tab.name,
@@ -1403,4 +1623,5 @@ BridgeTab changedTab(
   sort: sort == null ? tab.sort : sort.$1,
   filter: filter == null ? tab.filter : filter.$1,
   folded: folded ?? tab.folded,
+  totals: totals ?? tab.totals,
 );

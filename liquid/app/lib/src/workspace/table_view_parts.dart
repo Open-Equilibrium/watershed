@@ -132,10 +132,12 @@ class MoreMenu extends StatefulWidget {
     super.key,
     required this.label,
     required this.items,
+    this.plain = const [],
     this.visible = true,
   });
 
   final String label;
+  final List<(IconData, String, VoidCallback)> plain;
   final List<(IconData, String, VoidCallback)> items;
   final bool visible;
 
@@ -156,7 +158,7 @@ class _MoreMenuState extends State<MoreMenu> {
     return AnchoredMenu(
       controller: _menu,
       end: true,
-      height: 40.0 * widget.items.length + 8,
+      height: 40.0 * (widget.plain.length + widget.items.length) + 8,
       onTapOutside: (_) => _close(),
       menu: (_) => Container(
         width: 220,
@@ -170,7 +172,10 @@ class _MoreMenuState extends State<MoreMenu> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            for (final (icon, label, onTap) in widget.items)
+            for (final (at, (icon, label, onTap)) in [
+              ...widget.plain,
+              ...widget.items,
+            ].indexed)
               InkWell(
                 borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
                 onTap: () {
@@ -184,7 +189,13 @@ class _MoreMenuState extends State<MoreMenu> {
                   ),
                   child: Row(
                     children: [
-                      Icon(icon, size: 14, color: ws.danger),
+                      Icon(
+                        icon,
+                        size: 14,
+                        color: at < widget.plain.length
+                            ? ws.textMuted
+                            : ws.danger,
+                      ),
                       const SizedBox(width: WsMetrics.space3),
                       Flexible(
                         child: Text(
@@ -193,7 +204,9 @@ class _MoreMenuState extends State<MoreMenu> {
                           overflow: TextOverflow.ellipsis,
                           style: TextStyle(
                             fontSize: WsMetrics.fsUi,
-                            color: ws.danger,
+                            color: at < widget.plain.length
+                                ? ws.text
+                                : ws.danger,
                           ),
                         ),
                       ),

@@ -251,6 +251,7 @@ fn main() {
         start: 0,
         limit: 100,
         search: None,
+        totals: Vec::new(),
     };
     let start = Instant::now();
     let window = workspace

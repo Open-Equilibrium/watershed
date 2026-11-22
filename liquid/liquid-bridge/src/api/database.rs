@@ -1,7 +1,9 @@
 use liquid_core::{
-    Cell, Database, FieldId, FieldKind, Filter, Layout, Match, OptionId, Row, Sort, Tab, TabSetup,
+    Cell, Database, FieldId, FieldKind, FieldTotal, Filter, Layout, Match, OptionId, Row, Sort,
+    Tab, TabSetup, Total,
 };
 
+use super::calculation::BridgeValueKind;
 use super::media::BridgeMedia;
 use super::workspace::id;
 
@@ -13,6 +15,7 @@ pub enum BridgeFieldKind {
     Date,
     Checkbox,
     File,
+    Formula,
 }
 
 impl BridgeFieldKind {
@@ -24,6 +27,7 @@ impl BridgeFieldKind {
             Self::Date => FieldKind::Date,
             Self::Checkbox => FieldKind::Checkbox,
             Self::File => FieldKind::File,
+            Self::Formula => FieldKind::Formula,
         }
     }
 
@@ -35,6 +39,7 @@ impl BridgeFieldKind {
             FieldKind::Date => Self::Date,
             FieldKind::Checkbox => Self::Checkbox,
             FieldKind::File => Self::File,
+            FieldKind::Formula => Self::Formula,
         }
     }
 }
@@ -151,6 +156,85 @@ pub struct BridgeTab {
     pub sort: Option<BridgeSort>,
     pub filter: Option<BridgeFilter>,
     pub folded: Vec<BridgeCell>,
+    pub totals: Vec<BridgeFieldTotal>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BridgeTotal {
+    Sum,
+    Average,
+    Count,
+    Min,
+    Max,
+    Empty,
+    Filled,
+}
+
+impl BridgeTotal {
+    pub(crate) fn to_core(self) -> Total {
+        match self {
+            Self::Sum => Total::Sum,
+            Self::Average => Total::Average,
+            Self::Count => Total::Count,
+            Self::Min => Total::Min,
+            Self::Max => Total::Max,
+            Self::Empty => Total::Empty,
+            Self::Filled => Total::Filled,
+        }
+    }
+
+    fn of(total: Total) -> Self {
+        match total {
+            Total::Sum => Self::Sum,
+            Total::Average => Self::Average,
+            Total::Count => Self::Count,
+            Total::Min => Self::Min,
+            Total::Max => Self::Max,
+            Total::Empty => Self::Empty,
+            Total::Filled => Self::Filled,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BridgeFieldTotal {
+    pub field: String,
+    pub total: BridgeTotal,
+}
+
+impl BridgeFieldTotal {
+    pub(crate) fn of(total: &FieldTotal) -> Self {
+        Self {
+            field: total.field.to_string(),
+            total: BridgeTotal::of(total.total),
+        }
+    }
+
+    pub(crate) fn to_core(&self) -> Result<FieldTotal, String> {
+        Ok(FieldTotal {
+            field: id(&Some(self.field.clone()), FieldId::parse, "total field")?,
+            total: self.total.to_core(),
+        })
+    }
+}
+
+pub(crate) fn totals(totals: &[BridgeFieldTotal]) -> Result<Vec<FieldTotal>, String> {
+    totals.iter().map(BridgeFieldTotal::to_core).collect()
+}
+
+pub(crate) fn computed(values: &[(FieldId, liquid_core::Value)]) -> Vec<BridgeComputed> {
+    values
+        .iter()
+        .map(|(field, value)| BridgeComputed {
+            field: field.to_string(),
+            value: value.to_string(),
+            kind: BridgeValueKind::of(value),
+            number: match value {
+                liquid_core::Value::Number(number) => *number,
+                _ => 0.0,
+            },
+        })
+        .collect()
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -158,6 +242,7 @@ pub struct BridgeGroup {
     pub value: BridgeCell,
     pub count: i64,
     pub rows: Vec<BridgeRow>,
+    pub totals: Vec<BridgeComputed>,
 }
 
 impl BridgeLayout {
@@ -190,6 +275,7 @@ impl BridgeTab {
             sort: setup.sort.as_ref().map(BridgeSort::of),
             filter: setup.filter.as_ref().map(BridgeFilter::of),
             folded: setup.folded.iter().map(BridgeCell::of).collect(),
+            totals: setup.totals.iter().map(BridgeFieldTotal::of).collect(),
         }
     }
 
@@ -211,6 +297,7 @@ impl BridgeTab {
                 .iter()
                 .map(BridgeCell::to_core)
                 .collect::<Result<_, _>>()?,
+            totals: totals(&self.totals)?,
         })
     }
 }
@@ -259,6 +346,7 @@ pub struct BridgeField {
     pub name: String,
     pub kind: BridgeFieldKind,
     pub options: Vec<BridgeOption>,
+    pub formula: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -272,6 +360,15 @@ pub struct BridgeOption {
 pub struct BridgeRow {
     pub id: String,
     pub cells: Vec<BridgeFieldCell>,
+    pub computed: Vec<BridgeComputed>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct BridgeComputed {
+    pub field: String,
+    pub value: String,
+    pub kind: BridgeValueKind,
+    pub number: f64,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -300,6 +397,7 @@ impl BridgeDatabase {
                             color: option.color.into(),
                         })
                         .collect(),
+                    formula: field.formula,
                 })
                 .collect(),
         }
@@ -318,6 +416,7 @@ impl BridgeRow {
                     value: BridgeCell::of(cell),
                 })
                 .collect(),
+            computed: computed(&row.computed),
         }
     }
 }

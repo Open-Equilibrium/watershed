@@ -181,7 +181,15 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
     }
     if (choice.block == BridgeBlockKind.code) return _turnIntoCode();
     if (choice.block == BridgeBlockKind.media) return _addMedia(_pickFiles);
-    if (choice.block == BridgeBlockKind.whiteboard) return _addWhiteboard();
+    if (choice.block == BridgeBlockKind.whiteboard) {
+      return _addBlock(BridgeMutationKind.addWhiteboardBlock, 'Whiteboard');
+    }
+    if (choice.block == BridgeBlockKind.chart) {
+      return _addBlock(BridgeMutationKind.addChartBlock, 'Chart');
+    }
+    if (choice.block == BridgeBlockKind.calculation) {
+      return _addBlock(BridgeMutationKind.addCalculationBlock, 'Calculation');
+    }
     ExistingView? existing;
     if (choice.existing) {
       existing = await pickExistingTable(context, _state);
@@ -578,7 +586,7 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
     } on Object catch (_) {}
   }
 
-  Future<void> _addWhiteboard() async {
+  Future<void> _addBlock(BridgeMutationKind kind, String name) async {
     final views = widget.views;
     final view = widget.view;
     final index = widget.index;
@@ -589,7 +597,7 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
       final above = index > 0 ? await views.viewAt(index - 1) : null;
       if (index > 0 && above == null) {
         _state.report(
-          'Liquid did not add the Whiteboard, as the Page changed; choose Whiteboard again.',
+          'Liquid did not add the $name, as the Page changed; choose $name again.',
         );
         return;
       }
@@ -597,14 +605,12 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
     }
     try {
       final added = await views.write(
-        mutation(
-          BridgeMutationKind.addWhiteboardBlock,
-          page: _page,
-          after: after,
-        ),
+        mutation(kind, page: _page, after: after),
         const [],
       );
-      views.focusBoard.value = added.view;
+      if (kind == BridgeMutationKind.addWhiteboardBlock) {
+        views.focusBoard.value = added.view;
+      }
       if (empty) await _handOverSection(added.view!, last: last);
       if (empty && !last) {
         await views.write(

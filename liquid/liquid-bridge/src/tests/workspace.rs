@@ -119,6 +119,10 @@ pub(super) fn mutation(kind: BridgeMutationKind) -> BridgeMutation {
         attachment: None,
         drawing_style: None,
         drawing: None,
+        line: None,
+        line_setup: None,
+        total: None,
+        chart: None,
     }
 }
 
@@ -135,6 +139,7 @@ pub(super) fn query(kind: BridgeQueryKind) -> BridgeQuery {
         filter: None,
         within: None,
         search: None,
+        totals: Vec::new(),
     }
 }
 

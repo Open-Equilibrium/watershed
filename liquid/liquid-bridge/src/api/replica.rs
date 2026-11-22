@@ -8,15 +8,17 @@ use liquid_core::{
 };
 use liquid_storage::Sqlite;
 
+use super::calculation::BridgeLine;
+use super::chart::BridgeChart;
 use super::database::{
-    BridgeCell, BridgeDatabase, BridgeGroup, BridgeRow, BridgeTab, filter, sort,
+    BridgeCell, BridgeDatabase, BridgeGroup, BridgeRow, BridgeTab, computed, filter, sort, totals,
 };
 use super::drawing::BridgeDrawing;
 use super::media::BridgeMedia;
 use super::workspace::{
     BridgeAnswer, BridgeApplied, BridgeArea, BridgeBlockKind, BridgeChange, BridgeFound, BridgeHit,
     BridgeMutation, BridgePage, BridgeQuery, BridgeQueryKind, BridgeResource, BridgeShown,
-    BridgeTable, BridgeTextStyle, BridgeTile, BridgeView, id, message, window,
+    BridgeTable, BridgeTextStyle, BridgeTile, BridgeView, follows, id, message, window,
 };
 use crate::frb_generated::StreamSink;
 use crate::keys::{Keychain, Keys, random_hex, replica_key};
@@ -153,6 +155,7 @@ impl LiquidWorkspace {
             option: None,
             tab: None,
             elements: Vec::new(),
+            line: None,
         };
         match applied.created {
             Some(Created::Area(area)) => answer.area = Some(area.to_string()),
@@ -166,6 +169,7 @@ impl LiquidWorkspace {
             Some(Created::Row(row)) => answer.row = Some(row.to_string()),
             Some(Created::Option(option)) => answer.option = Some(option.to_string()),
             Some(Created::Tab(tab)) => answer.tab = Some(tab.to_string()),
+            Some(Created::Line(line)) => answer.line = Some(line.to_string()),
             Some(Created::Elements(elements)) => {
                 answer.elements = elements.iter().map(ToString::to_string).collect();
             }
@@ -218,6 +222,10 @@ impl LiquidWorkspace {
             tables: Vec::new(),
             shown: Vec::new(),
             icon: None,
+            lines: Vec::new(),
+            totals: Vec::new(),
+            chart: None,
+            follows: Vec::new(),
         };
         match query.kind {
             BridgeQueryKind::Workspace => {
@@ -273,6 +281,8 @@ impl LiquidWorkspace {
                             BlockKind::Code => BridgeBlockKind::Code,
                             BlockKind::Media => BridgeBlockKind::Media,
                             BlockKind::Whiteboard => BridgeBlockKind::Whiteboard,
+                            BlockKind::Calculation => BridgeBlockKind::Calculation,
+                            BlockKind::Chart => BridgeBlockKind::Chart,
                             BlockKind::Unknown => BridgeBlockKind::Unknown,
                         },
                         tabs: view.tabs.iter().map(BridgeTab::of).collect(),
@@ -316,6 +326,22 @@ impl LiquidWorkspace {
                     .map_err(message)?
                     .map(BridgeDrawing::of);
             }
+            BridgeQueryKind::Calculation => {
+                let page = id(&query.page, PageId::parse, "page")?;
+                let block = id(&query.block, BlockId::parse, "block")?;
+                if let Some(calculation) = workspace.calculation(&page, &block).map_err(message)? {
+                    answer.follows = follows(&calculation.uses);
+                    answer.lines = calculation.lines.into_iter().map(BridgeLine::of).collect();
+                }
+            }
+            BridgeQueryKind::Chart => {
+                let page = id(&query.page, PageId::parse, "page")?;
+                let block = id(&query.block, BlockId::parse, "block")?;
+                if let Some(chart) = workspace.chart(&page, &block).map_err(message)? {
+                    answer.follows = follows(&chart.uses);
+                    answer.chart = Some(BridgeChart::of(chart));
+                }
+            }
             BridgeQueryKind::Database => {
                 let block = id(&query.block, BlockId::parse, "block")?;
                 answer.database = workspace
@@ -328,6 +354,8 @@ impl LiquidWorkspace {
                 let rows = workspace
                     .rows(&block, &row_query(query, start, limit)?)
                     .map_err(message)?;
+                answer.totals = computed(&rows.totals);
+                answer.follows = follows(&rows.uses);
                 answer.count = rows.count as i64;
                 answer.rows = rows.rows.into_iter().map(BridgeRow::of).collect();
             }
@@ -358,6 +386,7 @@ impl LiquidWorkspace {
                     .map(|group| BridgeGroup {
                         value: BridgeCell::of(&group.value),
                         count: group.count as i64,
+                        totals: computed(&group.totals),
                         rows: group.rows.into_iter().map(BridgeRow::of).collect(),
                     })
                     .collect();
@@ -486,5 +515,6 @@ fn row_query(query: &BridgeQuery, start: usize, limit: usize) -> Result<RowQuery
         start,
         limit,
         search: query.search.clone(),
+        totals: totals(&query.totals)?,
     })
 }

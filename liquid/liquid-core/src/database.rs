@@ -14,6 +14,7 @@ const ROWS: &str = "rows";
 const CELLS: &str = "cells";
 const OPTIONS: &str = "options";
 const COLOR: &str = "color";
+const FORMULA: &str = "formula";
 
 pub const MAX_FIELDS: usize = 500;
 pub const MAX_OPTIONS: usize = 500;
@@ -32,6 +33,7 @@ pub struct Field {
     pub name: String,
     pub kind: FieldKind,
     pub options: Vec<SelectOption>,
+    pub formula: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -45,6 +47,7 @@ pub struct SelectOption {
 pub struct Row {
     pub id: RowId,
     pub cells: Vec<(FieldId, Cell)>,
+    pub computed: Vec<(FieldId, crate::Value)>,
 }
 
 impl Row {
@@ -66,6 +69,7 @@ pub struct RowQuery {
     pub start: usize,
     pub limit: usize,
     pub search: Option<String>,
+    pub totals: Vec<crate::FieldTotal>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -94,12 +98,15 @@ pub struct Group {
     pub value: Cell,
     pub count: usize,
     pub rows: Vec<Row>,
+    pub totals: Vec<(FieldId, crate::Value)>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Rows {
     pub count: usize,
     pub rows: Vec<Row>,
+    pub totals: Vec<(FieldId, crate::Value)>,
+    pub uses: Vec<crate::Used>,
 }
 
 pub(crate) struct Index {
@@ -130,6 +137,10 @@ impl Index {
             })
             .collect();
         Ok(Self { rows })
+    }
+
+    pub(crate) fn entries(&self) -> impl Iterator<Item = (&RowId, &HashMap<String, Cell>)> {
+        self.rows.iter().map(|row| (&row.id, &row.cells))
     }
 
     fn position(&self, row: &RowId) -> Option<usize> {
@@ -197,6 +208,7 @@ fn kind_name(kind: FieldKind) -> &'static str {
         FieldKind::Date => "date",
         FieldKind::Checkbox => "checkbox",
         FieldKind::File => "file",
+        FieldKind::Formula => "formula",
     }
 }
 
@@ -208,6 +220,7 @@ fn kind(name: Option<&str>) -> Option<FieldKind> {
         "date" => FieldKind::Date,
         "checkbox" => FieldKind::Checkbox,
         "file" => FieldKind::File,
+        "formula" => FieldKind::Formula,
         _ => return None,
     })
 }
@@ -298,6 +311,20 @@ pub(crate) fn rename_field(
 ) -> Result<(), Error> {
     let (entry, _) = field(doc, block, field_id)?;
     Ok(doc.put(&entry, NAME, name)?)
+}
+
+pub(crate) fn set_formula(
+    doc: &mut AutoCommit,
+    block: &BlockId,
+    field_id: &FieldId,
+    formula: &str,
+) -> Result<(), Error> {
+    let (entry, kind) = field(doc, block, field_id)?;
+    if kind != FieldKind::Formula {
+        return Err(Error::WrongKind);
+    }
+    crate::calculation::check_formula(formula)?;
+    Ok(doc.put(&entry, FORMULA, formula)?)
 }
 
 pub(crate) fn remove_field(
@@ -549,6 +576,7 @@ pub(crate) fn read(doc: &AutoCommit, block: &BlockId) -> Result<Option<Database>
                 name: field.get(NAME).unwrap_or_default().to_string(),
                 kind,
                 options,
+                formula: field.get(FORMULA).unwrap_or_default().to_string(),
             })
         })
         .collect();
@@ -578,6 +606,8 @@ pub(crate) fn rows(
         return Ok(Rows {
             count: index.rows.len(),
             rows: window.map(|row| shown(&live, row)).collect(),
+            totals: Vec::new(),
+            uses: Vec::new(),
         });
     }
     let rows = matching(&database, &live, index, query, true);
@@ -589,6 +619,8 @@ pub(crate) fn rows(
             .take(query.limit)
             .map(|row| shown(&live, row))
             .collect(),
+        totals: Vec::new(),
+        uses: Vec::new(),
     })
 }
 
@@ -639,7 +671,12 @@ pub(crate) fn groups(
         .zip(counts)
         .zip(rows)
         .filter(|((value, count), _)| *value != Cell::Empty || *count > 0)
-        .map(|((value, count), rows)| Group { value, count, rows })
+        .map(|((value, count), rows)| Group {
+            value,
+            count,
+            rows,
+            totals: Vec::new(),
+        })
         .collect())
 }
 
@@ -720,7 +757,7 @@ fn matching<'a>(
 
 pub(crate) fn check_sort(doc: &AutoCommit, block: &BlockId, sort: &Sort) -> Result<(), Error> {
     match field(doc, block, &sort.field)? {
-        (_, FieldKind::File) => Err(Error::WrongKind),
+        (_, FieldKind::File | FieldKind::Formula) => Err(Error::WrongKind),
         _ => Ok(()),
     }
 }
@@ -733,6 +770,7 @@ pub(crate) fn check_filter(
     let (entry, kind) = field(doc, block, &filter.field)?;
     let long = |text: &str| text.chars().count() > MAX_FILTER_TEXT;
     match (kind, &filter.matches) {
+        (FieldKind::Formula, _) => Err(Error::WrongKind),
         (_, Match::Empty | Match::NotEmpty) => Ok(()),
         (FieldKind::Text, Match::Contains(text) | Match::Is(Cell::Text(text))) if long(text) => {
             Err(Error::TooLong)
@@ -760,6 +798,7 @@ fn shown(live: &[&FieldId], row: &Indexed) -> Row {
     Row {
         id: row.id.clone(),
         cells,
+        computed: Vec::new(),
     }
 }
 
@@ -808,6 +847,15 @@ fn cells(
         read.insert(field.clone(), cell);
     }
     read
+}
+
+pub(crate) fn in_group(cell: Option<&Cell>, group: &Cell) -> bool {
+    match group {
+        Cell::Checkbox(true) => cell == Some(&Cell::Checkbox(true)),
+        Cell::Checkbox(false) => cell != Some(&Cell::Checkbox(true)),
+        Cell::Empty => !matches!(cell, Some(Cell::Select(_))),
+        group => cell == Some(group),
+    }
 }
 
 fn matches(cell: Option<&Cell>, matches: &Match) -> bool {

@@ -227,6 +227,13 @@ class _PowerBarState extends State<PowerBar> {
             change(BridgeMutationKind.addWhiteboardBlock),
             const [],
           );
+        case SlashCommand(block: BridgeBlockKind.chart):
+          await views.write(change(BridgeMutationKind.addChartBlock), const []);
+        case SlashCommand(block: BridgeBlockKind.calculation):
+          await views.write(
+            change(BridgeMutationKind.addCalculationBlock),
+            const [],
+          );
         case SlashCommand(block: BridgeBlockKind.media):
           final files = await MediaPlatform.pickFiles();
           if (files.isNotEmpty) await addMedia(views, files, after: after);

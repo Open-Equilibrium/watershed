@@ -224,6 +224,7 @@ void main() {
                             color: number % 10,
                           ),
                       ],
+                      formula: '',
                     )
                   : field,
           ],

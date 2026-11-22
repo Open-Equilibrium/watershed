@@ -2,6 +2,8 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 
+import '../rust/api/calculation.dart';
+import '../rust/api/chart.dart';
 import '../rust/api/database.dart';
 import '../rust/api/replica.dart';
 import '../settings_file.dart';
@@ -42,6 +44,10 @@ BridgeMutation mutation(
   String? attachment,
   BridgeDrawingStyle? drawingStyle,
   BridgeDrawingEdit? drawing,
+  String? line,
+  BridgeLineSetup? lineSetup,
+  BridgeTotal? total,
+  BridgeChartSetup? chart,
 }) => BridgeMutation(
   kind: kind,
   area: area,
@@ -72,6 +78,10 @@ BridgeMutation mutation(
   attachment: attachment,
   drawingStyle: drawingStyle,
   drawing: drawing,
+  line: line,
+  lineSetup: lineSetup,
+  total: total,
+  chart: chart,
 );
 
 BridgeQuery query(
@@ -86,6 +96,7 @@ BridgeQuery query(
   BridgeFilter? filter,
   BridgeFilter? within,
   String? search,
+  List<BridgeFieldTotal> totals = const [],
 }) => BridgeQuery(
   kind: kind,
   area: area,
@@ -98,6 +109,7 @@ BridgeQuery query(
   filter: filter,
   within: within,
   search: search,
+  totals: totals,
 );
 
 typedef CopiedView = ({
