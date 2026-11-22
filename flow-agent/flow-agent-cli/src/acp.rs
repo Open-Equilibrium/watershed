@@ -21,6 +21,7 @@ const SESSION_PREFIX: &str = "chat-";
 const SESSION_RANDOM_BYTES: usize = 16;
 pub(crate) const MAX_ACP_LINE_BYTES: usize = 8 * flow_agent_core::MAX_STEERING_MESSAGE_BYTES;
 const INPUT_CAPACITY: usize = 64;
+const MAX_HELD_UPDATES: usize = 256;
 const PARSE_ERROR: i64 = -32700;
 const METHOD_NOT_FOUND: i64 = -32601;
 const INVALID_PARAMS: i64 = -32602;
@@ -138,6 +139,8 @@ impl<W: Write> Agent<W> {
                     }
                 } else {
                     self.held.extend(updates);
+                    let excess = self.held.len().saturating_sub(MAX_HELD_UPDATES);
+                    self.held.drain(..excess);
                 }
             }
             Input::Finished(result) => self.finished(result)?,
@@ -590,4 +593,38 @@ fn is_session_id(id: &str) -> bool {
 
 fn internal(error: impl ToString) -> (i64, String) {
     (INTERNAL_ERROR, error.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Agent, Input, MAX_HELD_UPDATES, RunView};
+    use serde_json::json;
+
+    #[test]
+    fn updates_held_without_an_open_prompt_stay_bounded() {
+        let (sender, _receiver) = std::sync::mpsc::sync_channel(1);
+        let mut agent = Agent {
+            out: Vec::new(),
+            sender,
+            session: None,
+            prompt: None,
+            running: true,
+            view: RunView::default(),
+            held: Vec::new(),
+        };
+
+        for index in 0..MAX_HELD_UPDATES + 10 {
+            let event = json!({
+                "event_type": "tool.started",
+                "payload": {"attempt_id": format!("tool-{index}"), "tool_name": "echo"},
+            });
+            agent
+                .handle(Input::Event(event))
+                .expect("the event is observed");
+        }
+
+        assert_eq!(agent.held.len(), MAX_HELD_UPDATES);
+        assert_eq!(agent.held[0]["toolCallId"], "tool-10");
+        assert!(agent.out.is_empty());
+    }
 }
