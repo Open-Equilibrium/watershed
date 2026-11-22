@@ -46,6 +46,7 @@ class _ArrangedPageState extends State<ArrangedPage> {
   List<BridgeView> _all = const [];
   final _heights = <String, double>{};
   final _remembered = <String, double>{};
+  final _asked = <String>{};
   String? _selected;
   String? _entered;
   _Drag? _drag;
@@ -116,7 +117,8 @@ class _ArrangedPageState extends State<ArrangedPage> {
     setState(() => _all = views);
     for (final tile in tilesOf(views)) {
       final lead = tile.lead.id;
-      if (_heights.containsKey('|$lead')) continue;
+      if (read != _reads) return;
+      if (_heights.containsKey('|$lead') || !_asked.add(lead)) continue;
       try {
         final kept = await _views.state.workspace.remembered(
           key: 'height/$lead',

@@ -800,8 +800,13 @@ class FakeWorkspace implements LiquidWorkspace {
 
   final device = <String, String>{};
 
+  final recalled = <String>[];
+
   @override
-  Future<String?> remembered({required String key}) async => device[key];
+  Future<String?> remembered({required String key}) async {
+    recalled.add(key);
+    return device[key];
+  }
 
   @override
   Future<void> remember({required String key, String? value}) async {

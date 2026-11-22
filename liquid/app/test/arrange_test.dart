@@ -219,6 +219,30 @@ void main() {
     expect(find.byKey(const Key('arrange bar')), findsNothing);
   });
 
+  testWidgets('a tile’s kept height is asked for once', (tester) async {
+    await kit.show(tester, [
+      for (var at = 0; at < 8; at++) const WhiteboardPart(),
+    ]);
+    final first = views().first;
+    Future<void> place(int column) async {
+      await kit.workspace.apply(
+        mutation(
+          BridgeMutationKind.setTile,
+          page: kit.page,
+          view: first.id,
+          tile: BridgeTile(column: column, span: 6),
+        ),
+      );
+      await tester.pumpAndSettle();
+    }
+
+    await place(0);
+    final asked = kit.fake.recalled.length;
+    expect(asked, greaterThan(0));
+    await place(1);
+    expect(kit.fake.recalled.length, asked);
+  });
+
   testWidgets('measured heights stay on the device', (tester) async {
     await trip(tester);
     await tester.pump(const Duration(seconds: 2));
