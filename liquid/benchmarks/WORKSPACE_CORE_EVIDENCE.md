@@ -5,7 +5,7 @@ Observational evidence for `liquid-core`'s mutation pipeline and `liquid-storage
 ## Environment
 
 - Apple M6, 24 GB, macOS 27.0 (26A428), internal SSD; Rust 1.99.0, release build; `automerge` 0.12.0, `rusqlite` 0.41.1 with SQLCipher 4.19.0.
-- Observed on 2026-11-02 at commit `e095071`, three rounds; the Typing and Long Page workloads again on 2026-11-22 at `9f2b3e01`, three rounds, after the Long Page workload added an arranged Page (ADR-0312). The Database workload was observed on 2026-11-03 at `6aa3f03`, three rounds, after its workload change on 2026-11-06 at `e4193e5`, three rounds, with rows added last (ADR-0247), and last on 2026-11-22 at `6de4f29d`, three rounds, with a Board's grouped read added (ADR-0311). The attachment workload was observed on 2026-11-17 at `1557b2a3`, three rounds, with `rusqlite` 0.42.0, and the Whiteboard workload on 2026-11-17 at `aa72dab6`, three rounds.
+- Observed on 2026-11-02 at commit `e095071`, three rounds; Durable typing again on 2026-11-22 at `2a0fa970`, three rounds, once each commit also wrote the search index (ADR-0237); the Typing and Long Page workloads again on 2026-11-22 at `9f2b3e01`, three rounds, after the Long Page workload added an arranged Page (ADR-0312). The Database workload was observed on 2026-11-03 at `6aa3f03`, three rounds, after its workload change on 2026-11-06 at `e4193e5`, three rounds, with rows added last (ADR-0247), and last on 2026-11-22 at `6de4f29d`, three rounds, with a Board's grouped read added (ADR-0311). The attachment workload was observed on 2026-11-17 at `1557b2a3`, three rounds, with `rusqlite` 0.42.0, and the Whiteboard workload on 2026-11-17 at `aa72dab6`, three rounds.
 
 ## Workloads
 
@@ -35,7 +35,8 @@ Observational evidence for `liquid-core`'s mutation pipeline and `liquid-storage
 | A filtered, sorted window of 100 of the 5,000 rows | 0.87 ms | 0.81 ms | 0.85 ms |
 | Both groups with their first 50 rows each, sorted | 1.86 ms | 1.80 ms | 1.84 ms |
 | Peak memory footprint of the pipeline process, with the Database | 102.6 MB | 101.6 MB | 101.3 MB |
-| Durable typing, per keystroke | median 3.06 ms, p99 6.01 ms, max 14.0 ms | median 3.01 ms, p99 4.69 ms, max 10.7 ms | median 3.02 ms, p99 5.97 ms, max 11.7 ms |
+| Durable typing, per keystroke, before the search index (2026-11-02, `e095071`) | median 3.06 ms, p99 6.01 ms, max 14.0 ms | median 3.01 ms, p99 4.69 ms, max 10.7 ms | median 3.02 ms, p99 5.97 ms, max 11.7 ms |
+| … with the search index written in each commit (2026-11-22, `2a0fa970`) | median 3.09 ms, p99 7.07 ms, max 12.0 ms | median 3.12 ms, p99 7.91 ms, max 17.3 ms | median 3.04 ms, p99 7.99 ms, max 12.0 ms |
 | Peak memory footprint of the writing process | 11.1 MB | 10.9 MB | 11.2 MB |
 | Replica on disk with its write-ahead log | 2.1 MiB | 2.1 MiB | 2.1 MiB |
 | A new process reopening the long Page and reading its Views | 25.7 ms | 23.6 ms | 23.4 ms |
@@ -55,7 +56,7 @@ Each loaded Page keeps its View order as an index, so adding a Text Block at the
 
 A keystroke through the pipeline with the in-memory store costs about 11 µs. The 3.8 ms maximum is the snapshot the pipeline writes after every 1,000 chunks of a document. The pipeline checks a text position against the elements beside it rather than reading the whole text.
 
-A durable commit is almost entirely the flush to the storage medium: F_FULLFSYNC, which macOS needs for a commit to survive a power loss (ADR-0237). The editor may group consecutive keystrokes into one commit (client architecture rule 9; the approved History mockup shows one entry per pause), and typing is designed not to wait for a commit (rule 7).
+Each durable commit also rewrites the edited Text Block's search entry, which leaves the median as it was and lengthens the tail by about 2 ms. A durable commit is almost entirely the flush to the storage medium: F_FULLFSYNC, which macOS needs for a commit to survive a power loss (ADR-0237). The editor may group consecutive keystrokes into one commit (client architecture rule 9; the approved History mockup shows one entry per pause), and typing is designed not to wait for a commit (rule 7).
 
 Adding an attachment costs about 11 ms per 1 MiB part; memory stays flat, as each part is written and dropped. Bridge calls take the Workspace's lock for one part at a time, so other writes wait at most one part's commit.
 
