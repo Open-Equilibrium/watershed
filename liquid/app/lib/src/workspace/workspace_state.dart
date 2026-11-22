@@ -210,7 +210,7 @@ class WorkspaceState {
       final kept = await workspace.remembered(key: 'recent');
       if (kept != null && kept.isNotEmpty) recent.value = kept.split(',');
     } on Object {
-      return;
+      recent.value = const [];
     }
     open.addListener(_opened);
     _opened();

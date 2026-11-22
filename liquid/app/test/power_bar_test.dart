@@ -76,6 +76,15 @@ void main() {
     expect(kit.fake.device['recent'], contains(trip.page));
   });
 
+  testWidgets('opened Pages count as recent though the kept list is unread', (
+    tester,
+  ) async {
+    await kit.show(tester, [
+      const TextPart('Plan'),
+    ], before: () => kit.fake.refuseRemembered = true);
+    expect(kit.workspace.recent.value, [kit.page]);
+  });
+
   testWidgets('a text hit opens its Page with the caret in that Block', (
     tester,
   ) async {

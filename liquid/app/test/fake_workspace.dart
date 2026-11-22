@@ -802,9 +802,12 @@ class FakeWorkspace implements LiquidWorkspace {
 
   final recalled = <String>[];
 
+  bool refuseRemembered = false;
+
   @override
   Future<String?> remembered({required String key}) async {
     recalled.add(key);
+    if (refuseRemembered) throw 'refused';
     return device[key];
   }
 
