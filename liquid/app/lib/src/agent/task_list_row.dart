@@ -114,7 +114,10 @@ class _NodeRowState extends State<_NodeRow> {
     };
     final small = TextStyle(color: ws.textFaint, fontSize: WsMetrics.fsSmall);
     final messageable =
-        node.instance && node.status == BridgeStepStatus.running;
+        node.instance &&
+        widget.state.runningInstances.value.any(
+          (running) => running.name == node.label,
+        );
     return MouseRegion(
       onEnter: (_) => setState(() => _hovered = true),
       onExit: (_) => setState(() => _hovered = false),

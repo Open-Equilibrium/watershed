@@ -478,7 +478,8 @@ void main() {
     test('a task list keeps its steps when it completes and names the running instances', () async {
       const running = BridgeStepStatus.running;
       const completed = BridgeStepStatus.completed;
-      await open();
+      session.turnList = [turnOf(1, status: BridgeTurnStatus.running)];
+      await open(snapshotOf(turns: session.turnList));
       await emit(
         startItem(
           1,
@@ -486,7 +487,9 @@ void main() {
           item(4, BridgeItemKind.taskList, steps: [step('Explore', running)]),
         ),
       );
-      final tasks = state.items.value.single;
+      final tasks = state.items.value.firstWhere(
+        (item) => item.kind == BridgeItemKind.taskList,
+      );
       final later = [
         step('Explore', running),
         step('Explore › scraper-1', running),
@@ -515,6 +518,10 @@ void main() {
         ),
       );
       expect(tasks.steps.value, later);
+
+      session.turnList = [turnOf(1, status: BridgeTurnStatus.aborted)];
+      await emit(event(BridgeEventKind.turnAborted, 4, turn: 1));
+      expect(state.runningInstances.value, isEmpty);
     });
 
     test('a finished model request adds its tokens to the totals, cached input included', () async {

@@ -558,7 +558,11 @@ void main() {
   testWidgets(
     'a task list opens into a tree whose running instance can be messaged',
     (tester) async {
-      await show(tester, transcript: researching());
+      await show(
+        tester,
+        transcript: researching(),
+        turns: [turnOf(1, status: BridgeTurnStatus.running)],
+      );
       expect(find.text('Tasks 2/5 · Explore'), findsOneWidget);
       expect(find.text('scraper-1'), findsNothing);
 
@@ -593,7 +597,11 @@ void main() {
   testWidgets(
     '@ in the composer lists the running instances and inserts the chosen one',
     (tester) async {
-      await show(tester, transcript: researching());
+      await show(
+        tester,
+        transcript: researching(),
+        turns: [turnOf(1, status: BridgeTurnStatus.running)],
+      );
 
       await typeInComposer(tester, '@scr');
       expect(find.text('Running instances'), findsOneWidget);

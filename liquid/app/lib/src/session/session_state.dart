@@ -1158,13 +1158,15 @@ class SessionState {
       (item) => item.kind == BridgeItemKind.taskList,
       orElse: () => ItemView(id: 0, kind: BridgeItemKind.taskList, turn: 0),
     );
-    final names = instancesOf(tasks.steps.value);
-    if (!listEquals(names, runningInstances.value)) {
-      runningInstances.value = names;
-    }
     final running = turns.value.any(
       (t) => t.status == BridgeTurnStatus.running,
     );
+    final names = running
+        ? instancesOf(tasks.steps.value)
+        : const <RunningInstance>[];
+    if (!listEquals(names, runningInstances.value)) {
+      runningInstances.value = names;
+    }
     status.value = _requests.isNotEmpty
         ? RunStatus.waitingForYou
         : running
