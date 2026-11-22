@@ -348,6 +348,70 @@ impl<S: Store> Workspace<S> {
     }
 
     fn write(&mut self, mutation: &Mutation) -> Result<Written, Error> {
+        let page = match mutation {
+            Mutation::AddTextBlock { page, .. }
+            | Mutation::SplitTextBlock { page, .. }
+            | Mutation::JoinTextBlock { page, .. }
+            | Mutation::SetSectionBoundary { page, .. }
+            | Mutation::TurnIntoCode { page, .. }
+            | Mutation::TurnIntoText { page, .. }
+            | Mutation::AddMediaBlock { page, .. }
+            | Mutation::AddWhiteboardBlock { page, .. }
+            | Mutation::AddDatabaseBlock { page, .. }
+            | Mutation::AddTableView { page, .. }
+            | Mutation::DuplicateTable { page, .. }
+            | Mutation::RemoveView { page, .. }
+            | Mutation::MoveViews { page, .. } => page,
+            _ => return self.write_mutation(mutation),
+        };
+        let before = self.page(page)?.1.sections();
+        let mut written = self.write_mutation(mutation)?;
+        if self.carry_tiles(page, &before)? {
+            let document = Document::Page(page.clone());
+            if !written.touched.contains(&document) {
+                written.touched.push(document);
+            }
+            written.changed.push(Changed::Views(page.clone()));
+        }
+        Ok(written)
+    }
+
+    fn carry_tiles(
+        &mut self,
+        page: &PageId,
+        before: &HashMap<ViewId, ViewId>,
+    ) -> Result<bool, Error> {
+        let (doc, order) = self.page(page)?;
+        let after = order.sections();
+        let mut carried = Vec::new();
+        for (view, lead) in &after {
+            let Some(old) = before.get(view) else {
+                continue;
+            };
+            let shown = order.view(view).ok_or(Error::NotFound)?;
+            if view == lead && old != view && shown.tile.is_none() {
+                if let Some(tile) = order.view(old).and_then(|old| old.tile) {
+                    carried.push((view.clone(), Some(tile), shown.inner));
+                }
+            } else if view != lead && old == view && shown.tile.is_some() {
+                carried.push((view.clone(), None, shown.inner));
+            }
+        }
+        for (view, tile, inner) in &carried {
+            let entry = model::live(doc, VIEWS, view.as_str()).ok_or(Error::NotFound)?;
+            match tile {
+                Some(tile) => {
+                    let json = serde_json::to_string(tile).map_err(|_| Error::WrongKind)?;
+                    doc.put(&entry, TILE, json)?;
+                }
+                None => doc.delete(&entry, TILE)?,
+            }
+            order.set_tiles(view, *tile, *inner);
+        }
+        Ok(!carried.is_empty())
+    }
+
+    fn write_mutation(&mut self, mutation: &Mutation) -> Result<Written, Error> {
         match mutation {
             Mutation::CreateArea { name } => self.write_create_area(name),
             Mutation::RenameWorkspace { name } => self.write_workspace(NAME, name),

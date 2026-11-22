@@ -182,3 +182,41 @@ fn a_run_of_views_moves_after_another_or_to_the_start() {
     assert_eq!(page.edit(into_itself), Err(Error::OutOfRange));
     assert_eq!(page.edit(backwards), Err(Error::OutOfRange));
 }
+
+#[test]
+fn a_split_section_keeps_the_width_and_a_join_keeps_the_upper_place() {
+    let mut page = Page::new();
+    let plan = page.text(None, "Plan");
+    let flight = page.text(Some(&plan), "We fly on 12 November.");
+    let hotel = page.text(Some(&flight), "The flat is in Alfama.");
+    page.tile(&plan, tile(0, 5)).unwrap();
+    let boundary = |view: &ViewId, boundary| Mutation::SetSectionBoundary {
+        page: page.page.clone(),
+        view: view.clone(),
+        boundary,
+    };
+    let (split, join) = (boundary(&flight, true), boundary(&flight, false));
+    page.edit(split).unwrap();
+    let tiles: Vec<_> = page.reopened().iter().map(|view| view.tile).collect();
+    assert_eq!(
+        tiles,
+        [tile(0, 5), tile(0, 5), None],
+        "the lower Section below, as wide"
+    );
+    page.edit(join).unwrap();
+    let tiles: Vec<_> = page.reopened().iter().map(|view| view.tile).collect();
+    assert_eq!(
+        tiles,
+        [tile(0, 5), None, None],
+        "the joined Section keeps the upper place"
+    );
+
+    page.board(Some(&flight));
+    let tiles: Vec<_> = page.reopened().iter().map(|view| view.tile).collect();
+    assert_eq!(
+        tiles,
+        [tile(0, 5), None, None, tile(0, 5)],
+        "a Block between Text Blocks splits their Section too"
+    );
+    assert_eq!(page.reopened()[3].id, hotel);
+}

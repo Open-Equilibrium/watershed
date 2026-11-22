@@ -145,6 +145,25 @@ impl Order {
         }
     }
 
+    pub(crate) fn sections(&self) -> HashMap<ViewId, ViewId> {
+        let mut leads = HashMap::new();
+        let mut lead: Option<&ViewId> = None;
+        let mut above: Option<&View> = None;
+        for placed in &self.placed {
+            let view = &placed.view;
+            if view.kind == BlockKind::Text {
+                if view.boundary || above.is_none_or(|above| above.kind != BlockKind::Text) {
+                    lead = Some(&view.id);
+                }
+                if let Some(lead) = lead {
+                    leads.insert(view.id.clone(), lead.clone());
+                }
+            }
+            above = Some(view);
+        }
+        leads
+    }
+
     pub(crate) fn arranged(&self) -> bool {
         self.placed.iter().any(|placed| placed.view.tile.is_some())
     }
