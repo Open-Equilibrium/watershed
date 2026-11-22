@@ -4,6 +4,7 @@
 // ignore_for_file: unused_import, unused_element, unnecessary_import, duplicate_ignore, invalid_use_of_internal_member, annotate_overrides, non_constant_identifier_names, curly_braces_in_flow_control_structures, prefer_const_literals_to_create_immutables, unused_field
 
 import 'api/calculation.dart';
+import 'api/chart.dart';
 import 'api/database.dart';
 import 'api/details.dart';
 import 'api/drawing.dart';
@@ -248,6 +249,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   BridgeCell dco_decode_box_autoadd_bridge_cell(dynamic raw);
 
   @protected
+  BridgeChart dco_decode_box_autoadd_bridge_chart(dynamic raw);
+
+  @protected
+  BridgeChartSetup dco_decode_box_autoadd_bridge_chart_setup(dynamic raw);
+
+  @protected
   BridgeContext dco_decode_box_autoadd_bridge_context(dynamic raw);
 
   @protected
@@ -363,6 +370,21 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   BridgeChangeStatus dco_decode_bridge_change_status(dynamic raw);
+
+  @protected
+  BridgeChart dco_decode_bridge_chart(dynamic raw);
+
+  @protected
+  BridgeChartKind dco_decode_bridge_chart_kind(dynamic raw);
+
+  @protected
+  BridgeChartPoint dco_decode_bridge_chart_point(dynamic raw);
+
+  @protected
+  BridgeChartSetup dco_decode_bridge_chart_setup(dynamic raw);
+
+  @protected
+  BridgeChartValue dco_decode_bridge_chart_value(dynamic raw);
 
   @protected
   BridgeCheckedOut dco_decode_bridge_checked_out(dynamic raw);
@@ -702,6 +724,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   List<BridgeCell> dco_decode_list_bridge_cell(dynamic raw);
 
   @protected
+  List<BridgeChartPoint> dco_decode_list_bridge_chart_point(dynamic raw);
+
+  @protected
   List<BridgeComputed> dco_decode_list_bridge_computed(dynamic raw);
 
   @protected
@@ -850,6 +875,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   BridgeCell? dco_decode_opt_box_autoadd_bridge_cell(dynamic raw);
+
+  @protected
+  BridgeChart? dco_decode_opt_box_autoadd_bridge_chart(dynamic raw);
+
+  @protected
+  BridgeChartSetup? dco_decode_opt_box_autoadd_bridge_chart_setup(dynamic raw);
 
   @protected
   BridgeContext? dco_decode_opt_box_autoadd_bridge_context(dynamic raw);
@@ -1130,6 +1161,14 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   BridgeCell sse_decode_box_autoadd_bridge_cell(SseDeserializer deserializer);
 
   @protected
+  BridgeChart sse_decode_box_autoadd_bridge_chart(SseDeserializer deserializer);
+
+  @protected
+  BridgeChartSetup sse_decode_box_autoadd_bridge_chart_setup(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   BridgeContext sse_decode_box_autoadd_bridge_context(
     SseDeserializer deserializer,
   );
@@ -1285,6 +1324,21 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   BridgeChangeStatus sse_decode_bridge_change_status(
     SseDeserializer deserializer,
   );
+
+  @protected
+  BridgeChart sse_decode_bridge_chart(SseDeserializer deserializer);
+
+  @protected
+  BridgeChartKind sse_decode_bridge_chart_kind(SseDeserializer deserializer);
+
+  @protected
+  BridgeChartPoint sse_decode_bridge_chart_point(SseDeserializer deserializer);
+
+  @protected
+  BridgeChartSetup sse_decode_bridge_chart_setup(SseDeserializer deserializer);
+
+  @protected
+  BridgeChartValue sse_decode_bridge_chart_value(SseDeserializer deserializer);
 
   @protected
   BridgeCheckedOut sse_decode_bridge_checked_out(SseDeserializer deserializer);
@@ -1678,6 +1732,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   List<BridgeCell> sse_decode_list_bridge_cell(SseDeserializer deserializer);
 
   @protected
+  List<BridgeChartPoint> sse_decode_list_bridge_chart_point(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   List<BridgeComputed> sse_decode_list_bridge_computed(
     SseDeserializer deserializer,
   );
@@ -1868,6 +1927,16 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   BridgeCell? sse_decode_opt_box_autoadd_bridge_cell(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgeChart? sse_decode_opt_box_autoadd_bridge_chart(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgeChartSetup? sse_decode_opt_box_autoadd_bridge_chart_setup(
     SseDeserializer deserializer,
   );
 
@@ -2220,6 +2289,18 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_box_autoadd_bridge_chart(
+    BridgeChart self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_box_autoadd_bridge_chart_setup(
+    BridgeChartSetup self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_box_autoadd_bridge_context(
     BridgeContext self,
     SseSerializer serializer,
@@ -2432,6 +2513,33 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_bridge_change_status(
     BridgeChangeStatus self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_bridge_chart(BridgeChart self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_bridge_chart_kind(
+    BridgeChartKind self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_bridge_chart_point(
+    BridgeChartPoint self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_bridge_chart_setup(
+    BridgeChartSetup self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_bridge_chart_value(
+    BridgeChartValue self,
     SseSerializer serializer,
   );
 
@@ -2967,6 +3075,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_list_bridge_chart_point(
+    List<BridgeChartPoint> self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_list_bridge_computed(
     List<BridgeComputed> self,
     SseSerializer serializer,
@@ -3233,6 +3347,18 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_opt_box_autoadd_bridge_cell(
     BridgeCell? self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_opt_box_autoadd_bridge_chart(
+    BridgeChart? self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_opt_box_autoadd_bridge_chart_setup(
+    BridgeChartSetup? self,
     SseSerializer serializer,
   );
 

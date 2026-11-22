@@ -122,6 +122,7 @@ pub(super) fn mutation(kind: BridgeMutationKind) -> BridgeMutation {
         line: None,
         line_setup: None,
         total: None,
+        chart: None,
     }
 }
 

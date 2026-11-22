@@ -4,6 +4,7 @@ use liquid_core::{
 };
 
 use super::calculation::{BridgeLine, BridgeLineSetup};
+use super::chart::{BridgeChart, BridgeChartSetup};
 use super::database::{
     BridgeCell, BridgeComputed, BridgeDatabase, BridgeFieldKind, BridgeFieldTotal, BridgeFilter,
     BridgeGroup, BridgeLayout, BridgeRow, BridgeSort, BridgeTab, BridgeTotal, filter, sort,
@@ -47,6 +48,8 @@ pub enum BridgeMutationKind {
     AddMediaBlock,
     AddWhiteboardBlock,
     AddCalculationBlock,
+    AddChartBlock,
+    SetChart,
     AddLine,
     SetLine,
     RemoveLine,
@@ -147,6 +150,7 @@ pub struct BridgeMutation {
     pub line: Option<String>,
     pub line_setup: Option<BridgeLineSetup>,
     pub total: Option<BridgeTotal>,
+    pub chart: Option<BridgeChartSetup>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -175,6 +179,7 @@ pub enum BridgeQueryKind {
     Media,
     Drawing,
     Calculation,
+    Chart,
     Database,
     Rows,
     Groups,
@@ -235,6 +240,7 @@ pub enum BridgeBlockKind {
     Media,
     Whiteboard,
     Calculation,
+    Chart,
     Unknown,
 }
 
@@ -308,6 +314,7 @@ pub struct BridgeAnswer {
     pub icon: Option<String>,
     pub lines: Vec<BridgeLine>,
     pub totals: Vec<BridgeComputed>,
+    pub chart: Option<BridgeChart>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -572,6 +579,15 @@ impl BridgeMutation {
             BridgeMutationKind::AddCalculationBlock => Mutation::AddCalculationBlock {
                 page: page()?,
                 after: optional_id(&self.after, ViewId::parse, "after")?,
+            },
+            BridgeMutationKind::AddChartBlock => Mutation::AddChartBlock {
+                page: page()?,
+                after: optional_id(&self.after, ViewId::parse, "after")?,
+            },
+            BridgeMutationKind::SetChart => Mutation::SetChart {
+                page: page()?,
+                block: block()?,
+                setup: self.chart.as_ref().ok_or("chart is missing")?.to_core()?,
             },
             BridgeMutationKind::AddLine => Mutation::AddLine {
                 page: page()?,

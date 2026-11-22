@@ -5,6 +5,7 @@
 
 import '../frb_generated.dart';
 import 'calculation.dart';
+import 'chart.dart';
 import 'database.dart';
 import 'drawing.dart';
 import 'media.dart';
@@ -34,6 +35,7 @@ class BridgeAnswer {
   final String? icon;
   final List<BridgeLine> lines;
   final List<BridgeComputed> totals;
+  final BridgeChart? chart;
 
   const BridgeAnswer({
     required this.areas,
@@ -55,6 +57,7 @@ class BridgeAnswer {
     this.icon,
     required this.lines,
     required this.totals,
+    this.chart,
   });
 
   @override
@@ -77,7 +80,8 @@ class BridgeAnswer {
       shown.hashCode ^
       icon.hashCode ^
       lines.hashCode ^
-      totals.hashCode;
+      totals.hashCode ^
+      chart.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -102,7 +106,8 @@ class BridgeAnswer {
           shown == other.shown &&
           icon == other.icon &&
           lines == other.lines &&
-          totals == other.totals;
+          totals == other.totals &&
+          chart == other.chart;
 }
 
 class BridgeApplied {
@@ -189,6 +194,7 @@ enum BridgeBlockKind {
   media,
   whiteboard,
   calculation,
+  chart,
   unknown,
 }
 
@@ -273,6 +279,7 @@ class BridgeMutation {
   final String? line;
   final BridgeLineSetup? lineSetup;
   final BridgeTotal? total;
+  final BridgeChartSetup? chart;
 
   const BridgeMutation({
     required this.kind,
@@ -307,6 +314,7 @@ class BridgeMutation {
     this.line,
     this.lineSetup,
     this.total,
+    this.chart,
   });
 
   @override
@@ -342,7 +350,8 @@ class BridgeMutation {
       drawing.hashCode ^
       line.hashCode ^
       lineSetup.hashCode ^
-      total.hashCode;
+      total.hashCode ^
+      chart.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -380,7 +389,8 @@ class BridgeMutation {
           drawing == other.drawing &&
           line == other.line &&
           lineSetup == other.lineSetup &&
-          total == other.total;
+          total == other.total &&
+          chart == other.chart;
 }
 
 enum BridgeMutationKind {
@@ -416,6 +426,8 @@ enum BridgeMutationKind {
   addMediaBlock,
   addWhiteboardBlock,
   addCalculationBlock,
+  addChartBlock,
+  setChart,
   addLine,
   setLine,
   removeLine,
@@ -532,6 +544,7 @@ enum BridgeQueryKind {
   media,
   drawing,
   calculation,
+  chart,
   database,
   rows,
   groups,

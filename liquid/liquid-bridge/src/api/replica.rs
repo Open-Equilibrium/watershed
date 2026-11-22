@@ -9,6 +9,7 @@ use liquid_core::{
 use liquid_storage::Sqlite;
 
 use super::calculation::BridgeLine;
+use super::chart::BridgeChart;
 use super::database::{
     BridgeCell, BridgeDatabase, BridgeGroup, BridgeRow, BridgeTab, computed, filter, sort, totals,
 };
@@ -223,6 +224,7 @@ impl LiquidWorkspace {
             icon: None,
             lines: Vec::new(),
             totals: Vec::new(),
+            chart: None,
         };
         match query.kind {
             BridgeQueryKind::Workspace => {
@@ -279,6 +281,7 @@ impl LiquidWorkspace {
                             BlockKind::Media => BridgeBlockKind::Media,
                             BlockKind::Whiteboard => BridgeBlockKind::Whiteboard,
                             BlockKind::Calculation => BridgeBlockKind::Calculation,
+                            BlockKind::Chart => BridgeBlockKind::Chart,
                             BlockKind::Unknown => BridgeBlockKind::Unknown,
                         },
                         tabs: view.tabs.iter().map(BridgeTab::of).collect(),
@@ -330,6 +333,14 @@ impl LiquidWorkspace {
                     .map_err(message)?
                     .map(|calculation| calculation.lines.into_iter().map(BridgeLine::of).collect())
                     .unwrap_or_default();
+            }
+            BridgeQueryKind::Chart => {
+                let page = id(&query.page, PageId::parse, "page")?;
+                let block = id(&query.block, BlockId::parse, "block")?;
+                answer.chart = workspace
+                    .chart(&page, &block)
+                    .map_err(message)?
+                    .map(BridgeChart::of);
             }
             BridgeQueryKind::Database => {
                 let block = id(&query.block, BlockId::parse, "block")?;

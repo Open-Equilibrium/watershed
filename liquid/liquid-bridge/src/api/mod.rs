@@ -1,4 +1,5 @@
 pub mod calculation;
+pub mod chart;
 pub mod database;
 pub mod details;
 pub mod drawing;

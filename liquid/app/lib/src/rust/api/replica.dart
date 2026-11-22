@@ -5,6 +5,7 @@
 
 import '../frb_generated.dart';
 import 'calculation.dart';
+import 'chart.dart';
 import 'database.dart';
 import 'drawing.dart';
 import 'media.dart';

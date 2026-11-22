@@ -141,3 +141,90 @@ fn a_calculation_block_s_lines_cross_and_come_back_computed() {
         "a line needs its label, formula and style"
     );
 }
+
+#[test]
+fn a_chart_s_setup_crosses_and_its_points_come_back() {
+    use crate::api::chart::{BridgeChartKind, BridgeChartSetup, BridgeChartValue};
+    let folder = Folder::new("chart");
+    let workspace = LiquidWorkspace::open_with(&folder.0, &Memory::default()).unwrap();
+    let (_, page, _, intro) = lisbon(&workspace);
+    let report = workspace
+        .apply(BridgeMutation {
+            page: Some(page.clone()),
+            after: Some(intro.clone()),
+            ..mutation(BridgeMutationKind::AddCalculationBlock)
+        })
+        .unwrap()
+        .block
+        .unwrap();
+    let first = workspace
+        .query(BridgeQuery {
+            page: Some(page.clone()),
+            block: Some(report.clone()),
+            ..query(BridgeQueryKind::Calculation)
+        })
+        .unwrap()
+        .lines[0]
+        .id
+        .clone();
+    workspace
+        .apply(BridgeMutation {
+            page: Some(page.clone()),
+            block: Some(report.clone()),
+            line: Some(first),
+            line_setup: setup("Flights", "420", BridgeLineStyle::Plain),
+            ..mutation(BridgeMutationKind::SetLine)
+        })
+        .unwrap();
+    let chart = workspace
+        .apply(BridgeMutation {
+            page: Some(page.clone()),
+            after: Some(intro),
+            ..mutation(BridgeMutationKind::AddChartBlock)
+        })
+        .unwrap()
+        .block
+        .unwrap();
+    let drawn = BridgeChartSetup {
+        kind: BridgeChartKind::Pie,
+        table: None,
+        page: Some(page.clone()),
+        block: Some(report),
+        group: None,
+        value: BridgeChartValue::Count,
+        field: None,
+    };
+    workspace
+        .apply(BridgeMutation {
+            page: Some(page.clone()),
+            block: Some(chart.clone()),
+            chart: Some(drawn.clone()),
+            ..mutation(BridgeMutationKind::SetChart)
+        })
+        .unwrap();
+    let read = workspace
+        .query(BridgeQuery {
+            page: Some(page.clone()),
+            block: Some(chart),
+            ..query(BridgeQueryKind::Chart)
+        })
+        .unwrap()
+        .chart
+        .unwrap();
+    assert_eq!(read.setup, drawn);
+    assert_eq!(
+        read.points
+            .iter()
+            .map(|point| (point.label.as_str(), point.value))
+            .collect::<Vec<_>>(),
+        [("Flights", 420.0)]
+    );
+    let views = workspace
+        .query(BridgeQuery {
+            page: Some(page),
+            ..query(BridgeQueryKind::Views)
+        })
+        .unwrap()
+        .views;
+    assert!(views.iter().any(|view| view.kind == BridgeBlockKind::Chart));
+}
