@@ -44,6 +44,7 @@ pub enum BridgeMutationKind {
     SetSectionBoundary,
     TurnIntoCode,
     TurnIntoText,
+    TurnIntoMath,
     SetCodeLanguage,
     AddMediaBlock,
     AddWhiteboardBlock,
@@ -176,6 +177,7 @@ pub enum BridgeQueryKind {
     Views,
     Text,
     Code,
+    Math,
     Media,
     Drawing,
     Calculation,
@@ -241,6 +243,7 @@ pub enum BridgeBlockKind {
     Whiteboard,
     Calculation,
     Chart,
+    Math,
     Unknown,
 }
 
@@ -577,6 +580,10 @@ impl BridgeMutation {
                 block: block()?,
             },
             BridgeMutationKind::TurnIntoText => Mutation::TurnIntoText {
+                page: page()?,
+                block: block()?,
+            },
+            BridgeMutationKind::TurnIntoMath => Mutation::TurnIntoMath {
                 page: page()?,
                 block: block()?,
             },

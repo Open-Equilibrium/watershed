@@ -679,6 +679,52 @@ fn a_text_block_turns_into_code_and_back_keeping_its_view_and_text() {
 }
 
 #[test]
+fn a_text_block_turns_into_math_and_back_keeping_its_text() {
+    let mut workspace = workspace();
+    let notes = area(&mut workspace, "Notes");
+    let physics = page(&mut workspace, &notes, None, "Physics notes");
+    let (roots, _) = text_block(&mut workspace, &physics, None, "x = ");
+    apply(
+        &mut workspace,
+        Mutation::TurnIntoMath {
+            page: physics.clone(),
+            block: roots.clone(),
+        },
+    );
+    assert_eq!(kinds(&mut workspace, &physics), [BlockKind::Math]);
+    apply(
+        &mut workspace,
+        Mutation::EditText {
+            page: physics.clone(),
+            block: roots.clone(),
+            at: 4,
+            delete: 0,
+            insert: r"\frac{-b}{2a}".into(),
+        },
+    );
+    workspace.close_page(&physics);
+    assert_eq!(
+        workspace.math(&physics, &roots).unwrap().as_deref(),
+        Some(r"x = \frac{-b}{2a}")
+    );
+    assert_eq!(workspace.text(&physics, &roots).unwrap(), None);
+    assert_eq!(workspace.code(&physics, &roots).unwrap(), None);
+    apply(
+        &mut workspace,
+        Mutation::TurnIntoText {
+            page: physics.clone(),
+            block: roots.clone(),
+        },
+    );
+    assert_eq!(kinds(&mut workspace, &physics), [BlockKind::Text]);
+    assert_eq!(
+        workspace.text(&physics, &roots).unwrap().as_deref(),
+        Some(r"x = \frac{-b}{2a}")
+    );
+    assert_eq!(workspace.math(&physics, &roots).unwrap(), None);
+}
+
+#[test]
 fn a_code_block_neither_splits_joins_nor_takes_text_block_writes() {
     let mut workspace = workspace();
     let acme = area(&mut workspace, "Acme API");
