@@ -47,6 +47,7 @@ struct Agent<W: Write> {
     prompt: Option<Value>,
     running: bool,
     view: RunView,
+    held: Vec<Value>,
 }
 
 pub(crate) fn acp_command() -> Result<ExitCode, RuntimeError> {
@@ -66,6 +67,7 @@ pub(crate) fn acp_command() -> Result<ExitCode, RuntimeError> {
         prompt: None,
         running: false,
         view: RunView::default(),
+        held: Vec::new(),
     };
     for input in receiver {
         if !agent.handle(input)? {
@@ -133,6 +135,8 @@ impl<W: Write> Agent<W> {
                     for update in updates {
                         self.update(update)?;
                     }
+                } else {
+                    self.held.extend(updates);
                 }
             }
             Input::Finished(result) => self.finished(result)?,
@@ -190,7 +194,9 @@ impl<W: Write> Agent<W> {
         }
         self.ensure_idle()?;
         let flows = installed_flows()?;
-        let flow = flows.first().map(|flow| flow.id.clone());
+        let flow = flow_agent_core::conversation_flow(&cwd, id)
+            .map_err(internal)?
+            .or_else(|| flows.first().map(|flow| flow.id.clone()));
         let session = self.session.insert(Session {
             id: id.to_owned(),
             cwd,
@@ -238,12 +244,20 @@ impl<W: Write> Agent<W> {
                 return self.fail(&id, INVALID_PARAMS, &error.to_string());
             }
             self.prompt = Some(id);
-            return self.update(self.view.plan());
+            self.update(self.view.plan())?;
+            return self.release_held();
         }
         self.prompt = Some(id.clone());
         if let Err((code, message)) = self.start(text, Vec::new()) {
             self.prompt = None;
             return self.fail(&id, code, &message);
+        }
+        self.release_held()
+    }
+
+    fn release_held(&mut self) -> Result<(), RuntimeError> {
+        for update in std::mem::take(&mut self.held) {
+            self.update(update)?;
         }
         Ok(())
     }

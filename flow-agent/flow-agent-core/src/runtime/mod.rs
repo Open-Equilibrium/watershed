@@ -72,7 +72,8 @@ pub use cancellation::{
     settle_productive_operation,
 };
 pub use conversations::{
-    ConversationState, conversation_state, conversation_status, project_tool_run_log,
+    ConversationState, conversation_flow, conversation_state, conversation_status,
+    project_tool_run_log,
 };
 pub use endpoint_credential::OPENAI_COMPATIBLE_PROVIDER_ID;
 pub use executor::{

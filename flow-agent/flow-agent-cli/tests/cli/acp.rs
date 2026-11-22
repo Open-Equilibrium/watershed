@@ -203,7 +203,11 @@ fn a_chat_needs_a_productive_provider() {
     );
 }
 
-const NOTE_FLOW: [(&str, &str); 3] = [
+const NOTE_FLOW: [(&str, &str); 4] = [
+    (
+        "flows/alpha.yaml",
+        "flow:\n  id: alpha\n  name: Alpha\n  phase_refs: [write]\n  subflow_refs: []\n",
+    ),
     (
         "flows/note.yaml",
         "flow:\n  id: note\n  name: Note\n  phase_refs: [write]\n  subflow_refs: []\n",
@@ -346,11 +350,12 @@ fn a_message_sent_while_a_flow_works_steers_its_active_phase() {
         acp.reply(first, &mut seen)["result"]["stopReason"],
         "cancelled"
     );
+    release_first.send(()).expect("the endpoint waits");
+    wait_for_committed_draft(&workspace, &session_id);
     let steer = acp.send(
         "session/prompt",
         json!({"sessionId": session_id, "prompt": [{"type": "text", "text": "Use British spelling"}]}),
     );
-    release_first.send(()).expect("the endpoint waits");
     let finished = acp.reply(steer, &mut seen);
 
     assert_eq!(finished["result"]["stopReason"], "end_turn", "{seen:#?}");
@@ -393,7 +398,7 @@ fn wait_for_committed_draft(workspace: &Path, session_id: &str) {
             session_id,
             flow_agent_core::EmitMode::Jsonl,
         );
-        if replay.is_ok_and(|output| output.stdout.contains("Colorful draft")) {
+        if replay.is_ok_and(|output| output.stdout.contains("\"message.completed\"")) {
             return;
         }
         thread::sleep(Duration::from_millis(25));
@@ -441,6 +446,11 @@ fn an_interrupted_run_resumes_with_the_next_message_unless_its_flow_changed() {
     install_note_flow(&base_url, &config_root);
     let mut acp = Acp::start(&workspace, &config_root);
     let (session_id, _) = acp.open(&workspace);
+    let chosen = acp.send(
+        "session/set_config_option",
+        json!({"sessionId": session_id, "configId": "flow", "value": "note"}),
+    );
+    assert!(acp.reply(chosen, &mut Vec::new())["result"].is_object());
     let first = acp.send(
         "session/prompt",
         json!({"sessionId": session_id, "prompt": [{"type": "text", "text": "A note about colour"}]}),
@@ -472,7 +482,10 @@ fn an_interrupted_run_resumes_with_the_next_message_unless_its_flow_changed() {
         "session/load",
         json!({"sessionId": session_id, "cwd": workspace.to_path_buf(), "mcpServers": []}),
     );
-    assert!(acp.reply(load, &mut Vec::new())["result"].is_object());
+    assert_eq!(
+        acp.reply(load, &mut Vec::new())["result"]["configOptions"][0]["currentValue"],
+        "note"
+    );
     let refused = acp.send(
         "session/prompt",
         json!({"sessionId": session_id, "prompt": [{"type": "text", "text": "Use British spelling"}]}),

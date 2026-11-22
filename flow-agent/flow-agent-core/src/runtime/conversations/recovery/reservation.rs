@@ -289,6 +289,20 @@ pub fn conversation_state(
     })
 }
 
+pub fn conversation_flow(
+    workspace: impl AsRef<Path>,
+    conversation_id: &str,
+) -> Result<Option<String>, RuntimeError> {
+    let workspace = workspace.as_ref();
+    if conversation_state(workspace, conversation_id)? == ConversationState::Absent {
+        return Ok(None);
+    }
+    Ok(
+        conversation_run_definition(workspace, conversation_id, conversation_id)?
+            .flow_definition_id,
+    )
+}
+
 pub(crate) fn reserve_conversation_continuation(
     workspace: &Path,
     conversation_id: &str,

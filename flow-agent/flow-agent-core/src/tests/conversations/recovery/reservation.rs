@@ -570,6 +570,16 @@ fn a_conversation_is_absent_settled_or_has_its_newest_run_interrupted() {
         crate::ConversationState::Absent
     );
     assert_eq!(
+        crate::conversation_flow(&workspace, "absent").expect("the store reads"),
+        None
+    );
+    assert_eq!(
+        crate::conversation_flow(&workspace, "review")
+            .expect("the definition reads")
+            .as_deref(),
+        Some("review-flow")
+    );
+    assert_eq!(
         crate::conversation_state(&workspace, "review").expect("history reads"),
         crate::ConversationState::Settled
     );
