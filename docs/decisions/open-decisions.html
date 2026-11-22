@@ -146,7 +146,7 @@
 
       <details id="d-116" class="decision wide">
         <summary><h3>D-116 - The Editor For A Section's Text</h3></summary>
-        <p><strong>Status:</strong> Open until the spike reports.</p>
+        <p><strong>Status:</strong> Open; the spike of A reported on 2026-11-22 (branch <code>spike/liquid-section-editor</code>), and a person still has to type German dead keys and Japanese on a real Mac.</p>
         <p><strong>Problem:</strong> A Section becomes one rich text with paragraph markers (ADR-0317), so selection, ⏎ and ⌫ work across Paragraphs as in Google Docs. Flutter's <code>TextField</code>, which each Text Block uses today, shows one plain text with one style; it cannot show several Paragraphs with their own styles and marks in one selection. Liquid needs a text editor that can, with input methods (IME) for accents and Asian scripts, and typing that stays responsive.</p>
         <p><strong>Question:</strong> Which editor shows and edits a Section?</p>
         <div class="dia">
@@ -163,7 +163,8 @@
             <ul><li>Pro: no dependency; Automerge's spans drive it directly.</li><li>Con: the most work; IME, caret, selection and accessibility are built by hand.</li></ul>
           </div>
         </div>
-        <p><strong>Recommendation:</strong> spike A; if it misses the criterion, spike C. B repeats the per-Paragraph model ADR-0317 leaves.</p>
+        <p><strong>Spike of A:</strong> bound to a Section's Automerge text, selection crosses Paragraphs by mouse and keyboard, ⏎, ⇧⏎ and ⌫ add, break and remove markers, a split or join on one device and an edit on another merge into the right Paragraphs, and composed IME text reaches the core once committed. Bold, links, ⌘B and typed <code>**x**</code> work; the Markdown at the caret, two caret stops and ⌘\ would be built. Keeping the core in step costs about 0.1 ms a keystroke. Against it: every Paragraph is laid out, so in a Section of 1,000 Paragraphs a keystroke builds a 3.3 ms frame and ⏎ a 21 ms one, longer than a 60 Hz frame (100 Paragraphs: 0.8 and 2.1 ms); <code>attributed_text</code> 0.4.7 drops a mark in one overlap case; 0.3 has been a pre-release since 2024, and its runtime dependencies include its test tools, one of them discontinued.</p>
+        <p><strong>Recommendation:</strong> A, pinned: report and fix the <code>attributed_text</code> bug upstream, build the caret's Markdown, the two stops and ⌘\ on top, and measure real Sections before adding virtualization. C stays the fallback if long Sections become common; B repeats the per-Paragraph model ADR-0317 leaves.</p>
         <p><strong>Acceptance criterion:</strong> on macOS, in a Section of 1,000 Paragraphs bound to Automerge's spans, a mouse selection and ⇧ with the arrows cross Paragraphs; ⏎, ⇧⏎ and ⌫ add, break and remove as ADR-0317 says; German dead keys and Japanese IME compose; marks behave as the <a href="../design/mockups/liquid-text-formatting.html">formatting mockup</a> shows; toggles and indentation fit the markers' parents; and the time per keystroke is recorded.</p>
       </details>
 
