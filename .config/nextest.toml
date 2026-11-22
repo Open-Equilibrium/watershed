@@ -1,14 +1,21 @@
-# The process-death matrix runs child processes and durable writes for minutes; run alone, its
-# load cannot push other tests past their Git deadlines.
+# The process-death matrix runs child processes and durable writes for minutes. It holds two test
+# threads, one for itself and one for its load, so every test beside it keeps its own core and
+# meets its Git deadlines.
 [[profile.default.overrides]]
 filter = 'test(crash_matrix)'
-threads-required = 'num-test-threads'
+threads-required = 2
 
-# Each of these tests starts its own pinned T3 Code server, about 1 GB each; two at a time keep a
-# small CI runner from pushing a server's start past its 30 s deadline.
+# Each of these tests starts its own pinned T3 Code server, about 500 MB each; two at a time keep a
+# small CI runner from pushing a server's start past its 30 s deadline. They start first, with the
+# longest Liquid test, so none of them is left running alone at the end.
 [test-groups]
 t3-server = { max-threads = 2 }
 
 [[profile.default.overrides]]
 filter = 'binary(t3_contract) | (package(liquid_bridge) & test(/^tests::agent::/))'
 test-group = 't3-server'
+priority = 100
+
+[[profile.default.overrides]]
+filter = 'test(/ten_boards_of_elements/)'
+priority = 100
