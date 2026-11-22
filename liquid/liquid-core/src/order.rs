@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use automerge::AutoCommit;
 
@@ -159,13 +159,21 @@ impl Order {
             .collect()
     }
 
-    pub(crate) fn lead_ids(&self) -> HashSet<ViewId> {
-        self.leads()
-            .into_iter()
-            .zip(&self.placed)
-            .filter(|(lead, _)| *lead)
-            .map(|(_, placed)| placed.view.id.clone())
-            .collect()
+    pub(crate) fn sections(&self) -> Sections {
+        let mut members = HashMap::new();
+        let mut tiles = HashMap::new();
+        let mut lead = 0;
+        for (placed, starts) in self.placed.iter().zip(self.leads()) {
+            let id = hashed(&placed.view.id);
+            if starts {
+                lead = id;
+                tiles.insert(id, placed.view.tile);
+            }
+            if placed.view.kind == BlockKind::Text {
+                members.insert(id, lead);
+            }
+        }
+        Sections { members, tiles }
     }
 
     pub(crate) fn placed_views(&self) -> impl Iterator<Item = &View> {
@@ -173,7 +181,9 @@ impl Order {
     }
 
     pub(crate) fn arranged(&self) -> bool {
-        self.placed.iter().any(|placed| placed.view.tile.is_some())
+        self.placed
+            .iter()
+            .any(|placed| placed.view.tile.is_some() || placed.view.inner.is_some())
     }
 
     pub(crate) fn len(&self) -> usize {
@@ -194,6 +204,25 @@ impl Order {
             .iter()
             .position(|placed| &placed.view.id == view)
     }
+}
+
+pub(crate) struct Sections {
+    members: HashMap<u64, u64>,
+    tiles: HashMap<u64, Option<Tile>>,
+}
+
+impl Sections {
+    pub(crate) fn tile_of(&self, member: &ViewId) -> Option<Option<Tile>> {
+        let lead = self.members.get(&hashed(member))?;
+        self.tiles.get(lead).copied()
+    }
+}
+
+pub(crate) fn hashed(view: &ViewId) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    view.hash(&mut hasher);
+    hasher.finish()
 }
 
 fn stored<T: serde::de::DeserializeOwned>(json: Option<&str>) -> Option<T> {

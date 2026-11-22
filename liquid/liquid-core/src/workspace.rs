@@ -368,7 +368,7 @@ impl<S: Store> Workspace<S> {
         if !order.arranged() {
             return self.write_mutation(mutation);
         }
-        let before = order.lead_ids();
+        let before = order.sections();
         let mut written = self.write_mutation(mutation)?;
         if self.carry_tiles(page, &before)? {
             let document = Document::Page(page.clone());
@@ -383,22 +383,28 @@ impl<S: Store> Workspace<S> {
     fn carry_tiles(
         &mut self,
         page: &PageId,
-        before: &std::collections::HashSet<ViewId>,
+        before: &crate::order::Sections,
     ) -> Result<bool, Error> {
         let (doc, order) = self.page(page)?;
         let mut carried = Vec::new();
-        let mut upper: Option<Option<Tile>> = None;
-        for (view, lead) in order.placed_views().zip(order.leads()) {
-            let was = before.contains(&view.id);
-            if lead && !was && view.tile.is_none() {
-                if let Some(Some(tile)) = upper {
-                    carried.push((view.id.clone(), Some(tile), view.inner));
-                }
-            } else if was && !lead && view.tile.is_some() {
+        let mut lead: Option<(&View, bool)> = None;
+        for (view, starts) in order.placed_views().zip(order.leads()) {
+            if view.kind != BlockKind::Text {
+                lead = None;
+                continue;
+            }
+            if starts {
+                lead = Some((view, false));
+            } else if view.tile.is_some() {
                 carried.push((view.id.clone(), None, view.inner));
             }
-            if was {
-                upper = Some(view.tile);
+            if let Some((shown, false)) = lead
+                && let Some(tile) = before.tile_of(&view.id)
+            {
+                lead = Some((shown, true));
+                if shown.tile != tile {
+                    carried.push((shown.id.clone(), tile, shown.inner));
+                }
             }
         }
         for (view, tile, inner) in &carried {

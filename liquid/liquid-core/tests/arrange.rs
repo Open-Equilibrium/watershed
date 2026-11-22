@@ -220,3 +220,62 @@ fn a_split_section_keeps_the_width_and_a_join_keeps_the_upper_place() {
     );
     assert_eq!(page.reopened()[3].id, hotel);
 }
+
+#[test]
+fn a_section_keeps_its_tile_when_its_first_line_changes() {
+    let mut page = Page::new();
+    let board = page.board(None);
+    let ideas = page.text(Some(&board), "Ideas");
+    let sintra = page.text(Some(&ideas), "Day trip to Sintra.");
+    page.tile(&board, tile(0, 6)).unwrap();
+    page.tile(&ideas, tile(6, 6)).unwrap();
+    let split = Mutation::SplitTextBlock {
+        page: page.page.clone(),
+        block: page.reopened()[1].block.clone(),
+        view: ideas.clone(),
+        at: 0,
+        style: liquid_core::TextStyle::Paragraph,
+    };
+    page.edit(split).unwrap();
+    let tiles: Vec<_> = page.reopened().iter().map(|view| view.tile).collect();
+    assert_eq!(
+        tiles,
+        [tile(0, 6), tile(6, 6), None, None],
+        "⏎ at the start"
+    );
+
+    let lead = page.reopened()[1].id.clone();
+    let remove = Mutation::RemoveView {
+        page: page.page.clone(),
+        view: lead,
+    };
+    page.edit(remove).unwrap();
+    let tiles: Vec<_> = page.reopened().iter().map(|view| view.tile).collect();
+    assert_eq!(
+        tiles,
+        [tile(0, 6), tile(6, 6), None],
+        "its first line removed"
+    );
+
+    let code = Mutation::TurnIntoCode {
+        page: page.page.clone(),
+        block: page.reopened()[1].block.clone(),
+    };
+    page.edit(code).unwrap();
+    let views = page.reopened();
+    assert_eq!(views[2].id, sintra);
+    assert_eq!(views[2].tile, tile(6, 6), "its first line turned into Code");
+}
+
+#[test]
+fn a_page_with_only_inner_tiles_is_arranged() {
+    let mut page = Page::new();
+    let plan = page.text(None, "Plan");
+    page.edit(Mutation::SetInnerTile {
+        page: page.page.clone(),
+        view: plan,
+        tile: tile(0, 6),
+    })
+    .unwrap();
+    assert!(page.workspace.arranged(&page.page).unwrap());
+}

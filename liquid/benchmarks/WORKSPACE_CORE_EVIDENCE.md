@@ -25,7 +25,7 @@ Observational evidence for `liquid-core`'s mutation pipeline and `liquid-storage
 | --- | --- | --- | --- |
 | Typing, per keystroke | median 11.2 µs, p99 45.3 µs, max 3.8 ms | median 11.0 µs, p99 13.1 µs, max 3.8 ms | median 11.1 µs, p99 13.4 µs, max 3.8 ms |
 | Adding a Text Block at the end of the long Page | median 138 µs, p99 173 µs | median 139 µs, p99 174 µs | median 140 µs, p99 173 µs |
-| … once the Page is arranged, up to 2,000 Text Blocks | median 159 µs, p99 194 µs | median 158 µs, p99 194 µs | median 159 µs, p99 197 µs |
+| … once the Page is arranged, up to 2,000 Text Blocks | median 192 µs, p99 245 µs | median 197 µs, p99 251 µs | median 197 µs, p99 250 µs |
 | Reading the long Page's 1,000 Views in order | 0.02 ms | 0.03 ms | 0.03 ms |
 | Peak memory footprint of the pipeline process | 19.4 MB | 17.8 MB | 17.8 MB |
 | Adding a Database row at the end, before the workload change (2026-11-03, `6aa3f03`) | median 55.7 µs, p99 90.2 µs, max 13.0 ms | median 53.7 µs, p99 82.5 µs, max 12.7 ms | median 52.7 µs, p99 85.6 µs, max 12.6 ms |
