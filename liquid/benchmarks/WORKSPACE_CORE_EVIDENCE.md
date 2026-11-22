@@ -5,7 +5,7 @@ Observational evidence for `liquid-core`'s mutation pipeline and `liquid-storage
 ## Environment
 
 - Apple M6, 24 GB, macOS 27.0 (26A428), internal SSD; Rust 1.99.0, release build; `automerge` 0.12.0, `rusqlite` 0.41.1 with SQLCipher 4.19.0.
-- Observed on 2026-11-02 at commit `e095071`, three rounds. The Database workload was observed on 2026-11-03 at `6aa3f03`, three rounds, and after its workload change on 2026-11-06 at `e4193e5`, three rounds, with rows added last (ADR-0247). The attachment workload was observed on 2026-11-17 at `1557b2a3`, three rounds, with `rusqlite` 0.42.0, and the Whiteboard workload on 2026-11-17 at `aa72dab6`, three rounds.
+- Observed on 2026-11-02 at commit `e095071`, three rounds. The Database workload was observed on 2026-11-03 at `6aa3f03`, three rounds, after its workload change on 2026-11-06 at `e4193e5`, three rounds, with rows added last (ADR-0247), and last on 2026-11-22 at `6de4f29d`, three rounds, with a Board's grouped read added (ADR-0311). The attachment workload was observed on 2026-11-17 at `1557b2a3`, three rounds, with `rusqlite` 0.42.0, and the Whiteboard workload on 2026-11-17 at `aa72dab6`, three rounds.
 
 ## Workloads
 
@@ -13,7 +13,7 @@ Observational evidence for `liquid-core`'s mutation pipeline and `liquid-storage
 | --- | --- | --- | --- |
 | Typing | `/usr/bin/time -l target/release/examples/pipeline_observe` after `cargo build --release -p liquid-core --example pipeline_observe` | 10,000 keystrokes appended to one Text Block, each its own request and Action, with the in-memory store | Durable commit, bridge and UI |
 | Long Page | the same run | 1,000 Text Blocks, each added after the last; then one read of all the Page's Views in order | the same |
-| Database | the same run | A Database Block of 5,000 rows with a text, number, date and checkbox field, each field and row added last (ADR-0247; at `6aa3f03` after the last one) and each cell set as its own request; then one window of 100 rows, filtered by the checkbox and sorted by the number | the same |
+| Database | the same run | A Database Block of 5,000 rows with a text, number, date and checkbox field, each field and row added last (ADR-0247; at `6aa3f03` after the last one) and each cell set as its own request; then one window of 100 rows, filtered by the checkbox and sorted by the number, and a Board's read: the rows grouped by the checkbox, each group's first 50 sorted by the number | the same |
 | Durable typing | `/usr/bin/time -l target/release/examples/replica_observe` after `cargo build --release -p liquid-storage --example replica_observe` | 2,000 keystrokes appended to one Text Block in an encrypted replica, each its own Action and durable commit; then 1,000 Text Blocks on that Page | Bridge and UI |
 | Reopening a long Page | `/usr/bin/time -l target/release/examples/replica_observe <path>` with the path that run printed | A new process opens the replica, finds the Page through its area and reads all its 1,001 Views in order | the same |
 | Attachment | `/usr/bin/time -l target/release/examples/replica_observe --attachment` | A 256 MiB file added to a new encrypted replica in 1 MiB parts, each its own durable commit, with its SHA-256; then read back part by part (ADR-0305) | Reading the file from disk, bridge and UI |
@@ -28,10 +28,11 @@ Observational evidence for `liquid-core`'s mutation pipeline and `liquid-storage
 | Reading the long Page's 1,000 Views in order | 0.02 ms | 0.02 ms | 0.02 ms |
 | Peak memory footprint of the pipeline process | 19.4 MB | 17.8 MB | 17.8 MB |
 | Adding a Database row at the end, before the workload change (2026-11-03, `6aa3f03`) | median 55.7 µs, p99 90.2 µs, max 13.0 ms | median 53.7 µs, p99 82.5 µs, max 12.7 ms | median 52.7 µs, p99 85.6 µs, max 12.6 ms |
-| … added last (2026-11-06, `e4193e5`) | median 47.8 µs, p99 59.1 µs, max 12.7 ms | median 49.1 µs, p99 63.8 µs, max 12.7 ms | median 48.2 µs, p99 60.5 µs, max 12.4 ms |
-| Setting one cell | median 36.9 µs, p99 60.5 µs | median 34.8 µs, p99 50.5 µs | median 34.7 µs, p99 52.7 µs |
-| A filtered, sorted window of 100 of the 5,000 rows | 0.81 ms | 0.82 ms | 0.88 ms |
-| Peak memory footprint of the pipeline process, with the Database | 101.0 MB | 101.2 MB | 100.5 MB |
+| … added last (2026-11-22, `6de4f29d`) | median 51.3 µs, p99 64.4 µs, max 0.15 ms | median 49.7 µs, p99 59.0 µs, max 0.15 ms | median 50.0 µs, p99 61.3 µs, max 0.15 ms |
+| Setting one cell | median 36.2 µs, p99 50.9 µs | median 35.9 µs, p99 50.4 µs | median 35.4 µs, p99 51.0 µs |
+| A filtered, sorted window of 100 of the 5,000 rows | 0.87 ms | 0.81 ms | 0.85 ms |
+| Both groups with their first 50 rows each, sorted | 1.86 ms | 1.80 ms | 1.84 ms |
+| Peak memory footprint of the pipeline process, with the Database | 102.6 MB | 101.6 MB | 101.3 MB |
 | Durable typing, per keystroke | median 3.06 ms, p99 6.01 ms, max 14.0 ms | median 3.01 ms, p99 4.69 ms, max 10.7 ms | median 3.02 ms, p99 5.97 ms, max 11.7 ms |
 | Peak memory footprint of the writing process | 11.1 MB | 10.9 MB | 11.2 MB |
 | Replica on disk with its write-ahead log | 2.1 MiB | 2.1 MiB | 2.1 MiB |

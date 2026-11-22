@@ -233,4 +233,19 @@ fn main() {
         window.count,
         start.elapsed().as_secs_f64() * 1e3
     );
+    let first_cards = RowQuery {
+        filter: None,
+        limit: 50,
+        ..query
+    };
+    let start = Instant::now();
+    let groups = workspace
+        .groups(&block, &first_cards, &fields[3])
+        .expect("the Database groups its rows");
+    println!(
+        "{} groups with their first {} rows each, sorted by amount: {:.2} ms",
+        groups.len(),
+        first_cards.limit,
+        start.elapsed().as_secs_f64() * 1e3
+    );
 }

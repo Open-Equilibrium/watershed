@@ -142,7 +142,7 @@ h4.qh{margin:14px 0 6px;font-size:13px}
   </section>
   <section>
     <h3 class="sec">1 · One concept: a Table with Views</h3>
-    <p class="sub">The Block is called <b>Table</b> everywhere, as in Airtable; Table, Board and Calendar are its <b>Views</b>, as Notion's database views. There is no second, "simple" table as Notion has: a Table starts as light as a grid and grows into a database by adding Views, links and formulas. Internally it stays the Database Block.</p>
+    <p class="sub">The Block is called <b>Table</b> everywhere, as in Airtable; Table, Board and Calendar are the layouts of its Views' tabs, as Notion's database views (ADR-0311). There is no second, "simple" table as Notion has: a Table starts as light as a grid and grows into a database by adding Views, links and formulas. Internally it stays the Database Block.</p>
     <div class="stage"><div class="scaler"><div class="win" id="w-views" data-w="1040"></div></div></div>
     <h4 class="qh">The same capabilities as a Notion database</h4>
     <div class="wrapx"><table class="maps">
@@ -154,9 +154,9 @@ h4.qh{margin:14px 0 6px;font-size:13px}
       <tr><td>Rollup</td><td>A formula over linked rows, e.g. <code>SUM(Trips.Cost)</code></td><td>With Formulas</td></tr>
       <tr><td>Formula property</td><td>Calculated field (section 3)</td><td>With Formulas</td></tr>
       <tr><td>Button property</td><td>Button field running an Automation</td><td>With Automations</td></tr>
-      <tr><td>Views: table, board, calendar (list, gallery, timeline, chart)</td><td>Table, Board, Calendar; charts are Chart Blocks fed by a Connection</td><td>Views on several Pages; more View kinds later</td></tr>
-      <tr><td>Sort, filter per View</td><td>One sort and one filter, stored on the View</td><td>Done</td></tr>
-      <tr><td>Group per View</td><td>Stored on the View, with group subtotals</td><td>Views on several Pages</td></tr>
+      <tr><td>Views: table, board, calendar (list, gallery, timeline, chart)</td><td>A View's tabs, laid out as Table, Board or Calendar; charts are Chart Blocks fed by a Connection</td><td>Done; more layouts later</td></tr>
+      <tr><td>Sort, filter per View</td><td>One sort and one filter per tab</td><td>Done</td></tr>
+      <tr><td>Group per View</td><td>Per tab, by a Select or Checkbox field; group subtotals</td><td>Done; subtotals with Formulas</td></tr>
       <tr><td>Calculate in the footer</td><td>Total row (section 2)</td><td>With Formulas</td></tr>
       <tr><td>Each row is a Page with its own content</td><td>Open question 4</td><td>—</td></tr>
       <tr><td>Linked view of a database on another Page</td><td>A View of the same Block on another Page (ADR-0235)</td><td>Views on several Pages</td></tr>
@@ -208,7 +208,7 @@ h4.qh{margin:14px 0 6px;font-size:13px}
       <li>The Block is a <b>Table</b> with Views, as Airtable; the core keeps calling it the Database Block.</li>
       <li>Reports in Excel's layout are a <b>Calculation Block</b> (section 5, A).</li>
       <li>A new field finds its kind from its first value and can change it later (section 6); the first Table View keeps the approved kind menu until the core can change a field's kind.</li>
-      <li>Whether a row opens as a Page is decided with Views on several Pages.</li>
+      <li>Whether a row opens as a Page waits for D-115, whether one View may show several Tables.</li>
     </ol>
   </section>
 </div>
@@ -258,8 +258,7 @@ const body=rows.map((r,ri)=>`<div class="tr">${f.map((x,i)=>cell(x[1]=='fx'?'num
 const tot=o.totals?`<div class="tr foot tot">${o.totals.map((t,i)=>`<span class="${f[i][1]=='num'||f[i][1]=='fx'?'num':''} ${o.totOn==i?'cell-sel':''}">${t?`<span class="tl">${t[0]}</span>${t[1]?`<b>${t[1]}</b>`:''}`:''}</span>`).join('')}<span></span></div>`:'';
 return `<div class="tbl" style="--cols:${cols(f)}">${hd}${body}<div class="tr add"><span style="grid-column:1/-1">${I.plus}&nbsp;New</span></div>${tot}</div>`}
 const bh2=(name,view)=>`<div class="bh"><span class="ico">${I.db}</span><b>${name}</b><span class="vchip">${view||'Table'} ${I.chev}</span><span class="end"><span class="ib">${I.sort}</span><span class="ib">${I.filter}</span><span class="ib">${I.more}</span></span></div>`;
-const viewsPop=`<div class="pop" style="left:268px;top:186px;width:220px"><div class="lbl">Views of Expenses</div><div class="it on"><span class="ico">${I.db}</span>Table</div><div class="it"><span class="ico">${I.grid}</span>Board<span class="r">by Category</span></div><div class="it"><span class="ico">${I.date}</span>Calendar<span class="r">by Date</span></div><hr><div class="it" style="color:var(--ws-text-muted)">${I.plus}Add a View</div></div>`;
-win('w-views',{h:400,main:`${intro}<div class="blk">${bh2('Expenses')}${table({})}</div>`,over:viewsPop});
+win('w-views',{h:400,main:`${intro}<div class="blk">${bh2('Expenses')}${table({})}</div>`});
 const tf=[['Name','text','1fr'],['Date','date','120px'],['Category','sel','128px'],['Amount','num','120px']];
 const tr=data.map(r=>[r[0],r[1],r[2],r[3]]);
 const calcPop=`<div class="pop" style="left:664px;top:150px;width:200px"><div class="lbl">Amount</div><div class="it">None</div><div class="it on">Sum<span class="r">1,284.5</span></div><div class="it">Average<span class="r">256.9</span></div><div class="it">Count<span class="r">5</span></div><div class="it">Min<span class="r">42.5</span></div><div class="it">Max<span class="r">950</span></div><hr><div class="it">${I.fx}Formula…</div></div>`;
