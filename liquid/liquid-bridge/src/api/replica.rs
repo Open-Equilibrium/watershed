@@ -8,6 +8,7 @@ use liquid_core::{
 };
 use liquid_storage::Sqlite;
 
+use super::calculation::BridgeLine;
 use super::database::{
     BridgeCell, BridgeDatabase, BridgeGroup, BridgeRow, BridgeTab, filter, sort,
 };
@@ -153,6 +154,7 @@ impl LiquidWorkspace {
             option: None,
             tab: None,
             elements: Vec::new(),
+            line: None,
         };
         match applied.created {
             Some(Created::Area(area)) => answer.area = Some(area.to_string()),
@@ -166,6 +168,7 @@ impl LiquidWorkspace {
             Some(Created::Row(row)) => answer.row = Some(row.to_string()),
             Some(Created::Option(option)) => answer.option = Some(option.to_string()),
             Some(Created::Tab(tab)) => answer.tab = Some(tab.to_string()),
+            Some(Created::Line(line)) => answer.line = Some(line.to_string()),
             Some(Created::Elements(elements)) => {
                 answer.elements = elements.iter().map(ToString::to_string).collect();
             }
@@ -218,6 +221,7 @@ impl LiquidWorkspace {
             tables: Vec::new(),
             shown: Vec::new(),
             icon: None,
+            lines: Vec::new(),
         };
         match query.kind {
             BridgeQueryKind::Workspace => {
@@ -273,6 +277,7 @@ impl LiquidWorkspace {
                             BlockKind::Code => BridgeBlockKind::Code,
                             BlockKind::Media => BridgeBlockKind::Media,
                             BlockKind::Whiteboard => BridgeBlockKind::Whiteboard,
+                            BlockKind::Calculation => BridgeBlockKind::Calculation,
                             BlockKind::Unknown => BridgeBlockKind::Unknown,
                         },
                         tabs: view.tabs.iter().map(BridgeTab::of).collect(),
@@ -315,6 +320,15 @@ impl LiquidWorkspace {
                     .drawing(&page, &block, pages)
                     .map_err(message)?
                     .map(BridgeDrawing::of);
+            }
+            BridgeQueryKind::Calculation => {
+                let page = id(&query.page, PageId::parse, "page")?;
+                let block = id(&query.block, BlockId::parse, "block")?;
+                answer.lines = workspace
+                    .calculation(&page, &block)
+                    .map_err(message)?
+                    .map(|calculation| calculation.lines.into_iter().map(BridgeLine::of).collect())
+                    .unwrap_or_default();
             }
             BridgeQueryKind::Database => {
                 let block = id(&query.block, BlockId::parse, "block")?;

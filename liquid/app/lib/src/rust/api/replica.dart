@@ -4,6 +4,7 @@
 // ignore_for_file: invalid_use_of_internal_member, unused_import, unnecessary_import
 
 import '../frb_generated.dart';
+import 'calculation.dart';
 import 'database.dart';
 import 'drawing.dart';
 import 'media.dart';

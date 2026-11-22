@@ -6170,6 +6170,7 @@ impl SseDecode for crate::api::workspace::BridgeAnswer {
         let mut var_tables = <Vec<crate::api::workspace::BridgeTable>>::sse_decode(deserializer);
         let mut var_shown = <Vec<crate::api::workspace::BridgeShown>>::sse_decode(deserializer);
         let mut var_icon = <Option<String>>::sse_decode(deserializer);
+        let mut var_lines = <Vec<crate::api::calculation::BridgeLine>>::sse_decode(deserializer);
         return crate::api::workspace::BridgeAnswer {
             areas: var_areas,
             pages: var_pages,
@@ -6188,6 +6189,7 @@ impl SseDecode for crate::api::workspace::BridgeAnswer {
             tables: var_tables,
             shown: var_shown,
             icon: var_icon,
+            lines: var_lines,
         };
     }
 }
@@ -6205,6 +6207,7 @@ impl SseDecode for crate::api::workspace::BridgeApplied {
         let mut var_option = <Option<String>>::sse_decode(deserializer);
         let mut var_tab = <Option<String>>::sse_decode(deserializer);
         let mut var_elements = <Vec<String>>::sse_decode(deserializer);
+        let mut var_line = <Option<String>>::sse_decode(deserializer);
         return crate::api::workspace::BridgeApplied {
             action: var_action,
             area: var_area,
@@ -6216,6 +6219,7 @@ impl SseDecode for crate::api::workspace::BridgeApplied {
             option: var_option,
             tab: var_tab,
             elements: var_elements,
+            line: var_line,
         };
     }
 }
@@ -6321,7 +6325,8 @@ impl SseDecode for crate::api::workspace::BridgeBlockKind {
             2 => crate::api::workspace::BridgeBlockKind::Code,
             3 => crate::api::workspace::BridgeBlockKind::Media,
             4 => crate::api::workspace::BridgeBlockKind::Whiteboard,
-            5 => crate::api::workspace::BridgeBlockKind::Unknown,
+            5 => crate::api::workspace::BridgeBlockKind::Calculation,
+            6 => crate::api::workspace::BridgeBlockKind::Unknown,
             _ => unreachable!("Invalid variant for BridgeBlockKind: {}", inner),
         };
     }
@@ -6974,6 +6979,54 @@ impl SseDecode for crate::api::database::BridgeLayout {
     }
 }
 
+impl SseDecode for crate::api::calculation::BridgeLine {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_id = <String>::sse_decode(deserializer);
+        let mut var_label = <String>::sse_decode(deserializer);
+        let mut var_formula = <String>::sse_decode(deserializer);
+        let mut var_style = <crate::api::calculation::BridgeLineStyle>::sse_decode(deserializer);
+        let mut var_value = <String>::sse_decode(deserializer);
+        let mut var_kind = <crate::api::calculation::BridgeValueKind>::sse_decode(deserializer);
+        return crate::api::calculation::BridgeLine {
+            id: var_id,
+            label: var_label,
+            formula: var_formula,
+            style: var_style,
+            value: var_value,
+            kind: var_kind,
+        };
+    }
+}
+
+impl SseDecode for crate::api::calculation::BridgeLineSetup {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_label = <String>::sse_decode(deserializer);
+        let mut var_formula = <String>::sse_decode(deserializer);
+        let mut var_style = <crate::api::calculation::BridgeLineStyle>::sse_decode(deserializer);
+        return crate::api::calculation::BridgeLineSetup {
+            label: var_label,
+            formula: var_formula,
+            style: var_style,
+        };
+    }
+}
+
+impl SseDecode for crate::api::calculation::BridgeLineStyle {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut inner = <i32>::sse_decode(deserializer);
+        return match inner {
+            0 => crate::api::calculation::BridgeLineStyle::Plain,
+            1 => crate::api::calculation::BridgeLineStyle::Heading,
+            2 => crate::api::calculation::BridgeLineStyle::Subtotal,
+            3 => crate::api::calculation::BridgeLineStyle::Total,
+            _ => unreachable!("Invalid variant for BridgeLineStyle: {}", inner),
+        };
+    }
+}
+
 impl SseDecode for crate::api::details::BridgeLineage {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -7299,6 +7352,9 @@ impl SseDecode for crate::api::workspace::BridgeMutation {
             <Option<crate::api::drawing::BridgeDrawingStyle>>::sse_decode(deserializer);
         let mut var_drawing =
             <Option<crate::api::drawing::BridgeDrawingEdit>>::sse_decode(deserializer);
+        let mut var_line = <Option<String>>::sse_decode(deserializer);
+        let mut var_lineSetup =
+            <Option<crate::api::calculation::BridgeLineSetup>>::sse_decode(deserializer);
         return crate::api::workspace::BridgeMutation {
             kind: var_kind,
             area: var_area,
@@ -7329,6 +7385,8 @@ impl SseDecode for crate::api::workspace::BridgeMutation {
             attachment: var_attachment,
             drawing_style: var_drawingStyle,
             drawing: var_drawing,
+            line: var_line,
+            line_setup: var_lineSetup,
         };
     }
 }
@@ -7368,23 +7426,27 @@ impl SseDecode for crate::api::workspace::BridgeMutationKind {
             27 => crate::api::workspace::BridgeMutationKind::SetCodeLanguage,
             28 => crate::api::workspace::BridgeMutationKind::AddMediaBlock,
             29 => crate::api::workspace::BridgeMutationKind::AddWhiteboardBlock,
-            30 => crate::api::workspace::BridgeMutationKind::SetDrawingStyle,
-            31 => crate::api::workspace::BridgeMutationKind::EditDrawing,
-            32 => crate::api::workspace::BridgeMutationKind::AddDatabaseBlock,
-            33 => crate::api::workspace::BridgeMutationKind::CreateTable,
-            34 => crate::api::workspace::BridgeMutationKind::AddTableView,
-            35 => crate::api::workspace::BridgeMutationKind::DuplicateTable,
-            36 => crate::api::workspace::BridgeMutationKind::RenameView,
-            37 => crate::api::workspace::BridgeMutationKind::DeleteTable,
-            38 => crate::api::workspace::BridgeMutationKind::RenameDatabase,
-            39 => crate::api::workspace::BridgeMutationKind::AddField,
-            40 => crate::api::workspace::BridgeMutationKind::RenameField,
-            41 => crate::api::workspace::BridgeMutationKind::RemoveField,
-            42 => crate::api::workspace::BridgeMutationKind::AddOption,
-            43 => crate::api::workspace::BridgeMutationKind::AddRow,
-            44 => crate::api::workspace::BridgeMutationKind::RemoveRow,
-            45 => crate::api::workspace::BridgeMutationKind::MoveRow,
-            46 => crate::api::workspace::BridgeMutationKind::SetCell,
+            30 => crate::api::workspace::BridgeMutationKind::AddCalculationBlock,
+            31 => crate::api::workspace::BridgeMutationKind::AddLine,
+            32 => crate::api::workspace::BridgeMutationKind::SetLine,
+            33 => crate::api::workspace::BridgeMutationKind::RemoveLine,
+            34 => crate::api::workspace::BridgeMutationKind::SetDrawingStyle,
+            35 => crate::api::workspace::BridgeMutationKind::EditDrawing,
+            36 => crate::api::workspace::BridgeMutationKind::AddDatabaseBlock,
+            37 => crate::api::workspace::BridgeMutationKind::CreateTable,
+            38 => crate::api::workspace::BridgeMutationKind::AddTableView,
+            39 => crate::api::workspace::BridgeMutationKind::DuplicateTable,
+            40 => crate::api::workspace::BridgeMutationKind::RenameView,
+            41 => crate::api::workspace::BridgeMutationKind::DeleteTable,
+            42 => crate::api::workspace::BridgeMutationKind::RenameDatabase,
+            43 => crate::api::workspace::BridgeMutationKind::AddField,
+            44 => crate::api::workspace::BridgeMutationKind::RenameField,
+            45 => crate::api::workspace::BridgeMutationKind::RemoveField,
+            46 => crate::api::workspace::BridgeMutationKind::AddOption,
+            47 => crate::api::workspace::BridgeMutationKind::AddRow,
+            48 => crate::api::workspace::BridgeMutationKind::RemoveRow,
+            49 => crate::api::workspace::BridgeMutationKind::MoveRow,
+            50 => crate::api::workspace::BridgeMutationKind::SetCell,
             _ => unreachable!("Invalid variant for BridgeMutationKind: {}", inner),
         };
     }
@@ -7591,12 +7653,13 @@ impl SseDecode for crate::api::workspace::BridgeQueryKind {
             5 => crate::api::workspace::BridgeQueryKind::Code,
             6 => crate::api::workspace::BridgeQueryKind::Media,
             7 => crate::api::workspace::BridgeQueryKind::Drawing,
-            8 => crate::api::workspace::BridgeQueryKind::Database,
-            9 => crate::api::workspace::BridgeQueryKind::Rows,
-            10 => crate::api::workspace::BridgeQueryKind::Groups,
-            11 => crate::api::workspace::BridgeQueryKind::Search,
-            12 => crate::api::workspace::BridgeQueryKind::Tables,
-            13 => crate::api::workspace::BridgeQueryKind::TableViews,
+            8 => crate::api::workspace::BridgeQueryKind::Calculation,
+            9 => crate::api::workspace::BridgeQueryKind::Database,
+            10 => crate::api::workspace::BridgeQueryKind::Rows,
+            11 => crate::api::workspace::BridgeQueryKind::Groups,
+            12 => crate::api::workspace::BridgeQueryKind::Search,
+            13 => crate::api::workspace::BridgeQueryKind::Tables,
+            14 => crate::api::workspace::BridgeQueryKind::TableViews,
             _ => unreachable!("Invalid variant for BridgeQueryKind: {}", inner),
         };
     }
@@ -8156,6 +8219,21 @@ impl SseDecode for crate::api::details::BridgeUsageWindow {
     }
 }
 
+impl SseDecode for crate::api::calculation::BridgeValueKind {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut inner = <i32>::sse_decode(deserializer);
+        return match inner {
+            0 => crate::api::calculation::BridgeValueKind::Blank,
+            1 => crate::api::calculation::BridgeValueKind::Number,
+            2 => crate::api::calculation::BridgeValueKind::Text,
+            3 => crate::api::calculation::BridgeValueKind::Bool,
+            4 => crate::api::calculation::BridgeValueKind::Error,
+            _ => unreachable!("Invalid variant for BridgeValueKind: {}", inner),
+        };
+    }
+}
+
 impl SseDecode for crate::api::workspace::BridgeView {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -8384,6 +8462,20 @@ impl SseDecode for Vec<crate::api::moves::BridgeHostProject> {
         let mut ans_ = Vec::with_capacity(len_ as usize);
         for idx_ in 0..len_ {
             ans_.push(<crate::api::moves::BridgeHostProject>::sse_decode(
+                deserializer,
+            ));
+        }
+        return ans_;
+    }
+}
+
+impl SseDecode for Vec<crate::api::calculation::BridgeLine> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut len_ = <i32>::sse_decode(deserializer);
+        let mut ans_ = Vec::with_capacity(len_ as usize);
+        for idx_ in 0..len_ {
+            ans_.push(<crate::api::calculation::BridgeLine>::sse_decode(
                 deserializer,
             ));
         }
@@ -8920,6 +9012,19 @@ impl SseDecode for Option<crate::api::events::BridgeItem> {
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
         if (<bool>::sse_decode(deserializer)) {
             return Some(<crate::api::events::BridgeItem>::sse_decode(deserializer));
+        } else {
+            return None;
+        }
+    }
+}
+
+impl SseDecode for Option<crate::api::calculation::BridgeLineSetup> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        if (<bool>::sse_decode(deserializer)) {
+            return Some(<crate::api::calculation::BridgeLineSetup>::sse_decode(
+                deserializer,
+            ));
         } else {
             return None;
         }
@@ -9728,6 +9833,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::workspace::BridgeAnswer {
             self.tables.into_into_dart().into_dart(),
             self.shown.into_into_dart().into_dart(),
             self.icon.into_into_dart().into_dart(),
+            self.lines.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -9757,6 +9863,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::workspace::BridgeApplied {
             self.option.into_into_dart().into_dart(),
             self.tab.into_into_dart().into_dart(),
             self.elements.into_into_dart().into_dart(),
+            self.line.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -9917,7 +10024,8 @@ impl flutter_rust_bridge::IntoDart for crate::api::workspace::BridgeBlockKind {
             Self::Code => 2.into_dart(),
             Self::Media => 3.into_dart(),
             Self::Whiteboard => 4.into_dart(),
-            Self::Unknown => 5.into_dart(),
+            Self::Calculation => 5.into_dart(),
+            Self::Unknown => 6.into_dart(),
             _ => unreachable!(),
         }
     }
@@ -10849,6 +10957,76 @@ impl flutter_rust_bridge::IntoIntoDart<crate::api::database::BridgeLayout>
     }
 }
 // Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::calculation::BridgeLine {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.id.into_into_dart().into_dart(),
+            self.label.into_into_dart().into_dart(),
+            self.formula.into_into_dart().into_dart(),
+            self.style.into_into_dart().into_dart(),
+            self.value.into_into_dart().into_dart(),
+            self.kind.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::calculation::BridgeLine
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::calculation::BridgeLine>
+    for crate::api::calculation::BridgeLine
+{
+    fn into_into_dart(self) -> crate::api::calculation::BridgeLine {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::calculation::BridgeLineSetup {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.label.into_into_dart().into_dart(),
+            self.formula.into_into_dart().into_dart(),
+            self.style.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::calculation::BridgeLineSetup
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::calculation::BridgeLineSetup>
+    for crate::api::calculation::BridgeLineSetup
+{
+    fn into_into_dart(self) -> crate::api::calculation::BridgeLineSetup {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::calculation::BridgeLineStyle {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        match self {
+            Self::Plain => 0.into_dart(),
+            Self::Heading => 1.into_dart(),
+            Self::Subtotal => 2.into_dart(),
+            Self::Total => 3.into_dart(),
+            _ => unreachable!(),
+        }
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::calculation::BridgeLineStyle
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::calculation::BridgeLineStyle>
+    for crate::api::calculation::BridgeLineStyle
+{
+    fn into_into_dart(self) -> crate::api::calculation::BridgeLineStyle {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
 impl flutter_rust_bridge::IntoDart for crate::api::details::BridgeLineage {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         [
@@ -11269,6 +11447,8 @@ impl flutter_rust_bridge::IntoDart for crate::api::workspace::BridgeMutation {
             self.attachment.into_into_dart().into_dart(),
             self.drawing_style.into_into_dart().into_dart(),
             self.drawing.into_into_dart().into_dart(),
+            self.line.into_into_dart().into_dart(),
+            self.line_setup.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -11318,23 +11498,27 @@ impl flutter_rust_bridge::IntoDart for crate::api::workspace::BridgeMutationKind
             Self::SetCodeLanguage => 27.into_dart(),
             Self::AddMediaBlock => 28.into_dart(),
             Self::AddWhiteboardBlock => 29.into_dart(),
-            Self::SetDrawingStyle => 30.into_dart(),
-            Self::EditDrawing => 31.into_dart(),
-            Self::AddDatabaseBlock => 32.into_dart(),
-            Self::CreateTable => 33.into_dart(),
-            Self::AddTableView => 34.into_dart(),
-            Self::DuplicateTable => 35.into_dart(),
-            Self::RenameView => 36.into_dart(),
-            Self::DeleteTable => 37.into_dart(),
-            Self::RenameDatabase => 38.into_dart(),
-            Self::AddField => 39.into_dart(),
-            Self::RenameField => 40.into_dart(),
-            Self::RemoveField => 41.into_dart(),
-            Self::AddOption => 42.into_dart(),
-            Self::AddRow => 43.into_dart(),
-            Self::RemoveRow => 44.into_dart(),
-            Self::MoveRow => 45.into_dart(),
-            Self::SetCell => 46.into_dart(),
+            Self::AddCalculationBlock => 30.into_dart(),
+            Self::AddLine => 31.into_dart(),
+            Self::SetLine => 32.into_dart(),
+            Self::RemoveLine => 33.into_dart(),
+            Self::SetDrawingStyle => 34.into_dart(),
+            Self::EditDrawing => 35.into_dart(),
+            Self::AddDatabaseBlock => 36.into_dart(),
+            Self::CreateTable => 37.into_dart(),
+            Self::AddTableView => 38.into_dart(),
+            Self::DuplicateTable => 39.into_dart(),
+            Self::RenameView => 40.into_dart(),
+            Self::DeleteTable => 41.into_dart(),
+            Self::RenameDatabase => 42.into_dart(),
+            Self::AddField => 43.into_dart(),
+            Self::RenameField => 44.into_dart(),
+            Self::RemoveField => 45.into_dart(),
+            Self::AddOption => 46.into_dart(),
+            Self::AddRow => 47.into_dart(),
+            Self::RemoveRow => 48.into_dart(),
+            Self::MoveRow => 49.into_dart(),
+            Self::SetCell => 50.into_dart(),
             _ => unreachable!(),
         }
     }
@@ -11608,12 +11792,13 @@ impl flutter_rust_bridge::IntoDart for crate::api::workspace::BridgeQueryKind {
             Self::Code => 5.into_dart(),
             Self::Media => 6.into_dart(),
             Self::Drawing => 7.into_dart(),
-            Self::Database => 8.into_dart(),
-            Self::Rows => 9.into_dart(),
-            Self::Groups => 10.into_dart(),
-            Self::Search => 11.into_dart(),
-            Self::Tables => 12.into_dart(),
-            Self::TableViews => 13.into_dart(),
+            Self::Calculation => 8.into_dart(),
+            Self::Database => 9.into_dart(),
+            Self::Rows => 10.into_dart(),
+            Self::Groups => 11.into_dart(),
+            Self::Search => 12.into_dart(),
+            Self::Tables => 13.into_dart(),
+            Self::TableViews => 14.into_dart(),
             _ => unreachable!(),
         }
     }
@@ -12402,6 +12587,30 @@ impl flutter_rust_bridge::IntoIntoDart<crate::api::details::BridgeUsageWindow>
     }
 }
 // Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::calculation::BridgeValueKind {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        match self {
+            Self::Blank => 0.into_dart(),
+            Self::Number => 1.into_dart(),
+            Self::Text => 2.into_dart(),
+            Self::Bool => 3.into_dart(),
+            Self::Error => 4.into_dart(),
+            _ => unreachable!(),
+        }
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::calculation::BridgeValueKind
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::calculation::BridgeValueKind>
+    for crate::api::calculation::BridgeValueKind
+{
+    fn into_into_dart(self) -> crate::api::calculation::BridgeValueKind {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
 impl flutter_rust_bridge::IntoDart for crate::api::workspace::BridgeView {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         [
@@ -12677,6 +12886,7 @@ impl SseEncode for crate::api::workspace::BridgeAnswer {
         <Vec<crate::api::workspace::BridgeTable>>::sse_encode(self.tables, serializer);
         <Vec<crate::api::workspace::BridgeShown>>::sse_encode(self.shown, serializer);
         <Option<String>>::sse_encode(self.icon, serializer);
+        <Vec<crate::api::calculation::BridgeLine>>::sse_encode(self.lines, serializer);
     }
 }
 
@@ -12693,6 +12903,7 @@ impl SseEncode for crate::api::workspace::BridgeApplied {
         <Option<String>>::sse_encode(self.option, serializer);
         <Option<String>>::sse_encode(self.tab, serializer);
         <Vec<String>>::sse_encode(self.elements, serializer);
+        <Option<String>>::sse_encode(self.line, serializer);
     }
 }
 
@@ -12772,7 +12983,8 @@ impl SseEncode for crate::api::workspace::BridgeBlockKind {
                 crate::api::workspace::BridgeBlockKind::Code => 2,
                 crate::api::workspace::BridgeBlockKind::Media => 3,
                 crate::api::workspace::BridgeBlockKind::Whiteboard => 4,
-                crate::api::workspace::BridgeBlockKind::Unknown => 5,
+                crate::api::workspace::BridgeBlockKind::Calculation => 5,
+                crate::api::workspace::BridgeBlockKind::Unknown => 6,
                 _ => {
                     unimplemented!("");
                 }
@@ -13326,6 +13538,45 @@ impl SseEncode for crate::api::database::BridgeLayout {
     }
 }
 
+impl SseEncode for crate::api::calculation::BridgeLine {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <String>::sse_encode(self.id, serializer);
+        <String>::sse_encode(self.label, serializer);
+        <String>::sse_encode(self.formula, serializer);
+        <crate::api::calculation::BridgeLineStyle>::sse_encode(self.style, serializer);
+        <String>::sse_encode(self.value, serializer);
+        <crate::api::calculation::BridgeValueKind>::sse_encode(self.kind, serializer);
+    }
+}
+
+impl SseEncode for crate::api::calculation::BridgeLineSetup {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <String>::sse_encode(self.label, serializer);
+        <String>::sse_encode(self.formula, serializer);
+        <crate::api::calculation::BridgeLineStyle>::sse_encode(self.style, serializer);
+    }
+}
+
+impl SseEncode for crate::api::calculation::BridgeLineStyle {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(
+            match self {
+                crate::api::calculation::BridgeLineStyle::Plain => 0,
+                crate::api::calculation::BridgeLineStyle::Heading => 1,
+                crate::api::calculation::BridgeLineStyle::Subtotal => 2,
+                crate::api::calculation::BridgeLineStyle::Total => 3,
+                _ => {
+                    unimplemented!("");
+                }
+            },
+            serializer,
+        );
+    }
+}
+
 impl SseEncode for crate::api::details::BridgeLineage {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
@@ -13573,6 +13824,8 @@ impl SseEncode for crate::api::workspace::BridgeMutation {
             serializer,
         );
         <Option<crate::api::drawing::BridgeDrawingEdit>>::sse_encode(self.drawing, serializer);
+        <Option<String>>::sse_encode(self.line, serializer);
+        <Option<crate::api::calculation::BridgeLineSetup>>::sse_encode(self.line_setup, serializer);
     }
 }
 
@@ -13611,23 +13864,27 @@ impl SseEncode for crate::api::workspace::BridgeMutationKind {
                 crate::api::workspace::BridgeMutationKind::SetCodeLanguage => 27,
                 crate::api::workspace::BridgeMutationKind::AddMediaBlock => 28,
                 crate::api::workspace::BridgeMutationKind::AddWhiteboardBlock => 29,
-                crate::api::workspace::BridgeMutationKind::SetDrawingStyle => 30,
-                crate::api::workspace::BridgeMutationKind::EditDrawing => 31,
-                crate::api::workspace::BridgeMutationKind::AddDatabaseBlock => 32,
-                crate::api::workspace::BridgeMutationKind::CreateTable => 33,
-                crate::api::workspace::BridgeMutationKind::AddTableView => 34,
-                crate::api::workspace::BridgeMutationKind::DuplicateTable => 35,
-                crate::api::workspace::BridgeMutationKind::RenameView => 36,
-                crate::api::workspace::BridgeMutationKind::DeleteTable => 37,
-                crate::api::workspace::BridgeMutationKind::RenameDatabase => 38,
-                crate::api::workspace::BridgeMutationKind::AddField => 39,
-                crate::api::workspace::BridgeMutationKind::RenameField => 40,
-                crate::api::workspace::BridgeMutationKind::RemoveField => 41,
-                crate::api::workspace::BridgeMutationKind::AddOption => 42,
-                crate::api::workspace::BridgeMutationKind::AddRow => 43,
-                crate::api::workspace::BridgeMutationKind::RemoveRow => 44,
-                crate::api::workspace::BridgeMutationKind::MoveRow => 45,
-                crate::api::workspace::BridgeMutationKind::SetCell => 46,
+                crate::api::workspace::BridgeMutationKind::AddCalculationBlock => 30,
+                crate::api::workspace::BridgeMutationKind::AddLine => 31,
+                crate::api::workspace::BridgeMutationKind::SetLine => 32,
+                crate::api::workspace::BridgeMutationKind::RemoveLine => 33,
+                crate::api::workspace::BridgeMutationKind::SetDrawingStyle => 34,
+                crate::api::workspace::BridgeMutationKind::EditDrawing => 35,
+                crate::api::workspace::BridgeMutationKind::AddDatabaseBlock => 36,
+                crate::api::workspace::BridgeMutationKind::CreateTable => 37,
+                crate::api::workspace::BridgeMutationKind::AddTableView => 38,
+                crate::api::workspace::BridgeMutationKind::DuplicateTable => 39,
+                crate::api::workspace::BridgeMutationKind::RenameView => 40,
+                crate::api::workspace::BridgeMutationKind::DeleteTable => 41,
+                crate::api::workspace::BridgeMutationKind::RenameDatabase => 42,
+                crate::api::workspace::BridgeMutationKind::AddField => 43,
+                crate::api::workspace::BridgeMutationKind::RenameField => 44,
+                crate::api::workspace::BridgeMutationKind::RemoveField => 45,
+                crate::api::workspace::BridgeMutationKind::AddOption => 46,
+                crate::api::workspace::BridgeMutationKind::AddRow => 47,
+                crate::api::workspace::BridgeMutationKind::RemoveRow => 48,
+                crate::api::workspace::BridgeMutationKind::MoveRow => 49,
+                crate::api::workspace::BridgeMutationKind::SetCell => 50,
                 _ => {
                     unimplemented!("");
                 }
@@ -13790,12 +14047,13 @@ impl SseEncode for crate::api::workspace::BridgeQueryKind {
                 crate::api::workspace::BridgeQueryKind::Code => 5,
                 crate::api::workspace::BridgeQueryKind::Media => 6,
                 crate::api::workspace::BridgeQueryKind::Drawing => 7,
-                crate::api::workspace::BridgeQueryKind::Database => 8,
-                crate::api::workspace::BridgeQueryKind::Rows => 9,
-                crate::api::workspace::BridgeQueryKind::Groups => 10,
-                crate::api::workspace::BridgeQueryKind::Search => 11,
-                crate::api::workspace::BridgeQueryKind::Tables => 12,
-                crate::api::workspace::BridgeQueryKind::TableViews => 13,
+                crate::api::workspace::BridgeQueryKind::Calculation => 8,
+                crate::api::workspace::BridgeQueryKind::Database => 9,
+                crate::api::workspace::BridgeQueryKind::Rows => 10,
+                crate::api::workspace::BridgeQueryKind::Groups => 11,
+                crate::api::workspace::BridgeQueryKind::Search => 12,
+                crate::api::workspace::BridgeQueryKind::Tables => 13,
+                crate::api::workspace::BridgeQueryKind::TableViews => 14,
                 _ => {
                     unimplemented!("");
                 }
@@ -14212,6 +14470,25 @@ impl SseEncode for crate::api::details::BridgeUsageWindow {
     }
 }
 
+impl SseEncode for crate::api::calculation::BridgeValueKind {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(
+            match self {
+                crate::api::calculation::BridgeValueKind::Blank => 0,
+                crate::api::calculation::BridgeValueKind::Number => 1,
+                crate::api::calculation::BridgeValueKind::Text => 2,
+                crate::api::calculation::BridgeValueKind::Bool => 3,
+                crate::api::calculation::BridgeValueKind::Error => 4,
+                _ => {
+                    unimplemented!("");
+                }
+            },
+            serializer,
+        );
+    }
+}
+
 impl SseEncode for crate::api::workspace::BridgeView {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
@@ -14383,6 +14660,16 @@ impl SseEncode for Vec<crate::api::moves::BridgeHostProject> {
         <i32>::sse_encode(self.len() as _, serializer);
         for item in self {
             <crate::api::moves::BridgeHostProject>::sse_encode(item, serializer);
+        }
+    }
+}
+
+impl SseEncode for Vec<crate::api::calculation::BridgeLine> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(self.len() as _, serializer);
+        for item in self {
+            <crate::api::calculation::BridgeLine>::sse_encode(item, serializer);
         }
     }
 }
@@ -14793,6 +15080,16 @@ impl SseEncode for Option<crate::api::events::BridgeItem> {
         <bool>::sse_encode(self.is_some(), serializer);
         if let Some(value) = self {
             <crate::api::events::BridgeItem>::sse_encode(value, serializer);
+        }
+    }
+}
+
+impl SseEncode for Option<crate::api::calculation::BridgeLineSetup> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <bool>::sse_encode(self.is_some(), serializer);
+        if let Some(value) = self {
+            <crate::api::calculation::BridgeLineSetup>::sse_encode(value, serializer);
         }
     }
 }

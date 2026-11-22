@@ -1,8 +1,9 @@
 use liquid_core::{
-    AreaId, AttachmentId, BlockId, Changed, Error, FieldId, Mutation, PageId, Place, RowId, TabId,
-    TextStyle, Tile, ViewId,
+    AreaId, AttachmentId, BlockId, Changed, Error, FieldId, LineId, Mutation, PageId, Place, RowId,
+    TabId, TextStyle, Tile, ViewId,
 };
 
+use super::calculation::{BridgeLine, BridgeLineSetup};
 use super::database::{
     BridgeCell, BridgeDatabase, BridgeFieldKind, BridgeFilter, BridgeGroup, BridgeLayout,
     BridgeRow, BridgeSort, BridgeTab, filter, sort,
@@ -44,6 +45,10 @@ pub enum BridgeMutationKind {
     SetCodeLanguage,
     AddMediaBlock,
     AddWhiteboardBlock,
+    AddCalculationBlock,
+    AddLine,
+    SetLine,
+    RemoveLine,
     SetDrawingStyle,
     EditDrawing,
     AddDatabaseBlock,
@@ -137,6 +142,8 @@ pub struct BridgeMutation {
     pub attachment: Option<String>,
     pub drawing_style: Option<BridgeDrawingStyle>,
     pub drawing: Option<BridgeDrawingEdit>,
+    pub line: Option<String>,
+    pub line_setup: Option<BridgeLineSetup>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -151,6 +158,7 @@ pub struct BridgeApplied {
     pub option: Option<String>,
     pub tab: Option<String>,
     pub elements: Vec<String>,
+    pub line: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -163,6 +171,7 @@ pub enum BridgeQueryKind {
     Code,
     Media,
     Drawing,
+    Calculation,
     Database,
     Rows,
     Groups,
@@ -221,6 +230,7 @@ pub enum BridgeBlockKind {
     Code,
     Media,
     Whiteboard,
+    Calculation,
     Unknown,
 }
 
@@ -292,6 +302,7 @@ pub struct BridgeAnswer {
     pub tables: Vec<BridgeTable>,
     pub shown: Vec<BridgeShown>,
     pub icon: Option<String>,
+    pub lines: Vec<BridgeLine>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -330,6 +341,7 @@ pub(crate) fn message(error: Error) -> String {
         Error::TooMany => "it holds the most it may".into(),
         Error::TooLong => "no more fit at this spot; move one of its neighbors first".into(),
         Error::TooLarge => "a file can be at most 5 GiB".into(),
+        Error::Formula { at } => format!("the formula can't be read from character {}", at + 1),
         Error::Changed => "the file changed while it was added; add it again".into(),
         Error::Random => "the random source failed".into(),
         Error::Document(message) | Error::Storage(message) => message,
@@ -355,6 +367,14 @@ fn optional_id<T>(
 }
 
 impl BridgeMutation {
+    fn line_setup(&self) -> Result<liquid_core::LineSetup, String> {
+        Ok(self
+            .line_setup
+            .as_ref()
+            .ok_or("line_setup is missing")?
+            .to_core())
+    }
+
     fn place<T>(&self, parse: fn(&str) -> Option<T>) -> Result<Place<T>, String> {
         match (self.last, optional_id(&self.after, parse, "after")?) {
             (true, Some(_)) => Err("after and last cannot both be set".into()),
@@ -536,6 +556,27 @@ impl BridgeMutation {
             BridgeMutationKind::AddWhiteboardBlock => Mutation::AddWhiteboardBlock {
                 page: page()?,
                 after: optional_id(&self.after, ViewId::parse, "after")?,
+            },
+            BridgeMutationKind::AddCalculationBlock => Mutation::AddCalculationBlock {
+                page: page()?,
+                after: optional_id(&self.after, ViewId::parse, "after")?,
+            },
+            BridgeMutationKind::AddLine => Mutation::AddLine {
+                page: page()?,
+                block: block()?,
+                after: optional_id(&self.after, LineId::parse, "after")?,
+                line: self.line_setup()?,
+            },
+            BridgeMutationKind::SetLine => Mutation::SetLine {
+                page: page()?,
+                block: block()?,
+                line: id(&self.line, LineId::parse, "line")?,
+                setup: self.line_setup()?,
+            },
+            BridgeMutationKind::RemoveLine => Mutation::RemoveLine {
+                page: page()?,
+                block: block()?,
+                line: id(&self.line, LineId::parse, "line")?,
             },
             BridgeMutationKind::SetDrawingStyle => Mutation::SetDrawingStyle {
                 page: page()?,

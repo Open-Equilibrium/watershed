@@ -119,6 +119,8 @@ pub(super) fn mutation(kind: BridgeMutationKind) -> BridgeMutation {
         attachment: None,
         drawing_style: None,
         drawing: None,
+        line: None,
+        line_setup: None,
     }
 }
 

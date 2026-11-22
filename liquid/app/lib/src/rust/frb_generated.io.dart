@@ -3,6 +3,7 @@
 
 // ignore_for_file: unused_import, unused_element, unnecessary_import, duplicate_ignore, invalid_use_of_internal_member, annotate_overrides, non_constant_identifier_names, curly_braces_in_flow_control_structures, prefer_const_literals_to_create_immutables, unused_field
 
+import 'api/calculation.dart';
 import 'api/database.dart';
 import 'api/details.dart';
 import 'api/drawing.dart';
@@ -271,6 +272,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   BridgeItem dco_decode_box_autoadd_bridge_item(dynamic raw);
 
   @protected
+  BridgeLineSetup dco_decode_box_autoadd_bridge_line_setup(dynamic raw);
+
+  @protected
   BridgeMedia dco_decode_box_autoadd_bridge_media(dynamic raw);
 
   @protected
@@ -455,6 +459,15 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   BridgeLayout dco_decode_bridge_layout(dynamic raw);
+
+  @protected
+  BridgeLine dco_decode_bridge_line(dynamic raw);
+
+  @protected
+  BridgeLineSetup dco_decode_bridge_line_setup(dynamic raw);
+
+  @protected
+  BridgeLineStyle dco_decode_bridge_line_style(dynamic raw);
 
   @protected
   BridgeLineage dco_decode_bridge_lineage(dynamic raw);
@@ -645,6 +658,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   BridgeUsageWindow dco_decode_bridge_usage_window(dynamic raw);
 
   @protected
+  BridgeValueKind dco_decode_bridge_value_kind(dynamic raw);
+
+  @protected
   BridgeView dco_decode_bridge_view(dynamic raw);
 
   @protected
@@ -699,6 +715,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   List<BridgeHostProject> dco_decode_list_bridge_host_project(dynamic raw);
+
+  @protected
+  List<BridgeLine> dco_decode_list_bridge_line(dynamic raw);
 
   @protected
   List<BridgeLineageRow> dco_decode_list_bridge_lineage_row(dynamic raw);
@@ -838,6 +857,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   BridgeItem? dco_decode_opt_box_autoadd_bridge_item(dynamic raw);
+
+  @protected
+  BridgeLineSetup? dco_decode_opt_box_autoadd_bridge_line_setup(dynamic raw);
 
   @protected
   BridgeMedia? dco_decode_opt_box_autoadd_bridge_media(dynamic raw);
@@ -1122,6 +1144,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   BridgeItem sse_decode_box_autoadd_bridge_item(SseDeserializer deserializer);
 
   @protected
+  BridgeLineSetup sse_decode_box_autoadd_bridge_line_setup(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   BridgeMedia sse_decode_box_autoadd_bridge_media(SseDeserializer deserializer);
 
   @protected
@@ -1350,6 +1377,15 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   BridgeLayout sse_decode_bridge_layout(SseDeserializer deserializer);
 
   @protected
+  BridgeLine sse_decode_bridge_line(SseDeserializer deserializer);
+
+  @protected
+  BridgeLineSetup sse_decode_bridge_line_setup(SseDeserializer deserializer);
+
+  @protected
+  BridgeLineStyle sse_decode_bridge_line_style(SseDeserializer deserializer);
+
+  @protected
   BridgeLineage sse_decode_bridge_lineage(SseDeserializer deserializer);
 
   @protected
@@ -1572,6 +1608,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  BridgeValueKind sse_decode_bridge_value_kind(SseDeserializer deserializer);
+
+  @protected
   BridgeView sse_decode_bridge_view(SseDeserializer deserializer);
 
   @protected
@@ -1640,6 +1679,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   List<BridgeHostProject> sse_decode_list_bridge_host_project(
     SseDeserializer deserializer,
   );
+
+  @protected
+  List<BridgeLine> sse_decode_list_bridge_line(SseDeserializer deserializer);
 
   @protected
   List<BridgeLineageRow> sse_decode_list_bridge_lineage_row(
@@ -1817,6 +1859,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   BridgeItem? sse_decode_opt_box_autoadd_bridge_item(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgeLineSetup? sse_decode_opt_box_autoadd_bridge_line_setup(
     SseDeserializer deserializer,
   );
 
@@ -2167,6 +2214,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_box_autoadd_bridge_line_setup(
+    BridgeLineSetup self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_box_autoadd_bridge_media(
     BridgeMedia self,
     SseSerializer serializer,
@@ -2485,6 +2538,21 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_bridge_layout(BridgeLayout self, SseSerializer serializer);
 
   @protected
+  void sse_encode_bridge_line(BridgeLine self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_bridge_line_setup(
+    BridgeLineSetup self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_bridge_line_style(
+    BridgeLineStyle self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_bridge_lineage(BridgeLineage self, SseSerializer serializer);
 
   @protected
@@ -2779,6 +2847,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_bridge_value_kind(
+    BridgeValueKind self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_bridge_view(BridgeView self, SseSerializer serializer);
 
   @protected
@@ -2868,6 +2942,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_list_bridge_host_project(
     List<BridgeHostProject> self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_list_bridge_line(
+    List<BridgeLine> self,
     SseSerializer serializer,
   );
 
@@ -3111,6 +3191,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_opt_box_autoadd_bridge_item(
     BridgeItem? self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_opt_box_autoadd_bridge_line_setup(
+    BridgeLineSetup? self,
     SseSerializer serializer,
   );
 
