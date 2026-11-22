@@ -5,6 +5,7 @@ import 'package:liquid/src/agent/shell.dart';
 import 'package:liquid/src/agent/sidebar.dart';
 import 'package:liquid/src/app.dart';
 import 'package:liquid/src/launch.dart';
+import 'package:liquid/src/rust/api/calculation.dart';
 import 'package:liquid/src/rust/api/database.dart';
 import 'package:liquid/src/rust/api/drawing.dart';
 import 'package:liquid/src/rust/api/workspace.dart';
@@ -51,6 +52,12 @@ class MediaPart extends Part {
 class WhiteboardPart extends Part {
   const WhiteboardPart([this.elements = const []]);
   final List<BridgeElement> elements;
+}
+
+class CalculationPart extends Part {
+  const CalculationPart(this.lines, {this.title = ''});
+  final List<BridgeLineSetup> lines;
+  final String title;
 }
 
 class UnknownPart extends Part {
@@ -269,6 +276,22 @@ class PageKit {
                 withId(element, 'element $index'),
             ],
           );
+        case CalculationPart(:final lines, :final title):
+          final added = await add(BridgeMutationKind.addCalculationBlock);
+          fake.calculations[added.block!] = [
+            for (final (index, setup) in lines.indexed)
+              fake.line('line $index', setup),
+          ];
+          if (title.isNotEmpty) {
+            await workspace.apply(
+              mutation(
+                BridgeMutationKind.renameView,
+                page: page,
+                view: added.view,
+                text: title,
+              ),
+            );
+          }
         case UnknownPart(:final boundary):
           final views = fake.views[page] ??= [];
           final at = after == null

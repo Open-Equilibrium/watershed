@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 
+import '../rust/api/calculation.dart';
 import '../rust/api/database.dart';
 import '../rust/api/replica.dart';
 import '../settings_file.dart';
@@ -42,6 +43,8 @@ BridgeMutation mutation(
   String? attachment,
   BridgeDrawingStyle? drawingStyle,
   BridgeDrawingEdit? drawing,
+  String? line,
+  BridgeLineSetup? lineSetup,
 }) => BridgeMutation(
   kind: kind,
   area: area,
@@ -72,6 +75,8 @@ BridgeMutation mutation(
   attachment: attachment,
   drawingStyle: drawingStyle,
   drawing: drawing,
+  line: line,
+  lineSetup: lineSetup,
 );
 
 BridgeQuery query(

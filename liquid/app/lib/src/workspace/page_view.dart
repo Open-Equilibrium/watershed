@@ -7,6 +7,7 @@ import '../rust/api/workspace.dart';
 import '../theme/icons.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
+import 'calculation_block.dart';
 import 'code_block.dart';
 import 'explorer.dart';
 import 'media_block.dart';
@@ -279,6 +280,10 @@ class _WorkspacePageState extends State<WorkspacePage> implements EditorSource {
               ),
               BridgeBlockKind.media => MediaBlock(views: _views, view: view),
               BridgeBlockKind.whiteboard => WhiteboardBlock(
+                views: _views,
+                view: view,
+              ),
+              BridgeBlockKind.calculation => CalculationBlock(
                 views: _views,
                 view: view,
               ),

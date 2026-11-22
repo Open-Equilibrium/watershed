@@ -106,4 +106,8 @@ abstract final class LucideIcons {
   static const lineSquiggle = IconData(0xe67a, fontFamily: _family);
   static const presentation = IconData(0xe4ae, fontFamily: _family);
   static const highlighter = IconData(0xe0f4, fontFamily: _family);
+  static const calculator = IconData(0xe1bc, fontFamily: _family);
+  static const sigma = IconData(0xe201, fontFamily: _family);
+  static const equal = IconData(0xe1bd, fontFamily: _family);
+  static const functionSquare = IconData(0xe22d, fontFamily: _family);
 }

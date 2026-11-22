@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:typed_data';
 
+import 'package:liquid/src/rust/api/calculation.dart';
 import 'package:liquid/src/rust/api/database.dart';
 import 'package:liquid/src/rust/api/media.dart';
 import 'package:liquid/src/rust/api/replica.dart';
@@ -36,6 +37,38 @@ class FakeWorkspace implements LiquidWorkspace {
   final rows = <String, List<BridgeRow>>{};
 
   final whiteboards = <String, BridgeDrawing>{};
+
+  final calculations = <String, List<BridgeLine>>{};
+
+  final computed = <String, String>{};
+
+  final referenceNames = <String, String>{};
+
+  BridgeLine line(String id, BridgeLineSetup setup) {
+    final formula = setup.formula.trim();
+    final literal = RegExp(r'^"(.*)"$').firstMatch(formula);
+    final value =
+        computed[formula] ??
+        (double.tryParse(formula) != null ? formula : literal?[1] ?? '');
+    return BridgeLine(
+      id: id,
+      label: setup.label,
+      formula: setup.formula,
+      style: setup.style,
+      value: value,
+      kind: value.isEmpty
+          ? BridgeValueKind.blank
+          : value.startsWith('#')
+          ? BridgeValueKind.error
+          : double.tryParse(value) != null
+          ? BridgeValueKind.number
+          : BridgeValueKind.text,
+      references: [
+        for (final token in RegExp(r'\{[0-9a-f.]+\}').allMatches(formula))
+          referenceNames[token[0]],
+      ],
+    );
+  }
 
   var readBudget = 1 << 30;
 
@@ -564,6 +597,46 @@ class FakeWorkspace implements LiquidWorkspace {
           elements: [],
         );
         return _placeView(mutation, view);
+      case BridgeMutationKind.addCalculationBlock:
+        final view = _newView(BridgeBlockKind.calculation);
+        calculations[view.block] = [
+          line(
+            _id(),
+            const BridgeLineSetup(
+              label: '',
+              formula: '',
+              style: BridgeLineStyle.plain,
+            ),
+          ),
+        ];
+        return _placeView(mutation, view);
+      case BridgeMutationKind.addLine:
+        final lines = calculations[mutation.block] ?? (throw 'not found');
+        final at = mutation.after == null
+            ? 0
+            : lines.indexWhere((line) => line.id == mutation.after) + 1;
+        final id = _id();
+        lines.insert(at, line(id, mutation.lineSetup!));
+        _changed(_blockResource(mutation));
+        return BridgeApplied(elements: const [], action: _id(), line: id);
+      case BridgeMutationKind.setLine:
+        final lines = calculations[mutation.block] ?? (throw 'not found');
+        final at = lines.indexWhere((line) => line.id == mutation.line);
+        if (at < 0) throw 'not found';
+        final formula = mutation.lineSetup!.formula;
+        if (formula.trimRight().endsWith('+')) {
+          throw "the formula can't be read from character ${formula.length + 1}";
+        }
+        lines[at] = line(mutation.line!, mutation.lineSetup!);
+        _changed(_blockResource(mutation));
+        return BridgeApplied(elements: const [], action: _id());
+      case BridgeMutationKind.removeLine:
+        final lines = calculations[mutation.block] ?? (throw 'not found');
+        final before = lines.length;
+        lines.removeWhere((line) => line.id == mutation.line);
+        if (lines.length == before) throw 'not found';
+        _changed(_blockResource(mutation));
+        return BridgeApplied(elements: const [], action: _id());
       case BridgeMutationKind.setDrawingStyle:
         final board = whiteboards[mutation.block] ?? (throw 'not found');
         if (board.style == mutation.drawingStyle) {
@@ -950,6 +1023,7 @@ class FakeWorkspace implements LiquidWorkspace {
       List<BridgeTable> tables = const [],
       List<BridgeShown> shown = const [],
       String? icon,
+      List<BridgeLine> lines = const [],
     }) => BridgeAnswer(
       areas: areas,
       pages: pages,
@@ -968,6 +1042,7 @@ class FakeWorkspace implements LiquidWorkspace {
       tables: tables,
       shown: shown,
       icon: icon,
+      lines: lines,
     );
     final code = _isCode(query.block);
     return switch (query.kind) {
@@ -1017,6 +1092,9 @@ class FakeWorkspace implements LiquidWorkspace {
         },
       ),
       BridgeQueryKind.database => answer(database: databases[query.block]),
+      BridgeQueryKind.calculation => answer(
+        lines: [...?calculations[query.block]],
+      ),
       BridgeQueryKind.rows => () {
         final shown = _shownRows(query);
         return answer(count: shown.length, rows: window(shown));
