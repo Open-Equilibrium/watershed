@@ -359,11 +359,13 @@ impl ProductiveRecovery for ProductiveRecoveryWriter {
             self.consume_replay_record();
             return Ok(Some(message));
         }
+        if self.ensure_live_append().is_err() || self.ensure_completed_attempts_consumed().is_err()
+        {
+            return Ok(None);
+        }
         let Some(message) = live()? else {
             return Ok(None);
         };
-        self.ensure_live_append()?;
-        self.ensure_completed_attempts_consumed()?;
         let message_object = self.persist_value(&serde_json::Value::String(message.clone()))?;
         self.append_record(&ProductiveRecoveryRecord::Steering {
             schema: PRODUCTIVE_RECOVERY_SCHEMA_V0.to_owned(),

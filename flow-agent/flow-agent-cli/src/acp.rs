@@ -264,7 +264,10 @@ impl<W: Write> Agent<W> {
         let sender = self.sender.clone();
         let resumed = matches!(state, ConversationState::Interrupted { .. });
         for message in resumed.then(|| text.clone()).into_iter().chain(steering) {
-            flow_agent_core::steer_productive_run(message).map_err(internal)?;
+            if let Err(error) = flow_agent_core::steer_productive_run(message) {
+                flow_agent_core::drain_productive_steering();
+                return Err(internal(error));
+            }
         }
         self.view = RunView::default();
         self.running = true;
@@ -277,6 +280,7 @@ impl<W: Write> Agent<W> {
             .map(|_| ())
             .map_err(|error| {
                 self.running = false;
+                flow_agent_core::drain_productive_steering();
                 internal(error)
             })
     }

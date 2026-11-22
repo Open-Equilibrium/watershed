@@ -752,3 +752,25 @@ fn a_recorded_steering_message_replays_only_at_its_boundary() {
         Some("Use British spelling")
     );
 }
+
+#[test]
+fn a_steering_boundary_leaves_the_message_queued_while_a_completed_attempt_awaits_replay() {
+    let workspace = empty_workspace("conversation-recovery-steering-pending-attempt");
+    let recovery = standard_review_recovery_writer(&workspace, None, &ContextHistory::default());
+    let intent = provider_intent("provider-000001");
+    commit_intent(&workspace, &intent);
+    commit_result(
+        &workspace,
+        &completed_provider_result(&intent.attempt_id, "2026-01-01T00:00:01Z"),
+    );
+    drop(recovery);
+
+    let mut resumed = open_recovery_snapshot(&workspace);
+    let taken = resumed
+        .steering_boundary("phase-000001", "provider-000001", &mut || {
+            panic!("a live message is never taken before the completed attempt replays")
+        })
+        .expect("the boundary waits for the completed attempt");
+
+    assert_eq!(taken, None);
+}
