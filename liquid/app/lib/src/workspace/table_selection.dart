@@ -539,6 +539,7 @@ class CellSelection extends ChangeNotifier {
   }
 
   void _write(BridgeRow row, BridgeField field, BridgeCell cell) {
+    if (field.kind == BridgeFieldKind.formula) return;
     _written.remove((row.id, field.id));
     write(row, field, cell).then<void>((_) {}, onError: (Object _) {});
   }

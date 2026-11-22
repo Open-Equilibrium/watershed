@@ -1,7 +1,6 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 
 import '../controls.dart';
 import '../rust/api/calculation.dart';
@@ -11,6 +10,7 @@ import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
 import 'explorer.dart' show untitled;
 import 'follow.dart';
+import 'formula_field.dart';
 import 'formula_text.dart';
 import 'page_views.dart';
 import 'stored_name.dart';
@@ -311,14 +311,7 @@ class _Line extends StatefulWidget {
 class _LineState extends State<_Line> {
   late final _label = TextEditingController(text: widget.line.label);
   final _labelFocus = FocusNode(debugLabel: 'Line label');
-  final _formula = FormulaText();
-  late final _formulaFocus = FocusNode(
-    debugLabel: 'Line formula',
-    onKeyEvent: (_, event) => _key(event),
-  );
   bool _hovered = false;
-  List<Suggestion> _suggestions = const [];
-  int _chosen = 0;
 
   BridgeLine get _line => widget.line;
 
@@ -326,9 +319,6 @@ class _LineState extends State<_Line> {
   void initState() {
     super.initState();
     _labelFocus.addListener(_leftLabel);
-    _formulaFocus.addListener(_leftFormula);
-    _formula.addListener(_typed);
-    if (widget.editing) _open();
     _takeLabel();
   }
 
@@ -338,7 +328,6 @@ class _LineState extends State<_Line> {
     if (!_labelFocus.hasFocus && _label.text != _line.label) {
       writeText(_label, TextEditingValue(text: _line.label));
     }
-    if (widget.editing && !old.editing) _open();
     _takeLabel();
   }
 
@@ -346,8 +335,6 @@ class _LineState extends State<_Line> {
   void dispose() {
     _label.dispose();
     _labelFocus.dispose();
-    _formula.dispose();
-    _formulaFocus.dispose();
     super.dispose();
   }
 
@@ -359,95 +346,14 @@ class _LineState extends State<_Line> {
     });
   }
 
-  void _open() {
-    final (text, chips) = editable(_line.formula, _line.references);
-    _formula.load(text, chips);
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) _formulaFocus.requestFocus();
-    });
-  }
-
   void _leftLabel() {
     if (_labelFocus.hasFocus || _label.text == _line.label) return;
     unawaited(widget.set(label: _label.text).then((_) {}, onError: (_) {}));
   }
 
-  void _leftFormula() {
-    if (_formulaFocus.hasFocus || !widget.editing) return;
-    unawaited(_commit());
-  }
-
-  void _typed() {
-    final word = _formula.word;
-    final next = word == null
-        ? const <Suggestion>[]
-        : suggestionsFor(word, widget.known());
-    if (next.length == _suggestions.length &&
-        next.indexed.every(
-          (item) => _suggestions[item.$1].name == item.$2.name,
-        )) {
-      return;
-    }
-    setState(() {
-      _suggestions = next;
-      _chosen = 0;
-    });
-  }
-
-  Future<void> _commit() async {
-    final formula = storedFormula(_formula.text, _formula.chips);
-    if (formula == _line.formula.trim()) {
-      widget.onDone();
-      return;
-    }
-    try {
-      await widget.set(formula: formula);
-      widget.onDone();
-    } on Object catch (_) {
-      if (mounted && !_formulaFocus.hasFocus) widget.onDone();
-    }
-  }
-
-  void _take(Suggestion suggestion) {
-    _formula.take(suggestion);
-    setState(() => _suggestions = const []);
-  }
-
-  KeyEventResult _key(KeyEvent event) {
-    if (event is! KeyDownEvent && event is! KeyRepeatEvent) {
-      return KeyEventResult.ignored;
-    }
-    final key = event.logicalKey;
-    final suggesting = _suggestions.isNotEmpty;
-    if (suggesting && key == LogicalKeyboardKey.arrowDown) {
-      setState(() => _chosen = (_chosen + 1) % _suggestions.length);
-      return KeyEventResult.handled;
-    }
-    if (suggesting && key == LogicalKeyboardKey.arrowUp) {
-      setState(
-        () =>
-            _chosen = (_chosen - 1 + _suggestions.length) % _suggestions.length,
-      );
-      return KeyEventResult.handled;
-    }
-    if (suggesting &&
-        (key == LogicalKeyboardKey.tab || key == LogicalKeyboardKey.enter)) {
-      _take(_suggestions[_chosen]);
-      return KeyEventResult.handled;
-    }
-    if (key == LogicalKeyboardKey.enter) {
-      unawaited(_commit());
-      return KeyEventResult.handled;
-    }
-    if (key == LogicalKeyboardKey.escape) {
-      if (suggesting) {
-        setState(() => _suggestions = const []);
-      } else {
-        widget.onDone();
-      }
-      return KeyEventResult.handled;
-    }
-    return KeyEventResult.ignored;
+  void _restyle(BridgeLineStyle style) {
+    if (style == _line.style) return;
+    unawaited(widget.set(style: style).then((_) {}, onError: (_) {}));
   }
 
   @override
@@ -457,19 +363,17 @@ class _LineState extends State<_Line> {
     final heading = style == BridgeLineStyle.heading;
     final total = style == BridgeLineStyle.total;
     final subtotal = style == BridgeLineStyle.subtotal;
-    final weight = total
-        ? WsMetrics.fwBold
-        : subtotal
-        ? WsMetrics.fwSemibold
-        : WsMetrics.fwRegular;
-    final size = heading
-        ? WsMetrics.fsSmall
-        : total
-        ? 15.0
-        : WsMetrics.fsUi;
     final text = TextStyle(
-      fontSize: size,
-      fontWeight: weight,
+      fontSize: heading
+          ? WsMetrics.fsSmall
+          : total
+          ? 15.0
+          : WsMetrics.fsUi,
+      fontWeight: total
+          ? WsMetrics.fwBold
+          : subtotal
+          ? WsMetrics.fwSemibold
+          : WsMetrics.fwRegular,
       color: heading ? ws.textFaint : ws.text,
     );
     final menu = MoreMenu(
@@ -504,173 +408,82 @@ class _LineState extends State<_Line> {
     return MouseRegion(
       onEnter: (_) => setState(() => _hovered = true),
       onExit: (_) => setState(() => _hovered = false),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Container(
-            height: heading ? 28 : lineHeight,
-            padding: EdgeInsets.only(
-              left: WsMetrics.space3,
-              top: heading ? WsMetrics.space3 : 0,
-            ),
-            decoration: BoxDecoration(
-              color: subtotal ? ws.subtle : null,
-              border: heading
-                  ? null
-                  : total
-                  ? Border(top: BorderSide(color: ws.text, width: 2))
-                  : Border(bottom: BorderSide(color: ws.border)),
-            ),
-            child: Row(
-              children: [
-                Expanded(child: label),
-                if (!heading) ...[
-                  if (widget.editing)
-                    Expanded(child: _editor(ws))
-                  else ...[
-                    if (_hovered && isComputed(_line.formula))
-                      Flexible(
-                        child: Text(
-                          '= ${namedFormula(_line.formula, _line.references)}',
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            fontFamily: WsMetrics.fontMono.first,
-                            fontSize: WsMetrics.fsCaption,
-                            color: ws.textFaint,
-                          ),
-                        ),
+      child: Container(
+        height: heading ? 28 : lineHeight,
+        padding: EdgeInsets.only(
+          left: WsMetrics.space3,
+          top: heading ? WsMetrics.space3 : 0,
+        ),
+        decoration: BoxDecoration(
+          color: subtotal ? ws.subtle : null,
+          border: heading
+              ? null
+              : total
+              ? Border(top: BorderSide(color: ws.text, width: 2))
+              : Border(bottom: BorderSide(color: ws.border)),
+        ),
+        child: Row(
+          children: [
+            Expanded(child: label),
+            if (!heading) ...[
+              if (widget.editing)
+                Expanded(
+                  child: FormulaField(
+                    formula: _line.formula,
+                    names: _line.references,
+                    known: widget.known,
+                    onCommit: (formula) => widget.set(formula: formula),
+                    onDone: widget.onDone,
+                  ),
+                )
+              else ...[
+                if (_hovered && isComputed(_line.formula))
+                  Flexible(
+                    child: Text(
+                      '= ${namedFormula(_line.formula, _line.references)}',
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontFamily: WsMetrics.fontMono.first,
+                        fontSize: WsMetrics.fsCaption,
+                        color: ws.textFaint,
                       ),
-                    const SizedBox(width: 10),
-                    _value(ws, text),
-                  ],
-                ],
-                menu,
+                    ),
+                  ),
+                const SizedBox(width: 10),
+                _value(ws, text),
               ],
-            ),
-          ),
-          if (widget.editing && _suggestions.isNotEmpty) _suggestionList(ws),
-        ],
-      ),
-    );
-  }
-
-  void _restyle(BridgeLineStyle style) {
-    if (style == _line.style) return;
-    unawaited(widget.set(style: style).then((_) {}, onError: (_) {}));
-  }
-
-  Widget _value(WsPalette ws, TextStyle text) {
-    final kind = _line.kind;
-    final empty = _line.value.isEmpty;
-    return Semantics(
-      button: true,
-      label: 'Value of ${_line.label}',
-      child: GestureDetector(
-        key: ValueKey('value ${_line.id}'),
-        behavior: HitTestBehavior.opaque,
-        onTap: widget.onEdit,
-        child: SizedBox(
-          width: valueWidth,
-          child: Text(
-            empty && _hovered ? 'Value' : _line.value,
-            textAlign: TextAlign.right,
-            overflow: TextOverflow.ellipsis,
-            style: text.copyWith(
-              color: kind == BridgeValueKind.error
-                  ? ws.danger
-                  : empty
-                  ? ws.textFaint
-                  : null,
-              fontFeatures: const [FontFeature.tabularFigures()],
-            ),
-          ),
+            ],
+            menu,
+          ],
         ),
       ),
     );
   }
 
-  Widget _editor(WsPalette ws) => Container(
-    height: lineHeight - 4,
-    padding: const EdgeInsets.symmetric(horizontal: WsMetrics.space3),
-    alignment: Alignment.centerLeft,
-    decoration: BoxDecoration(
-      color: ws.canvas,
-      borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
-      border: Border.all(color: ws.accent, width: 1.5),
-    ),
-    child: TextField(
-      controller: _formula,
-      focusNode: _formulaFocus,
-      style: TextStyle(
-        fontFamily: WsMetrics.fontMono.first,
-        fontSize: WsMetrics.fsMono,
-        color: ws.text,
-      ),
-      decoration: InputDecoration.collapsed(
-        hintText: 'A value, or = and a formula',
-        hintStyle: TextStyle(color: ws.textFaint),
-      ),
-    ),
-  );
-
-  Widget _suggestionList(WsPalette ws) =>
-      TextFieldTapRegion(child: _suggestionRows(ws));
-
-  Widget _suggestionRows(WsPalette ws) => Container(
-    margin: const EdgeInsets.only(left: WsMetrics.space3),
-    padding: const EdgeInsets.all(WsMetrics.space1),
-    decoration: BoxDecoration(
-      color: ws.surface,
-      borderRadius: BorderRadius.circular(WsMetrics.radiusLg),
-      border: Border.all(color: ws.border),
-    ),
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        for (final (at, suggestion) in _suggestions.indexed)
-          GestureDetector(
-            onTap: () => _take(suggestion),
-            child: Container(
-              height: 28,
-              padding: const EdgeInsets.symmetric(horizontal: WsMetrics.space3),
-              decoration: BoxDecoration(
-                color: at == _chosen ? ws.selected : null,
-                borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
-              ),
-              child: Row(
-                children: [
-                  Icon(
-                    suggestion.reference == null
-                        ? LucideIcons.functionSquare
-                        : LucideIcons.hash,
-                    size: 14,
-                    color: ws.textFaint,
-                  ),
-                  const SizedBox(width: WsMetrics.space3),
-                  Expanded(
-                    child: Text(
-                      suggestion.name,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        fontSize: WsMetrics.fsCompact,
-                        color: ws.text,
-                      ),
-                    ),
-                  ),
-                  Text(
-                    suggestion.detail,
-                    style: TextStyle(
-                      fontSize: WsMetrics.fsSmall,
-                      color: ws.textFaint,
-                    ),
-                  ),
-                ],
-              ),
-            ),
+  Widget _value(WsPalette ws, TextStyle text) {
+    final empty = _line.value.isEmpty;
+    return GestureDetector(
+      key: ValueKey('value ${_line.id}'),
+      behavior: HitTestBehavior.opaque,
+      onTap: widget.onEdit,
+      child: SizedBox(
+        width: valueWidth,
+        child: Text(
+          empty && _hovered ? 'Value' : _line.value,
+          textAlign: TextAlign.right,
+          overflow: TextOverflow.ellipsis,
+          style: text.copyWith(
+            color: _line.kind == BridgeValueKind.error
+                ? ws.danger
+                : empty
+                ? ws.textFaint
+                : null,
+            fontFeatures: const [FontFeature.tabularFigures()],
           ),
-      ],
-    ),
-  );
+        ),
+      ),
+    );
+  }
 }
 
 class _AddLine extends StatelessWidget {

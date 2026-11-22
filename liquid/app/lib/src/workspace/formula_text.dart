@@ -81,9 +81,16 @@ bool isComputed(String formula) {
       _literal(source) == null;
 }
 
-(String, List<Reference>) editable(String formula, List<String?> names) {
+(String, List<Reference>) editable(
+  String formula,
+  List<String?> names, {
+  bool always = false,
+}) {
   final source = formula.trim();
-  if (!isComputed(source)) return (_literal(source) ?? source, const []);
+  if (always && source.isEmpty) return ('', const []);
+  if (!always && !isComputed(source)) {
+    return (_literal(source) ?? source, const []);
+  }
   final chips = <Reference>[];
   final text = source.replaceAllMapped(_token, (match) {
     final at = chips.length;
@@ -95,13 +102,16 @@ bool isComputed(String formula) {
   return ('=$text', chips);
 }
 
-String storedFormula(String text, List<Reference> chips) {
+String storedFormula(
+  String text,
+  List<Reference> chips, {
+  bool always = false,
+}) {
   final typed = text.trim();
   if (typed.isEmpty) return '';
-  if (typed.startsWith('=')) {
+  if (always || typed.startsWith('=')) {
     var at = 0;
-    return typed
-        .substring(1)
+    return (typed.startsWith('=') ? typed.substring(1) : typed)
         .trim()
         .replaceAllMapped(
           chipMark,
@@ -111,6 +121,14 @@ String storedFormula(String text, List<Reference> chips) {
   if (_number.hasMatch(typed)) return typed;
   return '"${typed.replaceAll('"', '""')}"';
 }
+
+List<String?> tokenNames(
+  String formula,
+  String? Function(List<String> ids) name,
+) => [
+  for (final token in _token.allMatches(formula))
+    name(token[0]!.substring(1, token[0]!.length - 1).split('.')),
+];
 
 String namedFormula(String formula, List<String?> names) {
   var at = 0;
@@ -122,6 +140,7 @@ String namedFormula(String formula, List<String?> names) {
 }
 
 class FormulaText extends TextEditingController {
+  bool always = false;
   List<Reference> chips = const [];
   List<Reference> _inserting = const [];
 
@@ -168,9 +187,12 @@ class FormulaText extends TextEditingController {
   String? get word {
     final text = this.text;
     final caret = selection.baseOffset;
-    if (!text.startsWith('=') || caret < 1 || caret > text.length) return null;
+    final floor = text.startsWith('=') ? 1 : 0;
+    if ((floor == 0 && !always) || caret < floor || caret > text.length) {
+      return null;
+    }
     var start = caret;
-    while (start > 1 && !_stop.hasMatch(text[start - 1])) {
+    while (start > floor && !_stop.hasMatch(text[start - 1])) {
       start--;
     }
     final word = text.substring(start, caret).trimLeft();

@@ -246,6 +246,7 @@ void main() {
           name: 'Field $number',
           kind: BridgeFieldKind.text,
           options: const [],
+          formula: '',
         ),
     ];
     await kit.show(tester, [TablePart(rows, fields: many)]);

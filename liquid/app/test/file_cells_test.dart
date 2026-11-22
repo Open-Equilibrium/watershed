@@ -30,12 +30,14 @@ void main() {
       name: 'Name',
       kind: BridgeFieldKind.text,
       options: [],
+      formula: '',
     ),
     BridgeField(
       id: 'files',
       name: 'Files',
       kind: BridgeFieldKind.file,
       options: [],
+      formula: '',
     ),
   ];
 
@@ -64,6 +66,7 @@ void main() {
           ),
         ),
     ],
+    computed: const [],
   );
 
   Future<void> bookings(

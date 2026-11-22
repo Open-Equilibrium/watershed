@@ -87,6 +87,7 @@ void main() {
             name: 'Amount',
             kind: BridgeFieldKind.number,
             options: [],
+            formula: '',
           ),
         ],
       ),

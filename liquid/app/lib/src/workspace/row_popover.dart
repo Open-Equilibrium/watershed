@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 
+import '../rust/api/calculation.dart';
 import '../rust/api/database.dart';
 import '../rust/api/workspace.dart';
 import '../theme/icons.dart';
@@ -78,8 +79,31 @@ class TableData {
   }
 }
 
-BridgeCell? cellOf(BridgeRow row, String field) =>
-    row.cells.where((cell) => cell.field == field).firstOrNull?.value;
+BridgeCell? cellOf(BridgeRow row, String field) {
+  if (row.cells.where((cell) => cell.field == field).firstOrNull
+      case final held?) {
+    return held.value;
+  }
+  final computed = row.computed
+      .where((value) => value.field == field)
+      .firstOrNull;
+  return switch (computed?.kind) {
+    null || BridgeValueKind.blank => null,
+    BridgeValueKind.number => BridgeCell(
+      kind: BridgeCellKind.number,
+      number: computed!.number,
+      checked: false,
+      files: const [],
+    ),
+    _ => BridgeCell(
+      kind: BridgeCellKind.text,
+      text: computed!.value,
+      number: 0,
+      checked: false,
+      files: const [],
+    ),
+  };
+}
 
 String rowTitle(BridgeRow row, BridgeDatabase database) {
   final first = database.fields.firstOrNull;
@@ -352,6 +376,17 @@ class _RowPopoverState extends State<RowPopover> {
               _picks[field.id]?.show();
             },
             child: Align(alignment: Alignment.centerLeft, child: shown),
+          ),
+        );
+      case BridgeFieldKind.formula:
+        return Align(
+          alignment: Alignment.centerLeft,
+          child: CellView(
+            cell: held,
+            kind: field.kind,
+            options: const {},
+            numbers: _data.numbers,
+            days: days,
           ),
         );
       case BridgeFieldKind.file:

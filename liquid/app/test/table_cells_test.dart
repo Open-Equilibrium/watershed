@@ -242,6 +242,7 @@ void main() {
               name: 'Field $number',
               kind: BridgeFieldKind.text,
               options: const [],
+              formula: '',
             ),
         ],
       ),

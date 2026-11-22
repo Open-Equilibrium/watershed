@@ -411,7 +411,9 @@ class SortMenu extends StatelessWidget {
     final ws = context.ws;
     final sortable = [
       for (final field in fields)
-        if (field.kind != BridgeFieldKind.file) field,
+        if (field.kind != BridgeFieldKind.file &&
+            field.kind != BridgeFieldKind.formula)
+          field,
     ];
     final sort = this.sort;
     return _Panel(

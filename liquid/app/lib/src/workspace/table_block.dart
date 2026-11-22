@@ -47,6 +47,7 @@ double _width(BridgeFieldKind kind) => switch (kind) {
   BridgeFieldKind.date => 120,
   BridgeFieldKind.checkbox => 72,
   BridgeFieldKind.file => 180,
+  BridgeFieldKind.formula => 120,
 };
 
 class TableBlock extends StatefulWidget {
@@ -665,7 +666,10 @@ class _TableBlockState extends State<TableBlock> implements CellDrop {
   ) => QueryAnchor(
     anchor: anchor,
     menu: (close) => FilterMenu(
-      fields: fields,
+      fields: [
+        for (final field in fields)
+          if (field.kind != BridgeFieldKind.formula) field,
+      ],
       filter: _liveFilter,
       numbers: numbers,
       locale: days,
@@ -880,6 +884,16 @@ class _TableBlockState extends State<TableBlock> implements CellDrop {
   late final _fieldMenus = FieldMenus(
     fieldOf: (id) =>
         _database?.fields.where((field) => field.id == id).firstOrNull,
+    fields: () => _database?.fields ?? const [],
+    formula: (field, formula) => _writeField(
+      mutation(
+        BridgeMutationKind.setFieldFormula,
+        page: _page,
+        block: _block,
+        field: field,
+        text: formula,
+      ),
+    ),
     rename: (field, name) => unawaited(
       _writeField(
         mutation(
@@ -1876,9 +1890,10 @@ class _TableBlockState extends State<TableBlock> implements CellDrop {
                   }
                   final rowIndex = at?.row ?? shownLine;
                   final row = _rows.at(rowIndex);
-                  final cells = {
-                    for (final cell in row?.cells ?? const <BridgeFieldCell>[])
-                      cell.field: cell.value,
+                  final cells = <String, BridgeCell>{
+                    if (row != null)
+                      for (final field in fields)
+                        field.id: ?cellOf(row, field.id),
                   };
                   final hovered =
                       row != null && row.id == _rowHandles.handleRow;
@@ -1927,7 +1942,8 @@ class _TableBlockState extends State<TableBlock> implements CellDrop {
                         }
                         return Align(
                           alignment: switch (field.kind) {
-                            BridgeFieldKind.number => Alignment.centerRight,
+                            BridgeFieldKind.number ||
+                            BridgeFieldKind.formula => Alignment.centerRight,
                             BridgeFieldKind.checkbox => Alignment.center,
                             _ => Alignment.centerLeft,
                           },

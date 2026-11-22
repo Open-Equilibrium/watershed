@@ -420,7 +420,7 @@ class FakeWorkspace implements LiquidWorkspace {
             when !table.any((row) => row.id == after)) {
           throw 'not found';
         }
-        final row = BridgeRow(id: _id(), cells: const []);
+        final row = BridgeRow(id: _id(), cells: const [], computed: const []);
         table.insert(
           mutation.last
               ? table.length
@@ -465,6 +465,7 @@ class FakeWorkspace implements LiquidWorkspace {
           name: mutation.text!,
           kind: mutation.fieldKind!,
           options: const [],
+          formula: '',
         );
         fields.insert(
           mutation.last
@@ -506,6 +507,7 @@ class FakeWorkspace implements LiquidWorkspace {
             if (cell.kind != BridgeCellKind.empty)
               BridgeFieldCell(field: mutation.field!, value: cell),
           ],
+          computed: table[at].computed,
         );
         _changed(_tableResource(mutation.block));
         return BridgeApplied(elements: const [], action: _id());
@@ -526,6 +528,7 @@ class FakeWorkspace implements LiquidWorkspace {
                       name: field.name,
                       kind: field.kind,
                       options: [...field.options, option],
+                      formula: '',
                     )
                   : field,
           ],
@@ -536,6 +539,33 @@ class FakeWorkspace implements LiquidWorkspace {
           action: _id(),
           option: option.id,
         );
+      case BridgeMutationKind.setFieldFormula:
+        final database = databases[mutation.block]!;
+        final at = database.fields.indexWhere(
+          (field) => field.id == mutation.field,
+        );
+        if (at < 0) throw 'not found';
+        final field = database.fields[at];
+        if (field.kind != BridgeFieldKind.formula) {
+          throw 'the value is not of its kind or not valid';
+        }
+        databases[mutation.block!] = BridgeDatabase(
+          name: database.name,
+          fields: [
+            for (final known in database.fields)
+              known.id == field.id
+                  ? BridgeField(
+                      id: field.id,
+                      name: field.name,
+                      kind: field.kind,
+                      options: field.options,
+                      formula: mutation.text!,
+                    )
+                  : known,
+          ],
+        );
+        _changed(_tableResource(mutation.block));
+        return BridgeApplied(elements: const [], action: _id());
       case BridgeMutationKind.renameField || BridgeMutationKind.removeField:
         final database = databases[mutation.block]!;
         if (!database.fields.any((field) => field.id == mutation.field)) {
@@ -554,6 +584,7 @@ class FakeWorkspace implements LiquidWorkspace {
                   name: mutation.text!,
                   kind: field.kind,
                   options: field.options,
+                  formula: field.formula,
                 ),
           ],
         );
@@ -566,6 +597,7 @@ class FakeWorkspace implements LiquidWorkspace {
                   for (final cell in row.cells)
                     if (cell.field != mutation.field) cell,
                 ],
+                computed: row.computed,
               ),
           ];
         }
@@ -695,12 +727,14 @@ class FakeWorkspace implements LiquidWorkspace {
               ].indexed)
                 BridgeOption(id: _id(), name: name, color: color),
             ],
+            formula: '',
           ),
           BridgeLayout.calendar => BridgeField(
             id: _id(),
             name: 'Date',
             kind: BridgeFieldKind.date,
             options: const [],
+            formula: '',
           ),
         };
         final view = _newView(
@@ -724,6 +758,7 @@ class FakeWorkspace implements LiquidWorkspace {
               name: 'Name',
               kind: BridgeFieldKind.text,
               options: const [],
+              formula: '',
             ),
             ?extra,
           ],
@@ -755,6 +790,7 @@ class FakeWorkspace implements LiquidWorkspace {
               name: 'Name',
               kind: BridgeFieldKind.text,
               options: const [],
+              formula: '',
             ),
           ],
         );

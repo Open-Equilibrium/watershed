@@ -84,12 +84,14 @@ const expenseFields = [
     name: 'Name',
     kind: BridgeFieldKind.text,
     options: [],
+    formula: '',
   ),
   BridgeField(
     id: 'date',
     name: 'Date',
     kind: BridgeFieldKind.date,
     options: [],
+    formula: '',
   ),
   BridgeField(
     id: 'category',
@@ -99,18 +101,21 @@ const expenseFields = [
       BridgeOption(id: 'food', name: 'Food', color: 5),
       BridgeOption(id: 'home', name: 'Home', color: 6),
     ],
+    formula: '',
   ),
   BridgeField(
     id: 'amount',
     name: 'Amount',
     kind: BridgeFieldKind.number,
     options: [],
+    formula: '',
   ),
   BridgeField(
     id: 'paid',
     name: 'Paid',
     kind: BridgeFieldKind.checkbox,
     options: [],
+    formula: '',
   ),
 ];
 
@@ -145,6 +150,7 @@ BridgeRow expenseRow(
       value: cell(BridgeCellKind.checkbox, checked: paid),
     ),
   ],
+  computed: const [],
 );
 
 final expenses = [
@@ -160,6 +166,7 @@ BridgeRow namedRow(int number) => BridgeRow(
       value: cell(BridgeCellKind.text, text: 'Row $number'),
     ),
   ],
+  computed: const [],
 );
 
 class PageKit {
