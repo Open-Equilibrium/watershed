@@ -147,7 +147,7 @@
       <details id="d-116" class="decision wide">
         <summary><h3>D-116 - The Editor For A Section's Text</h3></summary>
         <p><strong>Status:</strong> Open until the spike reports.</p>
-        <p><strong>Problem:</strong> A Section becomes one rich text with paragraph markers (ADR-0317), so selection, ⏎ and ⌫ work across Paragraphs as in Google Docs. Flutter's <code>TextField</code>, which each Text Block uses today, shows one plain text with one style; it cannot show several Paragraphs with their own styles and marks in one selection. Liquid needs a text editor that can, with input methods (IME) for accents and Asian scripts, and typing that stays under 10 ms per keystroke.</p>
+        <p><strong>Problem:</strong> A Section becomes one rich text with paragraph markers (ADR-0317), so selection, ⏎ and ⌫ work across Paragraphs as in Google Docs. Flutter's <code>TextField</code>, which each Text Block uses today, shows one plain text with one style; it cannot show several Paragraphs with their own styles and marks in one selection. Liquid needs a text editor that can, with input methods (IME) for accents and Asian scripts, and typing that stays responsive.</p>
         <p><strong>Question:</strong> Which editor shows and edits a Section?</p>
         <div class="dia">
           <div class="opt rec"><h4>A: super_editor <span class="tag">Recommended to spike first</span></h4>
@@ -164,7 +164,7 @@
           </div>
         </div>
         <p><strong>Recommendation:</strong> spike A; if it misses the criterion, spike C. B repeats the per-Paragraph model ADR-0317 leaves.</p>
-        <p><strong>Acceptance criterion:</strong> on macOS, in a Section of 1,000 Paragraphs bound to Automerge's spans, a mouse selection and ⇧ with the arrows cross Paragraphs; ⏎, ⇧⏎ and ⌫ add, break and remove as ADR-0317 says; German dead keys and Japanese IME compose; marks behave as the <a href="../design/mockups/liquid-text-formatting.html">formatting mockup</a> shows; toggles and indentation fit the markers' parents; and typing stays under 10 ms per keystroke.</p>
+        <p><strong>Acceptance criterion:</strong> on macOS, in a Section of 1,000 Paragraphs bound to Automerge's spans, a mouse selection and ⇧ with the arrows cross Paragraphs; ⏎, ⇧⏎ and ⌫ add, break and remove as ADR-0317 says; German dead keys and Japanese IME compose; marks behave as the <a href="../design/mockups/liquid-text-formatting.html">formatting mockup</a> shows; toggles and indentation fit the markers' parents; and the time per keystroke is recorded.</p>
       </details>
 
     </div>
