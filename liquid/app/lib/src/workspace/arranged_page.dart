@@ -63,6 +63,11 @@ class _ArrangedPageState extends State<ArrangedPage> {
     _views.addListener(_reread);
     _views.arranging.addListener(_arranging);
     _views.narrowPreview.addListener(_changed);
+    if (_views.arranging.value) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _keys.requestFocus();
+      });
+    }
     unawaited(_read());
   }
 

@@ -362,6 +362,7 @@ impl<S: Store> Workspace<S> {
             | Mutation::DuplicateTable { page, .. }
             | Mutation::RemoveView { page, .. }
             | Mutation::MoveViews { page, .. } => page,
+            Mutation::DeleteTable { block } => return self.write_across_pages(mutation, block),
             _ => return self.write_mutation(mutation),
         };
         let order = self.page(page)?.1;
@@ -376,6 +377,40 @@ impl<S: Store> Workspace<S> {
                 written.touched.push(document);
             }
             written.changed.push(Changed::Views(page.clone()));
+        }
+        Ok(written)
+    }
+
+    fn write_across_pages(
+        &mut self,
+        mutation: &Mutation,
+        table: &BlockId,
+    ) -> Result<Written, Error> {
+        let mut pages: Vec<PageId> = self
+            .table_views(table)
+            .unwrap_or_default()
+            .into_iter()
+            .map(|(page, _)| page)
+            .collect();
+        pages.sort();
+        pages.dedup();
+        let mut before = Vec::new();
+        for page in pages {
+            if let Ok((_, order)) = self.page(&page)
+                && order.arranged()
+            {
+                before.push((page, order.sections()));
+            }
+        }
+        let mut written = self.write_mutation(mutation)?;
+        for (page, sections) in &before {
+            if self.carry_tiles(page, sections)? {
+                let document = Document::Page(page.clone());
+                if !written.touched.contains(&document) {
+                    written.touched.push(document);
+                }
+                written.changed.push(Changed::Views(page.clone()));
+            }
         }
         Ok(written)
     }

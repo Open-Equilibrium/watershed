@@ -207,6 +207,15 @@ void main() {
     expect(tiles(), hasLength(before));
   });
 
+  testWidgets('esc ends Arrange mode opened on a Page not yet arranged', (
+    tester,
+  ) async {
+    await kit.show(tester, [const TextPart('Plan')]);
+    await arrange(tester);
+    await press(tester, LogicalKeyboardKey.escape);
+    expect(find.byKey(const Key('arrange bar')), findsNothing);
+  });
+
   testWidgets('measured heights stay on the device', (tester) async {
     await trip(tester);
     await tester.pump(const Duration(seconds: 2));

@@ -279,3 +279,28 @@ fn a_page_with_only_inner_tiles_is_arranged() {
     .unwrap();
     assert!(page.workspace.arranged(&page.page).unwrap());
 }
+
+#[test]
+fn deleting_a_table_joins_the_sections_around_its_view() {
+    let mut page = Page::new();
+    let above = page.text(None, "Plan");
+    let add = Mutation::AddDatabaseBlock {
+        page: page.page.clone(),
+        after: Some(above.clone()),
+        name: "Costs".into(),
+        layout: liquid_core::Layout::Table,
+    };
+    let Some(Created::Block { block: table, view }) = page.edit(add).unwrap().created else {
+        panic!("a Table")
+    };
+    let below = page.text(Some(&view), "Ideas");
+    page.tile(&below, tile(6, 6)).unwrap();
+    page.edit(Mutation::DeleteTable { block: table }).unwrap();
+    let tiles: Vec<_> = page.reopened().iter().map(|view| view.tile).collect();
+    assert_eq!(
+        tiles,
+        [None, None],
+        "the joined Section keeps the upper place"
+    );
+    assert!(!page.workspace.arranged(&page.page).unwrap());
+}
