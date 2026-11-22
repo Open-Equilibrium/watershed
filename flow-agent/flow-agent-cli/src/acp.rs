@@ -290,14 +290,20 @@ impl<W: Write> Agent<W> {
     fn finished(&mut self, result: Result<RunOutput, RuntimeError>) -> Result<(), RuntimeError> {
         self.running = false;
         let mut waiting = flow_agent_core::drain_productive_steering();
-        let result = if waiting.is_empty() {
-            result.map(|_| ()).map_err(internal)
-        } else {
-            let text = waiting.remove(0);
-            match self.start(text, waiting) {
-                Ok(()) => return Ok(()),
-                Err(error) => Err(error),
+        let result = match result {
+            Ok(_) if !waiting.is_empty() => {
+                let text = waiting.remove(0);
+                match self.start(text, waiting) {
+                    Ok(()) => return Ok(()),
+                    Err(error) => Err(error),
+                }
             }
+            Ok(_) => Ok(()),
+            Err(error) if waiting.is_empty() => Err(internal(error)),
+            Err(error) => Err(internal(format!(
+                "{error}; {} waiting message(s) were not delivered",
+                waiting.len()
+            ))),
         };
         let Some(id) = self.prompt.take() else {
             return Ok(());

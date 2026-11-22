@@ -384,3 +384,119 @@ fn a_message_sent_while_a_flow_works_steers_its_active_phase() {
         flow_agent_core::ConversationState::Settled
     );
 }
+
+fn wait_for_committed_draft(workspace: &Path, session_id: &str) {
+    for _ in 0..400 {
+        let replay = flow_agent_core::replay_conversation_run(
+            workspace,
+            session_id,
+            session_id,
+            flow_agent_core::EmitMode::Jsonl,
+        );
+        if replay.is_ok_and(|output| output.stdout.contains("Colorful draft")) {
+            return;
+        }
+        thread::sleep(Duration::from_millis(25));
+    }
+    panic!(
+        "the first turn's reply is committed: {:?}",
+        flow_agent_core::replay_conversation_run(
+            workspace,
+            session_id,
+            session_id,
+            flow_agent_core::EmitMode::Jsonl
+        )
+    );
+}
+
+#[test]
+fn an_interrupted_run_resumes_with_the_next_message_unless_its_flow_changed() {
+    if run_current_test_isolated_session_home() {
+        return;
+    }
+    let listener = TcpListener::bind("127.0.0.1:0").expect("fake endpoint binds");
+    let base_url = format!(
+        "http://{}/v1",
+        listener.local_addr().expect("endpoint address")
+    );
+    let (first_arrived, first_in_flight) = mpsc::channel::<()>();
+    let (release_first, first_released) = mpsc::channel::<()>();
+    let endpoint = thread::spawn(move || {
+        let (mut first, _) = listener.accept().expect("the first turn arrives");
+        read_request_body(&mut first);
+        first_arrived
+            .send(())
+            .expect("the test waits for the first turn");
+        first_released
+            .recv_timeout(Duration::from_secs(30))
+            .expect("the test releases the first turn");
+        reply_with_text(&mut first, "resp-draft", "Colorful draft");
+        let (mut resumed, _) = listener.accept().expect("the resumed turn arrives");
+        let body = read_request_body(&mut resumed);
+        reply_with_text(&mut resumed, "resp-final", "Colourful note");
+        body
+    });
+    let workspace = workspace_copy("hello-flow");
+    let config_root = empty_workspace_under(Path::new(env!("CARGO_TARGET_TMPDIR")));
+    install_note_flow(&base_url, &config_root);
+    let mut acp = Acp::start(&workspace, &config_root);
+    let (session_id, _) = acp.open(&workspace);
+    let first = acp.send(
+        "session/prompt",
+        json!({"sessionId": session_id, "prompt": [{"type": "text", "text": "A note about colour"}]}),
+    );
+    first_in_flight
+        .recv_timeout(cli_child_watchdog())
+        .expect("the first turn reaches the endpoint");
+    acp.notify("session/cancel", json!({"sessionId": session_id}));
+    assert_eq!(
+        acp.reply(first, &mut Vec::new())["result"]["stopReason"],
+        "cancelled"
+    );
+    release_first.send(()).expect("the endpoint waits");
+    wait_for_committed_draft(&workspace, &session_id);
+    drop(acp);
+    assert_eq!(
+        flow_agent_core::conversation_state(&workspace, &session_id).expect("the chat is stored"),
+        flow_agent_core::ConversationState::Interrupted {
+            run_session_id: session_id.clone()
+        }
+    );
+
+    let instruction = session_home_path().join("registry/instructions/write-note.yaml");
+    let original = fs::read_to_string(&instruction).expect("instruction reads");
+    fs::write(&instruction, original.replace("short", "long")).expect("the Flow changes");
+    let mut acp = Acp::start(&workspace, &config_root);
+    acp.send("initialize", json!({"protocolVersion": 1}));
+    let load = acp.send(
+        "session/load",
+        json!({"sessionId": session_id, "cwd": workspace.to_path_buf(), "mcpServers": []}),
+    );
+    assert!(acp.reply(load, &mut Vec::new())["result"].is_object());
+    let refused = acp.send(
+        "session/prompt",
+        json!({"sessionId": session_id, "prompt": [{"type": "text", "text": "Use British spelling"}]}),
+    );
+    let answer = acp.reply(refused, &mut Vec::new());
+    assert!(answer["error"].is_object(), "{answer}");
+
+    fs::write(&instruction, original).expect("the Flow is restored");
+    let steer = acp.send(
+        "session/prompt",
+        json!({"sessionId": session_id, "prompt": [{"type": "text", "text": "Use British spelling"}]}),
+    );
+    let mut seen = Vec::new();
+    let finished = acp.reply(steer, &mut seen);
+
+    assert_eq!(finished["result"]["stopReason"], "end_turn", "{seen:#?}");
+    assert!(
+        endpoint
+            .join()
+            .expect("endpoint completes")
+            .contains("Use British spelling")
+    );
+    assert_eq!(
+        flow_agent_core::conversation_state(&workspace, &session_id).expect("the chat is stored"),
+        flow_agent_core::ConversationState::Settled
+    );
+}
