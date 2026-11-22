@@ -244,6 +244,8 @@ struct Values<'w, S: Store> {
     depth: usize,
     cuts: usize,
     cut: HashMap<Key, usize>,
+    cyclic: HashSet<Key>,
+    path: Vec<Key>,
     uses: BTreeSet<Used>,
 }
 
@@ -279,6 +281,8 @@ impl<'w, S: Store> Values<'w, S> {
             depth: 0,
             cuts: 0,
             cut: HashMap::new(),
+            cyclic: HashSet::new(),
+            path: Vec::new(),
             uses: BTreeSet::new(),
         }
     }
@@ -347,8 +351,12 @@ impl<'w, S: Store> Values<'w, S> {
             return MISSING;
         }
         if !self.visiting.insert(key.clone()) {
+            self.cuts += 1;
+            let from = self.path.iter().rposition(|on| *on == key).unwrap_or(0);
+            self.cyclic.extend(self.path[from..].iter().cloned());
             return MISSING;
         }
+        self.path.push(key.clone());
         let cuts = self.cuts;
         let source = lines[at].setup.formula.trim();
         let value = if source.is_empty() {
@@ -363,6 +371,12 @@ impl<'w, S: Store> Values<'w, S> {
             }
         };
         self.visiting.remove(&key);
+        self.path.pop();
+        let value = if self.cyclic.contains(&key) {
+            MISSING
+        } else {
+            value
+        };
         if self.cuts == cuts {
             self.memo.insert(key, value.clone());
         } else {
@@ -452,8 +466,12 @@ impl<'w, S: Store> Values<'w, S> {
             return MISSING;
         }
         if !self.visiting.insert(key.clone()) {
+            self.cuts += 1;
+            let from = self.path.iter().rposition(|on| *on == key).unwrap_or(0);
+            self.cyclic.extend(self.path[from..].iter().cloned());
             return MISSING;
         }
+        self.path.push(key.clone());
         let cuts = self.cuts;
         let value = match Formula::parse(&field.formula) {
             _ if field.formula.trim().is_empty() => Value::Blank,
@@ -461,6 +479,12 @@ impl<'w, S: Store> Values<'w, S> {
             Err(_) => Value::Error(crate::Failure::Name),
         };
         self.visiting.remove(&key);
+        self.path.pop();
+        let value = if self.cyclic.contains(&key) {
+            MISSING
+        } else {
+            value
+        };
         if self.cuts == cuts {
             self.memo.insert(key, value.clone());
         } else {
@@ -484,6 +508,7 @@ impl<'w, S: Store> Values<'w, S> {
             return Operand::Value(MISSING);
         };
         if !self.columns.insert(reading.clone()) {
+            self.cuts += 1;
             return Operand::Value(MISSING);
         }
         let cuts = self.cuts;

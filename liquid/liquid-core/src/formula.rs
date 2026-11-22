@@ -915,24 +915,29 @@ impl Criterion {
 fn wildcard(pattern: &str, text: &str) -> bool {
     let pattern: Vec<char> = pattern.chars().collect();
     let text: Vec<char> = text.chars().collect();
-    let mut reachable = vec![false; text.len() + 1];
-    reachable[0] = true;
-    for p in &pattern {
-        let mut next = vec![false; text.len() + 1];
-        for i in 0..=text.len() {
-            if !reachable[i] {
-                continue;
+    let (mut at, mut read) = (0, 0);
+    let mut star: Option<(usize, usize)> = None;
+    while read < text.len() {
+        match pattern.get(at) {
+            Some('*') => {
+                star = Some((at, read));
+                at += 1;
             }
-            match p {
-                '*' => next[i..].iter_mut().for_each(|r| *r = true),
-                '?' if i < text.len() => next[i + 1] = true,
-                c if i < text.len() && text[i] == *c => next[i + 1] = true,
-                _ => {}
+            Some(c) if *c == '?' || *c == text[read] => {
+                at += 1;
+                read += 1;
             }
+            _ => match star {
+                Some((starred, from)) => {
+                    at = starred + 1;
+                    read = from + 1;
+                    star = Some((starred, from + 1));
+                }
+                None => return false,
+            },
         }
-        reachable = next;
     }
-    reachable[text.len()]
+    pattern[at..].iter().all(|c| *c == '*')
 }
 
 fn round15(n: f64) -> f64 {

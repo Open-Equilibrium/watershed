@@ -108,6 +108,7 @@ fn excel_functions_read_references_and_ranges() {
         ("SUMIF($A, \">100\")", "1200"),
         ("COUNTIF($C, \"<>Food\")", "3"),
         ("COUNTIF($C, \"F*\")", "3"),
+        ("COUNTIF($C, \"?oo*\") & COUNTIF($C, \"*n*t\")", "22"),
         ("AVERAGEIF($C, \"Food\", $A)", "84.5"),
         ("AVERAGEIF($C, \"None\", $A)", "#DIV/0!"),
         ("SUM($A) + $A", "#VALUE!"),

@@ -1057,3 +1057,47 @@ fn lines_that_each_read_the_next_two_stop_without_blowing_up() {
     assert_eq!(lines[0].1, "#REF!");
     assert_eq!(lines[lines.len() - 3].1, "2");
 }
+
+#[test]
+fn lines_that_need_each_other_are_errors_whatever_order_reads_them() {
+    let mut home = Home::new();
+    let page = home.page.clone();
+    for swapped in [false, true] {
+        let report = home.calculation(&page);
+        let first = home
+            .workspace
+            .calculation(&page, &report)
+            .unwrap()
+            .unwrap()
+            .lines[0]
+            .id
+            .clone();
+        let second = home
+            .add(&page, &report, Some(&first), line("", "", LineStyle::Plain))
+            .unwrap();
+        let (guarded, plain) = if swapped {
+            (&second, &first)
+        } else {
+            (&first, &second)
+        };
+        let at = |line: &LineId| format!("{{{page}.{report}.{line}}}");
+        for (line_id, formula) in [
+            (guarded, format!("IFERROR({}, 0)", at(plain))),
+            (plain, format!("{} + 1", at(guarded))),
+        ] {
+            home.edit(Mutation::SetLine {
+                page: page.clone(),
+                block: report.clone(),
+                line: line_id.clone(),
+                setup: line("", &formula, LineStyle::Plain),
+            })
+            .unwrap();
+        }
+        let values: Vec<_> = home
+            .lines(&page, &report)
+            .into_iter()
+            .map(|(_, value)| value)
+            .collect();
+        assert_eq!(values, ["#REF!", "#REF!"], "swapped: {swapped}");
+    }
+}
