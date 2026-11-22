@@ -395,9 +395,12 @@ impl<S: Store> Workspace<S> {
         pages.dedup();
         let mut before = Vec::new();
         for page in pages {
-            if let Ok((_, order)) = self.page(&page)
-                && order.arranged()
-            {
+            let order = match self.page(&page) {
+                Ok((_, order)) => order,
+                Err(Error::NotFound) => continue,
+                Err(error) => return Err(error),
+            };
+            if order.arranged() {
                 before.push((page, order.sections()));
             }
         }
