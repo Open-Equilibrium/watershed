@@ -257,7 +257,7 @@ impl HistoryScratch {
     }
 }
 
-const ROOT_LEASE_ATTEMPTS: u32 = 100;
+const ROOT_LEASE_WAIT: std::time::Duration = std::time::Duration::from_secs(1);
 const ROOT_LEASE_RETRY: std::time::Duration = std::time::Duration::from_millis(10);
 
 impl HistoryScratchRootLease {
@@ -272,15 +272,14 @@ impl HistoryScratchRootLease {
             }
             Err(error) => return Err(error),
         };
-        let mut attempts = 0;
+        let deadline = std::time::Instant::now() + ROOT_LEASE_WAIT;
         loop {
             match file.try_lock() {
                 Ok(()) => break,
                 Err(fs::TryLockError::WouldBlock) => {
                     #[cfg(test)]
                     observe_history_scratch_stage(HistoryScratchStage::RootLeaseContended);
-                    attempts += 1;
-                    if attempts >= ROOT_LEASE_ATTEMPTS {
+                    if std::time::Instant::now() >= deadline {
                         return Err(protocol("history validation scratch is active"));
                     }
                     std::thread::sleep(ROOT_LEASE_RETRY);
