@@ -52,6 +52,58 @@ impl Section {
                     .map_err(fail)?;
                 Ok(Json::Null)
             }
+            Some("insert") => {
+                let at = at("at").ok_or("at")?;
+                let text = op["text"].as_str().unwrap_or("");
+                let n = width(text);
+                self.doc
+                    .splice_text(&self.text, at, 0, text)
+                    .map_err(fail)?;
+                let wanted = op["marks"].as_object().cloned().unwrap_or_default();
+                // `get_marks` can disagree with `spans` after mark and unmark
+                // history; `marks` agrees, so read what the new text got there.
+                let present: Vec<(String, ScalarValue)> = self
+                    .doc
+                    .marks(&self.text)
+                    .map_err(fail)?
+                    .iter()
+                    .filter(|m| m.start <= at && at < m.end)
+                    .map(|m| (m.name().to_string(), m.value().clone()))
+                    .collect();
+                for (name, value) in &present {
+                    let keep = match (wanted.get(name), value) {
+                        (Some(Json::String(w)), ScalarValue::Str(v)) => w == v.as_str(),
+                        (Some(Json::Bool(true)), ScalarValue::Boolean(true)) => true,
+                        _ => false,
+                    };
+                    if !keep && !matches!(value, ScalarValue::Null | ScalarValue::Boolean(false)) {
+                        self.doc
+                            .unmark(&self.text, name, at, at + n, expand(name))
+                            .map_err(fail)?;
+                    }
+                }
+                for (name, value) in &wanted {
+                    let has = present.iter().any(|(p, v)| {
+                        p == name
+                            && match (value, v) {
+                                (Json::String(w), ScalarValue::Str(v)) => w == v.as_str(),
+                                (Json::Bool(true), ScalarValue::Boolean(true)) => true,
+                                _ => false,
+                            }
+                    });
+                    if !has {
+                        let value = match value {
+                            Json::String(s) => ScalarValue::Str(s.as_str().into()),
+                            _ => ScalarValue::Boolean(true),
+                        };
+                        let mark = Mark::new(name.clone(), value, at, at + n);
+                        self.doc
+                            .mark(&self.text, mark, expand(name))
+                            .map_err(fail)?;
+                    }
+                }
+                Ok(Json::Null)
+            }
             Some("split") => {
                 let id = self
                     .doc
@@ -351,8 +403,10 @@ mod tests {
 mod replay {
     use super::*;
 
+    /// Replays a dumped op log up to its last step, then splices that step's
+    /// text on a fork and prints what `get_marks` and `marks` say about it.
     #[test]
-    #[ignore = "replays a dumped op log from SECTION_REPLAY"]
+    #[ignore = "replays the op log in SECTION_REPLAY"]
     fn replay_a_dumped_log() {
         let path = std::env::var("SECTION_REPLAY").unwrap();
         let log: Json = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
@@ -371,12 +425,86 @@ mod replay {
             at += width(text);
         }
         let steps = log.as_array().unwrap();
-        for (n, step) in steps.iter().enumerate() {
+        let (last, earlier) = steps.split_last().unwrap();
+        for step in earlier {
             for op in step.as_array().unwrap() {
                 section.apply(op).unwrap();
             }
-            if n + 3 >= steps.len() {
-                println!("after step {n}: {step}\n  {}", section.spans());
+        }
+        for op in last.as_array().unwrap() {
+            let (Some(at), Some(text)) = (op["at"].as_u64(), op["text"].as_str()) else {
+                continue;
+            };
+            let at = at as usize;
+            let mut probe = section.fork();
+            probe
+                .apply(&json!({"op": "splice", "at": at, "ins": text}))
+                .unwrap();
+            let by_index: Vec<String> = probe
+                .doc
+                .get_marks(&probe.text, at, None)
+                .unwrap()
+                .iter()
+                .map(|(n, v)| format!("{n}={v}"))
+                .collect();
+            let by_list: Vec<String> = probe
+                .doc
+                .marks(&probe.text)
+                .unwrap()
+                .iter()
+                .filter(|m| m.start <= at && at < m.end)
+                .map(|m| format!("{}={}", m.name(), m.value()))
+                .collect();
+            println!("after splicing {text:?} at {at}: get_marks {by_index:?}, marks {by_list:?}");
+        }
+    }
+}
+
+#[cfg(test)]
+mod cost {
+    use super::*;
+    use std::time::Instant;
+
+    #[test]
+    #[ignore = "prints op costs"]
+    fn op_costs() {
+        for paragraphs in [10usize, 100, 1000] {
+            let mut a = Section::new();
+            let text = "Paragraph: Liquid keeps a Section as one text, so a selection crosses Paragraphs freely.";
+            let mut at = 1;
+            for i in 0..paragraphs {
+                if i > 0 {
+                    a.apply(&json!({"op": "split", "at": at})).unwrap();
+                    at += 1;
+                }
+                a.apply(&json!({"op": "splice", "at": at, "ins": text}))
+                    .unwrap();
+                at += width(text);
+            }
+            let ops = [
+                ("splice", json!({"op": "splice", "at": 5, "ins": "x"})),
+                (
+                    "unmark",
+                    json!({"op": "unmark", "start": 5, "end": 6, "name": "bold"}),
+                ),
+                (
+                    "mark",
+                    json!({"op": "mark", "start": 5, "end": 6, "name": "bold"}),
+                ),
+                (
+                    "insert",
+                    json!({"op": "insert", "at": 5, "text": "x", "marks": {}}),
+                ),
+            ];
+            for (name, op) in ops {
+                let start = Instant::now();
+                for _ in 0..200 {
+                    a.apply(&op).unwrap();
+                }
+                println!(
+                    "{paragraphs:>5} paragraphs: {name:<6} {:>8.1} µs",
+                    start.elapsed().as_secs_f64() * 1e6 / 200.0
+                );
             }
         }
     }
