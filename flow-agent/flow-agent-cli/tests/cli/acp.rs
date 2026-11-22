@@ -725,11 +725,28 @@ fn a_phase_runs_two_scraper_instances_at_once_and_reads_their_results() {
         entries.contains("Explore › scraper-1") && entries.contains("Explore › scraper-2"),
         "{entries}"
     );
-    for name in ["scraper-1", "scraper-2"] {
+    drop(acp);
+    let mut acp = Acp::start(&workspace, &config_root);
+    acp.send("initialize", json!({"protocolVersion": 1}));
+    let load = acp.send(
+        "session/load",
+        json!({"sessionId": session_id, "cwd": workspace.to_path_buf(), "mcpServers": []}),
+    );
+    acp.reply(load, &mut Vec::new());
+    let again = acp.send(
+        "session/prompt",
+        json!({"sessionId": session_id, "prompt": [{"type": "text", "text": "Once more"}]}),
+    );
+    assert_eq!(
+        acp.reply(again, &mut Vec::new())["result"]["stopReason"],
+        "end_turn"
+    );
+    for name in ["scraper-1", "scraper-2", "scraper-3", "scraper-4"] {
         assert_eq!(
             flow_agent_core::conversation_state(&workspace, &format!("{session_id}__{name}"))
                 .expect("the instance has its own Conversation"),
-            flow_agent_core::ConversationState::Settled
+            flow_agent_core::ConversationState::Settled,
+            "{name}"
         );
     }
 }

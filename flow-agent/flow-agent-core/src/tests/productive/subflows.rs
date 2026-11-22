@@ -25,12 +25,23 @@ struct FakeLauncher {
 }
 
 impl SubflowLauncher for FakeLauncher {
-    fn name(&self, flow: &str) -> Result<String, RuntimeError> {
+    fn names(
+        &self,
+        _parent_conversation_id: &str,
+        flows: &[String],
+    ) -> Result<Vec<String>, RuntimeError> {
         let mut counts = self.counts.lock().unwrap();
-        let count = counts.entry(flow.to_owned()).or_default();
-        *count += 1;
-        Ok(format!("{flow}-{count}"))
+        Ok(flows
+            .iter()
+            .map(|flow| {
+                let count = counts.entry(flow.clone()).or_default();
+                *count += 1;
+                format!("{flow}-{count}")
+            })
+            .collect())
     }
+
+    fn release(&self, _names: &[String]) {}
 
     fn run(
         &self,
@@ -230,4 +241,32 @@ fn a_failed_instance_fails_the_phase_unless_it_may_continue() {
             .to_string()
             .contains("the page did not load")
     );
+}
+
+#[test]
+fn a_turn_asking_for_too_many_instances_names_none_and_fails_the_run() {
+    const CHILD_ENV: &str = "WATERSHED_SUBFLOW_TOO_MANY_CHILD";
+    if run_isolated_test(CHILD_ENV) {
+        return;
+    }
+    let launcher = Arc::new(FakeLauncher::default());
+    let mut calling = string_provider_turn("response-calls", "unused");
+    calling.output_text.clear();
+    calling.tool_calls = (0..=crate::MAX_SUBFLOW_BATCH)
+        .map(|index| subflow_call(&format!("call-{index}"), "topic"))
+        .collect();
+
+    let (failed, _) = run(
+        "    - flow: scraper\n      start: llm\n",
+        vec![calling],
+        None,
+        Arc::clone(&launcher),
+    );
+
+    assert!(failed.expect("the refusal ends the Run as failed"));
+    assert!(
+        launcher.counts.lock().unwrap().is_empty(),
+        "no name is taken"
+    );
+    assert!(launcher.batches.lock().unwrap().is_empty());
 }

@@ -309,12 +309,11 @@ where
         );
         let (requests, outcomes) =
             run_subflow_batch(context, phase_execution_id, &before_attempt_id, &mut || {
-                let launcher = subflow_launcher()?;
                 let mut requests = Vec::new();
                 for (subflow, field) in &each {
                     for item in each_inputs(input, field, &subflow.flow)? {
                         requests.push(SubflowInstanceRequest {
-                            name: launcher.name(&subflow.flow)?,
+                            name: String::new(),
                             flow: subflow.flow.clone(),
                             input: item,
                             continue_on_error: subflow.continue_on_error,
@@ -539,12 +538,11 @@ where
         );
         let (requests, outcomes) =
             run_subflow_batch(context, phase_execution_id, &before_attempt_id, &mut || {
-                let launcher = subflow_launcher()?;
                 subflow_calls
                     .iter()
                     .map(|(_, subflow, input)| {
                         Ok(SubflowInstanceRequest {
-                            name: launcher.name(&subflow.flow)?,
+                            name: String::new(),
                             flow: subflow.flow.clone(),
                             input: input.clone(),
                             continue_on_error: subflow.continue_on_error,
@@ -577,21 +575,43 @@ where
     T: ProductiveToolExecutor,
 {
     crate::runtime::cancellation::ensure_productive_dispatch_allowed()?;
+    let conversation_id = context.execution.conversation_id;
+    let mut named = Vec::new();
+    let mut refused = false;
     let mut checked = || {
-        let requests = live()?;
+        let mut requests = live().inspect_err(|_| refused = true)?;
         if requests.len() > MAX_SUBFLOW_BATCH {
+            refused = true;
             return Err(RuntimeError::Protocol(format!(
                 "a Phase starts at most {MAX_SUBFLOW_BATCH} subflow instances at once"
             )));
         }
+        let flows = requests
+            .iter()
+            .map(|request| request.flow.clone())
+            .collect::<Vec<_>>();
+        named = subflow_launcher()
+            .and_then(|launcher| launcher.names(conversation_id, &flows))
+            .inspect_err(|_| refused = true)?;
+        for (request, name) in requests.iter_mut().zip(&named) {
+            request.name.clone_from(name);
+        }
         Ok(requests)
     };
-    let recorded = mark_recovery_failure(
-        &mut context.recovery_failed,
+    let recorded =
         context
             .recovery
-            .subflow_batch(phase_execution_id, before_attempt_id, &mut checked),
-    )?;
+            .subflow_batch(phase_execution_id, before_attempt_id, &mut checked);
+    let recorded = match recorded {
+        Ok(recorded) => recorded,
+        Err(error) => {
+            if !named.is_empty() {
+                subflow_launcher()?.release(&named);
+            }
+            context.recovery_failed |= !refused;
+            return Err(error);
+        }
+    };
     let outcomes = match recorded.outcomes {
         Some(outcomes) => outcomes,
         None => {

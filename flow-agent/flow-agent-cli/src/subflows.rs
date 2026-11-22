@@ -35,10 +35,12 @@ struct Tree {
     live: BTreeSet<String>,
 }
 
+type NamesReply = Sender<Result<Vec<String>, String>>;
+
 struct Upstream {
     out: Mutex<io::Stdout>,
     next: AtomicU64,
-    pending: Mutex<BTreeMap<u64, Sender<Result<String, String>>>>,
+    pending: Mutex<BTreeMap<u64, NamesReply>>,
 }
 
 impl Upstream {
@@ -140,24 +142,38 @@ impl ProcessLauncher {
         }
     }
 
-    fn allocate(&self, flow: &str) -> Result<String, String> {
+    fn allocate(&self, root: &str, flows: &[String]) -> Result<Vec<String>, String> {
+        let workspace = std::env::current_dir().map_err(|error| error.to_string())?;
         let mut tree = self.tree.lock().unwrap_or_else(PoisonError::into_inner);
-        if tree.started >= MAX_TREE_INSTANCES {
+        if tree.started + flows.len() > MAX_TREE_INSTANCES {
             return Err(format!(
                 "a Run's tree starts at most {MAX_TREE_INSTANCES} subflow instances"
             ));
         }
-        if tree.live.len() >= MAX_LIVE_INSTANCES {
+        if tree.live.len() + flows.len() > MAX_LIVE_INSTANCES {
             return Err(format!(
                 "at most {MAX_LIVE_INSTANCES} subflow instances run at once"
             ));
         }
-        let count = tree.counts.entry(flow.to_owned()).or_default();
-        *count += 1;
-        let name = format!("{flow}-{count}");
-        tree.started += 1;
-        tree.live.insert(name.clone());
-        Ok(name)
+        let mut names = Vec::with_capacity(flows.len());
+        for flow in flows {
+            let name = loop {
+                let count = tree.counts.entry(flow.clone()).or_default();
+                *count += 1;
+                let name = format!("{flow}-{count}");
+                let conversation = format!("{root}{CONVERSATION_SEPARATOR}{name}");
+                if flow_agent_core::conversation_state(&workspace, &conversation)
+                    .map_err(|error| error.to_string())?
+                    == flow_agent_core::ConversationState::Absent
+                {
+                    break name;
+                }
+            };
+            names.push(name);
+        }
+        tree.started += names.len();
+        tree.live.extend(names.iter().cloned());
+        Ok(names)
     }
 
     fn handle_child_line(
@@ -167,11 +183,20 @@ impl ProcessLauncher {
     ) -> Option<SubflowOutcome> {
         if let Some(request) = message.get("name_request") {
             let id = request["id"].clone();
-            let reply = match self.name(request["flow"].as_str().unwrap_or_default()) {
-                Ok(name) => json!({"name": {"id": id, "name": name}}),
-                Err(error) => json!({"name": {"id": id, "error": error.to_string()}}),
+            let flows =
+                serde_json::from_value::<Vec<String>>(request["flows"].clone()).unwrap_or_default();
+            let reply = match self.names(
+                request["conversation_id"].as_str().unwrap_or_default(),
+                &flows,
+            ) {
+                Ok(names) => json!({"names": {"id": id, "names": names}}),
+                Err(error) => json!({"names": {"id": id, "error": error.to_string()}}),
             };
             let _ = write_line(child, &reply);
+            return None;
+        }
+        if let Some(names) = message.get("release") {
+            self.release(&serde_json::from_value::<Vec<String>>(names.clone()).unwrap_or_default());
             return None;
         }
         if let Some(instance) = message.get("instance") {
@@ -204,9 +229,33 @@ impl ProcessLauncher {
 }
 
 impl SubflowLauncher for ProcessLauncher {
-    fn name(&self, flow: &str) -> Result<String, RuntimeError> {
+    fn release(&self, names: &[String]) {
+        match &self.upstream {
+            Some(upstream) => {
+                let _ = upstream.send(&json!({"release": names}));
+            }
+            None => {
+                let mut tree = self.tree.lock().unwrap_or_else(PoisonError::into_inner);
+                for name in names {
+                    tree.live.remove(name);
+                }
+            }
+        }
+    }
+
+    fn names(
+        &self,
+        parent_conversation_id: &str,
+        flows: &[String],
+    ) -> Result<Vec<String>, RuntimeError> {
+        let root = self
+            .root_conversation
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+            .unwrap_or_else(|| parent_conversation_id.to_owned());
         let Some(upstream) = &self.upstream else {
-            return self.allocate(flow).map_err(RuntimeError::Protocol);
+            return self.allocate(&root, flows).map_err(RuntimeError::Protocol);
         };
         let id = upstream.next.fetch_add(1, Ordering::Relaxed);
         let (sender, receiver) = mpsc::channel();
@@ -216,7 +265,7 @@ impl SubflowLauncher for ProcessLauncher {
             .unwrap_or_else(PoisonError::into_inner)
             .insert(id, sender);
         upstream
-            .send(&json!({"name_request": {"id": id, "flow": flow}}))
+            .send(&json!({"name_request": {"id": id, "conversation_id": root, "flows": flows}}))
             .map_err(|source| RuntimeError::Io {
                 path: PathBuf::from("<parent>"),
                 source,
@@ -488,12 +537,10 @@ fn follow_parent(input: impl BufRead, launcher: &ProcessLauncher, own_name: &str
         } else if message.get("cancel").is_some() {
             flow_agent_core::request_productive_interrupt();
             launcher.cancel_all();
-        } else if let Some(reply) = message.get("name") {
+        } else if let Some(reply) = message.get("names") {
             let id = reply["id"].as_u64().unwrap_or_default();
-            let answer = match reply["name"].as_str() {
-                Some(name) => Ok(name.to_owned()),
-                None => Err(reply["error"].as_str().unwrap_or("no name").to_owned()),
-            };
+            let answer = serde_json::from_value::<Vec<String>>(reply["names"].clone())
+                .map_err(|_| reply["error"].as_str().unwrap_or("no names").to_owned());
             if let Some(upstream) = &launcher.upstream
                 && let Some(sender) = upstream
                     .pending

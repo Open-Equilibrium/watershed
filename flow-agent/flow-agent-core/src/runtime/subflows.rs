@@ -21,7 +21,13 @@ pub enum SubflowOutcome {
 }
 
 pub trait SubflowLauncher: Send + Sync {
-    fn name(&self, flow: &str) -> Result<String, RuntimeError>;
+    fn names(
+        &self,
+        parent_conversation_id: &str,
+        flows: &[String],
+    ) -> Result<Vec<String>, RuntimeError>;
+
+    fn release(&self, names: &[String]);
 
     fn run(
         &self,
