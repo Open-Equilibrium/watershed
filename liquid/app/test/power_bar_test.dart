@@ -222,6 +222,7 @@ void main() {
     await kit.show(tester, [
       const TextPart('Plan'),
     ], shortcuts: ShortcutController.memory(ShortcutSettings.liquidKey()));
+    expect(find.text('⇪K'), findsOneWidget, reason: 'the hint follows keys');
     await tester.sendKeyDownEvent(liquidKey, platform: 'macos');
     await tester.sendKeyUpEvent(liquidKey, platform: 'macos');
     await tester.pumpAndSettle();

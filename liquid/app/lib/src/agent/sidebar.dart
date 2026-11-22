@@ -149,7 +149,7 @@ class Sidebar extends StatelessWidget {
                       ),
                     ),
                     Text(
-                      '⌘K',
+                      Keymap.of(context).label(Command.powerBar),
                       style: TextStyle(
                         fontSize: WsMetrics.fsSmall,
                         color: ws.textFaint,

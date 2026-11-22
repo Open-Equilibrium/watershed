@@ -7,6 +7,7 @@ import '../rust/api/workspace.dart';
 import '../theme/icons.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
+import '../shortcuts/keymap.dart';
 import 'explorer.dart' show untitled;
 import 'media_block.dart';
 import 'page_views.dart';
@@ -164,7 +165,7 @@ class _PowerBarState extends State<PowerBar> {
         icon: LucideIcons.filePlus,
         label: 'New Page',
         detail: _areaName == null ? null : 'in $_areaName',
-        keys: '⇧⌘N',
+        keys: Keymap.of(context).label(Command.newPage),
         run: () async => widget.onNewPage(),
       ),
       (
@@ -172,7 +173,7 @@ class _PowerBarState extends State<PowerBar> {
         icon: LucideIcons.settings,
         label: 'Settings',
         detail: null,
-        keys: '⌘,',
+        keys: Keymap.of(context).label(Command.settings),
         run: () async => widget.onSettings(),
       ),
     ].where((item) => item.label.toLowerCase().contains(filter)).toList();
