@@ -89,7 +89,7 @@ impl<S: Store> Workspace<S> {
             vec![(Document::Workspace, doc)],
             Vec::new(),
         )?;
-        this.store.index(&[], Some(INDEX_VERSION))?;
+        this.store.index(&[], Some(INDEX_VERSION)).ok();
         Ok(this)
     }
 
@@ -126,22 +126,24 @@ impl<S: Store> Workspace<S> {
         if self.store.index_version()? >= INDEX_VERSION {
             return Ok(());
         }
-        let mut writes = Vec::new();
         let mut complete = true;
         for area in self.areas()? {
             for page in self.pages(&area.id)? {
-                writes.push(page_entry(&page.id, &page.title));
+                let mut writes = vec![page_entry(&page.id, &page.title)];
                 match self.page_text(&page.id) {
                     Ok(text) => writes.extend(text),
                     Err(_) => complete = false,
                 }
                 self.close_page(&page.id);
+                self.store.index(&writes, None)?;
             }
         }
-        for table in self.tables()? {
-            writes.push(table_entry(&table.id, Some(&table.name)));
-        }
-        self.store.index(&writes, complete.then_some(INDEX_VERSION))
+        let tables: Vec<IndexWrite> = self
+            .tables()?
+            .iter()
+            .map(|table| table_entry(&table.id, Some(&table.name)))
+            .collect();
+        self.store.index(&tables, complete.then_some(INDEX_VERSION))
     }
 
     fn page_text(&mut self, page: &PageId) -> Result<Vec<IndexWrite>, Error> {

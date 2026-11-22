@@ -5,6 +5,8 @@ import 'package:flutter/widgets.dart';
 
 import 'keymap.dart';
 
+const revealDelay = Duration(milliseconds: 600);
+
 class ShortcutReveal extends StatefulWidget {
   const ShortcutReveal({super.key, required this.liquid, required this.child});
 
@@ -20,7 +22,6 @@ class ShortcutReveal extends StatefulWidget {
 }
 
 class _ShortcutRevealState extends State<ShortcutReveal> {
-  static const _delay = Duration(milliseconds: 600);
   final _shown = ValueNotifier(false);
   Timer? _timer;
 
@@ -59,7 +60,7 @@ class _ShortcutRevealState extends State<ShortcutReveal> {
     if (event is KeyDownEvent &&
         reveals &&
         HardwareKeyboard.instance.logicalKeysPressed.length == 1) {
-      _timer = Timer(_delay, () => _shown.value = true);
+      _timer = Timer(revealDelay, () => _shown.value = true);
     } else {
       _shown.value = false;
     }

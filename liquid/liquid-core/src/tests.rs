@@ -105,6 +105,7 @@ fn every_change_of_every_document_belongs_to_a_recorded_action() {
 struct Flaky {
     inner: MemoryStore,
     failing: bool,
+    index_failing: bool,
 }
 
 impl Store for Flaky {
@@ -161,6 +162,9 @@ impl Store for Flaky {
     }
 
     fn index(&mut self, writes: &[crate::IndexWrite], version: Option<u32>) -> Result<(), Error> {
+        if self.index_failing {
+            return Err(Error::Storage("disk full".into()));
+        }
         self.inner.index(writes, version)
     }
 
@@ -546,4 +550,20 @@ fn an_upload_whose_part_the_store_refused_never_finishes() {
         "a failed upload takes no more"
     );
     assert!(workspace.finish_upload(upload).is_err());
+}
+
+#[test]
+fn a_failed_index_version_write_leaves_a_created_workspace_usable() {
+    let store = Flaky {
+        index_failing: true,
+        ..Flaky::default()
+    };
+    let workspace = Workspace::create(PersonId::new("benni"), store).unwrap();
+    let mut store = workspace.store;
+    store.index_failing = false;
+    let mut reopened = Workspace::open(store).unwrap();
+    assert_eq!(
+        reopened.store.index_version().unwrap(),
+        crate::INDEX_VERSION
+    );
 }

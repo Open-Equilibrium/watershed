@@ -185,6 +185,7 @@ class _AgentShellState extends State<AgentShell> {
   void _requestChanged() {
     if (widget.state!.request.value != null) {
       _settings.value = null;
+      _powerBar.value = false;
       Navigator.of(context).popUntil((route) => route.isFirst);
     } else if (_shortcuts.firstStart && ModalRoute.of(context)!.isCurrent) {
       unawaited(_askProfile());
@@ -223,6 +224,7 @@ class _AgentShellState extends State<AgentShell> {
   @override
   void dispose() {
     HardwareKeyboard.instance.removeHandler(_liquidTap);
+    _liquidAlone?.cancel();
     _powerBar.dispose();
     widget.workspace?.open.removeListener(_pageOpened);
     _lifecycle.dispose();
@@ -341,18 +343,19 @@ class _AgentShellState extends State<AgentShell> {
 
   final _powerBar = ValueNotifier(false);
 
-  bool _liquidAlone = false;
+  Timer? _liquidAlone;
 
   bool _liquidTap(KeyEvent event) {
     if (widget.workspace == null || !_shortcuts.value.liquidKey) return false;
     if (event.logicalKey != liquidKey) {
-      if (event is KeyDownEvent) _liquidAlone = false;
+      if (event is KeyDownEvent) _liquidAlone?.cancel();
       return false;
     }
     if (event is KeyDownEvent) {
-      _liquidAlone = true;
-    } else if (event is KeyUpEvent && _liquidAlone) {
-      _liquidAlone = false;
+      _liquidAlone?.cancel();
+      _liquidAlone = Timer(revealDelay, () {});
+    } else if (event is KeyUpEvent && (_liquidAlone?.isActive ?? false)) {
+      _liquidAlone?.cancel();
       _powerBar.value = !_powerBar.value;
     }
     return false;
