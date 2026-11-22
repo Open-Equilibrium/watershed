@@ -1,6 +1,6 @@
-# The process-death matrix runs child processes and durable writes for minutes; holding two test
-# threads keeps its load beside at most one other test on a three-core runner, so it cannot push
-# other tests past their Git deadlines while the rest of the suite still moves on.
+# The process-death matrix runs child processes and durable writes for minutes. It holds two test
+# threads, one for itself and one for its load, so every test beside it keeps its own core and
+# meets its Git deadlines.
 [[profile.default.overrides]]
 filter = 'test(crash_matrix)'
 threads-required = 2
