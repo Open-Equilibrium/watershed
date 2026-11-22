@@ -11,6 +11,7 @@ fn read_productive_recovery_snapshot(path: &AnchoredFile) -> Result<Vec<u8>, Run
     read_anchored_file_with_limit(path, MAX_SESSION_METADATA_BYTES)
 }
 
+pub use reservation::{ConversationState, conversation_state};
 pub(crate) use reservation::{
     ProductiveConversationReservation, read_conversation_continuation_definition,
     read_conversation_recovery_definition, reserve_conversation_continuation,

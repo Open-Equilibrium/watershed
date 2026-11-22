@@ -558,3 +558,28 @@ fn a_named_conversation_takes_exactly_its_id_or_is_refused() {
     };
     assert!(error.to_string().contains("chat-0123"), "{error}");
 }
+
+#[test]
+fn a_conversation_is_absent_settled_or_has_its_newest_run_interrupted() {
+    let workspace = empty_workspace("conversation-interrupted-run");
+    create_flow_run(&workspace, "review", "review");
+    write_terminal_run(&workspace, "review", "review");
+    write_terminal_recovery_fixture(&workspace, "review", "review", "root");
+    assert_eq!(
+        crate::conversation_state(&workspace, "absent").expect("the store reads"),
+        crate::ConversationState::Absent
+    );
+    assert_eq!(
+        crate::conversation_state(&workspace, "review").expect("history reads"),
+        crate::ConversationState::Settled
+    );
+
+    create_flow_run(&workspace, "review", "review-2");
+
+    assert_eq!(
+        crate::conversation_state(&workspace, "review").expect("history reads"),
+        crate::ConversationState::Interrupted {
+            run_session_id: "review-2".to_owned()
+        }
+    );
+}

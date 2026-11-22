@@ -91,6 +91,7 @@ mod recovery_record;
 pub(crate) use recovery_record::ProductiveRecoveryRecord;
 
 mod recovery;
+pub use recovery::{ConversationState, conversation_state};
 pub(crate) use recovery::{
     ProductiveConversationReservation, ProductiveRecoveryWriter,
     read_conversation_continuation_definition, read_conversation_recovery_definition,

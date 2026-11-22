@@ -71,7 +71,9 @@ pub use cancellation::{
     ProductiveInterruptAction, begin_productive_operation, request_productive_interrupt,
     settle_productive_operation,
 };
-pub use conversations::{conversation_status, project_tool_run_log};
+pub use conversations::{
+    ConversationState, conversation_state, conversation_status, project_tool_run_log,
+};
 pub use endpoint_credential::OPENAI_COMPATIBLE_PROVIDER_ID;
 pub use executor::{
     ExecutorSelection, ExecutorSelectionSource, configure_default_executor,
