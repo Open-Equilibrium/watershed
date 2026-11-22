@@ -317,9 +317,7 @@ pub(crate) fn productive_cancellation() -> &'static AtomicBool {
 }
 
 pub fn begin_productive_operation() -> Result<(), RuntimeError> {
-    PRODUCTIVE_OPERATION.begin()?;
-    crate::runtime::steering::reset_productive_steering();
-    Ok(())
+    PRODUCTIVE_OPERATION.begin()
 }
 
 pub fn request_productive_interrupt() -> ProductiveInterruptAction {

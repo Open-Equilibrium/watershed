@@ -64,10 +64,6 @@ pub fn drain_productive_steering() -> Vec<String> {
     state.messages.drain(..).collect()
 }
 
-pub(crate) fn reset_productive_steering() {
-    drain_productive_steering();
-}
-
 pub(crate) fn wake_productive_steering() {
     drop(STEERING.lock());
     STEERING.changed.notify_all();

@@ -268,18 +268,23 @@ impl<W: Write> Agent<W> {
     fn finished(&mut self, result: Result<RunOutput, RuntimeError>) -> Result<(), RuntimeError> {
         self.running = false;
         let mut waiting = flow_agent_core::drain_productive_steering();
-        if result.is_ok() && !waiting.is_empty() {
-            let text = waiting.remove(0);
-            if self.start(text, waiting).is_ok() {
-                return Ok(());
+        let result = match result {
+            Ok(_) if !waiting.is_empty() => {
+                let text = waiting.remove(0);
+                match self.start(text, waiting) {
+                    Ok(()) => return Ok(()),
+                    Err(error) => Err(error),
+                }
             }
-        }
+            Ok(_) => Ok(()),
+            Err(error) => Err(internal(error)),
+        };
         let Some(id) = self.prompt.take() else {
             return Ok(());
         };
         match result {
-            Ok(_) => self.respond(&id, json!({"stopReason": "end_turn"})),
-            Err(error) => self.fail(&id, INTERNAL_ERROR, &error.to_string()),
+            Ok(()) => self.respond(&id, json!({"stopReason": "end_turn"})),
+            Err((code, message)) => self.fail(&id, code, &message),
         }
     }
 

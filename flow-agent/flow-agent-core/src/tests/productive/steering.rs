@@ -157,3 +157,23 @@ fn messages_no_run_took_are_handed_back() {
     assert_eq!(crate::drain_productive_steering(), ["first", "second"]);
     assert!(crate::drain_productive_steering().is_empty());
 }
+
+#[test]
+fn a_pause_and_a_message_sent_before_the_run_starts_reach_it() {
+    const CHILD_ENV: &str = "WATERSHED_STEERING_EARLY_CHILD";
+    if run_isolated_test(CHILD_ENV) {
+        return;
+    }
+    crate::request_productive_pause();
+    crate::steer_productive_run("Keep it short".to_owned()).unwrap();
+
+    crate::begin_productive_operation().expect("productive operation begins");
+
+    assert_eq!(
+        take_productive_steering()
+            .expect("the message is taken")
+            .as_deref(),
+        Some("Keep it short")
+    );
+    crate::settle_productive_operation();
+}
