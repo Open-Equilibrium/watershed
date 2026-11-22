@@ -262,12 +262,16 @@ impl<W: Write> Agent<W> {
         let cwd = session.cwd.clone();
         let conversation_id = session.id.clone();
         let sender = self.sender.clone();
+        let resumed = matches!(state, ConversationState::Interrupted { .. });
+        for message in resumed.then(|| text.clone()).into_iter().chain(steering) {
+            flow_agent_core::steer_productive_run(message).map_err(internal)?;
+        }
         self.view = RunView::default();
         self.running = true;
         thread::Builder::new()
             .name("flow-acp-run".to_owned())
             .spawn(move || {
-                let result = run(cwd, conversation_id, flow, state, text, steering, &sender);
+                let result = run(cwd, conversation_id, flow, state, text, &sender);
                 let _ = sender.send(Input::Finished(result));
             })
             .map(|_| ())
@@ -367,7 +371,6 @@ fn run(
     flow: Option<String>,
     state: ConversationState,
     text: String,
-    steering: Vec<String>,
     sender: &Sender<Input>,
 ) -> Result<RunOutput, RuntimeError> {
     let operation = InterruptCoordinator::new().operation();
@@ -379,18 +382,10 @@ fn run(
     stream_live_operation_into(
         cwd,
         move |notifier| {
-            let interrupted = matches!(state, ConversationState::Interrupted { .. });
-            let input = core_script::FlowValue::String(text.clone());
-            let mut pending = steering;
-            if interrupted {
-                pending.insert(0, text);
-            }
+            let input = core_script::FlowValue::String(text);
             let activate = move |productive: bool| {
                 if productive {
                     operation.activate()?;
-                }
-                for message in pending.drain(..) {
-                    flow_agent_core::steer_productive_run(message)?;
                 }
                 Ok(operation)
             };

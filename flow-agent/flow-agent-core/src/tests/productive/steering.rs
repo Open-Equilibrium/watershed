@@ -74,6 +74,14 @@ fn a_message_sent_during_the_final_turn_gives_the_phase_another_turn() {
     assert_eq!(bodies.len(), 2, "the message adds one turn");
     assert!(user_texts(&bodies[0]).is_empty());
     assert_eq!(user_texts(&bodies[1]), ["Use British spelling"]);
+    assert_eq!(
+        bodies[1]
+            .to_string()
+            .matches("Use British spelling")
+            .count(),
+        1,
+        "the steering message reaches the turn once"
+    );
     let user_deltas = sink
         .0
         .iter()
