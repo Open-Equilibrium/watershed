@@ -205,6 +205,7 @@ Canonical terms. Use these exactly; do not introduce synonyms. Tool names are fi
 - **Chat** — Liquid's one kind of conversation, as in WhatsApp: one-to-one or a group, whose participants are people or agents alike; a Block that Pages can show. A planned replacement for separate agent sessions and projects (ADR-0239, ADR-0241).
 - **Inbox** — Liquid's one list of what needs the person, from every Chat and Table: agents' approvals and questions, mentions, direct messages and tasks due soon, ordered by when they are due (ADR-0241).
 - **Arrange mode** — The explicit Page state that reveals the responsive grid and resize/reorder handles. Outside Arrange mode, a Page remains a content-first flow.
+- **Tile** — In Arrange mode, a Section or another Block's View on the Page's 12-column grid, placed by its column and span; it rises as high as the tiles above it allow, in Page order (ADR-0312).
 - **Block SDK** — Versioned contract for reusable built-in and Block Registry Block Types: state/migrations, Views, ports/actions, permissions, lifecycle and responsive behavior. It is for product/community extension, not end-user app creation.
 - **Block Registry** — Official distribution catalog for reusable Block Types. Community packages are signed, sandboxed and capability-scoped; the initial model loads no arbitrary third-party native code.
 - **App** — Workspace-local interactive functionality with versioned state, declared UI, typed actions and explicit capabilities.
