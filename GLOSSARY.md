@@ -78,6 +78,7 @@ Canonical terms. Use these exactly; do not introduce synonyms. Tool names are fi
 - **Flow** — A fully configured deterministic orchestration of ordered Phases and optional subflows. Whole successful results pass forward by default; a Flow is itself a building block.
 - **Subflow** — A Flow a Phase starts ([V-Spec](docs/concept/V-Spec_FlowAgent.html#parallel-subflows)).
 - **Subflow instance** — One started Subflow: the Run of its own Conversation, in its own `flow` process, named by subflow id and start order across its root Run's tree, such as `scraper-5`.
+- **Task list** — An agent's steps with their status, which T3 Code keeps from an ACP plan and shows as one "Tasks 2/5" row; a Flow's steps are its Phases and Subflow instances ([design guidelines](docs/design/guidelines.md#patterns)).
 - **Flow execution plan** — The finite typed, deterministic and side-effect-free description of resolved Flow invocations, lifecycle boundaries, context inputs and Tool intents consumed by runtime apply.
 - **Execution request** — One versioned, bounded request for exactly one validated Tool invocation, bound by a canonical digest. Canonical: [PROTOCOL.md](PROTOCOL.md#m12-executor-protocol).
 - **Executor** — A Flow Agent execution component that validates one Execution request, waits for Start, establishes Flow-owned write protection, supervises one Tool invocation and returns a bounded result with enforcement receipt or typed error. Observed cleanup is not a universal hostile-descendant guarantee. Canonical: [PROTOCOL.md](PROTOCOL.md#m12-executor-protocol).

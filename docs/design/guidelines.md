@@ -29,6 +29,7 @@ References: Notion, AppFlowy, Microsoft Loop and T3 Code.
 ## Patterns
 
 - The input area floats at the bottom of each tab's main column, centered within the reading width, as T3 Code's composer does; content runs on beneath it. Agent questions appear inside it, and widgets sit directly above it.
+- An agent's task list sits in the Chat where T3 Code puts it, as one row, "Tasks 2/5 · Explore", that opens into its steps. Steps named `Phase › instance` hang under their Phase as a tree. Hovering a running instance shows Message, which starts the composer with `@instance `. Typing `@` as the composer's first character lists the running instances, as T3 lists files, and Enter or Tab inserts one (ADR-0314).
 - A choice of one among a few options uses the shared segments (`Segments` in `liquid/app/lib/src/controls.dart`): one framed control on the subtle background, the chosen segment raised on the surface, the same in every view; mockups that draw it otherwise are superseded.
 - An action that cannot run stays visible, dimmed, and says why on hover.
 - Where a click on a column's name sorts, the column's menu opens from ⌄ beside the name, seen on hover and always on touch, or by a right-click or long press.

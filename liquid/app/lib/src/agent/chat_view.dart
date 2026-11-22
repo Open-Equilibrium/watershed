@@ -16,6 +16,7 @@ import '../theme/tokens.g.dart';
 import 'input_lane.dart';
 import 'sidebar.dart';
 import 'start_page.dart';
+import 'task_list_row.dart';
 
 class ChatView extends StatefulWidget {
   const ChatView({
@@ -408,6 +409,7 @@ class ItemTile extends StatelessWidget {
             style: TextStyle(color: ws.textFaint, fontSize: WsMetrics.fsSmall),
           ),
           BridgeItemKind.error => _ErrorRow(text: text),
+          BridgeItemKind.taskList => TaskListRow(item: item, state: state),
           _ => ToolRow(item: item),
         };
       },

@@ -537,6 +537,91 @@ void main() {
     expect(find.byTooltip('Runs outside the project'), findsOneWidget);
   });
 
+  List<BridgeTranscriptItem> researching() => [
+    chatItem(
+      item(
+        1,
+        BridgeItemKind.taskList,
+        steps: [
+          step('Plan research', BridgeStepStatus.completed),
+          step('Explore', BridgeStepStatus.running),
+          step('Explore › scraper-1', BridgeStepStatus.running),
+          step('Explore › scraper-2', BridgeStepStatus.completed),
+          step('Write report', BridgeStepStatus.pending),
+        ],
+      ),
+      1,
+      '',
+    ),
+  ];
+
+  testWidgets(
+    'a task list opens into a tree whose running instance can be messaged',
+    (tester) async {
+      await show(
+        tester,
+        transcript: researching(),
+        turns: [turnOf(1, status: BridgeTurnStatus.running)],
+      );
+      expect(find.text('Tasks 2/5 · Explore'), findsOneWidget);
+      expect(find.text('scraper-1'), findsNothing);
+
+      await tester.tap(find.text('Tasks 2/5 · Explore'));
+      await tester.pumpAndSettle();
+      expect(find.text('Plan research'), findsOneWidget);
+      expect(find.text('scraper-2'), findsOneWidget);
+      expect(find.text('Pending'), findsOneWidget);
+      expect(find.text('Completed'), findsNWidgets(2));
+      expect(find.text('Message'), findsNothing);
+
+      final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+      await mouse.addPointer(
+        location: tester.getCenter(find.text('scraper-1')),
+      );
+      addTearDown(mouse.removePointer);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Message'));
+      await tester.pumpAndSettle();
+      expect(composerText(tester), '@scraper-1 ');
+
+      await typeInComposer(tester, '@scraper-2 Look at Dart');
+      await mouse.moveTo(tester.getCenter(find.text('Plan research')));
+      await mouse.moveTo(tester.getCenter(find.text('scraper-1')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Message'));
+      await tester.pumpAndSettle();
+      expect(composerText(tester), '@scraper-1 Look at Dart');
+    },
+  );
+
+  testWidgets(
+    '@ in the composer lists the running instances and inserts the chosen one',
+    (tester) async {
+      await show(
+        tester,
+        transcript: researching(),
+        turns: [turnOf(1, status: BridgeTurnStatus.running)],
+      );
+
+      await typeInComposer(tester, '@scr');
+      expect(find.text('Running instances'), findsOneWidget);
+      expect(find.text('scraper-1'), findsOneWidget);
+      expect(find.text('scraper-2'), findsNothing, reason: 'it has finished');
+
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.pumpAndSettle();
+      expect(composerText(tester), '@scraper-1 ');
+      expect(find.text('Running instances'), findsNothing);
+      expect(
+        actions().where((call) => call.startsWith(RegExp('send|steer'))),
+        isEmpty,
+      );
+
+      await typeInComposer(tester, 'mail @scr');
+      expect(find.text('Running instances'), findsNothing);
+    },
+  );
+
   testWidgets('reasoning, tool calls and errors each show as their row', (
     tester,
   ) async {

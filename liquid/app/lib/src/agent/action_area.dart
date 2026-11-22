@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
 import '../controls.dart';
@@ -10,7 +11,10 @@ import '../session/session_state.dart';
 import '../shortcuts/keymap.dart';
 import '../theme/icons.dart';
 import '../theme/theme.dart';
+import '../session/task_tree.dart';
 import '../theme/tokens.g.dart';
+import '../workspace/anchored_menu.dart';
+import 'mention_menu.dart';
 import 'moving_notice.dart';
 import 'question_card.dart';
 import 'start_page.dart';
@@ -187,6 +191,74 @@ class Composer extends StatefulWidget {
 
 class _ComposerState extends State<Composer> {
   BridgeTurn? _editing;
+  final _menu = OverlayPortalController();
+  var _choices = const <RunningInstance>[];
+  var _chosen = 0;
+  String? _dismissedFor;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.controller.addListener(_offer);
+    widget.state.runningInstances.addListener(_offer);
+  }
+
+  @override
+  void didUpdateWidget(Composer old) {
+    super.didUpdateWidget(old);
+    if (old.controller != widget.controller) {
+      old.controller.removeListener(_offer);
+      widget.controller.addListener(_offer);
+    }
+  }
+
+  @override
+  void dispose() {
+    widget.controller.removeListener(_offer);
+    widget.state.runningInstances.removeListener(_offer);
+    super.dispose();
+  }
+
+  void _offer() {
+    final value = widget.controller.value;
+    final choices = value.text == _dismissedFor
+        ? const <RunningInstance>[]
+        : mentionChoices(value, widget.state.runningInstances.value);
+    if (choices.isEmpty && _choices.isEmpty) return;
+    setState(() {
+      if (!listEquals(choices, _choices)) _chosen = 0;
+      _choices = choices;
+    });
+    choices.isEmpty ? _menu.hide() : _menu.show();
+  }
+
+  void _take(RunningInstance choice) {
+    final text = '@${choice.name} ';
+    writeText(
+      widget.controller,
+      TextEditingValue(
+        text: text,
+        selection: TextSelection.collapsed(offset: text.length),
+      ),
+    );
+  }
+
+  KeyEventResult _menuKey(KeyEvent event) {
+    if (!_menu.isShowing || event is KeyUpEvent) return KeyEventResult.ignored;
+    switch (event.logicalKey) {
+      case LogicalKeyboardKey.arrowDown || LogicalKeyboardKey.arrowUp:
+        final by = event.logicalKey == LogicalKeyboardKey.arrowDown ? 1 : -1;
+        setState(() => _chosen = (_chosen + by) % _choices.length);
+      case LogicalKeyboardKey.enter || LogicalKeyboardKey.tab:
+        _take(_choices[_chosen]);
+      case LogicalKeyboardKey.escape:
+        _dismissedFor = widget.controller.text;
+        _offer();
+      default:
+        return KeyEventResult.ignored;
+    }
+    return KeyEventResult.handled;
+  }
 
   void _send({required bool steer}) {
     final text = widget.controller.text.trim();
@@ -268,31 +340,43 @@ class _ComposerState extends State<Composer> {
                     canRequestFocus: false,
                     skipTraversal: true,
                     onKeyEvent: (node, event) =>
-                        event is KeyRepeatEvent &&
-                            [Command.send, Command.queue, Command.stop]
-                                .expand(keys.bindings)
-                                .any(
-                                  (held) => held.repeating.accepts(
-                                    event,
-                                    HardwareKeyboard.instance,
-                                  ),
-                                )
+                        _menuKey(event) == KeyEventResult.handled
+                        ? KeyEventResult.handled
+                        : event is KeyRepeatEvent &&
+                              [Command.send, Command.queue, Command.stop]
+                                  .expand(keys.bindings)
+                                  .any(
+                                    (held) => held.repeating.accepts(
+                                      event,
+                                      HardwareKeyboard.instance,
+                                    ),
+                                  )
                         ? KeyEventResult.handled
                         : KeyEventResult.ignored,
-                    child: composingField(
-                      controller,
-                      TextField(
-                        key: const Key('composer'),
-                        controller: controller,
-                        focusNode: widget.focusNode,
-                        maxLines: null,
-                        expands: true,
-                        style: Theme.of(context).textTheme.bodyLarge,
-                        decoration: InputDecoration.collapsed(
-                          hintText: approving
-                              ? 'Send a message to decline and redirect the agent'
-                              : 'Ask anything. @ files, \$ skills, / commands',
-                          hintStyle: TextStyle(color: ws.textFaint),
+                    child: AnchoredMenu(
+                      controller: _menu,
+                      height: MentionMenu.heightFor(_choices.length),
+                      menu: (context) => MentionMenu(
+                        choices: _choices,
+                        chosen: _chosen,
+                        onChoose: _take,
+                        onHover: (index) => setState(() => _chosen = index),
+                      ),
+                      child: composingField(
+                        controller,
+                        TextField(
+                          key: const Key('composer'),
+                          controller: controller,
+                          focusNode: widget.focusNode,
+                          maxLines: null,
+                          expands: true,
+                          style: Theme.of(context).textTheme.bodyLarge,
+                          decoration: InputDecoration.collapsed(
+                            hintText: approving
+                                ? 'Send a message to decline and redirect the agent'
+                                : 'Ask anything. @ files, \$ skills, / commands',
+                            hintStyle: TextStyle(color: ws.textFaint),
+                          ),
                         ),
                       ),
                     ),

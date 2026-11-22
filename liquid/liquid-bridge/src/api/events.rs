@@ -7,6 +7,7 @@ pub enum BridgeEventKind {
     RolledBack,
     ItemStarted,
     ContentDelta,
+    ItemUpdated,
     ItemCompleted,
     ModelRequestCompleted,
     RequestOpened,
@@ -35,6 +36,7 @@ pub enum BridgeItemKind {
     FileChange,
     DynamicToolCall,
     Error,
+    TaskList,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -46,6 +48,20 @@ pub struct BridgeItem {
     pub ended: bool,
     pub failed: bool,
     pub duration_ms: Option<i64>,
+    pub steps: Vec<BridgeTaskStep>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BridgeTaskStep {
+    pub text: String,
+    pub status: BridgeStepStatus,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BridgeStepStatus {
+    Pending,
+    Running,
+    Completed,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]

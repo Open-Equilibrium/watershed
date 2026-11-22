@@ -48,6 +48,13 @@ def prompt(mid, sid, script):
         for _ in range(int(script[len("stream "):])):
             say(sid, "sixteen bytes ok")
         reason = "end_turn"
+    elif script == "plan":
+        for status in ("in_progress", "completed"):
+            update(sid, {"sessionUpdate": "plan", "entries": [
+                {"content": "Explore", "priority": "medium", "status": status},
+                {"content": "Explore › scraper-1", "priority": "medium", "status": status}]})
+        say(sid, "Planned.")
+        reason = "end_turn"
     elif script == "wait":
         cancelled[sid].wait()
         reason = "cancelled"
@@ -80,7 +87,7 @@ for raw in sys.stdin:
         text = "".join(p.get("text", "") for p in params.get("prompt", []) if p.get("type") == "text")
         lines = [line.split("<")[0].strip() for line in text.splitlines()]
         handoff = "Imported conversation history from the previous host" in text
-        script = "" if handoff else next((line for line in lines if line.startswith(("append ", "stream ")) or line in ("ask", "wait")), "")
+        script = "" if handoff else next((line for line in lines if line.startswith(("append ", "stream ")) or line in ("ask", "wait", "plan")), "")
         threading.Thread(target=prompt, args=(mid, sid, script)).start()
     elif method == "session/cancel":
         cancelled[params["sessionId"]].set()

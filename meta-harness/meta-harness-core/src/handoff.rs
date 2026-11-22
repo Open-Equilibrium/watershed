@@ -68,7 +68,7 @@ struct Message {
 fn message(item: &ChatItem) -> Option<Message> {
     let target = match &item.detail {
         ItemDetail::Tool { target, .. } => target.as_str(),
-        ItemDetail::None => "",
+        ItemDetail::None | ItemDetail::Tasks { .. } => "",
     };
     let (role, kind, body) = match item.kind {
         ItemKind::UserMessage => (Role::User, "user_message", item.text.clone()),
@@ -84,7 +84,7 @@ fn message(item: &ChatItem) -> Option<Message> {
             format!("File change: {target}"),
         ),
         ItemKind::Error => (Role::Assistant, "error", item.text.clone()),
-        ItemKind::Reasoning | ItemKind::DynamicToolCall => return None,
+        ItemKind::Reasoning | ItemKind::DynamicToolCall | ItemKind::TaskList => return None,
     };
     let speaker = match role {
         Role::User => "user",

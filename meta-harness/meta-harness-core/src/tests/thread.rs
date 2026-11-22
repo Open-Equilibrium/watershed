@@ -7,7 +7,7 @@ use tokio::sync::mpsc;
 use super::fake_t3::{Fake, chunk, ok};
 use crate::event::{
     AgentEvent, ApprovalOption, ItemDetail, ItemId, ItemKind, ItemStatus, PendingRequest, Question,
-    Request, RequestId, TurnId, Usage,
+    Request, RequestId, StepStatus, TaskStep, TurnId, Usage,
 };
 use crate::t3::Client;
 use crate::thread::{ChatItem, Snapshot, Thread, ThreadEvent, TurnStatus};
@@ -304,6 +304,84 @@ async fn a_snapshot_shows_turns_chat_items_and_the_requests_waiting_for_the_pers
                     multi_select: true,
                     custom: false,
                 }]),
+            },
+        ]
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_task_list_starts_once_and_reports_each_change_of_its_steps() {
+    let tasks = |status: &str, steps: Value| json!({"id": "t1", "runId": "r1", "type": "todo_list", "status": status, "steps": steps});
+    let step = |text: &str, status: &str| json!({"id": text, "text": text, "status": status});
+    let first = json!([step("Explore", "running")]);
+    let (fake, thread) = follow(
+        projection(json!({
+            "runs": [run("r1", 1, "running", "m1")],
+            "messages": [{"id": "m1", "text": "go"}],
+            "turnItems": [tasks("running", first.clone())],
+        })),
+        5,
+    )
+    .await;
+    let (snapshot, mut events) = thread.subscribe();
+    let shown = |steps: &[(&str, StepStatus)]| ItemDetail::Tasks {
+        steps: steps
+            .iter()
+            .map(|(text, status)| TaskStep {
+                text: (*text).to_owned(),
+                status: *status,
+            })
+            .collect(),
+    };
+    let item = snapshot
+        .transcript
+        .iter()
+        .find(|item| item.kind == ItemKind::TaskList)
+        .expect("the task list is in the transcript");
+    assert_eq!(item.detail, shown(&[("Explore", StepStatus::Running)]));
+
+    let second = json!([
+        step("Explore", "running"),
+        step("Explore › scraper-1", "running")
+    ]);
+    let done = json!([
+        step("Explore", "completed"),
+        step("Explore › scraper-1", "completed")
+    ]);
+    fake.push(
+        SUBSCRIBE,
+        vec![
+            event(6, "turn-item.updated", tasks("running", second.clone())),
+            event(7, "turn-item.updated", tasks("running", second)),
+            event(8, "turn-item.updated", tasks("completed", done)),
+        ],
+    );
+    let seen = until(&fake, &mut events, 9).await;
+
+    assert_eq!(
+        seen,
+        vec![
+            AgentEvent::ItemUpdated {
+                item: item.id,
+                detail: shown(&[
+                    ("Explore", StepStatus::Running),
+                    ("Explore › scraper-1", StepStatus::Running)
+                ]),
+            },
+            AgentEvent::ItemUpdated {
+                item: item.id,
+                detail: shown(&[
+                    ("Explore", StepStatus::Completed),
+                    ("Explore › scraper-1", StepStatus::Completed)
+                ]),
+            },
+            AgentEvent::ItemCompleted {
+                turn: TurnId(1),
+                item: item.id,
+                kind: ItemKind::TaskList,
+                text: String::new(),
+                status: ItemStatus::Completed,
+                duration_ms: None,
             },
         ]
     );

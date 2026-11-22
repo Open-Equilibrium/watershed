@@ -475,6 +475,55 @@ void main() {
       );
     });
 
+    test('a task list keeps its steps when it completes and names the running instances', () async {
+      const running = BridgeStepStatus.running;
+      const completed = BridgeStepStatus.completed;
+      session.turnList = [turnOf(1, status: BridgeTurnStatus.running)];
+      await open(snapshotOf(turns: session.turnList));
+      await emit(
+        startItem(
+          1,
+          1,
+          item(4, BridgeItemKind.taskList, steps: [step('Explore', running)]),
+        ),
+      );
+      final tasks = state.items.value.firstWhere(
+        (item) => item.kind == BridgeItemKind.taskList,
+      );
+      final later = [
+        step('Explore', running),
+        step('Explore › scraper-1', running),
+        step('Explore › scraper-2', completed),
+      ];
+
+      await emit(
+        event(
+          BridgeEventKind.itemUpdated,
+          2,
+          item: item(4, BridgeItemKind.taskList, steps: later),
+        ),
+      );
+      expect(tasks.steps.value, later);
+      expect(state.runningInstances.value, [
+        (name: 'scraper-1', phase: 'Explore'),
+      ]);
+
+      await emit(
+        event(
+          BridgeEventKind.itemCompleted,
+          3,
+          turn: 1,
+          item: item(4, BridgeItemKind.taskList, ended: true),
+          text: '',
+        ),
+      );
+      expect(tasks.steps.value, later);
+
+      session.turnList = [turnOf(1, status: BridgeTurnStatus.aborted)];
+      await emit(event(BridgeEventKind.turnAborted, 4, turn: 1));
+      expect(state.runningInstances.value, isEmpty);
+    });
+
     test('a finished model request adds its tokens to the totals, cached input included', () async {
       await open();
 
@@ -1199,7 +1248,13 @@ void main() {
     group('moves (ADR-0308)', () {
       BridgeTranscriptItem entry(int id, BridgeItemKind kind, String text) =>
           BridgeTranscriptItem(
-            item: BridgeItem(id: id, kind: kind, ended: true, failed: false),
+            item: BridgeItem(
+              id: id,
+              kind: kind,
+              ended: true,
+              failed: false,
+              steps: const [],
+            ),
             turn: 1,
             text: text,
           );

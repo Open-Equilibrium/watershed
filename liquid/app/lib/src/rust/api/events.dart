@@ -7,7 +7,7 @@ import '../frb_generated.dart';
 
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
 
 class BridgeApproval {
   final String kind;
@@ -118,6 +118,7 @@ enum BridgeEventKind {
   rolledBack,
   itemStarted,
   contentDelta,
+  itemUpdated,
   itemCompleted,
   modelRequestCompleted,
   requestOpened,
@@ -168,6 +169,7 @@ class BridgeItem {
   final bool ended;
   final bool failed;
   final PlatformInt64? durationMs;
+  final List<BridgeTaskStep> steps;
 
   const BridgeItem({
     required this.id,
@@ -177,6 +179,7 @@ class BridgeItem {
     required this.ended,
     required this.failed,
     this.durationMs,
+    required this.steps,
   });
 
   @override
@@ -187,7 +190,8 @@ class BridgeItem {
       target.hashCode ^
       ended.hashCode ^
       failed.hashCode ^
-      durationMs.hashCode;
+      durationMs.hashCode ^
+      steps.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -200,7 +204,8 @@ class BridgeItem {
           target == other.target &&
           ended == other.ended &&
           failed == other.failed &&
-          durationMs == other.durationMs;
+          durationMs == other.durationMs &&
+          steps == other.steps;
 }
 
 enum BridgeItemKind {
@@ -211,6 +216,7 @@ enum BridgeItemKind {
   fileChange,
   dynamicToolCall,
   error,
+  taskList,
 }
 
 class BridgeQuestion {
@@ -282,6 +288,26 @@ class BridgeRequest {
           turn == other.turn &&
           approval == other.approval &&
           questions == other.questions;
+}
+
+enum BridgeStepStatus { pending, running, completed }
+
+class BridgeTaskStep {
+  final String text;
+  final BridgeStepStatus status;
+
+  const BridgeTaskStep({required this.text, required this.status});
+
+  @override
+  int get hashCode => text.hashCode ^ status.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeTaskStep &&
+          runtimeType == other.runtimeType &&
+          text == other.text &&
+          status == other.status;
 }
 
 class BridgeUsage {
