@@ -3,12 +3,14 @@ use std::path::Path;
 use std::sync::{Mutex, MutexGuard};
 
 use liquid_core::{
-    Actor, AreaId, BlockId, BlockKind, Created, Document, Error, Origin, PageId, PersonId, Request,
-    Workspace,
+    Actor, AreaId, BlockId, BlockKind, Created, Document, Error, FieldId, Origin, PageId, PersonId,
+    Request, RowQuery, Workspace,
 };
 use liquid_storage::Sqlite;
 
-use super::database::{BridgeDatabase, BridgeFilter, BridgeRow, BridgeSort, row_query};
+use super::database::{
+    BridgeCell, BridgeDatabase, BridgeGroup, BridgeRow, BridgeTab, filter, sort,
+};
 use super::drawing::BridgeDrawing;
 use super::media::BridgeMedia;
 use super::workspace::{
@@ -149,6 +151,7 @@ impl LiquidWorkspace {
             field: None,
             row: None,
             option: None,
+            tab: None,
             elements: Vec::new(),
         };
         match applied.created {
@@ -162,6 +165,7 @@ impl LiquidWorkspace {
             Some(Created::Field(field)) => answer.field = Some(field.to_string()),
             Some(Created::Row(row)) => answer.row = Some(row.to_string()),
             Some(Created::Option(option)) => answer.option = Some(option.to_string()),
+            Some(Created::Tab(tab)) => answer.tab = Some(tab.to_string()),
             Some(Created::Elements(elements)) => {
                 answer.elements = elements.iter().map(ToString::to_string).collect();
             }
@@ -196,6 +200,7 @@ impl LiquidWorkspace {
             drawing: None,
             database: None,
             rows: Vec::new(),
+            groups: Vec::new(),
             tables: Vec::new(),
             shown: Vec::new(),
             icon: None,
@@ -255,8 +260,7 @@ impl LiquidWorkspace {
                             BlockKind::Whiteboard => BridgeBlockKind::Whiteboard,
                             BlockKind::Unknown => BridgeBlockKind::Unknown,
                         },
-                        sort: view.sort.as_ref().map(BridgeSort::of),
-                        filter: view.filter.as_ref().map(BridgeFilter::of),
+                        tabs: view.tabs.iter().map(BridgeTab::of).collect(),
                     })
                     .collect();
             }
@@ -304,16 +308,24 @@ impl LiquidWorkspace {
             }
             BridgeQueryKind::Rows => {
                 let block = id(&query.block, BlockId::parse, "block")?;
-                let mut rows = row_query(&query.sort, &query.filter, start, limit)?;
-                if let Some(search) = &query.search {
-                    if search.chars().count() > liquid_core::MAX_FILTER_TEXT {
-                        return Err("the search is too long".into());
-                    }
-                    rows.search = Some(search.clone());
-                }
-                let rows = workspace.rows(&block, &rows).map_err(message)?;
+                let rows = workspace
+                    .rows(&block, &row_query(query, start, limit)?)
+                    .map_err(message)?;
                 answer.count = rows.count as i64;
                 answer.rows = rows.rows.into_iter().map(BridgeRow::of).collect();
+            }
+            BridgeQueryKind::Groups => {
+                let block = id(&query.block, BlockId::parse, "block")?;
+                let field = id(&query.field, FieldId::parse, "field")?;
+                answer.groups = workspace
+                    .groups(&block, &row_query(query, 0, 0)?, &field)
+                    .map_err(message)?
+                    .into_iter()
+                    .map(|group| BridgeGroup {
+                        value: BridgeCell::of(&group.value),
+                        count: group.count as i64,
+                    })
+                    .collect();
             }
             BridgeQueryKind::Tables => {
                 let tables = workspace.tables().map_err(message)?;
@@ -342,8 +354,7 @@ impl LiquidWorkspace {
                         page: page.to_string(),
                         view: view.to_string(),
                         title: shown.title,
-                        sort: shown.sort.as_ref().map(BridgeSort::of),
-                        filter: shown.filter.as_ref().map(BridgeFilter::of),
+                        tabs: shown.tabs.iter().map(BridgeTab::of).collect(),
                     });
                 }
                 answer.shown = listed;
@@ -425,4 +436,20 @@ impl Inner {
             _ => true,
         });
     }
+}
+
+fn row_query(query: &BridgeQuery, start: usize, limit: usize) -> Result<RowQuery, String> {
+    if let Some(search) = &query.search
+        && search.chars().count() > liquid_core::MAX_FILTER_TEXT
+    {
+        return Err("the search is too long".into());
+    }
+    Ok(RowQuery {
+        sort: sort(&query.sort)?,
+        filter: filter(&query.filter)?,
+        within: filter(&query.within)?,
+        start,
+        limit,
+        search: query.search.clone(),
+    })
 }

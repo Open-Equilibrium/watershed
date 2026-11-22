@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
+use crate::api::database::BridgeLayout;
 use crate::api::replica::LiquidWorkspace;
 use crate::api::workspace::{
     BridgeChange, BridgeMutation, BridgeMutationKind, BridgeQuery, BridgeQueryKind, BridgeResource,
@@ -109,6 +110,9 @@ pub(super) fn mutation(kind: BridgeMutationKind) -> BridgeMutation {
         cell: None,
         sort: None,
         filter: None,
+        tab: None,
+        layout: BridgeLayout::Table,
+        tabs: Vec::new(),
         media_type: None,
         attachment: None,
         drawing_style: None,
@@ -124,8 +128,10 @@ pub(super) fn query(kind: BridgeQueryKind) -> BridgeQuery {
         block: None,
         start: 0,
         limit: MAX_WINDOW,
+        field: None,
         sort: None,
         filter: None,
+        within: None,
         search: None,
     }
 }

@@ -3,7 +3,8 @@
 use liquid_core::{
     Actor, Applied, BlockId, BlockKind, Cell, Changed, Created, Database, Error, FieldId,
     FieldKind, Filter, MAX_FIELDS, MAX_FILTER_TEXT, MAX_OPTIONS, Match, MemoryStore, Mutation,
-    Origin, PageId, PersonId, Place, Request, RowId, RowQuery, Rows, Sort, TextStyle, ViewId,
+    Origin, PageId, PersonId, Place, Request, RowId, RowQuery, Rows, Sort, TabId, TextStyle,
+    ViewId,
 };
 
 type Workspace = liquid_core::Workspace<MemoryStore>;
@@ -49,6 +50,7 @@ impl Sheet {
             page: page.clone(),
             after: None,
             name: "Expenses".into(),
+            layout: liquid_core::Layout::Table,
         };
         let Some(Created::Block { block, .. }) = apply(&mut workspace, add).unwrap().created else {
             panic!("a Database Block")
@@ -143,6 +145,7 @@ fn all() -> RowQuery {
     RowQuery {
         sort: None,
         filter: None,
+        within: None,
         start: 0,
         limit: usize::MAX,
         search: None,
@@ -651,15 +654,25 @@ fn actions_stored_before_places_still_read() {
     }
 }
 
+fn first_tab(workspace: &mut Workspace, page: &PageId, view: &ViewId) -> TabId {
+    let shown = workspace.view(page, view).unwrap().unwrap();
+    shown
+        .tabs
+        .first()
+        .map(|tab| tab.id.clone())
+        .unwrap_or_default()
+}
+
 fn set_sort(
     workspace: &mut Workspace,
     page: &PageId,
     view: &ViewId,
     sort: Option<Sort>,
 ) -> Result<Applied, Error> {
-    let set = Mutation::SetViewSort {
+    let set = Mutation::SetTabSort {
         page: page.clone(),
         view: view.clone(),
+        tab: first_tab(workspace, page, view),
         sort,
     };
     apply(workspace, set)
@@ -676,57 +689,13 @@ fn set_filter(
         field: field.clone(),
         matches,
     });
-    let set = Mutation::SetViewFilter {
+    let set = Mutation::SetTabFilter {
         page: page.clone(),
         view: view.clone(),
+        tab: first_tab(workspace, page, view),
         filter,
     };
     apply(workspace, set)
-}
-
-#[test]
-fn a_view_keeps_its_sort_and_filter() {
-    let mut sheet = Sheet::new();
-    let amount = sheet.field("Amount", FieldKind::Number);
-    let view = sheet.workspace.views(&sheet.page, 0, 1).unwrap().remove(0);
-    assert_eq!((view.sort.clone(), view.filter.clone()), (None, None));
-    let sort = Sort {
-        field: amount.clone(),
-        descending: true,
-    };
-    set_sort(
-        &mut sheet.workspace,
-        &sheet.page,
-        &view.id,
-        Some(sort.clone()),
-    )
-    .unwrap();
-    set_filter(
-        &mut sheet.workspace,
-        &sheet.page,
-        &view.id,
-        &amount,
-        Match::Is(Cell::Number(5.0)),
-    )
-    .unwrap();
-    let filter = Filter {
-        field: amount,
-        matches: Match::Is(Cell::Number(5.0)),
-    };
-    sheet.workspace.close_page(&sheet.page);
-    let read = sheet.workspace.views(&sheet.page, 0, 1).unwrap().remove(0);
-    assert_eq!(read.sort, Some(sort));
-    assert_eq!(read.filter, Some(filter));
-    set_sort(&mut sheet.workspace, &sheet.page, &view.id, None).unwrap();
-    let cleared = Mutation::SetViewFilter {
-        page: sheet.page.clone(),
-        view: view.id.clone(),
-        filter: None,
-    };
-    apply(&mut sheet.workspace, cleared).unwrap();
-    sheet.workspace.close_page(&sheet.page);
-    let read = sheet.workspace.views(&sheet.page, 0, 1).unwrap().remove(0);
-    assert_eq!((read.sort, read.filter), (None, None));
 }
 
 #[test]

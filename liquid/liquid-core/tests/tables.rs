@@ -1,8 +1,9 @@
 #![allow(clippy::unwrap_used)]
 
 use liquid_core::{
-    Actor, AreaId, BlockId, Cell, Changed, Created, Error, FieldKind, Filter, Match, MemoryStore,
-    Mutation, Origin, PageId, PersonId, Place, Request, RowQuery, Sort, View,
+    Actor, AreaId, BlockId, Cell, Changed, Created, Error, FieldKind, Filter, Layout, Match,
+    MemoryStore, Mutation, Origin, PageId, PersonId, Place, Request, RowQuery, Sort, TabSetup,
+    View,
 };
 
 type Workspace = liquid_core::Workspace<MemoryStore>;
@@ -58,6 +59,7 @@ impl Home {
             page: budget.clone(),
             after: None,
             name: "Expenses".into(),
+            layout: liquid_core::Layout::Table,
         };
         let table = match apply(&mut workspace, add).unwrap().created {
             Some(Created::Block { block, .. }) => block,
@@ -86,8 +88,7 @@ impl Home {
             after: None,
             table: self.table.clone(),
             title: title.into(),
-            sort: None,
-            filter: None,
+            tabs: Vec::new(),
         };
         match self.edit(add).unwrap().created {
             Some(Created::Block { view, .. }) => view,
@@ -109,6 +110,7 @@ fn all() -> RowQuery {
     RowQuery {
         sort: None,
         filter: None,
+        within: None,
         start: 0,
         limit: usize::MAX,
         search: None,
@@ -215,6 +217,7 @@ fn a_view_s_title_is_its_own_and_the_first_one_names_an_unnamed_table() {
         page: home.budget.clone(),
         after: None,
         name: String::new(),
+        layout: liquid_core::Layout::Table,
     };
     let Some(Created::Block { view, .. }) = home.edit(add).unwrap().created else {
         panic!("a Table")
@@ -300,25 +303,28 @@ fn a_table_made_in_tables_belongs_to_its_area_and_a_new_view_may_copy_a_setup() 
         field: amount,
         matches: Match::Is(Cell::Number(5.0)),
     };
+    let setup = TabSetup {
+        sort: Some(sort),
+        filter: Some(filter),
+        ..TabSetup::of(Layout::Table)
+    };
     let add = Mutation::AddTableView {
         page: home.review.clone(),
         after: None,
         table: home.table.clone(),
         title: "Big costs".into(),
-        sort: Some(sort.clone()),
-        filter: Some(filter.clone()),
+        tabs: vec![setup.clone()],
     };
     home.edit(add).unwrap();
     let view = home.views(&home.review.clone()).remove(0);
-    assert_eq!((view.sort, view.filter), (Some(sort.clone()), Some(filter)));
+    assert_eq!(view.tabs[0].setup, setup);
 
     let foreign = Mutation::AddTableView {
         page: home.review.clone(),
         after: None,
         table: customers,
         title: "Customers".into(),
-        sort: Some(sort),
-        filter: None,
+        tabs: vec![setup],
     };
     assert_eq!(home.edit(foreign), Err(Error::NotFound));
 }

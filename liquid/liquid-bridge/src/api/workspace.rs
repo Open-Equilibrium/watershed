@@ -1,10 +1,11 @@
 use liquid_core::{
-    AreaId, AttachmentId, BlockId, Changed, Error, FieldId, Mutation, PageId, Place, RowId,
+    AreaId, AttachmentId, BlockId, Changed, Error, FieldId, Mutation, PageId, Place, RowId, TabId,
     TextStyle, ViewId,
 };
 
 use super::database::{
-    BridgeCell, BridgeDatabase, BridgeFieldKind, BridgeFilter, BridgeRow, BridgeSort, row_query,
+    BridgeCell, BridgeDatabase, BridgeFieldKind, BridgeFilter, BridgeGroup, BridgeLayout,
+    BridgeRow, BridgeSort, BridgeTab, filter, sort,
 };
 use super::drawing::{BridgeDrawing, BridgeDrawingEdit, BridgeDrawingStyle};
 use super::media::BridgeMedia;
@@ -21,8 +22,15 @@ pub enum BridgeMutationKind {
     AddTextBlock,
     EditText,
     RemoveView,
-    SetViewSort,
-    SetViewFilter,
+    AddTab,
+    RenameTab,
+    SetTabLayout,
+    SetTabGroup,
+    SetTabDate,
+    SetTabSort,
+    SetTabFilter,
+    MoveTab,
+    RemoveTab,
     SplitTextBlock,
     JoinTextBlock,
     SetTextStyle,
@@ -37,6 +45,7 @@ pub enum BridgeMutationKind {
     AddDatabaseBlock,
     CreateTable,
     AddTableView,
+    DuplicateTable,
     RenameView,
     DeleteTable,
     RenameDatabase,
@@ -114,6 +123,9 @@ pub struct BridgeMutation {
     pub cell: Option<BridgeCell>,
     pub sort: Option<BridgeSort>,
     pub filter: Option<BridgeFilter>,
+    pub tab: Option<String>,
+    pub layout: BridgeLayout,
+    pub tabs: Vec<BridgeTab>,
     pub media_type: Option<String>,
     pub attachment: Option<String>,
     pub drawing_style: Option<BridgeDrawingStyle>,
@@ -130,6 +142,7 @@ pub struct BridgeApplied {
     pub field: Option<String>,
     pub row: Option<String>,
     pub option: Option<String>,
+    pub tab: Option<String>,
     pub elements: Vec<String>,
 }
 
@@ -145,6 +158,7 @@ pub enum BridgeQueryKind {
     Drawing,
     Database,
     Rows,
+    Groups,
     Tables,
     TableViews,
 }
@@ -157,8 +171,10 @@ pub struct BridgeQuery {
     pub block: Option<String>,
     pub start: i64,
     pub limit: i64,
+    pub field: Option<String>,
     pub sort: Option<BridgeSort>,
     pub filter: Option<BridgeFilter>,
+    pub within: Option<BridgeFilter>,
     pub search: Option<String>,
 }
 
@@ -187,8 +203,7 @@ pub struct BridgeShown {
     pub page: String,
     pub view: String,
     pub title: String,
-    pub sort: Option<BridgeSort>,
-    pub filter: Option<BridgeFilter>,
+    pub tabs: Vec<BridgeTab>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -208,8 +223,7 @@ pub struct BridgeView {
     pub title: String,
     pub boundary: bool,
     pub kind: BridgeBlockKind,
-    pub sort: Option<BridgeSort>,
-    pub filter: Option<BridgeFilter>,
+    pub tabs: Vec<BridgeTab>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -225,6 +239,7 @@ pub struct BridgeAnswer {
     pub drawing: Option<BridgeDrawing>,
     pub database: Option<BridgeDatabase>,
     pub rows: Vec<BridgeRow>,
+    pub groups: Vec<BridgeGroup>,
     pub tables: Vec<BridgeTable>,
     pub shown: Vec<BridgeShown>,
     pub icon: Option<String>,
@@ -316,6 +331,14 @@ impl BridgeMutation {
         let block = || id(&self.block, BlockId::parse, "block");
         let field = || id(&self.field, FieldId::parse, "field");
         let row = || id(&self.row, RowId::parse, "row");
+        let view = || id(&self.view, ViewId::parse, "view");
+        let tab = || id(&self.tab, TabId::parse, "tab");
+        let tabs = || {
+            self.tabs
+                .iter()
+                .map(BridgeTab::to_core)
+                .collect::<Result<Vec<_>, _>>()
+        };
         Ok(match self.kind {
             BridgeMutationKind::RenameWorkspace => Mutation::RenameWorkspace { name: text()? },
             BridgeMutationKind::SetWorkspaceIcon => Mutation::SetWorkspaceIcon { icon: text()? },
@@ -345,15 +368,58 @@ impl BridgeMutation {
                 page: id(&self.page, PageId::parse, "page")?,
                 view: id(&self.view, ViewId::parse, "view")?,
             },
-            BridgeMutationKind::SetViewSort => Mutation::SetViewSort {
-                page: id(&self.page, PageId::parse, "page")?,
-                view: id(&self.view, ViewId::parse, "view")?,
-                sort: row_query(&self.sort, &None, 0, 0)?.sort,
+            BridgeMutationKind::AddTab => Mutation::AddTab {
+                page: page()?,
+                view: view()?,
+                after: optional_id(&self.after, TabId::parse, "after")?,
+                setup: Box::new(self.tabs.first().ok_or("tabs is empty")?.to_core()?),
             },
-            BridgeMutationKind::SetViewFilter => Mutation::SetViewFilter {
-                page: id(&self.page, PageId::parse, "page")?,
-                view: id(&self.view, ViewId::parse, "view")?,
-                filter: row_query(&None, &self.filter, 0, 0)?.filter,
+            BridgeMutationKind::RenameTab => Mutation::RenameTab {
+                page: page()?,
+                view: view()?,
+                tab: tab()?,
+                name: text()?,
+            },
+            BridgeMutationKind::SetTabLayout => Mutation::SetTabLayout {
+                page: page()?,
+                view: view()?,
+                tab: tab()?,
+                layout: self.layout.to_core(),
+            },
+            BridgeMutationKind::SetTabGroup => Mutation::SetTabGroup {
+                page: page()?,
+                view: view()?,
+                tab: tab()?,
+                group: optional_id(&self.field, FieldId::parse, "field")?,
+            },
+            BridgeMutationKind::SetTabDate => Mutation::SetTabDate {
+                page: page()?,
+                view: view()?,
+                tab: tab()?,
+                date: optional_id(&self.field, FieldId::parse, "field")?,
+            },
+            BridgeMutationKind::SetTabSort => Mutation::SetTabSort {
+                page: page()?,
+                view: view()?,
+                tab: tab()?,
+                sort: sort(&self.sort)?,
+            },
+            BridgeMutationKind::SetTabFilter => Mutation::SetTabFilter {
+                page: page()?,
+                view: view()?,
+                tab: tab()?,
+                filter: filter(&self.filter)?,
+            },
+            BridgeMutationKind::MoveTab => Mutation::MoveTab {
+                page: page()?,
+                view: view()?,
+                tab: tab()?,
+                after: optional_id(&self.after, TabId::parse, "after")?,
+            },
+            BridgeMutationKind::RemoveTab => Mutation::RemoveTab {
+                page: page()?,
+                view: view()?,
+                tab: tab()?,
             },
             BridgeMutationKind::SplitTextBlock => Mutation::SplitTextBlock {
                 page: id(&self.page, PageId::parse, "page")?,
@@ -426,6 +492,14 @@ impl BridgeMutation {
                 page: page()?,
                 after: optional_id(&self.after, ViewId::parse, "after")?,
                 name: text()?,
+                layout: self.layout.to_core(),
+            },
+            BridgeMutationKind::DuplicateTable => Mutation::DuplicateTable {
+                page: page()?,
+                after: optional_id(&self.after, ViewId::parse, "after")?,
+                table: block()?,
+                name: text()?,
+                tabs: tabs()?,
             },
             BridgeMutationKind::CreateTable => Mutation::CreateTable {
                 area: id(&self.area, AreaId::parse, "area")?,
@@ -436,8 +510,7 @@ impl BridgeMutation {
                 after: optional_id(&self.after, ViewId::parse, "after")?,
                 table: block()?,
                 title: text()?,
-                sort: row_query(&self.sort, &None, 0, 0)?.sort,
-                filter: row_query(&None, &self.filter, 0, 0)?.filter,
+                tabs: tabs()?,
             },
             BridgeMutationKind::RenameView => Mutation::RenameView {
                 page: page()?,

@@ -25,6 +25,7 @@ class BridgeAnswer {
   final BridgeDrawing? drawing;
   final BridgeDatabase? database;
   final List<BridgeRow> rows;
+  final List<BridgeGroup> groups;
   final List<BridgeTable> tables;
   final List<BridgeShown> shown;
   final String? icon;
@@ -41,6 +42,7 @@ class BridgeAnswer {
     this.drawing,
     this.database,
     required this.rows,
+    required this.groups,
     required this.tables,
     required this.shown,
     this.icon,
@@ -59,6 +61,7 @@ class BridgeAnswer {
       drawing.hashCode ^
       database.hashCode ^
       rows.hashCode ^
+      groups.hashCode ^
       tables.hashCode ^
       shown.hashCode ^
       icon.hashCode;
@@ -79,6 +82,7 @@ class BridgeAnswer {
           drawing == other.drawing &&
           database == other.database &&
           rows == other.rows &&
+          groups == other.groups &&
           tables == other.tables &&
           shown == other.shown &&
           icon == other.icon;
@@ -93,6 +97,7 @@ class BridgeApplied {
   final String? field;
   final String? row;
   final String? option;
+  final String? tab;
   final List<String> elements;
 
   const BridgeApplied({
@@ -104,6 +109,7 @@ class BridgeApplied {
     this.field,
     this.row,
     this.option,
+    this.tab,
     required this.elements,
   });
 
@@ -117,6 +123,7 @@ class BridgeApplied {
       field.hashCode ^
       row.hashCode ^
       option.hashCode ^
+      tab.hashCode ^
       elements.hashCode;
 
   @override
@@ -132,6 +139,7 @@ class BridgeApplied {
           field == other.field &&
           row == other.row &&
           option == other.option &&
+          tab == other.tab &&
           elements == other.elements;
 }
 
@@ -194,6 +202,9 @@ class BridgeMutation {
   final BridgeCell? cell;
   final BridgeSort? sort;
   final BridgeFilter? filter;
+  final String? tab;
+  final BridgeLayout layout;
+  final List<BridgeTab> tabs;
   final String? mediaType;
   final String? attachment;
   final BridgeDrawingStyle? drawingStyle;
@@ -220,6 +231,9 @@ class BridgeMutation {
     this.cell,
     this.sort,
     this.filter,
+    this.tab,
+    required this.layout,
+    required this.tabs,
     this.mediaType,
     this.attachment,
     this.drawingStyle,
@@ -248,6 +262,9 @@ class BridgeMutation {
       cell.hashCode ^
       sort.hashCode ^
       filter.hashCode ^
+      tab.hashCode ^
+      layout.hashCode ^
+      tabs.hashCode ^
       mediaType.hashCode ^
       attachment.hashCode ^
       drawingStyle.hashCode ^
@@ -278,6 +295,9 @@ class BridgeMutation {
           cell == other.cell &&
           sort == other.sort &&
           filter == other.filter &&
+          tab == other.tab &&
+          layout == other.layout &&
+          tabs == other.tabs &&
           mediaType == other.mediaType &&
           attachment == other.attachment &&
           drawingStyle == other.drawingStyle &&
@@ -293,8 +313,15 @@ enum BridgeMutationKind {
   addTextBlock,
   editText,
   removeView,
-  setViewSort,
-  setViewFilter,
+  addTab,
+  renameTab,
+  setTabLayout,
+  setTabGroup,
+  setTabDate,
+  setTabSort,
+  setTabFilter,
+  moveTab,
+  removeTab,
   splitTextBlock,
   joinTextBlock,
   setTextStyle,
@@ -309,6 +336,7 @@ enum BridgeMutationKind {
   addDatabaseBlock,
   createTable,
   addTableView,
+  duplicateTable,
   renameView,
   deleteTable,
   renameDatabase,
@@ -348,8 +376,10 @@ class BridgeQuery {
   final String? block;
   final PlatformInt64 start;
   final PlatformInt64 limit;
+  final String? field;
   final BridgeSort? sort;
   final BridgeFilter? filter;
+  final BridgeFilter? within;
   final String? search;
 
   const BridgeQuery({
@@ -359,8 +389,10 @@ class BridgeQuery {
     this.block,
     required this.start,
     required this.limit,
+    this.field,
     this.sort,
     this.filter,
+    this.within,
     this.search,
   });
 
@@ -372,8 +404,10 @@ class BridgeQuery {
       block.hashCode ^
       start.hashCode ^
       limit.hashCode ^
+      field.hashCode ^
       sort.hashCode ^
       filter.hashCode ^
+      within.hashCode ^
       search.hashCode;
 
   @override
@@ -387,8 +421,10 @@ class BridgeQuery {
           block == other.block &&
           start == other.start &&
           limit == other.limit &&
+          field == other.field &&
           sort == other.sort &&
           filter == other.filter &&
+          within == other.within &&
           search == other.search;
 }
 
@@ -403,6 +439,7 @@ enum BridgeQueryKind {
   drawing,
   database,
   rows,
+  groups,
   tables,
   tableViews,
 }
@@ -436,24 +473,18 @@ class BridgeShown {
   final String page;
   final String view;
   final String title;
-  final BridgeSort? sort;
-  final BridgeFilter? filter;
+  final List<BridgeTab> tabs;
 
   const BridgeShown({
     required this.page,
     required this.view,
     required this.title,
-    this.sort,
-    this.filter,
+    required this.tabs,
   });
 
   @override
   int get hashCode =>
-      page.hashCode ^
-      view.hashCode ^
-      title.hashCode ^
-      sort.hashCode ^
-      filter.hashCode;
+      page.hashCode ^ view.hashCode ^ title.hashCode ^ tabs.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -463,8 +494,7 @@ class BridgeShown {
           page == other.page &&
           view == other.view &&
           title == other.title &&
-          sort == other.sort &&
-          filter == other.filter;
+          tabs == other.tabs;
 }
 
 class BridgeTable {
@@ -505,8 +535,7 @@ class BridgeView {
   final String title;
   final bool boundary;
   final BridgeBlockKind kind;
-  final BridgeSort? sort;
-  final BridgeFilter? filter;
+  final List<BridgeTab> tabs;
 
   const BridgeView({
     required this.id,
@@ -514,8 +543,7 @@ class BridgeView {
     required this.title,
     required this.boundary,
     required this.kind,
-    this.sort,
-    this.filter,
+    required this.tabs,
   });
 
   @override
@@ -525,8 +553,7 @@ class BridgeView {
       title.hashCode ^
       boundary.hashCode ^
       kind.hashCode ^
-      sort.hashCode ^
-      filter.hashCode;
+      tabs.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -538,6 +565,5 @@ class BridgeView {
           title == other.title &&
           boundary == other.boundary &&
           kind == other.kind &&
-          sort == other.sort &&
-          filter == other.filter;
+          tabs == other.tabs;
 }

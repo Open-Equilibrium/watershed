@@ -8,12 +8,13 @@ mod mutation;
 mod order;
 mod sort_key;
 mod store;
+mod tab;
 mod workspace;
 
 pub use attachment::{Attachment, AttachmentId, MAX_ATTACHMENT, Media, PART, Upload};
 pub use database::{
-    Database, Field, Filter, MAX_FIELDS, MAX_FILES, MAX_FILTER_TEXT, MAX_OPTIONS, Match, Row,
-    RowQuery, Rows, SelectOption, Sort,
+    Database, Field, Filter, Group, MAX_FIELDS, MAX_FILES, MAX_FILTER_TEXT, MAX_OPTIONS, Match,
+    Row, RowQuery, Rows, SelectOption, Sort,
 };
 pub use drawing::{
     Content, Drawing, DrawingStyle, Element, ElementChange, Frame, InkColor, MAX_BOARD_POINTS,
@@ -22,7 +23,7 @@ pub use drawing::{
 };
 pub use history::{Action, Document, Operation, Permission};
 pub use id::{
-    ActionId, AreaId, BlockId, ElementId, FieldId, OptionId, PageId, PersonId, RowId, ViewId,
+    ActionId, AreaId, BlockId, ElementId, FieldId, OptionId, PageId, PersonId, RowId, TabId, ViewId,
 };
 pub use model::{Area, BlockKind, Code, PageEntry, TableEntry, View};
 pub use mutation::{
@@ -30,6 +31,7 @@ pub use mutation::{
     TextStyle,
 };
 pub use store::{Commit, MemoryStore, Store, Write};
+pub use tab::{Layout, MAX_TABS, Tab, TabSetup};
 pub use workspace::Workspace;
 
 #[cfg(test)]

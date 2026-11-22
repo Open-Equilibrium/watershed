@@ -210,6 +210,7 @@ fn history_keeps_a_number_cell_exactly() {
         page: page.clone(),
         after: None,
         name: "Expenses".into(),
+        layout: liquid_core::Layout::Table,
     };
     let Some(Created::Block { block, .. }) = apply(&mut workspace, add) else {
         panic!("a Database")

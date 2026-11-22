@@ -8,7 +8,7 @@ use crate::history::Header;
 use crate::id::random_bytes;
 use crate::model::{
     self, AREA, AREAS, BLOCK, BLOCKS, BOUNDARY, ICON, KIND, LANGUAGE, NAME, OWNER, PAGE, PAGES,
-    PARENT, ROW_FILTER, ROW_SORT, SORT, STYLE, TABLE, TABLES, TEXT, TITLE, VIEWS,
+    PARENT, SORT, STYLE, TABLE, TABLES, TEXT, TITLE, VIEWS,
 };
 
 const MAX_ICON: usize = 64;
@@ -16,11 +16,11 @@ use crate::order::Order;
 use crate::store::{Commit, Store, Write};
 use crate::{
     Action, ActionId, Actor, Applied, Area, AreaId, AttachmentId, BlockId, BlockKind, Cell,
-    Changed, Code, Created, Document, Error, FieldId, Media, Mutation, Operation, Origin,
-    PageEntry, PageId, Permission, PersonId, Place, Request, RowId, TableEntry, TextStyle, View,
-    ViewId,
+    Changed, Code, Created, Document, Error, FieldId, FieldKind, Layout, Media, Mutation,
+    Operation, Origin, PageEntry, PageId, Permission, PersonId, Place, Request, RowId, TabId,
+    TabSetup, TableEntry, TextStyle, View, ViewId,
 };
-use crate::{database, drawing};
+use crate::{database, drawing, tab};
 
 const COMPACT_AFTER: usize = 1_000;
 
@@ -223,6 +223,19 @@ impl<S: Store> Workspace<S> {
         database::rows(doc, index, table, query)
     }
 
+    pub fn groups(
+        &mut self,
+        table: &BlockId,
+        query: &database::RowQuery,
+        field: &FieldId,
+    ) -> Result<Vec<database::Group>, Error> {
+        if self.table_name(table)?.is_none() {
+            return Err(Error::NotFound);
+        }
+        let (doc, index) = self.database_index(table)?;
+        database::groups(doc, index, table, query, field)
+    }
+
     pub fn table_views(&mut self, table: &BlockId) -> Result<Vec<(PageId, ViewId)>, Error> {
         if self.table_name(table)?.is_none() {
             return Err(Error::NotFound);
@@ -396,11 +409,21 @@ impl<S: Store> Workspace<S> {
                 let created = (!ids.is_empty()).then_some(Created::Elements(ids));
                 Ok(block_changed(page, block, created))
             }
-            Mutation::AddDatabaseBlock { page, after, name } => {
-                self.write_add_database_block(page, after.as_ref(), name)
-            }
+            Mutation::AddDatabaseBlock {
+                page,
+                after,
+                name,
+                layout,
+            } => self.write_add_database_block(page, after.as_ref(), name, *layout),
+            Mutation::DuplicateTable {
+                page,
+                after,
+                table,
+                name,
+                tabs,
+            } => self.write_duplicate_table(page, after.as_ref(), table, name, tabs),
             Mutation::CreateTable { area, name } => {
-                let (table, mut written) = self.write_create_table(area, name)?;
+                let (table, mut written) = self.write_create_table(area, name, None)?;
                 written.created = Some(Created::Table(table));
                 Ok(written)
             }
@@ -409,15 +432,8 @@ impl<S: Store> Workspace<S> {
                 after,
                 table,
                 title,
-                sort,
-                filter,
-            } => self.write_add_table_view(
-                page,
-                after.as_ref(),
-                table,
-                title,
-                (sort.as_ref(), filter.as_ref()),
-            ),
+                tabs,
+            } => self.write_add_table_view(page, after.as_ref(), table, title, tabs),
             Mutation::RenameView { page, view, title } => self.write_rename_view(page, view, title),
             Mutation::DeleteTable { block } => self.write_delete_table(block),
             Mutation::RenameDatabase { block, name } => self.write_rename_database(block, name),
@@ -468,12 +484,59 @@ impl<S: Store> Workspace<S> {
                 value,
             } => self.write_set_cell(block, row, field, value),
             Mutation::RemoveView { page, view } => self.write_remove_view(page, view),
-            Mutation::SetViewSort { page, view, sort } => {
-                self.write_view_sort(page, view, sort.as_ref())
-            }
-            Mutation::SetViewFilter { page, view, filter } => {
-                self.write_view_filter(page, view, filter.as_ref())
-            }
+            Mutation::AddTab {
+                page,
+                view,
+                after,
+                setup,
+            } => self.write_add_tab(page, view, after.as_ref(), setup),
+            Mutation::RenameTab {
+                page,
+                view,
+                tab,
+                name,
+            } => self.write_tab(page, view, tab, |setup| setup.name.clone_from(name)),
+            Mutation::SetTabLayout {
+                page,
+                view,
+                tab,
+                layout,
+            } => self.write_tab(page, view, tab, |setup| setup.layout = *layout),
+            Mutation::SetTabGroup {
+                page,
+                view,
+                tab,
+                group,
+            } => self.write_tab(page, view, tab, |setup| setup.group.clone_from(group)),
+            Mutation::SetTabDate {
+                page,
+                view,
+                tab,
+                date,
+            } => self.write_tab(page, view, tab, |setup| setup.date.clone_from(date)),
+            Mutation::SetTabSort {
+                page,
+                view,
+                tab,
+                sort,
+            } => self.write_tab(page, view, tab, |setup| setup.sort.clone_from(sort)),
+            Mutation::SetTabFilter {
+                page,
+                view,
+                tab,
+                filter,
+            } => self.write_tab(page, view, tab, |setup| setup.filter.clone_from(filter)),
+            Mutation::MoveTab {
+                page,
+                view,
+                tab,
+                after,
+            } => self.write_tabs(page, view, |doc, entry| {
+                tab::move_after(doc, entry, tab, after.as_ref()).map(|()| None)
+            }),
+            Mutation::RemoveTab { page, view, tab } => self.write_tabs(page, view, |doc, entry| {
+                tab::remove(doc, entry, tab).map(|()| None)
+            }),
         }
     }
 
@@ -796,13 +859,60 @@ impl<S: Store> Workspace<S> {
         page: &PageId,
         after: Option<&ViewId>,
         name: &str,
+        layout: Layout,
     ) -> Result<Written, Error> {
         let area = self.area_of(page)?;
-        let (table, mut written) = self.write_create_table(&area, name)?;
+        let (table, mut written) = self.write_create_table(&area, name, None)?;
+        let (_, doc) = written.new.last_mut().expect("the new Table");
+        let mut setup = TabSetup::of(layout);
+        match layout {
+            Layout::Table => {}
+            Layout::Board => {
+                let status =
+                    database::add_field(doc, &table, Place::Last, "Status", FieldKind::Select)?;
+                for (color, option) in ["Not started", "In progress", "Done"].iter().enumerate() {
+                    database::add_option(doc, &table, &status, option, color as u8)?;
+                }
+                setup.group = Some(status);
+            }
+            Layout::Calendar => {
+                let date = database::add_field(doc, &table, Place::Last, "Date", FieldKind::Date)?;
+                setup.date = Some(date);
+            }
+        }
+        self.show_new_table(written, page, after, &table, name, &[setup])
+    }
+
+    fn write_duplicate_table(
+        &mut self,
+        page: &PageId,
+        after: Option<&ViewId>,
+        source: &BlockId,
+        name: &str,
+        tabs: &[TabSetup],
+    ) -> Result<Written, Error> {
+        let doc = self.table_doc(source)?;
+        for setup in tabs {
+            tab::check(doc, source, None, setup)?;
+        }
+        let area = self.area_of(page)?;
+        let (table, written) = self.write_create_table(&area, name, Some(source))?;
+        self.show_new_table(written, page, after, &table, name, tabs)
+    }
+
+    fn show_new_table(
+        &mut self,
+        mut written: Written,
+        page: &PageId,
+        after: Option<&ViewId>,
+        table: &BlockId,
+        title: &str,
+        tabs: &[TabSetup],
+    ) -> Result<Written, Error> {
         let view = ViewId::new()?;
         let (_, doc) = written.new.last_mut().expect("the new Table");
         model::insert(doc, VIEWS, view.as_str(), &[(PAGE, page.as_str())])?;
-        let shown = self.place_table_view(page, after, &table, &view, name, (None, None))?;
+        let shown = self.place_table_view(page, after, table, &view, title, tabs)?;
         written.touched.extend(shown.touched);
         written.changed.extend(shown.changed);
         written.created = shown.created;
@@ -813,6 +923,7 @@ impl<S: Store> Workspace<S> {
         &mut self,
         area: &AreaId,
         name: &str,
+        source: Option<&BlockId>,
     ) -> Result<(BlockId, Written), Error> {
         self.doc(&Document::Area(area.clone()))?;
         let table = BlockId::new()?;
@@ -830,7 +941,10 @@ impl<S: Store> Workspace<S> {
         )?;
         let mut doc = model::document(&self.device);
         model::create_maps(&mut doc, &[BLOCKS, VIEWS])?;
-        database::create(&mut doc, &table)?;
+        match source {
+            Some(source) => database::copy(self.table_doc(source)?, source, &mut doc, &table)?,
+            None => database::create(&mut doc, &table)?,
+        }
         let mut written = Written::new(Document::Workspace, Changed::Tables);
         written.touched.push(Document::Table(table.clone()));
         written.new.push((Document::Table(table.clone()), doc));
@@ -843,21 +957,19 @@ impl<S: Store> Workspace<S> {
         after: Option<&ViewId>,
         table: &BlockId,
         title: &str,
-        (sort, filter): (Option<&database::Sort>, Option<&database::Filter>),
+        tabs: &[TabSetup],
     ) -> Result<Written, Error> {
+        let first = [TabSetup::of(Layout::Table)];
+        let tabs = if tabs.is_empty() { &first[..] } else { tabs };
         let view = ViewId::new()?;
         {
             let doc = self.table_doc(table)?;
-            if let Some(sort) = sort {
-                database::check_sort(doc, table, sort)?;
-            }
-            if let Some(filter) = filter {
-                database::check_filter(doc, table, filter)?;
+            for setup in tabs {
+                tab::check(doc, table, None, setup)?;
             }
             model::insert(doc, VIEWS, view.as_str(), &[(PAGE, page.as_str())])?;
         }
-        let mut written =
-            self.place_table_view(page, after, table, &view, title, (sort, filter))?;
+        let mut written = self.place_table_view(page, after, table, &view, title, tabs)?;
         written.touched.push(Document::Table(table.clone()));
         written.changed.push(Changed::Table(table.clone()));
         Ok(written)
@@ -870,7 +982,7 @@ impl<S: Store> Workspace<S> {
         table: &BlockId,
         view: &ViewId,
         title: &str,
-        (sort, filter): (Option<&database::Sort>, Option<&database::Filter>),
+        tabs: &[TabSetup],
     ) -> Result<Written, Error> {
         let (doc, order) = self.page(page)?;
         let key = order.key_after(after)?;
@@ -881,8 +993,15 @@ impl<S: Store> Workspace<S> {
             &[(TABLE, table.as_str()), (TITLE, title), (SORT, &key)],
         )?;
         doc.put(&entry, BOUNDARY, false)?;
-        put_setting(doc, view, ROW_SORT, sort)?;
-        put_setting(doc, view, ROW_FILTER, filter)?;
+        let mut last = None;
+        for setup in tabs {
+            last = Some(tab::add(
+                doc,
+                &entry,
+                last.as_ref().map_or(Place::First, Place::After),
+                setup,
+            )?);
+        }
         order.insert(
             key,
             View {
@@ -891,8 +1010,7 @@ impl<S: Store> Workspace<S> {
                 title: title.to_string(),
                 boundary: false,
                 kind: BlockKind::Database,
-                sort: sort.cloned(),
-                filter: filter.cloned(),
+                tabs: tab::read(doc, &entry),
             },
         );
         let mut written = Written::new(Document::Page(page.clone()), Changed::Views(page.clone()));
@@ -1018,42 +1136,58 @@ impl<S: Store> Workspace<S> {
         Ok(written)
     }
 
-    fn write_view_sort(
+    fn write_add_tab(
         &mut self,
         page: &PageId,
         view: &ViewId,
-        sort: Option<&database::Sort>,
+        after: Option<&TabId>,
+        setup: &TabSetup,
     ) -> Result<Written, Error> {
-        let block = table_of(self.page(page)?.1, view)?;
-        if let Some(sort) = sort {
-            database::check_sort(self.table_doc(&block)?, &block, sort)?;
-        }
-        let (doc, order) = self.page(page)?;
-        put_setting(doc, view, ROW_SORT, sort)?;
-        order.set_sort(view, sort.cloned());
-        Ok(Written::new(
-            Document::Page(page.clone()),
-            Changed::Views(page.clone()),
-        ))
+        let table = table_of(self.page(page)?.1, view)?;
+        tab::check(self.table_doc(&table)?, &table, None, setup)?;
+        self.write_tabs(page, view, |doc, entry| {
+            let place = after.map_or(Place::First, Place::After);
+            tab::add(doc, entry, place, setup).map(Some)
+        })
     }
 
-    fn write_view_filter(
+    fn write_tab(
         &mut self,
         page: &PageId,
         view: &ViewId,
-        filter: Option<&database::Filter>,
+        tab: &TabId,
+        change: impl FnOnce(&mut TabSetup),
     ) -> Result<Written, Error> {
-        let block = table_of(self.page(page)?.1, view)?;
-        if let Some(filter) = filter {
-            database::check_filter(self.table_doc(&block)?, &block, filter)?;
-        }
+        let order = self.page(page)?.1;
+        let table = table_of(order, view)?;
+        let before = order
+            .view(view)
+            .and_then(|shown| shown.tabs.iter().find(|shown| &shown.id == tab))
+            .ok_or(Error::NotFound)?
+            .setup
+            .clone();
+        let mut after = before.clone();
+        change(&mut after);
+        tab::check(self.table_doc(&table)?, &table, Some(&before), &after)?;
+        self.write_tabs(page, view, |doc, entry| {
+            tab::set(doc, entry, tab, &before, &after).map(|()| None)
+        })
+    }
+
+    fn write_tabs(
+        &mut self,
+        page: &PageId,
+        view: &ViewId,
+        change: impl FnOnce(&mut AutoCommit, &automerge::ObjId) -> Result<Option<TabId>, Error>,
+    ) -> Result<Written, Error> {
         let (doc, order) = self.page(page)?;
-        put_setting(doc, view, ROW_FILTER, filter)?;
-        order.set_filter(view, filter.cloned());
-        Ok(Written::new(
-            Document::Page(page.clone()),
-            Changed::Views(page.clone()),
-        ))
+        table_of(order, view)?;
+        let entry = model::live(doc, VIEWS, view.as_str()).ok_or(Error::NotFound)?;
+        let created = change(doc, &entry)?;
+        order.set_tabs(view, tab::read(doc, &entry));
+        let mut written = Written::new(Document::Page(page.clone()), Changed::Views(page.clone()));
+        written.created = created.map(Created::Tab);
+        Ok(written)
     }
 
     fn rollback(&mut self) {
@@ -1165,24 +1299,6 @@ fn table_of(order: &Order, view: &ViewId) -> Result<BlockId, Error> {
     Ok(shown.block.clone())
 }
 
-fn put_setting<T: serde::Serialize>(
-    doc: &mut AutoCommit,
-    view: &ViewId,
-    key: &str,
-    value: Option<&T>,
-) -> Result<(), Error> {
-    let entry = model::live(doc, VIEWS, view.as_str()).ok_or(Error::NotFound)?;
-    match value {
-        Some(value) => {
-            let json = serde_json::to_string(value).map_err(|_| Error::WrongKind)?;
-            doc.put(&entry, key, json)?;
-        }
-        None if doc.get(&entry, key)?.is_some() => doc.delete(&entry, key)?,
-        None => {}
-    }
-    Ok(())
-}
-
 fn add_view(
     doc: &mut AutoCommit,
     order: &mut Order,
@@ -1210,8 +1326,7 @@ fn add_view(
         title: String::new(),
         boundary: false,
         kind,
-        sort: None,
-        filter: None,
+        tabs: Vec::new(),
     };
     order.insert(sort, placed);
     Ok(view)

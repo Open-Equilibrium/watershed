@@ -295,6 +295,7 @@ fn a_file_cell_holds_files_of_finished_attachments() {
             page: page.clone(),
             after: Some(intro),
             name: "Bookings".into(),
+            layout: liquid_core::Layout::Table,
         },
     )
     .unwrap() else {
@@ -342,6 +343,7 @@ fn a_file_cell_holds_files_of_finished_attachments() {
             field: files.clone(),
             matches: Match::NotEmpty,
         }),
+        within: None,
         start: 0,
         limit: 10,
         search: None,

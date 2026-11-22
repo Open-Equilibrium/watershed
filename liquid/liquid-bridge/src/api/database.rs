@@ -1,5 +1,5 @@
 use liquid_core::{
-    Cell, Database, FieldId, FieldKind, Filter, Match, OptionId, Row, RowQuery, Sort,
+    Cell, Database, FieldId, FieldKind, Filter, Layout, Match, OptionId, Row, Sort, Tab, TabSetup,
 };
 
 use super::media::BridgeMedia;
@@ -82,7 +82,7 @@ impl BridgeCell {
         })
     }
 
-    fn of(cell: &Cell) -> Self {
+    pub(crate) fn of(cell: &Cell) -> Self {
         if let Cell::Files(files) = cell {
             return Self {
                 kind: BridgeCellKind::Files,
@@ -123,6 +123,7 @@ pub enum BridgeMatch {
     NotEmpty,
     Is,
     Contains,
+    Between,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -130,6 +131,80 @@ pub struct BridgeFilter {
     pub field: String,
     pub matches: BridgeMatch,
     pub value: Option<BridgeCell>,
+    pub until: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BridgeLayout {
+    Table,
+    Board,
+    Calendar,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct BridgeTab {
+    pub id: String,
+    pub name: String,
+    pub layout: BridgeLayout,
+    pub group: Option<String>,
+    pub date: Option<String>,
+    pub sort: Option<BridgeSort>,
+    pub filter: Option<BridgeFilter>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct BridgeGroup {
+    pub value: BridgeCell,
+    pub count: i64,
+}
+
+impl BridgeLayout {
+    pub(crate) fn of(layout: Layout) -> Self {
+        match layout {
+            Layout::Table => Self::Table,
+            Layout::Board => Self::Board,
+            Layout::Calendar => Self::Calendar,
+        }
+    }
+
+    pub(crate) fn to_core(self) -> Layout {
+        match self {
+            Self::Table => Layout::Table,
+            Self::Board => Layout::Board,
+            Self::Calendar => Layout::Calendar,
+        }
+    }
+}
+
+impl BridgeTab {
+    pub(crate) fn of(tab: &Tab) -> Self {
+        let setup = &tab.setup;
+        Self {
+            id: tab.id.to_string(),
+            name: setup.name.clone(),
+            layout: BridgeLayout::of(setup.layout),
+            group: setup.group.as_ref().map(ToString::to_string),
+            date: setup.date.as_ref().map(ToString::to_string),
+            sort: setup.sort.as_ref().map(BridgeSort::of),
+            filter: setup.filter.as_ref().map(BridgeFilter::of),
+        }
+    }
+
+    pub(crate) fn to_core(&self) -> Result<TabSetup, String> {
+        let field = |text: &Option<String>, what| {
+            text.as_ref()
+                .map(|_| id(text, FieldId::parse, what))
+                .transpose()
+        };
+        Ok(TabSetup {
+            name: self.name.clone(),
+            layout: self.layout.to_core(),
+            group: field(&self.group, "group")?,
+            date: field(&self.date, "date")?,
+            sort: sort(&self.sort)?,
+            filter: filter(&self.filter)?,
+        })
+    }
 }
 
 impl BridgeSort {
@@ -149,11 +224,17 @@ impl BridgeFilter {
             Match::NotEmpty => (BridgeMatch::NotEmpty, None),
             Match::Is(cell) => (BridgeMatch::Is, Some(BridgeCell::of(cell))),
             Match::Contains(part) => (BridgeMatch::Contains, Some(text(part))),
+            Match::Between(from, _) => (BridgeMatch::Between, Some(text(from))),
+        };
+        let until = match &filter.matches {
+            Match::Between(_, until) => Some(until.clone()),
+            _ => None,
         };
         Self {
             field: filter.field.to_string(),
             matches,
             value,
+            until,
         }
     }
 }
@@ -233,53 +314,33 @@ impl BridgeRow {
     }
 }
 
-pub(crate) fn row_query(
-    sort: &Option<BridgeSort>,
-    filter: &Option<BridgeFilter>,
-    start: usize,
-    limit: usize,
-) -> Result<RowQuery, String> {
-    let field = |field: &str| id(&Some(field.to_string()), FieldId::parse, "field");
-    let sort = sort
-        .as_ref()
+pub(crate) fn sort(sort: &Option<BridgeSort>) -> Result<Option<Sort>, String> {
+    sort.as_ref()
         .map(|sort| {
-            Ok::<_, String>(Sort {
-                field: field(&sort.field)?,
+            Ok(Sort {
+                field: id(&Some(sort.field.clone()), FieldId::parse, "field")?,
                 descending: sort.descending,
             })
         })
-        .transpose()?;
-    let filter = filter
-        .as_ref()
-        .map(|filter| {
-            let value = || {
-                filter
-                    .value
-                    .as_ref()
-                    .ok_or_else(|| "the filter's value is missing".to_string())
-            };
-            let matches = match filter.matches {
-                BridgeMatch::Empty => Match::Empty,
-                BridgeMatch::NotEmpty => Match::NotEmpty,
-                BridgeMatch::Is => Match::Is(value()?.to_core()?),
-                BridgeMatch::Contains => Match::Contains(
-                    value()?
-                        .text
-                        .clone()
-                        .ok_or_else(|| "the filter's value is missing".to_string())?,
-                ),
-            };
-            Ok::<_, String>(Filter {
-                field: field(&filter.field)?,
-                matches,
-            })
-        })
-        .transpose()?;
-    Ok(RowQuery {
-        sort,
-        filter,
-        start,
-        limit,
-        search: None,
-    })
+        .transpose()
+}
+
+pub(crate) fn filter(filter: &Option<BridgeFilter>) -> Result<Option<Filter>, String> {
+    let Some(filter) = filter else {
+        return Ok(None);
+    };
+    let missing = || "the filter's value is missing".to_string();
+    let value = || filter.value.as_ref().ok_or_else(missing);
+    let text = || value()?.text.clone().ok_or_else(missing);
+    let matches = match filter.matches {
+        BridgeMatch::Empty => Match::Empty,
+        BridgeMatch::NotEmpty => Match::NotEmpty,
+        BridgeMatch::Is => Match::Is(value()?.to_core()?),
+        BridgeMatch::Contains => Match::Contains(text()?),
+        BridgeMatch::Between => Match::Between(text()?, filter.until.clone().ok_or_else(missing)?),
+    };
+    Ok(Some(Filter {
+        field: id(&Some(filter.field.clone()), FieldId::parse, "field")?,
+        matches,
+    }))
 }

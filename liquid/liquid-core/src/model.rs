@@ -62,8 +62,7 @@ pub struct View {
     pub title: String,
     pub boundary: bool,
     pub kind: BlockKind,
-    pub sort: Option<crate::Sort>,
-    pub filter: Option<crate::Filter>,
+    pub tabs: Vec<crate::Tab>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

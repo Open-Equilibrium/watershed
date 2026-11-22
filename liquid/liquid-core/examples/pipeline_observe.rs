@@ -131,6 +131,7 @@ fn main() {
         page: budget.clone(),
         after: None,
         name: "Expenses".into(),
+        layout: liquid_core::Layout::Table,
     };
     let Some(Created::Block { block, .. }) = workspace
         .apply(request(add))
@@ -217,6 +218,7 @@ fn main() {
             field: fields[3].clone(),
             matches: Match::Is(Cell::Checkbox(true)),
         }),
+        within: None,
         start: 0,
         limit: 100,
         search: None,

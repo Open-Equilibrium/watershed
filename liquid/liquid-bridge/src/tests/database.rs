@@ -2,7 +2,8 @@ use std::sync::{Arc, Mutex};
 
 use super::workspace::{Folder, Memory, lisbon, mutation, query, resource};
 use crate::api::database::{
-    BridgeCell, BridgeCellKind, BridgeFieldKind, BridgeFilter, BridgeMatch, BridgeSort,
+    BridgeCell, BridgeCellKind, BridgeFieldKind, BridgeFilter, BridgeLayout, BridgeMatch,
+    BridgeSort, BridgeTab,
 };
 use crate::api::replica::LiquidWorkspace;
 use crate::api::workspace::{
@@ -272,6 +273,7 @@ fn rows_come_in_filtered_and_sorted_windows() {
             field: field.into(),
             matches,
             value,
+            until: None,
         }),
         ..by_amount.clone()
     };
@@ -369,6 +371,7 @@ fn malformed_database_requests_are_refused() {
             field: expenses.name.clone(),
             matches: BridgeMatch::Contains,
             value: None,
+            until: None,
         }),
         ..query(BridgeQueryKind::Rows)
     });
@@ -467,48 +470,114 @@ fn field_row_and_code_changes_map_to_their_core_mutations() {
 }
 
 #[test]
-fn a_view_s_sort_and_filter_cross_the_bridge() {
-    let expenses = Expenses::new("database-view-query");
-    let view = |answer: BridgeAnswer| {
-        let table = |view: &BridgeView| view.kind == BridgeBlockKind::Database;
-        answer.views.into_iter().find(table).unwrap()
-    };
-    let read = || {
-        expenses
+fn a_view_s_tabs_and_their_groups_cross_the_bridge() {
+    let expenses = Expenses::new("database-view-tabs");
+    let views = || {
+        let answer = expenses
             .workspace
             .query(BridgeQuery {
                 page: Some(expenses.page.clone()),
                 ..query(BridgeQueryKind::Views)
             })
-            .unwrap()
+            .unwrap();
+        let table = |view: &BridgeView| view.kind == BridgeBlockKind::Database;
+        answer.views.into_iter().find(table).unwrap()
     };
-    let id = view(read()).id;
-    let sort = BridgeSort {
-        field: expenses.name.clone(),
-        descending: true,
-    };
-    let filter = BridgeFilter {
-        field: expenses.name.clone(),
-        matches: BridgeMatch::Contains,
-        value: Some(text("rent")),
-    };
-    expenses
+    let view = views();
+    assert_eq!(
+        view.tabs.iter().map(|tab| tab.layout).collect::<Vec<_>>(),
+        [BridgeLayout::Table]
+    );
+    let paid = expenses
         .apply(BridgeMutation {
-            view: Some(id.clone()),
-            sort: Some(sort.clone()),
-            ..mutation(BridgeMutationKind::SetViewSort)
+            text: Some("Paid".into()),
+            field_kind: Some(BridgeFieldKind::Checkbox),
+            last: true,
+            ..mutation(BridgeMutationKind::AddField)
         })
+        .unwrap();
+    let board = expenses
+        .workspace
+        .apply(BridgeMutation {
+            page: Some(expenses.page.clone()),
+            view: Some(view.id.clone()),
+            after: Some(view.tabs[0].id.clone()),
+            tabs: vec![BridgeTab {
+                group: Some(paid.clone()),
+                sort: Some(BridgeSort {
+                    field: expenses.name.clone(),
+                    descending: true,
+                }),
+                ..view.tabs[0].clone()
+            }],
+            ..mutation(BridgeMutationKind::AddTab)
+        })
+        .unwrap()
+        .tab
         .unwrap();
     expenses
         .apply(BridgeMutation {
-            view: Some(id),
-            filter: Some(filter.clone()),
-            ..mutation(BridgeMutationKind::SetViewFilter)
+            view: Some(view.id.clone()),
+            tab: Some(board.clone()),
+            layout: BridgeLayout::Board,
+            ..mutation(BridgeMutationKind::SetTabLayout)
         })
         .unwrap();
-    let shown = view(read());
-    assert_eq!(shown.sort, Some(sort));
-    assert_eq!(shown.filter, Some(filter));
+    let tabs = views().tabs;
+    assert_eq!(tabs[1].id, board);
+    assert_eq!(
+        (
+            tabs[1].layout,
+            tabs[1].group.as_deref(),
+            tabs[1].sort.is_some()
+        ),
+        (BridgeLayout::Board, Some(paid.as_str()), true)
+    );
+
+    let due = expenses
+        .apply(BridgeMutation {
+            text: Some("Due".into()),
+            field_kind: Some(BridgeFieldKind::Date),
+            last: true,
+            ..mutation(BridgeMutationKind::AddField)
+        })
+        .unwrap();
+    let row = expenses.row(None);
+    let day = BridgeCell {
+        text: Some("2026-11-21".into()),
+        ..cell(BridgeCellKind::Date)
+    };
+    expenses.set(&row, &due, day).unwrap();
+    expenses.row(None);
+    let groups = expenses
+        .workspace
+        .query(BridgeQuery {
+            block: Some(expenses.block.clone()),
+            field: Some(paid),
+            ..query(BridgeQueryKind::Groups)
+        })
+        .unwrap()
+        .groups;
+    let counts: Vec<_> = groups.iter().map(|g| (g.value.checked, g.count)).collect();
+    assert_eq!(counts, [(false, 2), (true, 0)]);
+    let november = expenses
+        .workspace
+        .query(BridgeQuery {
+            block: Some(expenses.block.clone()),
+            within: Some(BridgeFilter {
+                field: due,
+                matches: BridgeMatch::Between,
+                value: Some(text("2026-11-01")),
+                until: Some("2026-11-30".into()),
+            }),
+            limit: 10,
+            ..query(BridgeQueryKind::Rows)
+        })
+        .unwrap();
+    assert_eq!(
+        november.rows.iter().map(|r| &r.id).collect::<Vec<_>>(),
+        [&row]
+    );
 }
 
 #[test]
@@ -544,10 +613,18 @@ fn a_table_shows_on_two_pages_keeps_its_name_and_goes_with_all_its_views() {
             page: Some(review.clone()),
             block: Some(expenses.block.clone()),
             text: Some("All costs".into()),
-            sort: Some(BridgeSort {
-                field: expenses.name.clone(),
-                descending: true,
-            }),
+            tabs: vec![BridgeTab {
+                id: String::new(),
+                name: "Table".into(),
+                layout: BridgeLayout::Table,
+                group: None,
+                date: None,
+                sort: Some(BridgeSort {
+                    field: expenses.name.clone(),
+                    descending: true,
+                }),
+                filter: None,
+            }],
             ..mutation(BridgeMutationKind::AddTableView)
         })
         .unwrap()
@@ -575,7 +652,7 @@ fn a_table_shows_on_two_pages_keeps_its_name_and_goes_with_all_its_views() {
         (
             shown.block.as_str(),
             shown.title.as_str(),
-            shown.sort.is_some()
+            shown.tabs[0].sort.is_some()
         ),
         (expenses.block.as_str(), "Costs", true)
     );
