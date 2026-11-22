@@ -1,7 +1,10 @@
 use std::fmt::Write as _;
 use std::path::Path;
 
-use liquid_core::{Action, ActionId, AttachmentId, Commit, Document, Error, Store, Write};
+use liquid_core::{
+    Action, ActionId, AttachmentId, Commit, Document, Error, Found, Hit, IndexWrite, PageId, Store,
+    Write,
+};
 use rusqlite::{Connection, ErrorCode, OptionalExtension, params};
 
 const VERSION: i64 = 2;
@@ -39,6 +42,23 @@ const DEVICE: &str = "
     CREATE TABLE IF NOT EXISTS device (
         key TEXT PRIMARY KEY,
         value TEXT NOT NULL
+    );
+    CREATE VIRTUAL TABLE IF NOT EXISTS search USING fts5(
+        found UNINDEXED,
+        id UNINDEXED,
+        page UNINDEXED,
+        text,
+        tokenize = 'unicode61 remove_diacritics 2'
+    );
+    CREATE TABLE IF NOT EXISTS search_rows (
+        found TEXT NOT NULL,
+        id TEXT NOT NULL,
+        row INTEGER NOT NULL,
+        PRIMARY KEY (found, id)
+    );
+    CREATE TABLE IF NOT EXISTS search_version (
+        one INTEGER PRIMARY KEY CHECK (one = 1),
+        version INTEGER NOT NULL
     );
 ";
 
@@ -146,6 +166,7 @@ impl Store for Sqlite {
                 }
             }
         }
+        write_index(&transaction, &commit.index)?;
         transaction
             .prepare_cached("INSERT INTO actions (id, record) VALUES (?1, ?2)")
             .and_then(|mut insert| insert.execute(params![commit.action.id.as_str(), record]))
@@ -303,6 +324,116 @@ impl Store for Sqlite {
         }
         transaction.commit().map_err(failed)
     }
+
+    fn index(&mut self, writes: &[IndexWrite], version: Option<u32>) -> Result<(), Error> {
+        let transaction = self.connection.transaction().map_err(failed)?;
+        write_index(&transaction, writes)?;
+        if let Some(version) = version {
+            transaction
+                .execute(
+                    "INSERT INTO search_version (one, version) VALUES (1, ?1) \
+                     ON CONFLICT (one) DO UPDATE SET version = excluded.version",
+                    [version],
+                )
+                .map_err(failed)?;
+        }
+        transaction.commit().map_err(failed)
+    }
+
+    fn index_version(&mut self) -> Result<u32, Error> {
+        Ok(self
+            .connection
+            .query_row("SELECT version FROM search_version", [], |row| row.get(0))
+            .optional()
+            .map_err(failed)?
+            .unwrap_or(0))
+    }
+
+    fn search(&mut self, words: &[String], found: Found, limit: usize) -> Result<Vec<Hit>, Error> {
+        if words.is_empty() {
+            return Ok(Vec::new());
+        }
+        let query = words
+            .iter()
+            .map(|word| format!("\"{}\"*", word.replace('"', "")))
+            .collect::<Vec<_>>()
+            .join(" ");
+        let limit = i64::try_from(limit).unwrap_or(i64::MAX);
+        let mut statement = self
+            .connection
+            .prepare_cached(
+                "SELECT id, page, CASE found WHEN 'text' \
+                 THEN snippet(search, 3, '', '', '…', 12) ELSE text END FROM search \
+                 WHERE search MATCH ?1 AND found = ?2 ORDER BY rank LIMIT ?3",
+            )
+            .map_err(failed)?;
+        let rows = statement
+            .query_map(params![query, found.key(), limit], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, Option<String>>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
+            })
+            .map_err(failed)?;
+        rows.map(|row| {
+            let (id, page, text) = row.map_err(failed)?;
+            Ok(Hit {
+                found,
+                id,
+                page: page.as_deref().and_then(PageId::parse),
+                text,
+            })
+        })
+        .collect()
+    }
+}
+
+fn write_index(
+    transaction: &rusqlite::Transaction<'_>,
+    writes: &[IndexWrite],
+) -> Result<(), Error> {
+    for write in writes {
+        let key = [write.found.key(), write.id.as_str()];
+        let row: Option<i64> = transaction
+            .query_row(
+                "SELECT row FROM search_rows WHERE found = ?1 AND id = ?2",
+                key,
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(failed)?;
+        if let Some(row) = row {
+            transaction
+                .execute("DELETE FROM search WHERE rowid = ?1", [row])
+                .and_then(|_| {
+                    transaction.execute("DELETE FROM search_rows WHERE found = ?1 AND id = ?2", key)
+                })
+                .map_err(failed)?;
+        }
+        if let Some(entry) = &write.entry {
+            transaction
+                .prepare_cached(
+                    "INSERT INTO search (found, id, page, text) VALUES (?1, ?2, ?3, ?4)",
+                )
+                .and_then(|mut insert| {
+                    insert.execute(params![
+                        write.found.key(),
+                        write.id,
+                        entry.page.as_ref().map(PageId::as_str),
+                        entry.text
+                    ])
+                })
+                .and_then(|_| {
+                    transaction.execute(
+                        "INSERT INTO search_rows (found, id, row) VALUES (?1, ?2, ?3)",
+                        params![write.found.key(), write.id, transaction.last_insert_rowid()],
+                    )
+                })
+                .map_err(failed)?;
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]

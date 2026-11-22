@@ -66,6 +66,8 @@ class PageViews extends ChangeNotifier {
 
   final narrowPreview = ValueNotifier(false);
 
+  String? lastFocused;
+
   final caret = ValueNotifier<Caret?>(null);
 
   final pastedCopy = ValueNotifier<({String view, CopiedView copied})?>(null);

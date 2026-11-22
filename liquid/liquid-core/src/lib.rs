@@ -6,6 +6,7 @@ mod id;
 mod model;
 mod mutation;
 mod order;
+mod search;
 mod sort_key;
 mod store;
 mod tab;
@@ -30,6 +31,7 @@ pub use mutation::{
     Actor, Applied, Cell, Changed, Created, Error, FieldKind, Mutation, Origin, Place, Request,
     TextStyle,
 };
+pub use search::{Found, Hit, INDEX_VERSION, IndexEntry, IndexWrite, search_words};
 pub use store::{Commit, MemoryStore, Store, Write};
 pub use tab::{Layout, MAX_TABS, Tab, TabSetup};
 pub use workspace::{MAX_DEVICE_KEY, MAX_DEVICE_VALUE, MAX_DEVICE_VALUES, Workspace};

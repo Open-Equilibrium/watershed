@@ -16,9 +16,10 @@ use crate::order::Order;
 use crate::store::{Commit, Store, Write};
 use crate::{
     Action, ActionId, Actor, Applied, Area, AreaId, AttachmentId, BlockId, BlockKind, Cell,
-    Changed, Code, Created, Document, Error, FieldId, FieldKind, Layout, Media, Mutation,
-    Operation, Origin, PageEntry, PageId, Permission, PersonId, Place, Request, RowId, TabId,
-    TabSetup, TableEntry, TextStyle, Tile, View, ViewId,
+    Changed, Code, Created, Document, Error, FieldId, FieldKind, Found, Hit, INDEX_VERSION,
+    IndexEntry, IndexWrite, Layout, Media, Mutation, Operation, Origin, PageEntry, PageId,
+    Permission, PersonId, Place, Request, RowId, TabId, TabSetup, TableEntry, TextStyle, Tile,
+    View, ViewId, search_words,
 };
 use crate::{database, drawing, tab};
 
@@ -86,7 +87,9 @@ impl<S: Store> Workspace<S> {
             action,
             &[Document::Workspace],
             vec![(Document::Workspace, doc)],
+            Vec::new(),
         )?;
+        this.store.index(&[], Some(INDEX_VERSION)).ok();
         Ok(this)
     }
 
@@ -100,12 +103,140 @@ impl<S: Store> Workspace<S> {
         let owner = model::string(this.doc(&Document::Workspace)?, &ROOT, OWNER)
             .ok_or_else(|| Error::Document("the Workspace document names no owner".into()))?;
         this.owner = PersonId::new(owner);
+        this.ensure_index().ok();
         Ok(this)
+    }
+
+    pub fn into_store(self) -> S {
+        self.store
+    }
+
+    pub fn search(&mut self, query: &str, found: Found, limit: usize) -> Result<Vec<Hit>, Error> {
+        if query.chars().count() > database::MAX_FILTER_TEXT {
+            return Err(Error::TooLong);
+        }
+        let words = search_words(query);
+        if words.is_empty() {
+            return Ok(Vec::new());
+        }
+        self.store.search(&words, found, limit)
+    }
+
+    fn ensure_index(&mut self) -> Result<(), Error> {
+        if self.store.index_version()? >= INDEX_VERSION {
+            return Ok(());
+        }
+        let mut complete = true;
+        for area in self.areas()? {
+            for page in self.pages(&area.id)? {
+                let mut writes = vec![page_entry(&page.id, &page.title)];
+                match self.page_text(&page.id) {
+                    Ok(text) => writes.extend(text),
+                    Err(_) => complete = false,
+                }
+                self.close_page(&page.id);
+                self.store.index(&writes, None)?;
+            }
+        }
+        let tables: Vec<IndexWrite> = self
+            .tables()?
+            .iter()
+            .map(|table| table_entry(&table.id, Some(&table.name)))
+            .collect();
+        self.store.index(&tables, complete.then_some(INDEX_VERSION))
+    }
+
+    fn page_text(&mut self, page: &PageId) -> Result<Vec<IndexWrite>, Error> {
+        let blocks: Vec<BlockId> = self
+            .views(page, 0, usize::MAX)?
+            .into_iter()
+            .filter(|view| matches!(view.kind, BlockKind::Text | BlockKind::Code))
+            .map(|view| view.block)
+            .collect();
+        blocks
+            .iter()
+            .map(|block| self.text_entry(page, block))
+            .collect()
+    }
+
+    fn text_entry(&mut self, page: &PageId, block: &BlockId) -> Result<IndexWrite, Error> {
+        let text = match self.text(page, block)? {
+            Some(text) => Some(text),
+            None => self.code(page, block)?.map(|code| code.text),
+        };
+        Ok(IndexWrite {
+            found: Found::Text,
+            id: block.to_string(),
+            entry: text.map(|text| IndexEntry {
+                page: Some(page.clone()),
+                text,
+            }),
+        })
+    }
+
+    fn leaving(&mut self, mutation: &Mutation) -> Option<(PageId, BlockId)> {
+        let (Mutation::RemoveView { page, view } | Mutation::JoinTextBlock { page, view }) =
+            mutation
+        else {
+            return None;
+        };
+        let block = self.page(page).ok()?.1.view(view)?.block.clone();
+        Some((page.clone(), block))
+    }
+
+    fn index_writes(
+        &mut self,
+        mutation: &Mutation,
+        written: &Written,
+        leaving: Option<(PageId, BlockId)>,
+    ) -> Result<Vec<IndexWrite>, Error> {
+        let mut writes = Vec::new();
+        let mut blocks: Vec<(PageId, BlockId)> = leaving.into_iter().collect();
+        let mut tables: Vec<BlockId> = Vec::new();
+        match (mutation, &written.created) {
+            (Mutation::CreatePage { title, .. }, Some(Created::Page(page))) => {
+                writes.push(page_entry(page, title));
+            }
+            (Mutation::RenamePage { page, title }, _) => writes.push(page_entry(page, title)),
+            (
+                Mutation::AddTextBlock { page, .. } | Mutation::SplitTextBlock { page, .. },
+                Some(Created::Block { block, .. }),
+            ) => blocks.push((page.clone(), block.clone())),
+            (Mutation::CreateTable { .. }, Some(Created::Table(table)))
+            | (
+                Mutation::AddDatabaseBlock { .. } | Mutation::DuplicateTable { .. },
+                Some(Created::Block { block: table, .. }),
+            ) => tables.push(table.clone()),
+            _ => {}
+        }
+        if let Mutation::SplitTextBlock { page, block, .. } = mutation {
+            blocks.push((page.clone(), block.clone()));
+        }
+        for changed in &written.changed {
+            match changed {
+                Changed::Block(page, block) => blocks.push((page.clone(), block.clone())),
+                Changed::Table(table) => tables.push(table.clone()),
+                _ => {}
+            }
+        }
+        blocks.sort();
+        blocks.dedup();
+        tables.sort();
+        tables.dedup();
+        for (page, block) in blocks {
+            writes.push(self.text_entry(&page, &block)?);
+        }
+        for table in tables {
+            let name = self.table_name(&table)?;
+            writes.push(table_entry(&table, name.as_deref()));
+        }
+        Ok(writes)
     }
 
     pub fn apply(&mut self, request: Request) -> Result<Applied, Error> {
         let permission = self.permit(&request.actor)?;
         let id = ActionId::new()?;
+        let leaving = self.leaving(&request.mutation);
         let written = match self.write(&request.mutation) {
             Ok(written) => written,
             Err(error) => {
@@ -122,6 +253,13 @@ impl<S: Store> Workspace<S> {
         if unchanged {
             return Err(Error::NoChange);
         }
+        let index = match self.index_writes(&request.mutation, &written, leaving) {
+            Ok(index) => index,
+            Err(error) => {
+                self.rollback();
+                return Err(error);
+            }
+        };
         let action = Action {
             id: id.clone(),
             actor: request.actor,
@@ -130,7 +268,7 @@ impl<S: Store> Workspace<S> {
             operation: Operation::Mutation(request.mutation),
             changes: Vec::new(),
         };
-        self.record(action, &written.touched, written.new)?;
+        self.record(action, &written.touched, written.new, index)?;
         Ok(Applied {
             action: id,
             created: written.created,
@@ -1444,6 +1582,7 @@ impl<S: Store> Workspace<S> {
         mut action: Action,
         touched: &[Document],
         new: Vec<(Document, AutoCommit)>,
+        index: Vec<IndexWrite>,
     ) -> Result<(), Error> {
         for (document, doc) in new {
             let loaded = Loaded {
@@ -1484,6 +1623,7 @@ impl<S: Store> Workspace<S> {
         let commit = Commit {
             action: &action,
             writes,
+            index,
         };
         if let Err(error) = self.store.commit(&commit) {
             for document in touched {
@@ -1514,6 +1654,28 @@ fn add_text_block(
     doc.splice_text(&content, 0, 0, text)?;
     let view = add_view(doc, order, sort, &block, BlockKind::Text)?;
     Ok((block, view))
+}
+
+fn page_entry(page: &PageId, title: &str) -> IndexWrite {
+    IndexWrite {
+        found: Found::Page,
+        id: page.to_string(),
+        entry: Some(IndexEntry {
+            page: Some(page.clone()),
+            text: title.to_string(),
+        }),
+    }
+}
+
+fn table_entry(table: &BlockId, name: Option<&str>) -> IndexWrite {
+    IndexWrite {
+        found: Found::Table,
+        id: table.to_string(),
+        entry: name.map(|name| IndexEntry {
+            page: None,
+            text: name.to_string(),
+        }),
+    }
 }
 
 fn block_changed(page: &PageId, block: &BlockId, created: Option<Created>) -> Written {

@@ -3,8 +3,8 @@ use std::path::Path;
 use std::sync::{Mutex, MutexGuard};
 
 use liquid_core::{
-    Actor, AreaId, BlockId, BlockKind, Created, Document, Error, FieldId, Origin, PageId, PersonId,
-    Request, RowQuery, Workspace,
+    Actor, AreaId, BlockId, BlockKind, Created, Document, Error, FieldId, Found, Origin, PageId,
+    PersonId, Request, RowQuery, Workspace,
 };
 use liquid_storage::Sqlite;
 
@@ -14,9 +14,9 @@ use super::database::{
 use super::drawing::BridgeDrawing;
 use super::media::BridgeMedia;
 use super::workspace::{
-    BridgeAnswer, BridgeApplied, BridgeArea, BridgeBlockKind, BridgeChange, BridgeMutation,
-    BridgePage, BridgeQuery, BridgeQueryKind, BridgeResource, BridgeShown, BridgeTable,
-    BridgeTextStyle, BridgeTile, BridgeView, id, message, window,
+    BridgeAnswer, BridgeApplied, BridgeArea, BridgeBlockKind, BridgeChange, BridgeFound, BridgeHit,
+    BridgeMutation, BridgePage, BridgeQuery, BridgeQueryKind, BridgeResource, BridgeShown,
+    BridgeTable, BridgeTextStyle, BridgeTile, BridgeView, id, message, window,
 };
 use crate::frb_generated::StreamSink;
 use crate::keys::{Keychain, Keys, random_hex, replica_key};
@@ -214,6 +214,7 @@ impl LiquidWorkspace {
             database: None,
             rows: Vec::new(),
             groups: Vec::new(),
+            hits: Vec::new(),
             tables: Vec::new(),
             shown: Vec::new(),
             icon: None,
@@ -329,6 +330,23 @@ impl LiquidWorkspace {
                     .map_err(message)?;
                 answer.count = rows.count as i64;
                 answer.rows = rows.rows.into_iter().map(BridgeRow::of).collect();
+            }
+            BridgeQueryKind::Search => {
+                let text = query.search.as_deref().unwrap_or_default();
+                for (found, shown) in [
+                    (Found::Page, BridgeFound::Page),
+                    (Found::Table, BridgeFound::Table),
+                    (Found::Text, BridgeFound::Text),
+                ] {
+                    for hit in workspace.search(text, found, limit).map_err(message)? {
+                        answer.hits.push(BridgeHit {
+                            found: shown,
+                            id: hit.id,
+                            page: hit.page.map(|page| page.to_string()),
+                            text: hit.text,
+                        });
+                    }
+                }
             }
             BridgeQueryKind::Groups => {
                 let block = id(&query.block, BlockId::parse, "block")?;

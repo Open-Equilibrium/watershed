@@ -11,7 +11,7 @@ import 'media.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
 // These functions are ignored because they are not marked as `pub`: `id`, `message`, `normalized`, `of`, `of`, `of`, `optional_id`, `page`, `place`, `table`, `to_core`, `to_core`, `to_core`, `units`, `window`
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `hash`, `hash`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `hash`, `hash`
 
 class BridgeAnswer {
   final List<BridgeArea> areas;
@@ -27,6 +27,7 @@ class BridgeAnswer {
   final BridgeDatabase? database;
   final List<BridgeRow> rows;
   final List<BridgeGroup> groups;
+  final List<BridgeHit> hits;
   final List<BridgeTable> tables;
   final List<BridgeShown> shown;
   final String? icon;
@@ -45,6 +46,7 @@ class BridgeAnswer {
     this.database,
     required this.rows,
     required this.groups,
+    required this.hits,
     required this.tables,
     required this.shown,
     this.icon,
@@ -65,6 +67,7 @@ class BridgeAnswer {
       database.hashCode ^
       rows.hashCode ^
       groups.hashCode ^
+      hits.hashCode ^
       tables.hashCode ^
       shown.hashCode ^
       icon.hashCode;
@@ -87,6 +90,7 @@ class BridgeAnswer {
           database == other.database &&
           rows == other.rows &&
           groups == other.groups &&
+          hits == other.hits &&
           tables == other.tables &&
           shown == other.shown &&
           icon == other.icon;
@@ -183,6 +187,36 @@ class BridgeChange {
           runtimeType == other.runtimeType &&
           resource == other.resource &&
           seq == other.seq;
+}
+
+enum BridgeFound { page, table, text }
+
+class BridgeHit {
+  final BridgeFound found;
+  final String id;
+  final String? page;
+  final String text;
+
+  const BridgeHit({
+    required this.found,
+    required this.id,
+    this.page,
+    required this.text,
+  });
+
+  @override
+  int get hashCode =>
+      found.hashCode ^ id.hashCode ^ page.hashCode ^ text.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeHit &&
+          runtimeType == other.runtimeType &&
+          found == other.found &&
+          id == other.id &&
+          page == other.page &&
+          text == other.text;
 }
 
 class BridgeMutation {
@@ -457,6 +491,7 @@ enum BridgeQueryKind {
   database,
   rows,
   groups,
+  search,
   tables,
   tableViews,
 }
