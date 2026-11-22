@@ -4,7 +4,9 @@ mod login;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use meta_harness_core::{Change, Service, ServiceConfig, api, default_home, remote, t3_version};
+use meta_harness_core::{
+    AcpAgent, Change, Service, ServiceConfig, api, default_home, remote, t3_version,
+};
 
 const USAGE: &str = "\
 usage: meta <command>
@@ -138,7 +140,7 @@ async fn serve(home: PathBuf) -> Result<(), String> {
     let service = Service::start(ServiceConfig {
         home,
         t3: pinned_t3()?,
-        acp_agents: Vec::new(),
+        acp_agents: flow_agent(std::env::var_os("PATH")).into_iter().collect(),
     })
     .await?;
     eprintln!(
@@ -177,6 +179,28 @@ fn prefix() -> Result<PathBuf, String> {
         .filter(|prefix| prefix.join("lib/meta-harness").is_dir())
         .map(Path::to_path_buf)
         .ok_or_else(|| format!("{} is not an installed meta.", program.display()))
+}
+
+#[cfg(not(unix))]
+fn flow_agent(_path: Option<std::ffi::OsString>) -> Option<AcpAgent> {
+    None
+}
+
+#[cfg(unix)]
+fn flow_agent(path: Option<std::ffi::OsString>) -> Option<AcpAgent> {
+    use std::os::unix::fs::PermissionsExt;
+    let command = std::env::split_paths(&path?)
+        .map(|dir| dir.join("flow"))
+        .find(|flow| {
+            flow.metadata()
+                .is_ok_and(|meta| meta.is_file() && meta.permissions().mode() & 0o111 != 0)
+        })?;
+    Some(AcpAgent {
+        id: "flow-agent".to_owned(),
+        command,
+        args: vec!["acp".to_owned()],
+        models: Vec::new(),
+    })
 }
 
 fn pinned_t3() -> Result<PathBuf, String> {
@@ -305,6 +329,30 @@ fn run_step(step: &login::Step) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn an_installed_flow_joins_t3_as_the_flow_agent() {
+        let dir = std::env::temp_dir().join(format!("meta-flow-agent-{}", std::process::id()));
+        let empty = dir.join("empty");
+        let bin = dir.join("bin");
+        std::fs::create_dir_all(&empty).unwrap();
+        std::fs::create_dir_all(&bin).unwrap();
+        std::fs::write(empty.join("flow"), "not runnable").unwrap();
+        let flow = bin.join("flow");
+        std::fs::write(&flow, "#!/bin/sh\n").unwrap();
+        std::fs::set_permissions(&flow, std::os::unix::fs::PermissionsExt::from_mode(0o755))
+            .unwrap();
+
+        assert!(flow_agent(None).is_none());
+        assert!(flow_agent(Some(empty.clone().into_os_string())).is_none());
+        let path = std::env::join_paths([&empty, &bin]).unwrap();
+        let agent = flow_agent(Some(path)).expect("flow on the PATH is found");
+        assert_eq!(agent.id, "flow-agent");
+        assert_eq!(agent.command, flow);
+        assert_eq!(agent.args, ["acp"]);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
 
     #[test]
     fn uninstall_refuses_a_data_folder_inside_what_it_removes() {
