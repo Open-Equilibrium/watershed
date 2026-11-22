@@ -4,7 +4,7 @@ use super::support::{authoring_workspace, padded_instruction};
 use crate::runtime::authoring::set_create_post_validation_observer;
 use crate::runtime::m11_budget_evidence::maximum_tool;
 use crate::runtime::types::RuntimeError;
-use crate::{create_global_registry_block, validate_global_registry};
+use crate::{create_global_registry_block, list_global_flows, validate_global_registry};
 use core_script::{
     MAX_REGISTRY_ENTRIES, MAX_REGISTRY_FILE_BYTES, MAX_REGISTRY_TOTAL_BYTES, RegistryBlock,
     ToolCommand, parse_registry_block,
@@ -275,4 +275,36 @@ fn concurrent_authoring_serializes_registry_validation_and_publication() {
         "only one duplicate-name definition may publish: first={first_result:?}, second={second_result:?}"
     );
     validate_global_registry(None).expect("the concurrently updated registry remains unambiguous");
+}
+
+#[test]
+fn installed_flows_are_listed_by_id_and_name() {
+    let workspace = authoring_workspace("installed-flows-are-listed");
+    let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("../fixtures/hello-flow/registry");
+    for kind in ["flows", "instructions", "phases", "tools"] {
+        for entry in fs::read_dir(fixture.join(kind)).expect("fixture kind lists") {
+            let entry = entry.expect("fixture entry reads");
+            fs::copy(
+                entry.path(),
+                workspace
+                    .join("registry")
+                    .join(kind)
+                    .join(entry.file_name()),
+            )
+            .expect("fixture definition is installed");
+        }
+    }
+
+    let flows = list_global_flows().expect("installed Flows are listed");
+
+    assert_eq!(
+        flows
+            .iter()
+            .map(|flow| (flow.id.as_str(), flow.name.as_str()))
+            .collect::<Vec<_>>(),
+        [
+            ("hello-flow", "HelloFlow"),
+            ("hello-subflow", "HelloSubflow")
+        ]
+    );
 }
