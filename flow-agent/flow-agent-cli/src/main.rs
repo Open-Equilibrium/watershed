@@ -1,5 +1,6 @@
 #![cfg_attr(not(test), deny(clippy::wildcard_imports))]
 
+mod acp;
 mod authoring;
 mod dispatch;
 mod interrupt;

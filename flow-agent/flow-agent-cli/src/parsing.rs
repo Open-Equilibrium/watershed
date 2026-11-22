@@ -24,6 +24,7 @@ pub(crate) fn parse_args(
 }
 
 const COMMANDS: &[&str] = &[
+    "acp",
     "auth",
     "chat",
     "create",
@@ -177,6 +178,8 @@ pub(crate) fn usage() -> String {
             "  {resume_continue}\n",
             "  {resume_interrupted}\n",
             "  {sessions_status}\n",
+            "  flow acp\n",
+            "    Agent Client Protocol over stdio, for T3 Code\n",
             "  flow chat\n",
             "    stdin Flow reference: /<flow> or <flow>"
         ),

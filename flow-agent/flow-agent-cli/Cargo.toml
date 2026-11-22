@@ -19,10 +19,10 @@ core-script.workspace = true
 flow-agent-core.workspace = true
 proto.workspace = true
 serde.workspace = true
+serde_json.workspace = true
 signal-hook.workspace = true
 
 [dev-dependencies]
-serde_json.workspace = true
 sha2.workspace = true
 
 [[bin]]

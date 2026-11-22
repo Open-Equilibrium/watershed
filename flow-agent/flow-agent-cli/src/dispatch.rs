@@ -162,6 +162,10 @@ fn dispatch_in_workspace(
             sessions_command(workspace, command)?;
             Ok(ExitCode::SUCCESS)
         }
+        "acp" => {
+            reject_extra_args(args, 1)?;
+            crate::acp::acp_command()
+        }
         "chat" => {
             reject_extra_args(args, 1)?;
             chat(workspace.to_path_buf(), interrupts)

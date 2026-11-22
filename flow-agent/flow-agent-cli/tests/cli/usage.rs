@@ -55,7 +55,7 @@ fn global_usage_errors_print_the_full_usage_text() {
     assert!(help.status.success());
     assert!(help.stderr.is_empty());
     let usage = String::from_utf8(help.stdout).expect("help should be UTF-8");
-    assert_eq!(usage.lines().count(), 22);
+    assert_eq!(usage.lines().count(), 24);
 
     let cases: [&[&str]; 3] = [&[], &["unknown"], &["not-a-command", "--help"]];
     for args in cases {

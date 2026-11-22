@@ -3,6 +3,8 @@ use std::process::Command;
 #[path = "../../tests/support.rs"]
 mod test_support;
 
+#[path = "cli/acp.rs"]
+mod acp;
 #[path = "cli/auth.rs"]
 mod auth;
 #[path = "cli/authoring.rs"]
