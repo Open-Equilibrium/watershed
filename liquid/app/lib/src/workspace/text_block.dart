@@ -13,6 +13,7 @@ import '../theme/tokens.g.dart';
 import 'anchored_menu.dart';
 import 'follow.dart';
 import 'media_block.dart';
+import 'inline_math.dart';
 import 'page_editor.dart';
 import 'page_views.dart';
 import 'arranged_page.dart' show InTile;
@@ -41,7 +42,7 @@ class TextBlock extends StatefulWidget {
 }
 
 class _TextBlockState extends State<TextBlock> implements EditorSource {
-  var _text = TextEditingController();
+  var _text = MathText.fromValue(TextEditingValue.empty);
 
   final _field = GlobalKey(debugLabel: 'Text Block field');
   late final _focus = FocusNode(
@@ -142,6 +143,7 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
   bool get focused => _focus.hasFocus;
 
   void _focusChanged() {
+    setState(() => _text.focused = _focus.hasFocus);
     if (_focus.hasFocus) {
       widget.views.lastFocused = widget.view.id;
       return;
@@ -407,7 +409,11 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
 
   void _adopt() {
     _replaced = false;
-    _text = adoptController(_text, listener: _typed);
+    _text = adoptController(
+      _text,
+      listener: _typed,
+      create: MathText.fromValue,
+    ) as MathText..focused = _focus.hasFocus;
   }
 
   @override

@@ -3,7 +3,9 @@ import 'package:flutter/services.dart';
 import 'package:flutter_math_fork/flutter_math.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:liquid/src/rust/api/workspace.dart';
+import 'package:liquid/src/workspace/inline_math.dart';
 import 'package:liquid/src/workspace/math_block.dart';
+import 'package:liquid/src/workspace/text_block.dart';
 import 'package:liquid/src/workspace/workspace_state.dart';
 
 import 'page_kit.dart';
@@ -89,5 +91,43 @@ void main() {
     await type(tester, '');
     await key(tester, LogicalKeyboardKey.backspace);
     expect(kinds(), [BridgeBlockKind.text]);
+  });
+
+  test('dollars open math as Pandoc reads them', () {
+    for (final (text, math) in [
+      (r'The area is $A = \pi r^2$.', [r'A = \pi r^2']),
+      (r'Tickets cost $5 and $10.', <String>[]),
+      (r'$ x$ and $x $', <String>[]),
+      (r'\$x$ and $$x$$', <String>[]),
+      (r'$a$5', <String>[]),
+      (r'$a$ and $b\$c$', ['a', r'b\$c']),
+    ]) {
+      expect(
+        [for (final match in inlineMath.allMatches(text)) match[1]],
+        math,
+        reason: text,
+      );
+    }
+  });
+
+  testWidgets('math in a sentence is set until the caret enters it', (
+    tester,
+  ) async {
+    await kit.show(tester, [const TextPart(r'The area is $A = \pi r^2$, so')]);
+    final inText = find.descendant(
+      of: find.byType(TextBlock),
+      matching: find.byType(Math),
+    );
+    expect(inText, findsOneWidget);
+    await tester.tap(block(0));
+    await tester.pump();
+    final controller = field(tester, 0).controller!;
+    controller.selection = const TextSelection.collapsed(offset: 16);
+    await tester.pumpAndSettle();
+    expect(inText, findsNothing, reason: 'the LaTeX shows');
+    controller.selection = const TextSelection.collapsed(offset: 29);
+    await tester.pumpAndSettle();
+    expect(inText, findsOneWidget);
+    expect(kit.fake.texts.values.first, r'The area is $A = \pi r^2$, so');
   });
 }
