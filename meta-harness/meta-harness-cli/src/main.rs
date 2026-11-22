@@ -190,10 +190,20 @@ fn flow_agent(_path: Option<std::ffi::OsString>) -> Option<AcpAgent> {
 fn flow_agent(path: Option<std::ffi::OsString>) -> Option<AcpAgent> {
     use std::os::unix::fs::PermissionsExt;
     let command = std::env::split_paths(&path?)
+        .filter(|dir| dir.is_absolute())
         .map(|dir| dir.join("flow"))
         .find(|flow| {
             flow.metadata()
                 .is_ok_and(|meta| meta.is_file() && meta.permissions().mode() & 0o111 != 0)
+                && std::process::Command::new(flow)
+                    .args(["acp", "--help"])
+                    .stdin(std::process::Stdio::null())
+                    .stderr(std::process::Stdio::null())
+                    .output()
+                    .is_ok_and(|output| {
+                        output.status.success()
+                            && String::from_utf8_lossy(&output.stdout).contains("flow acp")
+                    })
         })?;
     Some(AcpAgent {
         id: "flow-agent".to_owned(),
@@ -334,19 +344,26 @@ mod tests {
     #[test]
     fn an_installed_flow_joins_t3_as_the_flow_agent() {
         let dir = std::env::temp_dir().join(format!("meta-flow-agent-{}", std::process::id()));
+        let executable = |dir: &Path, script: &str| {
+            std::fs::create_dir_all(dir).unwrap();
+            let flow = dir.join("flow");
+            std::fs::write(&flow, script).unwrap();
+            std::fs::set_permissions(&flow, std::os::unix::fs::PermissionsExt::from_mode(0o755))
+                .unwrap();
+            flow
+        };
         let empty = dir.join("empty");
-        let bin = dir.join("bin");
         std::fs::create_dir_all(&empty).unwrap();
-        std::fs::create_dir_all(&bin).unwrap();
         std::fs::write(empty.join("flow"), "not runnable").unwrap();
-        let flow = bin.join("flow");
-        std::fs::write(&flow, "#!/bin/sh\n").unwrap();
-        std::fs::set_permissions(&flow, std::os::unix::fs::PermissionsExt::from_mode(0o755))
-            .unwrap();
+        let checker = dir.join("checker");
+        executable(&checker, "#!/bin/sh\necho 'Flow, a static type checker'\n");
+        let bin = dir.join("bin");
+        let flow = executable(&bin, "#!/bin/sh\necho '  flow acp'\n");
 
         assert!(flow_agent(None).is_none());
         assert!(flow_agent(Some(empty.clone().into_os_string())).is_none());
-        let path = std::env::join_paths([&empty, &bin]).unwrap();
+        assert!(flow_agent(Some("bin".into())).is_none());
+        let path = std::env::join_paths([&empty, &checker, &bin]).unwrap();
         let agent = flow_agent(Some(path)).expect("flow on the PATH is found");
         assert_eq!(agent.id, "flow-agent");
         assert_eq!(agent.command, flow);

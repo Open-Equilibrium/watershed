@@ -53,7 +53,10 @@ pub fn steer_productive_run(message: String) -> Result<(), RuntimeError> {
             message.len()
         )));
     }
-    STEERING.lock().messages.push_back(message);
+    let mut state = STEERING.lock();
+    state.pause = false;
+    state.messages.push_back(message);
+    drop(state);
     STEERING.changed.notify_all();
     Ok(())
 }
@@ -72,12 +75,8 @@ pub(crate) fn wake_productive_steering() {
 pub(crate) fn take_productive_steering() -> Result<Option<String>, RuntimeError> {
     let mut state = STEERING.lock();
     loop {
-        if let Some(message) = state.messages.pop_front() {
-            state.pause = false;
-            return Ok(Some(message));
-        }
         if !state.pause {
-            return Ok(None);
+            return Ok(state.messages.pop_front());
         }
         crate::runtime::cancellation::ensure_productive_dispatch_allowed()?;
         state = STEERING

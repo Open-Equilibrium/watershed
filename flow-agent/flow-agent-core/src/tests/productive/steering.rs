@@ -185,3 +185,33 @@ fn a_pause_and_a_message_sent_before_the_run_starts_reach_it() {
     );
     crate::settle_productive_operation();
 }
+
+#[test]
+fn a_stop_after_a_queued_message_pauses_until_the_next_message() {
+    const CHILD_ENV: &str = "WATERSHED_STEERING_STOP_QUEUED_CHILD";
+    if run_isolated_test(CHILD_ENV) {
+        return;
+    }
+    crate::begin_productive_operation().expect("productive operation begins");
+    crate::steer_productive_run("first".to_owned()).unwrap();
+    crate::request_productive_pause();
+    let (sender, receiver) = mpsc::channel();
+    let waiter = thread::spawn(move || {
+        for _ in 0..2 {
+            sender.send(take_productive_steering()).unwrap();
+        }
+    });
+
+    assert!(
+        receiver.recv_timeout(Duration::from_millis(200)).is_err(),
+        "a stop wins over a queued message"
+    );
+    crate::steer_productive_run("second".to_owned()).unwrap();
+
+    let taken = (0..2)
+        .map(|_| receiver.recv().unwrap().expect("a message is taken"))
+        .collect::<Vec<_>>();
+    assert_eq!(taken, [Some("first".to_owned()), Some("second".to_owned())]);
+    waiter.join().unwrap();
+    crate::settle_productive_operation();
+}
