@@ -51,6 +51,7 @@ class PageViews extends ChangeNotifier {
       final answer = await state.read(
         query(BridgeQueryKind.views, page: page, start: start, limit: limit),
       );
+      arranged = answer.arranged;
       return (answer.count, answer.views);
     },
     _report,
@@ -58,6 +59,10 @@ class PageViews extends ChangeNotifier {
   );
 
   int? get count => _views.count;
+
+  bool arranged = false;
+
+  final arranging = ValueNotifier(false);
 
   final caret = ValueNotifier<Caret?>(null);
 
@@ -238,6 +243,7 @@ class PageViews extends ChangeNotifier {
     _views.dispose();
     caret.dispose();
     pastedCopy.dispose();
+    arranging.dispose();
     styles.dispose();
     uploads.dispose();
     for (final (board, _) in _boards.values) {

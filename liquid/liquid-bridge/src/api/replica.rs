@@ -205,6 +205,7 @@ impl LiquidWorkspace {
             pages: Vec::new(),
             views: Vec::new(),
             count: 0,
+            arranged: false,
             text: None,
             style: None,
             language: None,
@@ -255,6 +256,7 @@ impl LiquidWorkspace {
             BridgeQueryKind::Views => {
                 let page = id(&query.page, PageId::parse, "page")?;
                 answer.count = workspace.view_count(&page).map_err(message)? as i64;
+                answer.arranged = workspace.arranged(&page).map_err(message)?;
                 answer.views = workspace
                     .views(&page, start, limit)
                     .map_err(message)?

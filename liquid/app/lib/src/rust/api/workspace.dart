@@ -18,6 +18,7 @@ class BridgeAnswer {
   final List<BridgePage> pages;
   final List<BridgeView> views;
   final PlatformInt64 count;
+  final bool arranged;
   final String? text;
   final BridgeTextStyle? style;
   final String? language;
@@ -35,6 +36,7 @@ class BridgeAnswer {
     required this.pages,
     required this.views,
     required this.count,
+    required this.arranged,
     this.text,
     this.style,
     this.language,
@@ -54,6 +56,7 @@ class BridgeAnswer {
       pages.hashCode ^
       views.hashCode ^
       count.hashCode ^
+      arranged.hashCode ^
       text.hashCode ^
       style.hashCode ^
       language.hashCode ^
@@ -75,6 +78,7 @@ class BridgeAnswer {
           pages == other.pages &&
           views == other.views &&
           count == other.count &&
+          arranged == other.arranged &&
           text == other.text &&
           style == other.style &&
           language == other.language &&

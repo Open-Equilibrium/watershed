@@ -6154,6 +6154,7 @@ impl SseDecode for crate::api::workspace::BridgeAnswer {
         let mut var_pages = <Vec<crate::api::workspace::BridgePage>>::sse_decode(deserializer);
         let mut var_views = <Vec<crate::api::workspace::BridgeView>>::sse_decode(deserializer);
         let mut var_count = <i64>::sse_decode(deserializer);
+        let mut var_arranged = <bool>::sse_decode(deserializer);
         let mut var_text = <Option<String>>::sse_decode(deserializer);
         let mut var_style =
             <Option<crate::api::workspace::BridgeTextStyle>>::sse_decode(deserializer);
@@ -6173,6 +6174,7 @@ impl SseDecode for crate::api::workspace::BridgeAnswer {
             pages: var_pages,
             views: var_views,
             count: var_count,
+            arranged: var_arranged,
             text: var_text,
             style: var_style,
             language: var_language,
@@ -9669,6 +9671,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::workspace::BridgeAnswer {
             self.pages.into_into_dart().into_dart(),
             self.views.into_into_dart().into_dart(),
             self.count.into_into_dart().into_dart(),
+            self.arranged.into_into_dart().into_dart(),
             self.text.into_into_dart().into_dart(),
             self.style.into_into_dart().into_dart(),
             self.language.into_into_dart().into_dart(),
@@ -12570,6 +12573,7 @@ impl SseEncode for crate::api::workspace::BridgeAnswer {
         <Vec<crate::api::workspace::BridgePage>>::sse_encode(self.pages, serializer);
         <Vec<crate::api::workspace::BridgeView>>::sse_encode(self.views, serializer);
         <i64>::sse_encode(self.count, serializer);
+        <bool>::sse_encode(self.arranged, serializer);
         <Option<String>>::sse_encode(self.text, serializer);
         <Option<crate::api::workspace::BridgeTextStyle>>::sse_encode(self.style, serializer);
         <Option<String>>::sse_encode(self.language, serializer);

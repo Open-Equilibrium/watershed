@@ -14,8 +14,7 @@ struct Page {
 
 impl Page {
     fn new() -> Self {
-        let workspace =
-            Workspace::create(PersonId::new("benni"), MemoryStore::default()).unwrap();
+        let workspace = Workspace::create(PersonId::new("benni"), MemoryStore::default()).unwrap();
         let mut page = Self {
             workspace,
             page: PageId::parse(&"0".repeat(32)).unwrap(),
@@ -117,8 +116,12 @@ fn a_block_and_a_section_keep_their_column_and_span() {
     for wrong in [tile(0, 0), tile(0, 13), tile(8, 5)] {
         assert_eq!(page.tile(&route, wrong), Err(Error::OutOfRange));
     }
-    page.tile(&route, None).unwrap();
+    assert!(page.workspace.arranged(&page.page).unwrap());
+    for view in [&plan, &route] {
+        page.tile(view, None).unwrap();
+    }
     assert_eq!(page.reopened()[2].tile, None);
+    assert!(!page.workspace.arranged(&page.page).unwrap());
 }
 
 #[test]

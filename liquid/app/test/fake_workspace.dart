@@ -929,6 +929,7 @@ class FakeWorkspace implements LiquidWorkspace {
       List<BridgePage> pages = const [],
       List<BridgeView> views = const [],
       int count = 0,
+      bool arranged = false,
       String? text,
       BridgeTextStyle? style,
       String? language,
@@ -945,6 +946,7 @@ class FakeWorkspace implements LiquidWorkspace {
       pages: pages,
       views: views,
       count: count,
+      arranged: arranged,
       text: text,
       style: style,
       language: language,
@@ -973,6 +975,9 @@ class FakeWorkspace implements LiquidWorkspace {
             _decoded(view),
         ],
         count: views[query.page]?.length ?? 0,
+        arranged: (views[query.page] ?? const <BridgeView>[]).any(
+          (view) => view.tile != null,
+        ),
       ),
       BridgeQueryKind.text => answer(
         text: code ? null : texts[query.block],

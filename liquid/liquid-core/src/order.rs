@@ -145,6 +145,10 @@ impl Order {
         }
     }
 
+    pub(crate) fn arranged(&self) -> bool {
+        self.placed.iter().any(|placed| placed.view.tile.is_some())
+    }
+
     pub(crate) fn len(&self) -> usize {
         self.placed.len()
     }

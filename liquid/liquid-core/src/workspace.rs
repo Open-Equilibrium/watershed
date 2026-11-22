@@ -154,6 +154,10 @@ impl<S: Store> Workspace<S> {
         Ok(self.page(page)?.1.window(start, limit))
     }
 
+    pub fn arranged(&mut self, page: &PageId) -> Result<bool, Error> {
+        Ok(self.page(page)?.1.arranged())
+    }
+
     pub fn view_count(&mut self, page: &PageId) -> Result<usize, Error> {
         Ok(self.page(page)?.1.len())
     }

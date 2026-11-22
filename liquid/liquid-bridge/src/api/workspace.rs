@@ -263,6 +263,7 @@ pub struct BridgeAnswer {
     pub pages: Vec<BridgePage>,
     pub views: Vec<BridgeView>,
     pub count: i64,
+    pub arranged: bool,
     pub text: Option<String>,
     pub style: Option<BridgeTextStyle>,
     pub language: Option<String>,

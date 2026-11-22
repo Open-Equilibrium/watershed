@@ -941,22 +941,23 @@ fn a_tile_and_a_move_cross_the_bridge() {
             })
             .unwrap();
     }
-    let views = workspace
+    let answer = workspace
         .query(BridgeQuery {
             page: Some(page),
             ..query(BridgeQueryKind::Views)
         })
-        .unwrap()
-        .views;
-    let shown: Vec<_> = views
+        .unwrap();
+    assert!(answer.arranged);
+    let shown: Vec<_> = answer
+        .views
         .iter()
-        .map(|view| (view.id.as_str(), view.tile, view.inner))
+        .map(|view| (view.id.clone(), view.tile, view.inner))
         .collect();
     assert_eq!(
         shown,
         [
-            (second.as_str(), Some(tile), None),
-            (first.as_str(), None, Some(tile))
+            (second.clone(), Some(tile), None),
+            (first.clone(), None, Some(tile))
         ]
     );
 }

@@ -5453,24 +5453,25 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   BridgeAnswer dco_decode_bridge_answer(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 15)
-      throw Exception('unexpected arr length: expect 15 but see ${arr.length}');
+    if (arr.length != 16)
+      throw Exception('unexpected arr length: expect 16 but see ${arr.length}');
     return BridgeAnswer(
       areas: dco_decode_list_bridge_area(arr[0]),
       pages: dco_decode_list_bridge_page(arr[1]),
       views: dco_decode_list_bridge_view(arr[2]),
       count: dco_decode_i_64(arr[3]),
-      text: dco_decode_opt_String(arr[4]),
-      style: dco_decode_opt_box_autoadd_bridge_text_style(arr[5]),
-      language: dco_decode_opt_String(arr[6]),
-      media: dco_decode_opt_box_autoadd_bridge_media(arr[7]),
-      drawing: dco_decode_opt_box_autoadd_bridge_drawing(arr[8]),
-      database: dco_decode_opt_box_autoadd_bridge_database(arr[9]),
-      rows: dco_decode_list_bridge_row(arr[10]),
-      groups: dco_decode_list_bridge_group(arr[11]),
-      tables: dco_decode_list_bridge_table(arr[12]),
-      shown: dco_decode_list_bridge_shown(arr[13]),
-      icon: dco_decode_opt_String(arr[14]),
+      arranged: dco_decode_bool(arr[4]),
+      text: dco_decode_opt_String(arr[5]),
+      style: dco_decode_opt_box_autoadd_bridge_text_style(arr[6]),
+      language: dco_decode_opt_String(arr[7]),
+      media: dco_decode_opt_box_autoadd_bridge_media(arr[8]),
+      drawing: dco_decode_opt_box_autoadd_bridge_drawing(arr[9]),
+      database: dco_decode_opt_box_autoadd_bridge_database(arr[10]),
+      rows: dco_decode_list_bridge_row(arr[11]),
+      groups: dco_decode_list_bridge_group(arr[12]),
+      tables: dco_decode_list_bridge_table(arr[13]),
+      shown: dco_decode_list_bridge_shown(arr[14]),
+      icon: dco_decode_opt_String(arr[15]),
     );
   }
 
@@ -7857,6 +7858,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_pages = sse_decode_list_bridge_page(deserializer);
     var var_views = sse_decode_list_bridge_view(deserializer);
     var var_count = sse_decode_i_64(deserializer);
+    var var_arranged = sse_decode_bool(deserializer);
     var var_text = sse_decode_opt_String(deserializer);
     var var_style = sse_decode_opt_box_autoadd_bridge_text_style(deserializer);
     var var_language = sse_decode_opt_String(deserializer);
@@ -7873,6 +7875,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       pages: var_pages,
       views: var_views,
       count: var_count,
+      arranged: var_arranged,
       text: var_text,
       style: var_style,
       language: var_language,
@@ -11030,6 +11033,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_list_bridge_page(self.pages, serializer);
     sse_encode_list_bridge_view(self.views, serializer);
     sse_encode_i_64(self.count, serializer);
+    sse_encode_bool(self.arranged, serializer);
     sse_encode_opt_String(self.text, serializer);
     sse_encode_opt_box_autoadd_bridge_text_style(self.style, serializer);
     sse_encode_opt_String(self.language, serializer);
