@@ -364,7 +364,11 @@ impl<S: Store> Workspace<S> {
             | Mutation::MoveViews { page, .. } => page,
             _ => return self.write_mutation(mutation),
         };
-        let before = self.page(page)?.1.sections();
+        let order = self.page(page)?.1;
+        if !order.arranged() {
+            return self.write_mutation(mutation);
+        }
+        let before = order.lead_ids();
         let mut written = self.write_mutation(mutation)?;
         if self.carry_tiles(page, &before)? {
             let document = Document::Page(page.clone());
@@ -379,22 +383,22 @@ impl<S: Store> Workspace<S> {
     fn carry_tiles(
         &mut self,
         page: &PageId,
-        before: &HashMap<ViewId, ViewId>,
+        before: &std::collections::HashSet<ViewId>,
     ) -> Result<bool, Error> {
         let (doc, order) = self.page(page)?;
-        let after = order.sections();
         let mut carried = Vec::new();
-        for (view, lead) in &after {
-            let Some(old) = before.get(view) else {
-                continue;
-            };
-            let shown = order.view(view).ok_or(Error::NotFound)?;
-            if view == lead && old != view && shown.tile.is_none() {
-                if let Some(tile) = order.view(old).and_then(|old| old.tile) {
-                    carried.push((view.clone(), Some(tile), shown.inner));
+        let mut upper: Option<Option<Tile>> = None;
+        for (view, lead) in order.placed_views().zip(order.leads()) {
+            let was = before.contains(&view.id);
+            if lead && !was && view.tile.is_none() {
+                if let Some(Some(tile)) = upper {
+                    carried.push((view.id.clone(), Some(tile), view.inner));
                 }
-            } else if view != lead && old == view && shown.tile.is_some() {
-                carried.push((view.clone(), None, shown.inner));
+            } else if was && !lead && view.tile.is_some() {
+                carried.push((view.id.clone(), None, view.inner));
+            }
+            if was {
+                upper = Some(view.tile);
             }
         }
         for (view, tile, inner) in &carried {

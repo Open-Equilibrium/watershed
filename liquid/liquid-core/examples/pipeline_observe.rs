@@ -2,7 +2,7 @@ use std::time::{Duration, Instant};
 
 use liquid_core::{
     Actor, Cell, Created, FieldKind, Filter, Match, MemoryStore, Mutation, Origin, PageId,
-    PersonId, Place, Request, RowQuery, Sort, Workspace,
+    PersonId, Place, Request, RowQuery, Sort, Tile, Workspace,
 };
 
 const KEYSTROKES: usize = 10_000;
@@ -122,6 +122,35 @@ fn main() {
         "reading that Page's {} Views in order: {:.2} ms",
         views.len(),
         start.elapsed().as_secs_f64() * 1e3
+    );
+    let tile = Mutation::SetTile {
+        page: lisbon.clone(),
+        view: views[0].id.clone(),
+        tile: Some(Tile { column: 0, span: 6 }),
+    };
+    workspace
+        .apply(request(tile))
+        .expect("the fixture arranges the Page");
+    let mut times = Vec::with_capacity(BLOCKS);
+    for _ in 0..BLOCKS {
+        let add = Mutation::AddTextBlock {
+            page: lisbon.clone(),
+            after: after.clone(),
+            text: "Five days in Lisbon, one in Porto.".into(),
+        };
+        let start = Instant::now();
+        let created = workspace
+            .apply(request(add))
+            .expect("the fixture adds a Block")
+            .created;
+        times.push(start.elapsed());
+        if let Some(Created::Block { view, .. }) = created {
+            after = Some(view);
+        }
+    }
+    summary(
+        "the same Page arranged, per Block added at the end up to 2000",
+        times,
     );
 
     let mut workspace = Workspace::create(PersonId::new("observer"), MemoryStore::default())

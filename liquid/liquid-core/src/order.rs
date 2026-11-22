@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use automerge::AutoCommit;
 
@@ -145,23 +145,31 @@ impl Order {
         }
     }
 
-    pub(crate) fn sections(&self) -> HashMap<ViewId, ViewId> {
-        let mut leads = HashMap::new();
-        let mut lead: Option<&ViewId> = None;
+    pub(crate) fn leads(&self) -> Vec<bool> {
         let mut above: Option<&View> = None;
-        for placed in &self.placed {
-            let view = &placed.view;
-            if view.kind == BlockKind::Text {
-                if view.boundary || above.is_none_or(|above| above.kind != BlockKind::Text) {
-                    lead = Some(&view.id);
-                }
-                if let Some(lead) = lead {
-                    leads.insert(view.id.clone(), lead.clone());
-                }
-            }
-            above = Some(view);
-        }
-        leads
+        self.placed
+            .iter()
+            .map(|placed| {
+                let view = &placed.view;
+                let lead = view.kind == BlockKind::Text
+                    && (view.boundary || above.is_none_or(|above| above.kind != BlockKind::Text));
+                above = Some(view);
+                lead
+            })
+            .collect()
+    }
+
+    pub(crate) fn lead_ids(&self) -> HashSet<ViewId> {
+        self.leads()
+            .into_iter()
+            .zip(&self.placed)
+            .filter(|(lead, _)| *lead)
+            .map(|(_, placed)| placed.view.id.clone())
+            .collect()
+    }
+
+    pub(crate) fn placed_views(&self) -> impl Iterator<Item = &View> {
+        self.placed.iter().map(|placed| &placed.view)
     }
 
     pub(crate) fn arranged(&self) -> bool {
