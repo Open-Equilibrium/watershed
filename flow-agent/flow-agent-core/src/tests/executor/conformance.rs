@@ -336,6 +336,7 @@ fn productive_session_uses_the_selected_executor_and_persists_its_receipt() {
         fixture.smoke_flow(),
         &fixture.policy,
         None,
+        None,
         true,
         || Ok(fixture.credential().clone()),
         "",
