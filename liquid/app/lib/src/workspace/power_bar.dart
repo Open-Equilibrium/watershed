@@ -181,23 +181,28 @@ class _PowerBarState extends State<PowerBar> {
   Future<void> _add(SlashCommand command) async {
     final views = _state.currentPage.value;
     if (views == null) return;
+    final state = _state;
+    final existing = command.existing
+        ? await pickExistingTable(Navigator.of(context).context, state)
+        : null;
+    if (command.existing && existing == null) return;
+    final focused = views.lastFocused;
     final count = views.count ?? 0;
     final last = count == 0 ? null : await views.viewAt(count - 1);
-    final after = views.lastFocused ?? last?.id;
+    final after = focused != null && views.indexOf(focused) != null
+        ? focused
+        : last?.id;
     BridgeMutation change(BridgeMutationKind kind, {String text = ''}) =>
         mutation(kind, page: views.page, after: after, text: text);
     try {
       switch (command) {
         case SlashCommand(existing: true):
-          if (!mounted) return;
-          final existing = await pickExistingTable(context, _state);
-          if (existing == null) return;
           await views.write(
             mutation(
               BridgeMutationKind.addTableView,
               page: views.page,
               after: after,
-              block: existing.table,
+              block: existing!.table,
               text: existing.title,
               tabs: existing.tabs,
             ),
@@ -253,7 +258,7 @@ class _PowerBarState extends State<PowerBar> {
           }
       }
     } on Object catch (error) {
-      _state.report('Liquid could not add the Block: $error');
+      state.report('Liquid could not add the Block: $error');
     }
   }
 

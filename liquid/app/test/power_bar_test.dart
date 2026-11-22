@@ -126,6 +126,41 @@ void main() {
     );
   });
 
+  testWidgets('Existing Table… asks for the Table while the end loads', (
+    tester,
+  ) async {
+    await kit.show(tester, [
+      TablePart(expenses),
+      for (var at = 0; at < 150; at++) TextPart('Line $at'),
+    ]);
+    kit.fake.deferredKinds = {BridgeQueryKind.views};
+    kit.fake.deferred = [];
+    await open(tester);
+    await type(tester, '/exist');
+    await enter(tester);
+    expect(bar(), findsNothing);
+    expect(find.text('Add a View of a Table'), findsOneWidget);
+  });
+
+  testWidgets('a Block goes after the last View once the focused one left', (
+    tester,
+  ) async {
+    await kit.show(tester, [const TextPart('Plan'), const TextPart('Gone')]);
+    final views = kit.fake.views[kit.page]!;
+    final gone = views.last.id;
+    await tester.tap(find.text('Gone'));
+    await tester.pumpAndSettle();
+    await kit.workspace.apply(
+      mutation(BridgeMutationKind.removeView, page: kit.page, view: gone),
+    );
+    await tester.pumpAndSettle();
+    await open(tester);
+    await type(tester, '/white');
+    await enter(tester);
+    final added = kit.applied(BridgeMutationKind.addWhiteboardBlock).single;
+    expect(added.after, views.first.id);
+  });
+
   testWidgets('> lists actions; Arrange turns on Arrange mode', (tester) async {
     await kit.show(tester, [const TextPart('Plan')]);
     await open(tester);
