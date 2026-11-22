@@ -1,3 +1,4 @@
+mod agents;
 pub mod api;
 mod config;
 mod context;

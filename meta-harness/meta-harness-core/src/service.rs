@@ -223,7 +223,7 @@ impl Drop for Service {
     }
 }
 
-fn create_private_dir(path: &Path) -> Result<(), String> {
+pub(crate) fn create_private_dir(path: &Path) -> Result<(), String> {
     std::fs::create_dir_all(path)
         .map_err(|e| format!("Could not create {}: {e}", path.display()))?;
     #[cfg(unix)]

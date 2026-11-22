@@ -123,9 +123,10 @@ impl Store {
             }
         }
         db.execute_batch(&format!(
-            "BEGIN; {schema} {} {} COMMIT;",
+            "BEGIN; {schema} {} {} {} COMMIT;",
             crate::hosts::SCHEMA,
-            crate::host_move::SCHEMA
+            crate::host_move::SCHEMA,
+            crate::agents::SCHEMA
         ))
         .map_err(failed)?;
         Ok(Self {
