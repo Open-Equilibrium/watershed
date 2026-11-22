@@ -15,24 +15,27 @@ use crate::{AgentEvent, StartThread, Thread, Workspace, handoff};
 const RETRY: Duration = Duration::from_secs(10);
 
 #[derive(Default)]
-pub(super) struct Watchers(std::sync::Mutex<HashMap<String, JoinHandle<()>>>);
+pub(super) struct Watchers {
+    tasks: std::sync::Mutex<HashMap<String, JoinHandle<()>>>,
+    serial: tokio::sync::Mutex<()>,
+}
 
 impl Watchers {
     fn start(&self, shared: &Arc<Shared>, name: &str) {
         let task = tokio::spawn(watch(shared.clone(), name.to_owned()));
-        if let Some(old) = crate::util::lock(&self.0).insert(name.to_owned(), task) {
+        if let Some(old) = crate::util::lock(&self.tasks).insert(name.to_owned(), task) {
             old.abort();
         }
     }
 
     fn stop(&self, name: &str) {
-        if let Some(task) = crate::util::lock(&self.0).remove(name) {
+        if let Some(task) = crate::util::lock(&self.tasks).remove(name) {
             task.abort();
         }
     }
 
     pub(super) fn stop_all(&self) {
-        for (_, task) in crate::util::lock(&self.0).drain() {
+        for (_, task) in crate::util::lock(&self.tasks).drain() {
             task.abort();
         }
     }
@@ -50,6 +53,7 @@ pub(super) fn start_all(shared: &Arc<Shared>) {
 }
 
 pub(super) async fn call(shared: &Arc<Shared>, call: AgentsCall) -> Result<Value, String> {
+    let _serial = shared.agents.serial.lock().await;
     match call {
         AgentsCall::List => to(agents::list(&shared.store.db(), &shared.home)?),
         AgentsCall::Create(new) => {
@@ -181,10 +185,13 @@ async fn watch(shared: Arc<Shared>, name: String) {
 
 async fn follow(shared: &Shared, name: &str) -> Result<(), String> {
     loop {
-        let Some(agent) = agents::get(&shared.store.db(), &shared.home, name)? else {
-            return Ok(());
+        let thread = {
+            let _serial = shared.agents.serial.lock().await;
+            let Some(agent) = agents::get(&shared.store.db(), &shared.home, name)? else {
+                return Ok(());
+            };
+            current(shared, &agent).await?
         };
-        let thread = current(shared, &agent).await?;
         let (_, mut events) = thread.subscribe();
         let mut full = filled(&thread);
         while !full && let Some(event) = events.recv().await {
@@ -194,7 +201,12 @@ async fn follow(shared: &Shared, name: &str) -> Result<(), String> {
             ) && filled(&thread);
         }
         if full {
-            agents::advance(&shared.store.db(), name, &crate::t3::fresh_id("thread"))?;
+            let _serial = shared.agents.serial.lock().await;
+            if agents::get(&shared.store.db(), &shared.home, name)?
+                .is_some_and(|agent| agent.thread == thread.id())
+            {
+                agents::advance(&shared.store.db(), name, &crate::t3::fresh_id("thread"))?;
+            }
         } else if thread.ended() {
             return Err("its thread stopped updating".to_owned());
         }
