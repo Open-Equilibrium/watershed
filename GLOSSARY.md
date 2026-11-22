@@ -149,7 +149,7 @@ Canonical terms. Use these exactly; do not introduce synonyms. Tool names are fi
 
 - **Workspace** — Top-level owner of Pages, Blocks, Sources, Connections, Automations, Roles, History and settings.
 - **Page** — Liquid's authored surface: an ordered composition of Block Views with responsive layout metadata. A Page starts as an empty flow and may later be arranged on a grid.
-- **Block** — A canonical, typed and addressable unit of content or functionality, such as text, database, code, formula, media, whiteboard, App or Chat. A text toggle is formatting inside a Text Block, not a Block Type.
+- **Block** — A canonical, typed and addressable unit of content or functionality, such as text, database, code, calculation, media, whiteboard, App or Chat. A text toggle is formatting inside a Text Block, not a Block Type.
 - **Block Type** — The versioned behavior, state contract, supported Views, ports/actions, permissions and responsive capabilities shared by Blocks of one kind.
 - **View** — One placement or representation of a Block. Several Views may expose the same Block on different Pages and stay synchronized because they share canonical Block state. Duplicating creates a new Block; adding a View does not. A View of a Table has its own title and View tabs.
 - **View tab** — One tab of a View of a Table, as Notion's database views: its own name, layout (Table, Board or Calendar), group, sort and filter over the View's Table. The UI says tab; the app's tabs (ADR-0241) are another thing.

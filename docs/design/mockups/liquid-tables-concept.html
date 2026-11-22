@@ -121,6 +121,11 @@ h4.qh{margin:14px 0 6px;font-size:13px}
 .crow.add{display:flex;color:var(--ws-text-faint);font-size:13px;box-shadow:none}
 .crow .fxh{white-space:nowrap;font-family:var(--ws-font-mono);font-size:11px;color:var(--ws-text-faint)}
 .crow .num{text-align:right;font-variant-numeric:tabular-nums}
+.vblk{display:flex;flex-direction:column;gap:2px;padding:10px 12px;border-radius:8px;box-shadow:inset 0 0 0 1px var(--ws-border)}
+.vblk .lab{font-size:12px;color:var(--ws-text-faint)}
+.vblk .big{font-size:28px;line-height:34px;font-weight:700;font-variant-numeric:tabular-nums}
+.vblk .fxh{font-family:var(--ws-font-mono);font-size:12px;color:var(--ws-text-faint)}
+.gcell .pc{margin:0;padding-left:18px;font-size:12px;line-height:18px;color:var(--ws-text-muted)}
 .sheet{font-size:13px;box-shadow:0 0 0 1px var(--ws-border);border-radius:4px;overflow:hidden}
 .sr{display:grid;grid-template-columns:28px 1fr 100px 50px;height:26px;align-items:center;box-shadow:inset 0 -1px 0 var(--ws-border)}
 .sr>span{padding:0 6px;height:100%;display:flex;align-items:center;box-shadow:inset 1px 0 0 var(--ws-border)}
@@ -203,12 +208,24 @@ h4.qh{margin:14px 0 6px;font-size:13px}
     </table></div>
   </section>
   <section>
-    <h3 class="sec">Decided on 2026-11-03</h3>
+    <h3 class="sec">8 · One value: a Formula Block, or a Calculation Block of one line</h3>
+    <p class="sub">The Pages mockups (2026-11-01) show a Formula Block, one value computed from other Blocks; section 5 chose the Calculation Block for reports. A Calculation Block of one line computes the same value. To decide: keep both Blocks, or only the Calculation Block.</p>
+    <div class="gal" id="g-onevalue"></div>
+  </section>
+  <section>
+    <h3 class="sec">9 · How a formula is written</h3>
+    <p class="sub">The mockups write the same formula two ways. The formula parser needs one. Both show references as chips bound to stable IDs.</p>
+    <div class="gal" id="g-syntax"></div>
+  </section>
+  <section>
+    <h3 class="sec">Decided on 2026-11-03 and 2026-11-22</h3>
     <ol class="qs">
       <li>The Block is a <b>Table</b> with Views, as Airtable; the core keeps calling it the Database Block.</li>
       <li>Reports in Excel's layout are a <b>Calculation Block</b> (section 5, A).</li>
       <li>A new field finds its kind from its first value and can change it later (section 6); the first Table View keeps the approved kind menu until the core can change a field's kind.</li>
       <li>Whether a row opens as a Page waits for D-115, whether one View may show several Tables.</li>
+      <li>There is no Formula Block: one value is a Calculation Block of one line, or a value inside a sentence (section 8, A).</li>
+      <li>Formulas are written with Excel's functions, <code>SUM(Expenses.Amount)</code> (section 9, A).</li>
     </ol>
   </section>
 </div>
@@ -268,15 +285,24 @@ const cr=[['Desk lamp','2','34.9','69.8'],['Office chair','1','249','249'],['Cab
 const fxPop=`<div class="pop" style="left:166px;top:342px;width:708px"><div class="fxin">= <span class="ref">Quantity</span> * <span class="ref">Unit price</span><span class="caret"></span></div><div class="cap" style="padding:6px 8px 2px">One value per row · fields of this row as chips · Excel's functions, such as ROUND, IF, SUMIFS</div></div>`;
 win('w-calc',{h:420,main:`<div class="prose"><p>Office equipment for the new room.</p></div><div class="blk">${bh2('Order')}${table2({fields:cf,rows:cr,totals:[['3 rows'],null,null,['Sum','368.8']],hdOn:3})}</div>`,over:fxPop});
 const inl=`<div class="prose"><p>So far we spent <span class="val">1,284.50 €</span> of <span class="val">1,500 €</span>, leaving <span class="val sel">215.50 €</span> for November.</p></div>`;
-const inlPop=`<div class="pop" style="left:560px;top:150px;width:310px"><div class="fxin">= 1500 − <span class="ref">Expenses.Amount</span>.SUM()</div><div class="cap" style="padding:6px 8px 2px">A value in the text; ⏎ keeps it, esc leaves it.</div></div>`;
+const inlPop=`<div class="pop" style="left:560px;top:150px;width:310px"><div class="fxin">= 1500 − SUM(<span class="ref">Expenses.Amount</span>)</div><div class="cap" style="padding:6px 8px 2px">A value in the text; ⏎ keeps it, esc leaves it.</div></div>`;
 win('w-inline',{h:340,main:`${inl}<div class="blk">${bh2('Expenses')}${table2({fields:tf,rows:tr.slice(0,2),totals:[['5 rows'],null,null,['Sum','1,284.5']]})}</div>`,over:inlPop});
-const rep=[['Income','',''],['Salary','','3,200.00'],['Side project','','450.00'],['Total income','=SUM(above)','3,650.00','sub'],['Spending','',''],['Expenses','=Expenses.Amount.SUM()','1,284.50'],['Savings plan','','500.00'],['Total spending','=SUM(above)','1,784.50','sub'],['Left over','=Total income − Total spending','1,865.50','tot']];
+const rep=[['Income','',''],['Salary','','3,200.00'],['Side project','','450.00'],['Total income','=SUM(above)','3,650.00','sub'],['Spending','',''],['Expenses','=SUM(Expenses.Amount)','1,284.50'],['Savings plan','','500.00'],['Total spending','=SUM(above)','1,784.50','sub'],['Left over','=Total income − Total spending','1,865.50','tot']];
 const calcBlock=`<div class="cblk"><div class="bh"><span class="ico">${I.calc}</span><b>October budget</b></div>${rep.map(r=>r[1]===''&&r[2]===''?`<div class="crow h">${r[0]}</div>`:`<div class="crow ${r[3]||''}"><span>${r[0]}</span>${r[1]?`<span class="fxh">${r[1]}</span>`:'<span></span>'}<span class="num">${r[2]}</span></div>`).join('')}<div class="crow add">${I.plus}&nbsp;Add a line</div></div>`;
 const sheet=`<div class="sheet"><div class="sr hd"><span></span><span>A</span><span>B</span><span>C</span></div>${[['1','Income','',''],['2','Salary','3200',''],['3','Side project','450',''],['4','Total income','=SUM(B2:B3)',''],['5','',' ',''],['6','Expenses','=Expenses!D7',''],['7','Left over','=B4-B6','']].map(r=>`<div class="sr"><span class="rn">${r[0]}</span><span>${r[1]}</span><span class="num ${r[2].startsWith('=')?'f':''}">${r[2]}</span><span></span></div>`).join('')}</div>`;
 const plain=`<div class="prose" style="font-size:14px;line-height:22px"><p>Income this month: <span class="val">3,650.00 €</span>.</p><p>Spent: <span class="val">1,284.50 €</span>, saved <span class="val">500.00 €</span>.</p><p>Left over: <span class="val">1,865.50 €</span>.</p></div>`;
 document.getElementById('g-report').innerHTML=`<div class="gcell"><h4>A · Calculation Block (recommended)</h4>${calcBlock}<div class="cap">Each line is a label and a value or formula; values align right, subtotals and the total stand out. References are by name, so moving a line breaks nothing. Formulas show on hover.</div></div>
 <div class="gcell"><h4>B · Sheet Block</h4>${sheet}<div class="cap">A free grid with A1 references, as in Excel. Most familiar, but a second kind of table beside the Table, and B4 points elsewhere once a row is inserted above it.</div></div>
 <div class="gcell"><h4>C · Sentences only</h4>${plain}<div class="cap">Formulas in Text Blocks and the Table's total row; nothing new to build, but a long report gets hard to scan.</div></div>`;
+const fxChip=`<span class="ref">Expenses.Amount</span>`;
+const formulaBlock=`<div class="vblk"><span class="lab">Left this month</span><span class="big">€ 715.50</span><span class="fxh">= 2000 − SUM(${fxChip})</span></div>`;
+const oneLine=`<div class="cblk"><div class="bh"><span class="ico">${I.calc}</span><b>This month</b></div><div class="crow tot"><span>Left this month</span><span class="fxh">= 2000 − SUM(…)</span><span class="num">€ 715.50</span></div><div class="crow add">${I.plus}&nbsp;Add a line</div></div>`;
+const both=`<div style="display:flex;flex-direction:column;gap:14px">${formulaBlock}${calcBlock}</div>`;
+const pc=(pros,cons)=>`<ul class="pc">${pros.map(t=>`<li>+ ${t}</li>`).join('')}${cons.map(t=>`<li>− ${t}</li>`).join('')}</ul>`;
+document.getElementById('g-onevalue').innerHTML=`<div class="gcell"><h4>A · Only the Calculation Block (recommended)</h4>${oneLine}<div class="cap">The slash menu offers "Calculation". Its lines are part of the Block, not Blocks of their own: each line is a label, a formula and its value. "Add a line" grows it into a report with subtotals. A value inside a sentence stays the inline value of section 4.</div>${pc(['One Block and one word for computed values, as GLOSSARY.md asks: one name per concept','Less to build, test and keep: one editor, one layout, one set of keys','A single value grows into a report without converting anything'],['A single value looks like a line in a report, not a large figure; a large figure needs a style choice such as "Total"'])}</div>
+<div class="gcell"><h4>B · Both Blocks</h4>${both}<div class="cap">"Formula" adds one large value, as a dashboard tile shows it; "Calculation" adds a report.</div>${pc(['A single value reads at a glance, as a KPI tile in a dashboard','Matches the Pages mockups and the Budget template as approved'],['Two Blocks that do the same: a person must choose, and a value that grows into a report must be rebuilt in the other Block','Two editors, two glossary entries, more code and tests'])}</div>`;
+document.getElementById('g-syntax').innerHTML=`<div class="gcell"><h4>A · Excel's functions (recommended)</h4><div class="fxin">= 2000 − SUM(${fxChip})</div><div class="fxin">= SUMIF(<span class="ref">Expenses.Category</span>, "Rent", ${fxChip})</div><div class="cap">The function comes first, as in Excel and Google Sheets.</div>${pc(['What ADR-0244 says: Excel\'s language, so Excel knowledge carries over','Import and export of .xlsx translate formulas one to one','Every function, including IF and SUMIF, reads the same way'],['Long nested formulas need many brackets, as in Excel'])}</div>
+<div class="gcell"><h4>B · Chained methods</h4><div class="fxin">= 2000 − ${fxChip}.SUM()</div><div class="fxin">= ${fxChip}.filter(<span class="ref">Category</span> = "Rent").SUM()</div><div class="cap">The value comes first and functions follow with a dot, as Notion's formulas 2.0 write them.</div>${pc(['Reads left to right; typing the dot can suggest what fits the value','Familiar from Notion'],['Not Excel: formulas copied from or to Excel must be rewritten','Two ways to write the same function, since Excel\'s form must still work for import'])}</div>`;
 const nf=[['Name','text','1fr'],['Amount','num','110px'],['Field 3','auto','120px']];
 document.getElementById('g-detect').innerHTML=`<div class="gcell"><h4>A field without a kind yet</h4>${table2({fields:[['Name','text','1fr'],['Amount','num','110px'],['Field 3','auto','120px']],rows:[['Groceries','84.2','02.11.2026<span class="caret"></span>'],['Electricity','96','']],on:[0,2]})}<div class="cap">Typing the first value into "Field 3".</div></div>
 <div class="gcell"><h4>Found: a date</h4><div class="room">${table2({fields:[['Name','text','1fr'],['Amount','num','110px'],['Field 3','date','120px']],rows:[['Groceries','84.2','Nov 2, 2026'],['Electricity','96','']]})}<div class="note">${I.date}<span>“Field 3” holds dates now.</span><span class="lnk">Change kind</span><span class="lnk">Rename</span></div></div><div class="cap">A note under the table says what was found; nothing asks before typing.</div></div>`;
