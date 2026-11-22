@@ -662,7 +662,7 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
       );
       views.pastedCopy.value = (view: added.view!, copied: copied);
     } on Object {
-      // The problem shows on the Page.
+      return;
     }
   }
 
