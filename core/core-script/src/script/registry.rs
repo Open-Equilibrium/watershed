@@ -496,10 +496,13 @@ impl ResolvedRegistry {
         };
         let mut llm_flows = BTreeSet::new();
         for subflow in &phase.subflows {
-            self.require_flow(&subflow.flow, RegistryBlockKind::Phase, &phase.identity.id)?;
+            let flow_id = &self
+                .require_flow(&subflow.flow, RegistryBlockKind::Phase, &phase.identity.id)?
+                .identity
+                .id;
             if subflow.start == SubflowStart::Llm {
-                let tool_name = format!("{SUBFLOW_TOOL_PREFIX}{}", subflow.flow);
-                if !llm_flows.insert(subflow.flow.as_str()) {
+                let tool_name = format!("{SUBFLOW_TOOL_PREFIX}{flow_id}");
+                if !llm_flows.insert(flow_id.as_str()) {
                     return Err(invalid(format!(
                         "subflow {} is started by the LLM more than once",
                         subflow.flow
@@ -510,7 +513,12 @@ impl ResolvedRegistry {
                         "subflow function name {tool_name} exceeds {MAX_SUBFLOW_TOOL_NAME_CHARS} characters"
                     )));
                 }
-                if phase.tool_refs.contains(&tool_name) {
+                if phase
+                    .tool_refs
+                    .iter()
+                    .filter_map(|reference| self.tool_block(reference))
+                    .any(|tool| tool.identity.id == tool_name)
+                {
                     return Err(invalid(format!(
                         "Tool {tool_name} has the function name of subflow {}",
                         subflow.flow

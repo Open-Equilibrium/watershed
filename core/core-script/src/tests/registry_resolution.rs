@@ -134,13 +134,16 @@ fn a_phase_offers_each_llm_subflow_once_under_a_free_function_name() {
         }
     };
 
-    let mut twice = starting_phase("chain-phase-000", vec!["flow-001".to_owned(); 2]);
+    let mut twice = starting_phase(
+        "chain-phase-000",
+        vec!["flow-001".to_owned(), "Flow 001".to_owned()],
+    );
     llm(&mut twice);
     assert!(refused(twice, "flow-001", None).contains("more than once"));
 
-    let mut shadowed = starting_phase("chain-phase-000", vec!["flow-001".to_owned()]);
+    let mut shadowed = starting_phase("chain-phase-000", vec!["Flow 001".to_owned()]);
     llm(&mut shadowed);
-    shadowed.tool_refs = vec!["subflow-flow-001".to_owned()];
+    shadowed.tool_refs = vec!["TestTool".to_owned()];
     let tool = own_script_tool("subflow-flow-001", "script:subflow-flow-001");
     assert!(refused(shadowed, "flow-001", Some(tool)).contains("Tool"));
 
