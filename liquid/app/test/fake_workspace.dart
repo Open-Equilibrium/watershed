@@ -163,6 +163,8 @@ class FakeWorkspace implements LiquidWorkspace {
             boundary: false,
             kind: shown.kind,
             tabs: shown.tabs,
+            tile: shown.tile,
+            inner: shown.inner,
           );
           created = _block(
             mutation.page!,
@@ -222,6 +224,8 @@ class FakeWorkspace implements LiquidWorkspace {
             boundary: shown.boundary,
             kind: to,
             tabs: shown.tabs,
+            tile: shown.tile,
+            inner: shown.inner,
           );
         }
         languages.remove(mutation.block);
@@ -255,6 +259,8 @@ class FakeWorkspace implements LiquidWorkspace {
           boundary: mutation.boundary,
           kind: shown.kind,
           tabs: shown.tabs,
+          tile: shown.tile,
+          inner: shown.inner,
         );
         _viewsChanged(mutation.page);
         return BridgeApplied(elements: const [], action: _id());
@@ -330,9 +336,47 @@ class FakeWorkspace implements LiquidWorkspace {
           boundary: shown.boundary,
           kind: shown.kind,
           tabs: tabs,
+          tile: shown.tile,
+          inner: shown.inner,
         );
         _viewsChanged(mutation.page);
         return BridgeApplied(elements: const [], action: _id(), tab: created);
+      case BridgeMutationKind.setTile || BridgeMutationKind.setInnerTile:
+        final page = views[mutation.page]!;
+        final at = page.indexWhere((view) => view.id == mutation.view);
+        if (at < 0) throw 'not found';
+        final shown = page[at];
+        final inner = mutation.kind == BridgeMutationKind.setInnerTile;
+        page[at] = BridgeView(
+          id: shown.id,
+          block: shown.block,
+          title: shown.title,
+          boundary: shown.boundary,
+          kind: shown.kind,
+          tabs: shown.tabs,
+          tile: inner ? shown.tile : mutation.tile,
+          inner: inner ? mutation.tile : shown.inner,
+        );
+        _viewsChanged(mutation.page);
+        return BridgeApplied(elements: const [], action: _id());
+      case BridgeMutationKind.moveViews:
+        final page = views[mutation.page]!;
+        final from = page.indexWhere((view) => view.id == mutation.view);
+        final to = page.indexWhere((view) => view.id == mutation.lastView);
+        if (from < 0 || to < from) throw 'text position out of range';
+        final run = page.sublist(from, to + 1);
+        if (run.any((view) => view.id == mutation.after)) {
+          throw 'text position out of range';
+        }
+        page.removeRange(from, to + 1);
+        page.insertAll(
+          mutation.after == null
+              ? 0
+              : page.indexWhere((view) => view.id == mutation.after) + 1,
+          run,
+        );
+        _viewsChanged(mutation.page);
+        return BridgeApplied(elements: const [], action: _id());
       case BridgeMutationKind.removeView:
         views[mutation.page]!.removeWhere((view) => view.id == mutation.view);
         _viewsChanged(mutation.page);
@@ -671,6 +715,8 @@ class FakeWorkspace implements LiquidWorkspace {
           boundary: shown.boundary,
           kind: shown.kind,
           tabs: shown.tabs,
+          tile: shown.tile,
+          inner: shown.inner,
         );
         _viewsChanged(mutation.page);
         if (shown.kind == BridgeBlockKind.database &&
@@ -1005,6 +1051,8 @@ class FakeWorkspace implements LiquidWorkspace {
           },
         ),
     ],
+    tile: view.tile,
+    inner: view.inner,
   );
 
   List<BridgeGroup> _groups(BridgeQuery query) {

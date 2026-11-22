@@ -25,7 +25,7 @@ pub use history::{Action, Document, Operation, Permission};
 pub use id::{
     ActionId, AreaId, BlockId, ElementId, FieldId, OptionId, PageId, PersonId, RowId, TabId, ViewId,
 };
-pub use model::{Area, BlockKind, Code, PageEntry, TableEntry, View};
+pub use model::{Area, BlockKind, Code, GRID_COLUMNS, PageEntry, TableEntry, Tile, View};
 pub use mutation::{
     Actor, Applied, Cell, Changed, Created, Error, FieldKind, Mutation, Origin, Place, Request,
     TextStyle,

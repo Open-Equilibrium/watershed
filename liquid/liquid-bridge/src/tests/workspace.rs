@@ -6,7 +6,7 @@ use crate::api::database::BridgeLayout;
 use crate::api::replica::LiquidWorkspace;
 use crate::api::workspace::{
     BridgeChange, BridgeMutation, BridgeMutationKind, BridgeQuery, BridgeQueryKind, BridgeResource,
-    BridgeResourceKind, BridgeTextStyle, MAX_WINDOW,
+    BridgeResourceKind, BridgeTextStyle, BridgeTile, MAX_WINDOW,
 };
 use crate::keys::{KEY_NAME_FILE, Keys, path_name};
 
@@ -111,6 +111,8 @@ pub(super) fn mutation(kind: BridgeMutationKind) -> BridgeMutation {
         sort: None,
         filter: None,
         tab: None,
+        tile: None,
+        last_view: None,
         layout: BridgeLayout::Table,
         tabs: Vec::new(),
         media_type: None,
@@ -898,4 +900,63 @@ fn a_workspace_whose_call_failed_midway_refuses_every_later_call() {
     );
     let watched = workspace.watch(2, resource(BridgeResourceKind::Areas), |_| true);
     assert_eq!(watched.err().unwrap(), stopped);
+}
+
+#[test]
+fn a_tile_and_a_move_cross_the_bridge() {
+    let folder = Folder::new("arrange");
+    let workspace = LiquidWorkspace::open_with(&folder.0, &Memory::default()).unwrap();
+    let (_, page, _, first) = lisbon(&workspace);
+    let second = workspace
+        .apply(BridgeMutation {
+            page: Some(page.clone()),
+            after: Some(first.clone()),
+            ..mutation(BridgeMutationKind::AddWhiteboardBlock)
+        })
+        .unwrap()
+        .view
+        .unwrap();
+    let tile = BridgeTile { column: 4, span: 8 };
+    for write in [
+        BridgeMutation {
+            view: Some(second.clone()),
+            tile: Some(tile),
+            ..mutation(BridgeMutationKind::SetTile)
+        },
+        BridgeMutation {
+            view: Some(first.clone()),
+            tile: Some(tile),
+            ..mutation(BridgeMutationKind::SetInnerTile)
+        },
+        BridgeMutation {
+            view: Some(second.clone()),
+            last_view: Some(second.clone()),
+            ..mutation(BridgeMutationKind::MoveViews)
+        },
+    ] {
+        workspace
+            .apply(BridgeMutation {
+                page: Some(page.clone()),
+                ..write
+            })
+            .unwrap();
+    }
+    let views = workspace
+        .query(BridgeQuery {
+            page: Some(page),
+            ..query(BridgeQueryKind::Views)
+        })
+        .unwrap()
+        .views;
+    let shown: Vec<_> = views
+        .iter()
+        .map(|view| (view.id.as_str(), view.tile, view.inner))
+        .collect();
+    assert_eq!(
+        shown,
+        [
+            (second.as_str(), Some(tile), None),
+            (first.as_str(), None, Some(tile))
+        ]
+    );
 }

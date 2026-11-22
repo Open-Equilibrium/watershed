@@ -10,8 +10,8 @@ import 'media.dart';
 
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `id`, `message`, `normalized`, `of`, `of`, `optional_id`, `page`, `place`, `table`, `to_core`, `to_core`, `units`, `window`
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `hash`, `hash`
+// These functions are ignored because they are not marked as `pub`: `id`, `message`, `normalized`, `of`, `of`, `of`, `optional_id`, `page`, `place`, `table`, `to_core`, `to_core`, `to_core`, `units`, `window`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `hash`, `hash`
 
 class BridgeAnswer {
   final List<BridgeArea> areas;
@@ -203,6 +203,8 @@ class BridgeMutation {
   final BridgeSort? sort;
   final BridgeFilter? filter;
   final String? tab;
+  final BridgeTile? tile;
+  final String? lastView;
   final BridgeLayout layout;
   final List<BridgeTab> tabs;
   final String? mediaType;
@@ -232,6 +234,8 @@ class BridgeMutation {
     this.sort,
     this.filter,
     this.tab,
+    this.tile,
+    this.lastView,
     required this.layout,
     required this.tabs,
     this.mediaType,
@@ -263,6 +267,8 @@ class BridgeMutation {
       sort.hashCode ^
       filter.hashCode ^
       tab.hashCode ^
+      tile.hashCode ^
+      lastView.hashCode ^
       layout.hashCode ^
       tabs.hashCode ^
       mediaType.hashCode ^
@@ -296,6 +302,8 @@ class BridgeMutation {
           sort == other.sort &&
           filter == other.filter &&
           tab == other.tab &&
+          tile == other.tile &&
+          lastView == other.lastView &&
           layout == other.layout &&
           tabs == other.tabs &&
           mediaType == other.mediaType &&
@@ -313,6 +321,9 @@ enum BridgeMutationKind {
   addTextBlock,
   editText,
   removeView,
+  setTile,
+  setInnerTile,
+  moveViews,
   addTab,
   renameTab,
   setTabLayout,
@@ -531,6 +542,24 @@ enum BridgeTextStyle {
   quote,
 }
 
+class BridgeTile {
+  final int column;
+  final int span;
+
+  const BridgeTile({required this.column, required this.span});
+
+  @override
+  int get hashCode => column.hashCode ^ span.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeTile &&
+          runtimeType == other.runtimeType &&
+          column == other.column &&
+          span == other.span;
+}
+
 class BridgeView {
   final String id;
   final String block;
@@ -538,6 +567,8 @@ class BridgeView {
   final bool boundary;
   final BridgeBlockKind kind;
   final List<BridgeTab> tabs;
+  final BridgeTile? tile;
+  final BridgeTile? inner;
 
   const BridgeView({
     required this.id,
@@ -546,6 +577,8 @@ class BridgeView {
     required this.boundary,
     required this.kind,
     required this.tabs,
+    this.tile,
+    this.inner,
   });
 
   @override
@@ -555,7 +588,9 @@ class BridgeView {
       title.hashCode ^
       boundary.hashCode ^
       kind.hashCode ^
-      tabs.hashCode;
+      tabs.hashCode ^
+      tile.hashCode ^
+      inner.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -567,5 +602,7 @@ class BridgeView {
           title == other.title &&
           boundary == other.boundary &&
           kind == other.kind &&
-          tabs == other.tabs;
+          tabs == other.tabs &&
+          tile == other.tile &&
+          inner == other.inner;
 }

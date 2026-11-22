@@ -2,8 +2,8 @@ use std::collections::HashMap;
 
 use automerge::AutoCommit;
 
-use crate::model::{self, BLOCK, BLOCKS, BOUNDARY, KIND, TABLE, TITLE, VIEWS};
-use crate::{BlockId, BlockKind, Error, Place, Tab, View, ViewId};
+use crate::model::{self, BLOCK, BLOCKS, BOUNDARY, INNER, KIND, TABLE, TILE, TITLE, VIEWS};
+use crate::{BlockId, BlockKind, Error, Place, Tab, Tile, View, ViewId};
 
 struct Placed {
     sort: String,
@@ -47,6 +47,8 @@ impl Order {
                         boundary: entry.get(BOUNDARY) == Some("true"),
                         kind,
                         tabs,
+                        tile: stored(entry.get(TILE)),
+                        inner: stored(entry.get(INNER)),
                     },
                 })
             })
@@ -112,6 +114,23 @@ impl Order {
         }
     }
 
+    pub(crate) fn set_tiles(&mut self, view: &ViewId, tile: Option<Tile>, inner: Option<Tile>) {
+        if let Some(index) = self.position(view) {
+            self.placed[index].view.tile = tile;
+            self.placed[index].view.inner = inner;
+        }
+    }
+
+    pub(crate) fn run(&self, first: &ViewId, last: &ViewId) -> Option<Vec<View>> {
+        let (from, to) = (self.position(first)?, self.position(last)?);
+        (from <= to).then(|| {
+            self.placed[from..=to]
+                .iter()
+                .map(|placed| placed.view.clone())
+                .collect()
+        })
+    }
+
     pub(crate) fn set_tabs(&mut self, view: &ViewId, tabs: Vec<Tab>) {
         if let Some(index) = self.position(view) {
             self.placed[index].view.tabs = tabs;
@@ -144,6 +163,10 @@ impl Order {
             .iter()
             .position(|placed| &placed.view.id == view)
     }
+}
+
+fn stored<T: serde::de::DeserializeOwned>(json: Option<&str>) -> Option<T> {
+    serde_json::from_str(json?).ok()
 }
 
 #[cfg(test)]

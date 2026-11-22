@@ -304,6 +304,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   BridgeTextStyle dco_decode_box_autoadd_bridge_text_style(dynamic raw);
 
   @protected
+  BridgeTile dco_decode_box_autoadd_bridge_tile(dynamic raw);
+
+  @protected
   BridgeUsage dco_decode_box_autoadd_bridge_usage(dynamic raw);
 
   @protected
@@ -606,6 +609,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   BridgeThreadSummary dco_decode_bridge_thread_summary(dynamic raw);
 
   @protected
+  BridgeTile dco_decode_bridge_tile(dynamic raw);
+
+  @protected
   BridgeToolCalls dco_decode_bridge_tool_calls(dynamic raw);
 
   @protected
@@ -849,6 +855,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   BridgeTextStyle? dco_decode_opt_box_autoadd_bridge_text_style(dynamic raw);
+
+  @protected
+  BridgeTile? dco_decode_opt_box_autoadd_bridge_tile(dynamic raw);
 
   @protected
   BridgeUsage? dco_decode_opt_box_autoadd_bridge_usage(dynamic raw);
@@ -1149,6 +1158,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   BridgeTextStyle sse_decode_box_autoadd_bridge_text_style(
     SseDeserializer deserializer,
   );
+
+  @protected
+  BridgeTile sse_decode_box_autoadd_bridge_tile(SseDeserializer deserializer);
 
   @protected
   BridgeUsage sse_decode_box_autoadd_bridge_usage(SseDeserializer deserializer);
@@ -1507,6 +1519,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  BridgeTile sse_decode_bridge_tile(SseDeserializer deserializer);
+
+  @protected
   BridgeToolCalls sse_decode_bridge_tool_calls(SseDeserializer deserializer);
 
   @protected
@@ -1824,6 +1839,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   BridgeTextStyle? sse_decode_opt_box_autoadd_bridge_text_style(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgeTile? sse_decode_opt_box_autoadd_bridge_tile(
     SseDeserializer deserializer,
   );
 
@@ -2191,6 +2211,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_box_autoadd_bridge_text_style(
     BridgeTextStyle self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_box_autoadd_bridge_tile(
+    BridgeTile self,
     SseSerializer serializer,
   );
 
@@ -2681,6 +2707,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_bridge_tile(BridgeTile self, SseSerializer serializer);
+
+  @protected
   void sse_encode_bridge_tool_calls(
     BridgeToolCalls self,
     SseSerializer serializer,
@@ -3100,6 +3129,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_opt_box_autoadd_bridge_text_style(
     BridgeTextStyle? self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_opt_box_autoadd_bridge_tile(
+    BridgeTile? self,
     SseSerializer serializer,
   );
 

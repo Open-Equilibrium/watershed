@@ -16,7 +16,7 @@ use super::media::BridgeMedia;
 use super::workspace::{
     BridgeAnswer, BridgeApplied, BridgeArea, BridgeBlockKind, BridgeChange, BridgeMutation,
     BridgePage, BridgeQuery, BridgeQueryKind, BridgeResource, BridgeShown, BridgeTable,
-    BridgeTextStyle, BridgeView, id, message, window,
+    BridgeTextStyle, BridgeTile, BridgeView, id, message, window,
 };
 use crate::frb_generated::StreamSink;
 use crate::keys::{Keychain, Keys, random_hex, replica_key};
@@ -273,6 +273,8 @@ impl LiquidWorkspace {
                             BlockKind::Unknown => BridgeBlockKind::Unknown,
                         },
                         tabs: view.tabs.iter().map(BridgeTab::of).collect(),
+                        tile: view.tile.map(BridgeTile::of),
+                        inner: view.inner.map(BridgeTile::of),
                     })
                     .collect();
             }
