@@ -14,7 +14,7 @@ use crate::runtime::{
         append_productive_run_checkpoint,
         create_unpublished_productive_conversation_run_with_model_profile, existing_anchored_run,
         reclaim_productive_run_creation, reclaim_unpublished_productive_run,
-        reserve_new_conversation_run,
+        reserve_named_conversation_run, reserve_new_conversation_run,
     },
     execution_plan::RuntimeExecution,
     fs_guards::AnchoredWorkspace,
@@ -135,6 +135,7 @@ pub(crate) fn run_productive_session_with_provider<P, C>(
     flow_block: &core_script::FlowBlock,
     policy: &core_policy::PolicyArtifact,
     root_input: Option<core_script::FlowValue>,
+    conversation_id: Option<&str>,
     capture_jsonl: bool,
     resolve_credential: C,
     agent_instructions: &str,
@@ -147,10 +148,10 @@ where
 {
     let mut tool_executor = prepare_productive_tool_executor(policy)?;
     let credential = reconcile_productive_preflight(resolve_credential())?;
-    let reservation = reconcile_productive_preflight(reserve_new_conversation_run(
-        workspace,
-        &flow_block.identity.id,
-    ))?;
+    let reservation = reconcile_productive_preflight(match conversation_id {
+        Some(conversation_id) => reserve_named_conversation_run(workspace, conversation_id),
+        None => reserve_new_conversation_run(workspace, &flow_block.identity.id),
+    })?;
     let operation = execute_reserved_productive_session(
         workspace,
         execution_workspace,

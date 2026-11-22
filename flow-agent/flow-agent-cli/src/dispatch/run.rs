@@ -21,6 +21,7 @@ pub(super) fn run_command(
             flow_agent_core::run_flow_with_execution_activation(
                 operation_workspace,
                 &flow_ref,
+                None,
                 root_input,
                 notifier,
                 emit,

@@ -79,6 +79,7 @@ pub fn run_flow_with_root_input_and_live_events(
 pub fn run_flow_with_execution_activation<G>(
     workspace: impl AsRef<Path>,
     flow_ref: &str,
+    conversation_id: Option<&str>,
     root_input: Option<core_script::FlowValue>,
     notifier: Option<LiveEventNotifier>,
     emit: EmitMode,
@@ -88,6 +89,7 @@ pub fn run_flow_with_execution_activation<G>(
     let mut output = run_flow_internal_with_root_input_and_activation(
         workspace,
         flow_ref,
+        conversation_id,
         root_input,
         notifier,
         emit == EmitMode::Jsonl && !live,
@@ -109,6 +111,7 @@ fn run_flow_internal_with_root_input(
     run_flow_internal_with_root_input_and_activation(
         workspace,
         flow_ref,
+        None,
         root_input,
         notifier,
         capture_jsonl,
@@ -119,6 +122,7 @@ fn run_flow_internal_with_root_input(
 fn run_flow_internal_with_root_input_and_activation<G>(
     workspace: impl AsRef<Path>,
     flow_ref: &str,
+    conversation_id: Option<&str>,
     root_input: Option<core_script::FlowValue>,
     notifier: Option<LiveEventNotifier>,
     capture_jsonl: bool,
@@ -127,6 +131,7 @@ fn run_flow_internal_with_root_input_and_activation<G>(
     run_flow_internal_with_cleanup_observer_impl(
         workspace,
         flow_ref,
+        conversation_id,
         root_input,
         notifier,
         capture_jsonl,
@@ -146,6 +151,7 @@ pub(crate) fn run_flow_internal_with_cleanup_observer(
     run_flow_internal_with_cleanup_observer_impl(
         workspace,
         flow_ref,
+        None,
         None,
         None,
         capture_jsonl,
@@ -169,6 +175,7 @@ pub(crate) fn run_flow_internal_with_stage_observers(
         flow_ref,
         None,
         None,
+        None,
         capture_jsonl,
         |_| Ok(()),
         (after_operation, after_finalization),
@@ -180,6 +187,7 @@ pub(crate) fn run_flow_internal_with_stage_observers(
 fn run_flow_internal_with_cleanup_observer_impl<G>(
     workspace: impl AsRef<Path>,
     flow_ref: &str,
+    conversation_id: Option<&str>,
     root_input: Option<core_script::FlowValue>,
     notifier: Option<LiveEventNotifier>,
     capture_jsonl: bool,
@@ -242,12 +250,18 @@ fn run_flow_internal_with_cleanup_observer_impl<G>(
             flow_block,
             &policy,
             root_input,
+            conversation_id,
             capture_jsonl,
             || resolve_provider_credential(&credential_backend),
             &agent_instructions,
             notifier,
             &mut provider,
         );
+    }
+    if conversation_id.is_some() {
+        return Err(RuntimeError::Usage(
+            "a named conversation needs a productive execution backend".to_owned(),
+        ));
     }
     let base_session_id = &flow_block.identity.id;
     let candidate = reserve_unique_session_candidate_with_anchored_workspace(

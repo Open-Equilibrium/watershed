@@ -122,6 +122,7 @@ impl Store {
             self.fixture.smoke_flow(),
             &self.fixture.policy,
             None,
+            None,
             false,
             || Ok(credential),
             "",

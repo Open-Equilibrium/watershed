@@ -142,10 +142,25 @@ pub(crate) fn reserve_new_conversation_run(
     workspace: &Path,
     base_id: &str,
 ) -> Result<ProductiveConversationReservation, RuntimeError> {
+    reserve_conversation_candidates(workspace, base_id, MAX_UNIQUE_SESSION_CANDIDATES)
+}
+
+pub(crate) fn reserve_named_conversation_run(
+    workspace: &Path,
+    conversation_id: &str,
+) -> Result<ProductiveConversationReservation, RuntimeError> {
+    reserve_conversation_candidates(workspace, conversation_id, 1)
+}
+
+fn reserve_conversation_candidates(
+    workspace: &Path,
+    base_id: &str,
+    candidates: u32,
+) -> Result<ProductiveConversationReservation, RuntimeError> {
     validate_id(base_id, "conversation")?;
     let roots = ensure_runtime_roots(workspace)?;
     SessionOwnershipLease::ensure_store_available(workspace)?;
-    for ordinal in 1..=MAX_UNIQUE_SESSION_CANDIDATES {
+    for ordinal in 1..=candidates {
         let candidate = if ordinal == 1 {
             base_id.to_owned()
         } else {
