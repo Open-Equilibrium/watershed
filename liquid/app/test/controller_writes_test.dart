@@ -85,6 +85,16 @@ void main() {
         'The language search, emptied as its picker opens; the field is built only while open.',
       ),
       (
+        'lib/src/workspace/row_popover.dart',
+        '_pickText.text = \'\';',
+        'A row popover\'s picker text, emptied as the picker opens; the picker is built only while open.',
+      ),
+      (
+        'lib/src/workspace/table_tabs.dart',
+        '_name.value = TextEditingValue(',
+        'The tab\'s name as Rename starts; the field is built only while renaming, so its history starts there.',
+      ),
+      (
         'lib/src/controls.dart',
         'controller.value = value;',
         'writeText itself: the one place Liquid writes text into a field.',

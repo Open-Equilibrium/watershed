@@ -101,9 +101,10 @@ class _TabStripState extends State<TabStrip> {
 
   void _startRename(BridgeTab tab) {
     setState(() => _renaming = tab.id);
-    _name
-      ..text = tab.name
-      ..selection = TextSelection(baseOffset: 0, extentOffset: tab.name.length);
+    _name.value = TextEditingValue(
+      text: tab.name,
+      selection: TextSelection(baseOffset: 0, extentOffset: tab.name.length),
+    );
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _nameFocus.requestFocus();
     });

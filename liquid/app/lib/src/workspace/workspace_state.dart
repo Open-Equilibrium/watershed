@@ -95,6 +95,13 @@ BridgeQuery query(
   search: search,
 );
 
+typedef CopiedView = ({
+  String text,
+  String table,
+  String title,
+  List<BridgeTab> tabs,
+});
+
 class EditChain {
   Object? refused;
 }
@@ -141,6 +148,8 @@ class _Reread {
 }
 
 class WorkspaceState {
+  CopiedView? copiedView;
+
   WorkspaceState(this.workspace, {this.layout});
 
   final LiquidWorkspace workspace;

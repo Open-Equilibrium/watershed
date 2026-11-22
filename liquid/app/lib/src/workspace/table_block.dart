@@ -28,6 +28,7 @@ import 'table_tabs.dart';
 import 'table_view_parts.dart';
 import 'follow.dart';
 import 'page_views.dart';
+import 'paste.dart';
 import 'windowed_list.dart';
 import 'workspace_state.dart';
 
@@ -1095,6 +1096,90 @@ class _TableBlockState extends State<TableBlock> implements CellDrop {
     );
   }
 
+  void _copy() {
+    final name = _database?.name ?? widget.view.title;
+    final text = name.isEmpty ? untitled : name;
+    _state.copiedView = (
+      text: text,
+      table: _block,
+      title: widget.view.title,
+      tabs: widget.view.tabs,
+    );
+    unawaited(writeClipboard(text).then((_) {}, onError: (Object _) {}));
+  }
+
+  Future<void> _pasteAsView(CopiedView copied) async {
+    widget.views.pastedCopy.value = null;
+    try {
+      await widget.views.write(
+        mutation(
+          BridgeMutationKind.addTableView,
+          page: _page,
+          after: widget.view.id,
+          block: copied.table,
+          text: copied.title,
+          tabs: copied.tabs,
+        ),
+        const [],
+      );
+      await widget.views.write(
+        mutation(BridgeMutationKind.deleteTable, block: _block),
+        const [],
+      );
+    } on Object {
+      return;
+    }
+  }
+
+  Widget _pastedChip() => ValueListenableBuilder(
+    valueListenable: widget.views.pastedCopy,
+    builder: (context, pasted, _) {
+      if (pasted == null || pasted.view != widget.view.id) {
+        return const SizedBox.shrink();
+      }
+      final ws = context.ws;
+      return Padding(
+        padding: const EdgeInsets.only(top: WsMetrics.space2),
+        child: Align(
+          alignment: Alignment.centerLeft,
+          child: Container(
+            height: 30,
+            padding: const EdgeInsets.only(left: WsMetrics.space3),
+            decoration: BoxDecoration(
+              color: ws.surface,
+              border: Border.all(color: ws.border),
+              borderRadius: BorderRadius.circular(WsMetrics.radiusLg),
+              boxShadow: ws.shadow,
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  'Pasted as a copy',
+                  style: TextStyle(
+                    fontSize: WsMetrics.fsCompact,
+                    color: ws.textMuted,
+                  ),
+                ),
+                const SizedBox(width: WsMetrics.space2),
+                TextButton(
+                  onPressed: () => unawaited(_pasteAsView(pasted.copied)),
+                  child: const Text('Paste as View'),
+                ),
+                IconButton(
+                  tooltip: 'Keep the copy',
+                  iconSize: 14,
+                  onPressed: () => widget.views.pastedCopy.value = null,
+                  icon: Icon(LucideIcons.x, color: ws.textFaint),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    },
+  );
+
   BridgeField? _groupOf(BridgeDatabase database) {
     bool groups(BridgeField field) =>
         field.kind == BridgeFieldKind.select ||
@@ -1210,6 +1295,7 @@ class _TableBlockState extends State<TableBlock> implements CellDrop {
               visible: _hovered || touchFirst,
               items: [
                 (LucideIcons.copy, 'Duplicate', _duplicate),
+                (LucideIcons.clipboardCopy, 'Copy', _copy),
                 (LucideIcons.trash, 'Delete View', _deleteView),
               ],
             ),
@@ -1498,6 +1584,7 @@ class _TableBlockState extends State<TableBlock> implements CellDrop {
                       ),
                     ),
                   ),
+                _pastedChip(),
                 if (_cells.error case final error?)
                   Padding(
                     padding: const EdgeInsets.only(top: WsMetrics.space2),

@@ -23,6 +23,9 @@ class Pasted {
   final String? text;
 }
 
+Future<void> Function(String text) writeClipboard = (text) =>
+    Clipboard.setData(ClipboardData(text: text));
+
 Future<Pasted> Function() readClipboard = () async {
   try {
     final read = await const MethodChannel('liquid/clipboard')

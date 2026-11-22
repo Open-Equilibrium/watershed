@@ -630,6 +630,9 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
     }
     if (pasted.code case final code?) return _pasteCode(code, pasted.language);
     final text = pasted.text;
+    if (_state.copiedView case final copied? when copied.text == text) {
+      return _pasteView(copied);
+    }
     final selection = _text.selection;
     if (text == null ||
         text.isEmpty ||
@@ -641,6 +644,26 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
     _text.value = value.copyWith(
       selection: TextSelection.collapsed(offset: selection.start + text.length),
     );
+  }
+
+  Future<void> _pasteView(CopiedView copied) async {
+    final views = widget.views;
+    try {
+      final added = await views.write(
+        mutation(
+          BridgeMutationKind.duplicateTable,
+          page: _page,
+          after: widget.view.id,
+          block: copied.table,
+          text: '${copied.text} (copy)',
+          tabs: copied.tabs,
+        ),
+        const [],
+      );
+      views.pastedCopy.value = (view: added.view!, copied: copied);
+    } on Object {
+      // The problem shows on the Page.
+    }
   }
 
   Future<void> _pasteCode(String code, String language) async {
