@@ -142,7 +142,6 @@
         "id": { "$ref": "#/$defs/block_id" },
         "name": { "$ref": "#/$defs/block_name" },
         "phase_refs": { "items": { "type": "string" }, "minItems": 1, "type": "array" },
-        "subflow_refs": { "items": { "type": "string" }, "type": "array" },
         "transitions": { "items": { "$ref": "#/$defs/transition" }, "type": "array" }
       },
       "required": ["id", "name", "phase_refs"],
@@ -159,10 +158,31 @@
         "output": { "$ref": "#/$defs/value_contract" },
         "phase_refs": { "items": { "type": "string" }, "type": "array" },
         "result_from": { "minLength": 1, "type": "string" },
+        "subflows": { "items": { "$ref": "#/$defs/phase_subflow" }, "maxItems": 32, "type": "array" },
         "tool_refs": { "items": { "type": "string" }, "type": "array" },
         "transitions": { "items": { "$ref": "#/$defs/transition" }, "type": "array" }
       },
       "required": ["id", "name", "instruction_refs", "tool_refs", "output"],
+      "type": "object"
+    },
+    "phase_subflow": {
+      "additionalProperties": false,
+      "properties": {
+        "continue_on_error": { "type": "boolean" },
+        "flow": { "minLength": 1, "type": "string" },
+        "start": {
+          "oneOf": [
+            { "const": "llm" },
+            {
+              "additionalProperties": false,
+              "properties": { "each": { "maxLength": 256, "minLength": 1, "type": "string" } },
+              "required": ["each"],
+              "type": "object"
+            }
+          ]
+        }
+      },
+      "required": ["flow", "start"],
       "type": "object"
     },
     "predefined_command": {

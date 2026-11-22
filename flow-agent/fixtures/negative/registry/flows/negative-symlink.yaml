@@ -2,4 +2,3 @@ flow:
   id: negative-symlink
   name: NegativeSymlink
   phase_refs: [negative-symlink]
-  subflow_refs: []

@@ -217,25 +217,6 @@ pub(in crate::tests) fn base_event() -> EventEnvelope {
     )
 }
 
-pub(in crate::tests) fn flow_id_for_definition(
-    events: &[EventEnvelope],
-    definition_id: &str,
-) -> String {
-    events
-        .iter()
-        .find(|event| {
-            event.event_type == EventType::FlowStarted
-                && event
-                    .payload
-                    .get("flow_definition_id")
-                    .and_then(Value::as_str)
-                    == Some(definition_id)
-        })
-        .and_then(|event| event.flow_id.as_deref())
-        .expect("flow definition starts")
-        .to_owned()
-}
-
 pub(in crate::tests) fn session_event_line(
     session_id: &str,
     event_id: &str,

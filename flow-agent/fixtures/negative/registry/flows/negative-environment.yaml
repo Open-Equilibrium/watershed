@@ -2,4 +2,3 @@ flow:
   id: negative-environment
   name: NegativeEnvironment
   phase_refs: [negative-environment]
-  subflow_refs: []

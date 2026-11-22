@@ -127,7 +127,7 @@ fn authoring_publishes_each_approved_block_kind_and_validates_a_selected_flow() 
         ),
         (
             "flow.yaml",
-            "flow:\n  id: review\n  name: Review\n  phase_refs: [review]\n  subflow_refs: []\n",
+            "flow:\n  id: review\n  name: Review\n  phase_refs: [review]\n",
         ),
     ];
 
@@ -294,6 +294,11 @@ fn installed_flows_are_listed_by_id_and_name() {
             .expect("fixture definition is installed");
         }
     }
+    fs::write(
+        workspace.join("registry/flows/hello-summary.yaml"),
+        "flow:\n  id: hello-summary\n  name: HelloSummary\n  phase_refs: [summarize]\n",
+    )
+    .expect("a second Flow is installed");
 
     let flows = list_global_flows().expect("installed Flows are listed");
 
@@ -304,7 +309,7 @@ fn installed_flows_are_listed_by_id_and_name() {
             .collect::<Vec<_>>(),
         [
             ("hello-flow", "HelloFlow"),
-            ("hello-subflow", "HelloSubflow")
+            ("hello-summary", "HelloSummary")
         ]
     );
 }

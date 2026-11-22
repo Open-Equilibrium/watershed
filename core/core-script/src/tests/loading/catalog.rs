@@ -8,8 +8,8 @@ use super::super::super::model::{
 };
 use super::super::super::semantics::validate_tool_semantics;
 use super::super::{
-    assert_missing_reference, load_registry, own_script_tool, registry_location,
-    simple_phase_block, temp_registry_dir, test_flow, test_phase,
+    assert_missing_reference, load_registry, own_script_tool, registry_location, starting_phase,
+    temp_registry_dir, test_flow, test_phase,
 };
 use super::write_registry_file;
 use serde_json::Value;
@@ -51,11 +51,15 @@ fn flow_registry_retains_the_unique_transitive_definition_closure() {
     for (path, source) in [
         (
             "root.yaml",
-            "flow:\n  id: root\n  name: Root\n  phase_refs: [shared-phase]\n  subflow_refs: [child, child]\n",
+            "flow:\n  id: root\n  name: Root\n  phase_refs: [starting-phase]\n",
+        ),
+        (
+            "starting-phase.yaml",
+            "phase:\n  id: starting-phase\n  name: StartingPhase\n  instruction_refs: [shared-instruction]\n  tool_refs: [endpoint-tool]\n  subflows:\n    - flow: child\n      start: llm\n    - flow: child\n      start: llm\n  output:\n    type: string\n",
         ),
         (
             "child.yaml",
-            "flow:\n  id: child\n  name: Child\n  phase_refs: [shared-phase]\n  subflow_refs: []\n",
+            "flow:\n  id: child\n  name: Child\n  phase_refs: [shared-phase]\n",
         ),
         (
             "phase.yaml",
@@ -108,7 +112,7 @@ fn flow_registry_reports_a_missing_reachable_definition_from_its_owner() {
     write_registry_file(
         &root,
         "root.yaml",
-        "flow:\n  id: root\n  name: Root\n  phase_refs: [missing]\n  subflow_refs: []\n",
+        "flow:\n  id: root\n  name: Root\n  phase_refs: [missing]\n",
     );
 
     let error = load_registry(&root).expect_err("missing reachable phase is rejected");
@@ -171,8 +175,7 @@ fn parser_rejects_oversized_names_and_definition_text() {
 #[test]
 fn flow_registry_rejects_a_definition_closure_above_its_byte_budget() {
     let root = temp_registry_dir("active-registry-limit");
-    let flow_source =
-        "flow:\n  id: root\n  name: Root\n  phase_refs: [phase]\n  subflow_refs: []\n";
+    let flow_source = "flow:\n  id: root\n  name: Root\n  phase_refs: [phase]\n";
     let phase_source = "phase:\n  id: phase\n  name: Phase\n  instruction_refs: [instruction]\n  tool_refs: []\n  output:\n    type: string\n";
     let instruction_source =
         "instruction:\n  id: instruction\n  name: Instruction\n  prompt: Retained\n";
@@ -307,11 +310,8 @@ fn registry_reference_validation_reports_each_missing_reference_shape() {
         (
             "flow",
             vec![
-                simple_phase_block("phase"),
-                RegistryBlock::Flow(FlowBlock {
-                    subflow_refs: vec!["missing-flow".to_owned()],
-                    ..test_flow()
-                }),
+                RegistryBlock::Phase(starting_phase("phase", vec!["missing-flow".to_owned()])),
+                RegistryBlock::Flow(test_flow()),
             ],
         ),
     ] {

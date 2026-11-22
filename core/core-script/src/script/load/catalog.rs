@@ -96,13 +96,13 @@ pub(super) fn enqueue_dependencies(
             for reference in &phase.phase_refs {
                 push(RegistryBlockKind::Phase, reference)?;
             }
+            for subflow in &phase.subflows {
+                push(RegistryBlockKind::Flow, &subflow.flow)?;
+            }
         }
         RegistryBlock::Flow(flow_block) => {
             for reference in &flow_block.phase_refs {
                 push(RegistryBlockKind::Phase, reference)?;
-            }
-            for reference in &flow_block.subflow_refs {
-                push(RegistryBlockKind::Flow, reference)?;
             }
         }
     }

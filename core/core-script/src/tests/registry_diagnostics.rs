@@ -141,12 +141,12 @@ fn registry_diagnostics_preserve_operator_context_and_error_sources() {
             false,
         ),
         (
-            RegistryError::FlowFanoutExceeded {
-                flow_id: "review".to_owned(),
+            RegistryError::SubflowFanoutExceeded {
+                phase_id: "review".to_owned(),
                 count: 33,
                 max: 32,
             },
-            "flow subflow fan-out 33 for review exceeds max 32",
+            "phase subflow fan-out 33 for review exceeds max 32",
             false,
         ),
         (

@@ -81,8 +81,8 @@ pub enum RegistryError {
         depth: usize,
         max: usize,
     },
-    FlowFanoutExceeded {
-        flow_id: String,
+    SubflowFanoutExceeded {
+        phase_id: String,
         count: usize,
         max: usize,
     },
@@ -172,13 +172,13 @@ impl fmt::Display for RegistryError {
                 f,
                 "flow nesting depth {depth} for {flow_id} exceeds max {max}"
             ),
-            Self::FlowFanoutExceeded {
-                flow_id,
+            Self::SubflowFanoutExceeded {
+                phase_id,
                 count,
                 max,
             } => write!(
                 f,
-                "flow subflow fan-out {count} for {flow_id} exceeds max {max}"
+                "phase subflow fan-out {count} for {phase_id} exceeds max {max}"
             ),
             Self::Semantic(err) => write!(f, "{err}"),
             Self::CanonicalJson(err) => {
@@ -213,7 +213,7 @@ impl std::error::Error for RegistryError {
             | Self::PhaseFanoutExceeded { .. }
             | Self::FlowCycle { .. }
             | Self::FlowDepthExceeded { .. }
-            | Self::FlowFanoutExceeded { .. } => None,
+            | Self::SubflowFanoutExceeded { .. } => None,
         }
     }
 }

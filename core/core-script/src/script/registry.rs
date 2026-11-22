@@ -3,9 +3,9 @@ use crate::script::canonical::{
 };
 use crate::script::error::{RegistryError, SemanticValidationError};
 use crate::script::model::{
-    FlowBlock, InstructionBlock, MAX_FLOW_FANOUT, MAX_FLOW_NESTING_DEPTH, MAX_PHASE_FANOUT,
-    MAX_PHASE_NESTING_DEPTH, PhaseBlock, PhaseTransition, RegistryBlock, RegistryBlockKind,
-    ResolvedRegistry, ToolBlock,
+    FlowBlock, InstructionBlock, MAX_FLOW_FANOUT, MAX_FLOW_NESTING_DEPTH, MAX_FLOW_VALUE_KEY_CHARS,
+    MAX_PHASE_FANOUT, MAX_PHASE_NESTING_DEPTH, PhaseBlock, PhaseTransition, RegistryBlock,
+    RegistryBlockKind, ResolvedRegistry, SubflowStart, ToolBlock,
 };
 use crate::script::naming::{insert_named_block, normalize_string};
 use crate::script::semantics::{validate_registry_block_semantics, validate_registry_block_shape};
@@ -97,6 +97,9 @@ impl ResolvedRegistry {
             if let Some(reference) = &mut phase.result_from {
                 canonicalize_reference(name_ids, RegistryBlockKind::Phase, reference);
             }
+            for subflow in &mut phase.subflows {
+                canonicalize_reference(name_ids, RegistryBlockKind::Flow, &mut subflow.flow);
+            }
             for transition in &mut phase.transitions {
                 canonicalize_transition_references(name_ids, transition);
             }
@@ -104,9 +107,6 @@ impl ResolvedRegistry {
         for flow_block in self.flows.values_mut() {
             for reference in &mut flow_block.phase_refs {
                 canonicalize_reference(name_ids, RegistryBlockKind::Phase, reference);
-            }
-            for reference in &mut flow_block.subflow_refs {
-                canonicalize_reference(name_ids, RegistryBlockKind::Flow, reference);
             }
             for transition in &mut flow_block.transitions {
                 canonicalize_transition_references(name_ids, transition);
@@ -203,6 +203,7 @@ impl ResolvedRegistry {
                     });
                 }
             }
+            self.validate_phase_subflows(phase)?;
             let mut tool_ids = BTreeSet::new();
             for reference in &phase.tool_refs {
                 let tool =
@@ -255,9 +256,6 @@ impl ResolvedRegistry {
                 RegistryBlockKind::Flow,
                 &flow_block.identity.id,
             )?;
-            for reference in &flow_block.subflow_refs {
-                self.require_flow(reference, RegistryBlockKind::Flow, &flow_block.identity.id)?;
-            }
             self.validate_transitions(
                 &flow_block.transitions,
                 &phase_positions,
@@ -480,6 +478,49 @@ impl ResolvedRegistry {
         Ok(())
     }
 
+    fn validate_phase_subflows(&self, phase: &PhaseBlock) -> Result<(), RegistryError> {
+        if phase.subflows.len() > MAX_FLOW_FANOUT {
+            return Err(RegistryError::SubflowFanoutExceeded {
+                phase_id: phase.identity.id.clone(),
+                count: phase.subflows.len(),
+                max: MAX_FLOW_FANOUT,
+            });
+        }
+        for subflow in &phase.subflows {
+            self.require_flow(&subflow.flow, RegistryBlockKind::Phase, &phase.identity.id)?;
+            if let SubflowStart::Each(field) = &subflow.start
+                && (field.is_empty() || field.chars().count() > MAX_FLOW_VALUE_KEY_CHARS)
+            {
+                return Err(SemanticValidationError::InvalidPhaseDefinition {
+                    phase_id: phase.identity.id.clone(),
+                    message: format!(
+                        "subflow {} starts each item of a field name with 1 to {MAX_FLOW_VALUE_KEY_CHARS} characters",
+                        subflow.flow
+                    ),
+                }
+                .into());
+            }
+        }
+        Ok(())
+    }
+
+    fn flow_subflow_refs(&self, flow_block: &FlowBlock) -> Vec<String> {
+        let mut pending = flow_block.phase_refs.clone();
+        let mut seen = BTreeSet::new();
+        let mut subflows = Vec::new();
+        while let Some(reference) = pending.pop() {
+            let Some(phase) = self.phase_block(&reference) else {
+                continue;
+            };
+            if !seen.insert(phase.identity.id.clone()) {
+                continue;
+            }
+            subflows.extend(phase.subflows.iter().map(|subflow| subflow.flow.clone()));
+            pending.extend(phase.phase_refs.iter().cloned());
+        }
+        subflows
+    }
+
     fn validate_flow_cycles(&self) -> Result<(), RegistryError> {
         let mut visited = BTreeMap::<String, FlowTailDepth>::new();
         for flow_id in self.flows.keys() {
@@ -521,19 +562,12 @@ impl ResolvedRegistry {
         }
 
         let flow_block = self.require_flow(flow_id, RegistryBlockKind::Flow, flow_id)?;
-        if flow_block.subflow_refs.len() > MAX_FLOW_FANOUT {
-            return Err(RegistryError::FlowFanoutExceeded {
-                flow_id: flow_id.to_owned(),
-                count: flow_block.subflow_refs.len(),
-                max: MAX_FLOW_FANOUT,
-            });
-        }
         let mut tail = FlowTailDepth {
             deepest_flow_id: flow_id.to_owned(),
             depth: 1,
         };
-        for subflow_ref in &flow_block.subflow_refs {
-            let subflow = self.require_flow(subflow_ref, RegistryBlockKind::Flow, flow_id)?;
+        for subflow_ref in self.flow_subflow_refs(flow_block) {
+            let subflow = self.require_flow(&subflow_ref, RegistryBlockKind::Flow, flow_id)?;
             self.visit_flow(&subflow.identity.id, depth + 1, visiting, visited)?;
             let child_tail = visited
                 .get(&subflow.identity.id)

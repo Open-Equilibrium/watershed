@@ -1,7 +1,7 @@
 use super::{
     Common, Cursor, TRANSITION_USAGE, parse_file, parse_number, parse_transition, set_once, unknown,
 };
-use core_script::{PhaseBlock, PhaseLoop, RegistryBlockKind};
+use core_script::{PhaseBlock, PhaseLoop, PhaseSubflow, RegistryBlockKind, SubflowStart};
 use flow_agent_core::RuntimeError;
 use std::{path::Path, sync::LazyLock};
 
@@ -13,6 +13,8 @@ pub(super) static USAGE: LazyLock<String> = LazyLock::new(|| {
             "[--instruction-ref ID]... [--tool-ref ID]... [--phase-ref ID]... ",
             "[--result-from ID] ",
             "[--loop --loop-max-iterations N --loop-until-file PATH --end-loop] ",
+            "[--subflow --subflow-ref ID (--subflow-start-llm | --subflow-start-each FIELD) ",
+            "[--subflow-continue-on-error] --end-subflow]... ",
             "{}",
         ),
         TRANSITION_USAGE
@@ -29,6 +31,7 @@ pub(super) fn parse(workspace: &Path, args: &[String]) -> Result<PhaseBlock, Run
     let mut result_from = None;
     let mut loop_config = None;
     let mut transitions = Vec::new();
+    let mut subflows = Vec::new();
     while let Some(flag) = cursor.next() {
         match flag {
             "--id" | "--name" => common.take(flag, cursor.value(flag)?.to_owned())?,
@@ -41,6 +44,7 @@ pub(super) fn parse(workspace: &Path, args: &[String]) -> Result<PhaseBlock, Run
             "--result-from" => set_once(&mut result_from, cursor.value(flag)?.to_owned(), flag)?,
             "--loop" => set_once(&mut loop_config, parse_loop(&mut cursor)?, flag)?,
             "--transition" => transitions.push(parse_transition(&mut cursor)?),
+            "--subflow" => subflows.push(parse_subflow(&mut cursor)?),
             other => return Err(unknown(other)),
         }
     }
@@ -64,6 +68,33 @@ pub(super) fn parse(workspace: &Path, args: &[String]) -> Result<PhaseBlock, Run
         result_from,
         loop_config,
         transitions,
+        subflows,
+    })
+}
+
+fn parse_subflow(cursor: &mut Cursor<'_>) -> Result<PhaseSubflow, RuntimeError> {
+    cursor.expect("--subflow-ref")?;
+    let flow = cursor.value("--subflow-ref")?.to_owned();
+    let start = match cursor.next() {
+        Some("--subflow-start-llm") => SubflowStart::Llm,
+        Some("--subflow-start-each") => {
+            SubflowStart::Each(cursor.value("--subflow-start-each")?.to_owned())
+        }
+        _ => {
+            return Err(RuntimeError::Usage(
+                "--subflow needs --subflow-start-llm or --subflow-start-each FIELD".to_owned(),
+            ));
+        }
+    };
+    let continue_on_error = cursor.peek() == Some("--subflow-continue-on-error");
+    if continue_on_error {
+        cursor.next();
+    }
+    cursor.expect("--end-subflow")?;
+    Ok(PhaseSubflow {
+        flow,
+        start,
+        continue_on_error,
     })
 }
 

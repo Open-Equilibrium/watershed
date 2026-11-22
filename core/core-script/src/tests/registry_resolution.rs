@@ -6,13 +6,13 @@ use super::super::model::{
     AllowedParameter, BlockIdentity, FlowBlock, FlowValue, InstructionBlock, MAX_BLOCK_NAME_CHARS,
     MAX_FLOW_FANOUT, MAX_FLOW_NESTING_DEPTH, MAX_PHASE_FANOUT, MAX_PHASE_NESTING_DEPTH,
     ParameterValueType, PhaseBlock, PhaseLoop, PhaseTransition, RegistryBlock, ResolvedRegistry,
-    ToolBlock, ToolCommand, ToolKind, ValueContract, ValueFieldContract, ValuePathSegment,
-    ValuePredicate,
+    SubflowStart, ToolBlock, ToolCommand, ToolKind, ValueContract, ValueFieldContract,
+    ValuePathSegment, ValuePredicate,
 };
 use super::{
     duplicated_subflow_tail_blocks, flow_chain_blocks, own_script_tool, phase_chain_block,
-    phase_chain_blocks, registry_location, simple_phase_block, temp_registry_dir, test_phase,
-    true_predicate,
+    phase_chain_blocks, registry_location, simple_phase_block, starting_phase, temp_registry_dir,
+    test_phase, true_predicate,
 };
 
 fn identity(id: &str, name: &str) -> BlockIdentity {
@@ -55,17 +55,16 @@ fn phase_transitions_reject_non_forward_references() {
 #[test]
 fn registry_reference_validation_rejects_flow_cycles() {
     let err = ResolvedRegistry::from_blocks([
-        simple_phase_block("phase"),
+        RegistryBlock::Phase(starting_phase("start-b", vec!["b".to_owned()])),
+        RegistryBlock::Phase(starting_phase("start-a", vec!["a".to_owned()])),
         RegistryBlock::Flow(FlowBlock {
             identity: identity("a", "A"),
-            phase_refs: vec!["phase".to_owned()],
-            subflow_refs: vec!["b".to_owned()],
+            phase_refs: vec!["start-b".to_owned()],
             transitions: Vec::new(),
         }),
         RegistryBlock::Flow(FlowBlock {
             identity: identity("b", "B"),
-            phase_refs: vec!["phase".to_owned()],
-            subflow_refs: vec!["a".to_owned()],
+            phase_refs: vec!["start-a".to_owned()],
             transitions: Vec::new(),
         }),
     ])
@@ -99,33 +98,45 @@ fn registry_reference_validation_rejects_deep_flow_chains() {
 }
 
 #[test]
-fn registry_reference_validation_rejects_more_than_32_direct_subflows() {
-    let mut blocks = flow_chain_blocks(2);
-    let RegistryBlock::Flow(root) = &mut blocks[1] else {
-        panic!("second chain block must be a flow");
+fn a_phase_declares_at_most_32_subflows() {
+    let blocks = |count| {
+        let mut blocks = flow_chain_blocks(2);
+        blocks[0] = RegistryBlock::Phase(starting_phase(
+            "chain-phase-000",
+            vec!["flow-001".to_owned(); count],
+        ));
+        blocks
     };
-    root.subflow_refs = vec!["flow-001".to_owned(); MAX_FLOW_FANOUT];
-    ResolvedRegistry::from_blocks(blocks).expect("32 direct subflow references are accepted");
+    ResolvedRegistry::from_blocks(blocks(MAX_FLOW_FANOUT)).expect("32 subflows are accepted");
 
-    let mut blocks = flow_chain_blocks(2);
-    let RegistryBlock::Flow(root) = &mut blocks[1] else {
-        panic!("second chain block must be a flow");
-    };
-    root.subflow_refs = vec!["flow-001".to_owned(); MAX_FLOW_FANOUT + 1];
-
-    let err = ResolvedRegistry::from_blocks(blocks)
-        .expect_err("more than 32 direct subflow invocations are rejected");
+    let err = ResolvedRegistry::from_blocks(blocks(MAX_FLOW_FANOUT + 1))
+        .expect_err("more than 32 subflows are rejected");
 
     assert!(err.to_string().contains("subflow fan-out"));
 }
 
 #[test]
+fn a_subflow_started_per_item_names_a_field() {
+    let mut phase = starting_phase("chain-phase-000", vec!["flow-001".to_owned()]);
+    phase.subflows[0].start = SubflowStart::Each(String::new());
+    let mut blocks = flow_chain_blocks(2);
+    blocks[0] = RegistryBlock::Phase(phase);
+
+    let err = ResolvedRegistry::from_blocks(blocks).expect_err("an empty field name is rejected");
+
+    assert!(err.to_string().contains("field name"), "{err}");
+}
+
+#[test]
 fn registry_reference_validation_counts_shared_subflow_tails_per_path() {
     let mut blocks = flow_chain_blocks(MAX_FLOW_NESTING_DEPTH);
+    blocks.push(RegistryBlock::Phase(starting_phase(
+        "zz-parent-phase",
+        vec!["flow-000".to_owned()],
+    )));
     blocks.push(RegistryBlock::Flow(FlowBlock {
         identity: identity("zz-parent", "Parent"),
-        phase_refs: vec!["chain-phase".to_owned()],
-        subflow_refs: vec!["flow-000".to_owned()],
+        phase_refs: vec!["zz-parent-phase".to_owned()],
         transitions: Vec::new(),
     }));
 

@@ -93,9 +93,9 @@ instruction         := flow create instruction common
                        (--prompt-file PATH | --prompt-stdin) instruction-parameter*
 phase               := flow create phase common [--instruction-ref REF]* [--tool-ref REF]*
                        [--phase-ref REF]* --output-contract-file PATH
-                       [--result-from REF] [phase-loop] transition*
+                       [--result-from REF] [phase-loop] transition* subflow*
 flow                 := flow create flow common --phase-ref REF [--phase-ref REF]*
-                       [--subflow-ref REF]* transition*
+                       transition*
 predefined tool     := flow create tool common --tool-kind predefined-command
                        --command-id COMMAND_ID [--argv TEXT]* parameter*
 own-script tool     := flow create tool common --tool-kind own-script
@@ -112,6 +112,9 @@ parameter           := --parameter --parameter-name PARAM_NAME
                        [--parameter-max-length U16]
                        [--parameter-min I64] [--parameter-max I64]
                        --end-parameter
+subflow             := --subflow --subflow-ref REF
+                       (--subflow-start-llm | --subflow-start-each FIELD)
+                       [--subflow-continue-on-error] --end-subflow
 phase-loop          := --loop --loop-max-iterations U8
                        --loop-until-file PATH --end-loop
 transition          := --transition --transition-from-phase-ref REF
@@ -121,7 +124,7 @@ transition          := --transition --transition-from-phase-ref REF
 
 `flow init`, `flow validate` and `flow create` operate only on the Global Flow home.
 
-The field mapping is literal: `--id`/`--name` map to every block's `id`/`name`; hyphenated singleton flags map to the same snake-case field; singular repeat flags map to arrays (`--argv` to `command.argv`, `--instruction-ref` to `instruction_refs`, `--tool-ref` to `tool_refs`, `--phase-ref` to `phase_refs`, `--subflow-ref` to `subflow_refs`). Instruction parameter groups map to `parameters[]`; Tool parameter groups map to `allowed_parameters[]`. Loop and Transition files contain one bounded `ValuePredicate`; output and parameter files contain one closed `ValueContract`. For own-script Tools, the body maps to `script_body`; `command: script:<tool-id>` and `script_runtime: posix-sh` are derived.
+The field mapping is literal: `--id`/`--name` map to every block's `id`/`name`; hyphenated singleton flags map to the same snake-case field; singular repeat flags map to arrays (`--argv` to `command.argv`, `--instruction-ref` to `instruction_refs`, `--tool-ref` to `tool_refs`, `--phase-ref` to `phase_refs`). Instruction parameter groups map to `parameters[]`; Tool parameter groups map to `allowed_parameters[]`; subflow groups map to `subflows[]` with `flow`, `start: llm` or `start: {each: FIELD}`, and `continue_on_error`. Loop and Transition files contain one bounded `ValuePredicate`; output and parameter files contain one closed `ValueContract`. For own-script Tools, the body maps to `script_body`; `command: script:<tool-id>` and `script_runtime: posix-sh` are derived.
 
 Group fields occur only inside their matching begin/end markers and in the displayed order, except that a Tool parameter's optional constraint flags may appear in any order after its required `name`, `value_type` and `required` fields. Type `none` permits no constraint flags; `string` requires exactly one pattern and maximum length; `enum` requires at least one allowed value; `integer` permits only optional minimum/maximum; `workspace-relative-path` permits only optional pattern/maximum length. A pattern is a finite Rust `regex` that must match the whole value; it is refused when an inline flag group names the verbose flag `x`, such as `(?x)`, `(?ix:…)` or `(?i-x)`, and an escaped or bracketed look-alike is refused too, since the check fails closed. A Flow requires at least one direct Phase. A leaf Phase has no child `phase_refs`, omits `result_from` and child Transitions, and may declare Instructions and Tools. A composite Phase has child `phase_refs`, declares exactly one `result_from` child with the same output contract, and declares no Instructions or Tools. A loop permits 1–32 iterations. Each Transition names two direct sibling Phases, points strictly forward, and its predicate is valid against the source output contract.
 

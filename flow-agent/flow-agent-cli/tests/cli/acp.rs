@@ -123,6 +123,11 @@ fn a_chat_offers_the_installed_flows_and_keeps_its_choice_until_it_starts() {
         return;
     }
     let workspace = workspace_copy("hello-flow");
+    fs::write(
+        session_home_path().join("registry/flows/hello-summary.yaml"),
+        "flow:\n  id: hello-summary\n  name: HelloSummary\n  phase_refs: [summarize]\n",
+    )
+    .expect("a second Flow is installed");
     let config_root = empty_workspace_under(Path::new(env!("CARGO_TARGET_TMPDIR")));
     let mut acp = Acp::start(&workspace, &config_root);
 
@@ -137,7 +142,7 @@ fn a_chat_offers_the_installed_flows_and_keeps_its_choice_until_it_starts() {
         .iter()
         .map(|choice| choice["value"].as_str().unwrap_or_default())
         .collect::<Vec<_>>();
-    assert_eq!(choices, ["hello-flow", "hello-subflow"]);
+    assert_eq!(choices, ["hello-flow", "hello-summary"]);
     assert_eq!(options[0]["currentValue"], "hello-flow");
 
     let unknown = acp.send(
@@ -147,11 +152,11 @@ fn a_chat_offers_the_installed_flows_and_keeps_its_choice_until_it_starts() {
     assert_eq!(acp.reply(unknown, &mut Vec::new())["error"]["code"], -32602);
     let chosen = acp.send(
         "session/set_config_option",
-        json!({"sessionId": session_id, "configId": "flow", "value": "hello-subflow"}),
+        json!({"sessionId": session_id, "configId": "flow", "value": "hello-summary"}),
     );
     assert_eq!(
         acp.reply(chosen, &mut Vec::new())["result"]["configOptions"][0]["currentValue"],
-        "hello-subflow"
+        "hello-summary"
     );
     let unsupported = acp.send("session/set_mode", json!({"sessionId": session_id}));
     assert_eq!(
@@ -226,11 +231,11 @@ fn a_chat_needs_a_productive_provider() {
 const NOTE_FLOW: [(&str, &str); 4] = [
     (
         "flows/alpha.yaml",
-        "flow:\n  id: alpha\n  name: Alpha\n  phase_refs: [write]\n  subflow_refs: []\n",
+        "flow:\n  id: alpha\n  name: Alpha\n  phase_refs: [write]\n",
     ),
     (
         "flows/note.yaml",
-        "flow:\n  id: note\n  name: Note\n  phase_refs: [write]\n  subflow_refs: []\n",
+        "flow:\n  id: note\n  name: Note\n  phase_refs: [write]\n",
     ),
     (
         "phases/write.yaml",

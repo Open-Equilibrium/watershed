@@ -1,5 +1,5 @@
 use super::{
-    helpers::{flow_id_for_definition, replace_registry_text},
+    helpers::replace_registry_text,
     test_support::{session_home_path, workspace_copy},
 };
 use crate::runtime::{
@@ -140,68 +140,6 @@ fn negative_policy_fixtures_reach_dispatch_with_their_declared_reason() {
                 && event.payload["tool_id"].as_str() == Some(tool_id)
         }));
     }
-}
-
-#[test]
-fn nested_sandbox_denial_emits_child_tool_failure_only() {
-    let workspace = workspace_copy("negative");
-    fs::write(
-        session_home_path().join("registry/flows/negative-write.yaml"),
-        "flow:\n  id: negative-write\n  name: NegativeWrite\n  phase_refs: [benign-parent]\n  subflow_refs: [nested-negative-write]\n",
-    )
-    .expect("parent flow fixture rewritten");
-    fs::write(
-        session_home_path().join("registry/phases/benign-parent.yaml"),
-        "phase:\n  id: benign-parent\n  name: BenignParent\n  instruction_refs: [deny-attempt]\n  tool_refs: []\n  output:\n    type: string\n",
-    )
-    .expect("benign parent phase written");
-    fs::write(
-        session_home_path().join("registry/flows/nested-negative-write.yaml"),
-        "flow:\n  id: nested-negative-write\n  name: NestedNegativeWrite\n  phase_refs: [negative-write]\n  subflow_refs: []\n",
-    )
-    .expect("nested flow fixture written");
-
-    let output = run_flow(&workspace, "negative-write", EmitMode::Jsonl)
-        .expect("nested negative operation produces a valid stream");
-
-    assert!(output.failed);
-    let events = validated_events(&output);
-    let parent_flow_id = flow_id_for_definition(&events, "negative-write");
-    let child_flow_id = flow_id_for_definition(&events, "nested-negative-write");
-    let tool_failed = events
-        .iter()
-        .filter(|event| event.event_type == EventType::ToolFailed)
-        .collect::<Vec<_>>();
-    assert_eq!(tool_failed.len(), 1);
-    assert_eq!(
-        tool_failed[0].flow_id.as_deref(),
-        Some(child_flow_id.as_str())
-    );
-    assert_ne!(
-        tool_failed[0].flow_id.as_deref(),
-        Some(parent_flow_id.as_str())
-    );
-    assert_eq!(
-        tool_failed[0].payload["tool_id"].as_str(),
-        Some("negative-tool")
-    );
-    let error_events = events
-        .iter()
-        .filter(|event| event.event_type == EventType::Error)
-        .collect::<Vec<_>>();
-    assert_eq!(error_events.len(), 1);
-    assert_eq!(
-        error_events[0].flow_id.as_deref(),
-        Some(child_flow_id.as_str())
-    );
-    for flow_id in [&parent_flow_id, &child_flow_id] {
-        assert!(events.iter().any(|event| {
-            event.event_type == EventType::FlowFailed
-                && event.flow_id.as_deref() == Some(flow_id.as_str())
-                && event.payload["error"].as_str() == Some("write_denied")
-        }));
-    }
-    assert_eq!(terminal_failure_reason(&events), Some("write_denied"));
 }
 
 #[test]

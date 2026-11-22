@@ -310,7 +310,7 @@ fn productive_composite_phase_loops_without_running_its_own_provider_turn() {
     .expect("composite Phase written");
     fs::write(
         workspace.join("registry/flows/smoke-flow.yaml"),
-        "flow:\n  id: smoke-flow\n  name: SmokeFlow\n  phase_refs: [repeat-smoke]\n  subflow_refs: []\n",
+        "flow:\n  id: smoke-flow\n  name: SmokeFlow\n  phase_refs: [repeat-smoke]\n",
     )
     .expect("Flow rewritten");
     let fixture = load_productive_execution_fixture(&workspace);
@@ -350,7 +350,7 @@ fn productive_composite_phase_loops_without_running_its_own_provider_turn() {
 }
 
 #[test]
-fn productive_transition_skips_a_phase_before_running_a_subflow() {
+fn productive_transition_skips_a_phase_in_a_composite() {
     let workspace = workspace_copy("smoke-flow");
     write_string_phases(
         &workspace,
@@ -358,7 +358,6 @@ fn productive_transition_skips_a_phase_before_running_a_subflow() {
             ("start", "Start"),
             ("skipped", "Skipped"),
             ("finish", "Finish"),
-            ("child", "Child"),
         ],
     );
     for (path, definition) in [
@@ -367,12 +366,8 @@ fn productive_transition_skips_a_phase_before_running_a_subflow() {
             "phase:\n  id: composite\n  name: Composite\n  instruction_refs: []\n  tool_refs: []\n  phase_refs: [start, skipped, finish]\n  output:\n    type: string\n  result_from: finish\n  transitions:\n    - from_phase_ref: start\n      to_phase_ref: finish\n      when:\n        path: []\n        equals:\n          type: string\n          value: jump\n",
         ),
         (
-            "flows/child-flow.yaml",
-            "flow:\n  id: child-flow\n  name: ChildFlow\n  phase_refs: [child]\n  subflow_refs: []\n",
-        ),
-        (
             "flows/smoke-flow.yaml",
-            "flow:\n  id: smoke-flow\n  name: SmokeFlow\n  phase_refs: [composite]\n  subflow_refs: [child-flow]\n",
+            "flow:\n  id: smoke-flow\n  name: SmokeFlow\n  phase_refs: [composite]\n",
         ),
     ] {
         fs::write(workspace.join("registry").join(path), definition)
@@ -383,7 +378,6 @@ fn productive_transition_skips_a_phase_before_running_a_subflow() {
     let mut provider = ScriptedProvider::new([
         string_provider_turn("response-start", "jump"),
         string_provider_turn("response-finish", "finished"),
-        string_provider_turn("response-child", "subflow"),
     ]);
     let mut attempts = MemoryAttempts::default();
     let mut sink = MemorySink::default();
@@ -397,20 +391,10 @@ fn productive_transition_skips_a_phase_before_running_a_subflow() {
     .expect("recursive productive execution");
 
     assert!(!execution.failed, "{:?}", execution.terminal_error);
-    assert_eq!(provider.bodies.len(), 3);
+    assert_eq!(provider.bodies.len(), 2);
     assert!(!sink.0.iter().any(|event| {
         event.event_type == EventType::PhaseEntered && event.payload["phase_id"] == "skipped"
     }));
-    assert_eq!(count_events(&sink.0, EventType::FlowStarted), 2);
-    let child_started = sink
-        .0
-        .iter()
-        .find(|event| {
-            event.event_type == EventType::FlowStarted
-                && event.payload["flow_definition_id"] == "child-flow"
-        })
-        .expect("child Flow starts");
-    assert!(child_started.parent_flow_id.is_some());
 }
 
 #[test]
@@ -431,7 +415,7 @@ fn productive_transition_rejects_skipped_composite_result_before_later_provider_
         ),
         (
             "flows/smoke-flow.yaml",
-            "flow:\n  id: smoke-flow\n  name: SmokeFlow\n  phase_refs: [composite]\n  subflow_refs: []\n",
+            "flow:\n  id: smoke-flow\n  name: SmokeFlow\n  phase_refs: [composite]\n",
         ),
     ] {
         fs::write(workspace.join("registry").join(path), definition)
@@ -597,7 +581,6 @@ fn custom_composite_phase_loop_fails_closed_when_its_bound_is_exhausted() {
   id: bounded-root
   name: BoundedRoot
   phase_refs: [bounded-composite]
-  subflow_refs: []
 "#,
     );
 

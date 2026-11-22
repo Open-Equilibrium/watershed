@@ -33,7 +33,7 @@ Flow Agent should add little overhead around provider and Tool work, remain resp
 These hard capacity and liveness limits are not performance thresholds and are not multiplied into one promised maximum workload:
 
 - Flow tree depth: 16 levels, root-inclusive.
-- Direct fan-out: 32 Subflow references per Flow definition.
+- Direct fan-out: 32 subflows declared per Phase.
 - Cumulative invocations: 512 per Run, including failed starts.
 - Live invocations: 32 process-wide across all sessions.
 - Target, parallel subflows (ADR-0314): the tree of a root Run and its Subflow instances shares the depth of 16, the 512 cumulative invocations and 32 live Subflow instances; a Phase starts at most 32.

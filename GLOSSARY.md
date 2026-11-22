@@ -141,7 +141,7 @@ Canonical terms. Use these exactly; do not introduce synonyms. Tool names are fi
 - **Golden event stream** — A checked-in JSONL event stream with fixed fixture IDs, timestamps, sequence values and canonical event JSONL bytes per `PROTOCOL.md`.
 - **Environment allowlist** — A tool-scoped policy-artifact field; its M1 availability and restrictions are defined in [`SECURITY.md`](SECURITY.md).
 - **Smoke-flow** — The smallest golden flow: one phase, one tool and one instruction, used as the first localizable gate.
-- **Hello-flow** — The showcase golden flow that exercises multiple Phases, scoped Instructions/Tools and subflow reuse.
+- **Hello-flow** — The showcase golden flow that exercises multiple Phases and scoped Instructions/Tools.
 - **Negative fixture** — A tiny flow that intentionally attempts a forbidden operation and must be rejected.
 - **HTML render gate** — The CI validation that browser-renders self-contained HTML docs; `pnpm run docs:render-check` invokes `scripts/check-html-render.mjs` at `1440x900` and `390x844`.
 
