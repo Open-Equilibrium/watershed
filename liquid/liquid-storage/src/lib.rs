@@ -284,20 +284,22 @@ impl Store for Sqlite {
         transaction
             .execute("DELETE FROM device WHERE key = ?1", [key])
             .map_err(failed)?;
-        if let Some(value) = value.filter(|_| most > 0) {
+        if let Some(value) = value {
             transaction
                 .execute(
                     "DELETE FROM device WHERE rowid IN (SELECT rowid FROM device \
                      ORDER BY rowid LIMIT max(0, (SELECT COUNT(*) FROM device) - ?1 + 1))",
                     [most],
                 )
-                .and_then(|_| {
-                    transaction.execute(
+                .map_err(failed)?;
+            if most > 0 {
+                transaction
+                    .execute(
                         "INSERT INTO device (key, value) VALUES (?1, ?2)",
                         [key, value],
                     )
-                })
-                .map_err(failed)?;
+                    .map_err(failed)?;
+            }
         }
         transaction.commit().map_err(failed)
     }

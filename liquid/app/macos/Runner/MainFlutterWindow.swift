@@ -75,8 +75,10 @@ private func readClipboard(_ call: FlutterMethodCall, result: @escaping FlutterR
   for _ in 0..<3 {
     let change = board.changeCount
     read = clipboardFlavors(board)
-    read["change"] = change
-    if board.changeCount == change { break }
+    if board.changeCount == change {
+      read["change"] = change
+      break
+    }
   }
   result(read)
 }

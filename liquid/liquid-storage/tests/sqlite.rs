@@ -292,9 +292,11 @@ fn a_device_value_is_there_after_a_reopen_and_the_oldest_makes_room() {
     assert_eq!(store.remembered("tab/v").unwrap().as_deref(), Some("t2"));
     assert_eq!(store.remembered("newest").unwrap().as_deref(), Some("n"));
     store.remember("none", Some("x"), 0).unwrap();
-    assert_eq!(
-        store.remembered("none").unwrap(),
-        None,
-        "no room keeps nothing"
-    );
+    for key in ["none", "tab/v", "newest"] {
+        assert_eq!(
+            store.remembered(key).unwrap(),
+            None,
+            "no room keeps nothing"
+        );
+    }
 }

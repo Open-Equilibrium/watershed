@@ -141,10 +141,12 @@ impl Store for MemoryStore {
 
     fn remember(&mut self, key: &str, value: Option<&str>, most: usize) -> Result<(), Error> {
         self.device.retain(|(kept, _)| kept != key);
-        if let Some(value) = value.filter(|_| most > 0) {
+        if let Some(value) = value {
             let over = (self.device.len() + 1).saturating_sub(most);
             self.device.drain(..over.min(self.device.len()));
-            self.device.push((key.to_string(), value.to_string()));
+            if most > 0 {
+                self.device.push((key.to_string(), value.to_string()));
+            }
         }
         Ok(())
     }
