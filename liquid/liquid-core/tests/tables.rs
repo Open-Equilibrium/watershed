@@ -326,7 +326,13 @@ fn a_table_made_in_tables_belongs_to_its_area_and_a_new_view_may_copy_a_setup() 
         title: "Customers".into(),
         tabs: vec![setup],
     };
-    assert_eq!(home.edit(foreign), Err(Error::NotFound));
+    home.edit(foreign).unwrap();
+    let shown = home.views(&home.review.clone()).remove(0);
+    assert_eq!(
+        shown.tabs[0].setup,
+        TabSetup::of(Layout::Table),
+        "another Table's fields are not this one's"
+    );
 }
 
 #[test]

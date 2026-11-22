@@ -98,4 +98,17 @@ void main() {
     expect(kit.applied(BridgeMutationKind.duplicateTable), isEmpty);
     expect(field(tester, 0).controller!.text, 'Expenses');
   });
+
+  testWidgets('a copy of a Table deleted since pastes as text', (tester) async {
+    await kit.show(tester, [TablePart(expenses), const TextPart('')]);
+    await viewAction(tester, 'Copy');
+    kit.fake.dropTable(tables().single.block);
+    await tester.tap(block(0));
+    await tester.pump();
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+    await key(tester, LogicalKeyboardKey.keyV);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+    await tester.pumpAndSettle();
+    expect(field(tester, 0).controller!.text, 'Expenses');
+  });
 }

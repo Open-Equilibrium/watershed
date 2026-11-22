@@ -632,7 +632,8 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
     final text = pasted.text;
     if (_state.copiedView case final copied?
         when copied.text == text && copied.change == pasted.change) {
-      return _pasteView(copied);
+      if (await _pasteView(copied) || !mounted) return;
+      _state.copiedView = null;
     }
     final selection = _text.selection;
     if (text == null ||
@@ -647,7 +648,7 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
     );
   }
 
-  Future<void> _pasteView(CopiedView copied) async {
+  Future<bool> _pasteView(CopiedView copied) async {
     final views = widget.views;
     try {
       final added = await views.write(
@@ -662,8 +663,9 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
         const [],
       );
       views.pastedCopy.value = (view: added.view!, copied: copied);
+      return true;
     } on Object {
-      return;
+      return false;
     }
   }
 
