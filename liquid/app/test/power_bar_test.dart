@@ -67,6 +67,16 @@ void main() {
     await type(tester, 'tues');
     expect(inBar('Text'), findsOneWidget);
     expect(inBar('We expect rain on Tuesday.'), findsOneWidget);
+    await tester.enterText(
+      find.descendant(of: bar(), matching: find.byType(TextField)),
+      'trip',
+    );
+    await tester.pump();
+    expect(
+      inBar('We expect rain on Tuesday.'),
+      findsNothing,
+      reason: 'hits of an earlier query are gone at once',
+    );
     await type(tester, 'trip');
     expect(inBar('Pages'), findsOneWidget);
     expect(inBar('Shared'), findsOneWidget, reason: 'the hit’s own area');

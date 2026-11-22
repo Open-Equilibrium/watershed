@@ -48,7 +48,7 @@ class PowerBar extends StatefulWidget {
 class _PowerBarState extends State<PowerBar> {
   final _text = TextEditingController();
   final _focus = FocusNode(debugLabel: 'PowerBar');
-  List<BridgeHit> _hits = const [];
+  (String, List<BridgeHit>) _hits = ('', const []);
   int _chosen = 0;
   Timer? _settle;
   int _searches = 0;
@@ -90,7 +90,9 @@ class _PowerBarState extends State<PowerBar> {
       final hits = (await _state.read(
         query(BridgeQueryKind.search, search: typed, limit: _shown),
       )).hits;
-      if (mounted && search == _searches) setState(() => _hits = hits);
+      if (mounted && search == _searches) {
+        setState(() => _hits = (typed, hits));
+      }
     } on Object {
       return;
     }
@@ -296,7 +298,7 @@ class _PowerBarState extends State<PowerBar> {
     if (typed.trim().isNotEmpty) {
       final tables = {for (final table in _state.tables.value) table.id: table};
       return [
-        for (final hit in _hits)
+        for (final hit in _hits.$1 == typed ? _hits.$2 : const <BridgeHit>[])
           switch (hit.found) {
             BridgeFound.page => (
               group: 'Pages',
