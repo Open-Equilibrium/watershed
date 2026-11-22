@@ -176,3 +176,20 @@ fn an_unreadable_page_neither_stops_the_open_nor_the_rest_of_the_index() {
         "the next open tries again"
     );
 }
+
+#[test]
+fn an_unreadable_area_does_not_stop_the_open() {
+    let mut home = Home::new();
+    home.page("Trip to Lisbon");
+    let area = home.area.clone();
+    let mut store = home.workspace.into_store();
+    store.drop_index();
+    store.spoil(&Document::Area(area));
+    let workspace = Workspace::open(store).unwrap();
+    let mut store = workspace.into_store();
+    assert_eq!(
+        store.index_version().unwrap(),
+        0,
+        "the next open tries again"
+    );
+}

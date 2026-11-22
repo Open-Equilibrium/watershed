@@ -103,7 +103,7 @@ impl<S: Store> Workspace<S> {
         let owner = model::string(this.doc(&Document::Workspace)?, &ROOT, OWNER)
             .ok_or_else(|| Error::Document("the Workspace document names no owner".into()))?;
         this.owner = PersonId::new(owner);
-        this.ensure_index()?;
+        this.ensure_index().ok();
         Ok(this)
     }
 
