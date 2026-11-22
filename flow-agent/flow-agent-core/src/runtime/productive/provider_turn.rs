@@ -298,8 +298,11 @@ where
             ),
         )?;
         match (completed_result.take(), steering) {
-            (Some(result), None) => return Ok(result),
-            (_, Some(message)) => {
+            (Some((result, _)), None) => return Ok(result),
+            (completed, Some(message)) => {
+                for item in completed.into_iter().flat_map(|(_, retained)| retained) {
+                    provider_input.push(item)?;
+                }
                 emit_user_message(context, builder, invocation, &message)?;
                 provider_input.push(serde_json::json!({
                     "content": [{"text": message, "type": "input_text"}],
@@ -422,10 +425,7 @@ where
         if turn.tool_calls.is_empty() {
             let result = parse_provider_result(phase, &turn.output_text)?;
             verify_leaf_provider_result(phase, &result, context.recovery)?;
-            for item in turn.retained_items {
-                provider_input.push(item)?;
-            }
-            completed_result = Some(result);
+            completed_result = Some((result, turn.retained_items));
             continue;
         }
         for item in turn.retained_items {
