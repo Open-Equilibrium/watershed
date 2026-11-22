@@ -147,6 +147,29 @@ impl Index {
         self.rows.insert(index, Indexed { sort, id, cells });
     }
 
+    fn move_to(&mut self, row: &RowId, place: Place<&RowId>) -> Result<String, Error> {
+        let at = self.position(row).ok_or(Error::NotFound)?;
+        let moved = self.rows.remove(at);
+        let sort = match self.key_at(place) {
+            Ok(sort) => sort,
+            Err(error) => {
+                self.rows.insert(at, moved);
+                return Err(error);
+            }
+        };
+        let index = self
+            .rows
+            .partition_point(|row| (&row.sort, &row.id) < (&sort, &moved.id));
+        self.rows.insert(
+            index,
+            Indexed {
+                sort: sort.clone(),
+                ..moved
+            },
+        );
+        Ok(sort)
+    }
+
     fn remove(&mut self, row: &RowId) {
         if let Some(index) = self.position(row) {
             self.rows.remove(index);
@@ -331,6 +354,18 @@ pub(crate) fn add_row(
 fn row(doc: &AutoCommit, block: &BlockId, row: &RowId) -> Result<ObjId, Error> {
     let rows = map(doc, &entry(doc, block)?, ROWS)?;
     model::live_in(doc, &rows, row.as_str()).ok_or(Error::NotFound)
+}
+
+pub(crate) fn move_row(
+    doc: &mut AutoCommit,
+    index: &mut Index,
+    block: &BlockId,
+    row_id: &RowId,
+    place: Place<&RowId>,
+) -> Result<(), Error> {
+    let entry = row(doc, block, row_id)?;
+    let sort = index.move_to(row_id, place)?;
+    Ok(doc.put(&entry, SORT, sort)?)
 }
 
 pub(crate) fn remove_row(

@@ -605,6 +605,23 @@ fn a_view_s_tabs_and_their_groups_cross_the_bridge() {
         november.rows.iter().map(|r| &r.id).collect::<Vec<_>>(),
         [&row]
     );
+    let last = expenses.row(None);
+    expenses
+        .apply(BridgeMutation {
+            row: Some(last.clone()),
+            last: true,
+            ..mutation(BridgeMutationKind::MoveRow)
+        })
+        .unwrap();
+    let all = expenses
+        .workspace
+        .query(BridgeQuery {
+            block: Some(expenses.block.clone()),
+            limit: 10,
+            ..query(BridgeQueryKind::Rows)
+        })
+        .unwrap();
+    assert_eq!(all.rows.last().map(|r| &r.id), Some(&last));
 }
 
 #[test]

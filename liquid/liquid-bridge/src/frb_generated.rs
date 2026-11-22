@@ -7341,7 +7341,8 @@ impl SseDecode for crate::api::workspace::BridgeMutationKind {
             39 => crate::api::workspace::BridgeMutationKind::AddOption,
             40 => crate::api::workspace::BridgeMutationKind::AddRow,
             41 => crate::api::workspace::BridgeMutationKind::RemoveRow,
-            42 => crate::api::workspace::BridgeMutationKind::SetCell,
+            42 => crate::api::workspace::BridgeMutationKind::MoveRow,
+            43 => crate::api::workspace::BridgeMutationKind::SetCell,
             _ => unreachable!("Invalid variant for BridgeMutationKind: {}", inner),
         };
     }
@@ -11195,7 +11196,8 @@ impl flutter_rust_bridge::IntoDart for crate::api::workspace::BridgeMutationKind
             Self::AddOption => 39.into_dart(),
             Self::AddRow => 40.into_dart(),
             Self::RemoveRow => 41.into_dart(),
-            Self::SetCell => 42.into_dart(),
+            Self::MoveRow => 42.into_dart(),
+            Self::SetCell => 43.into_dart(),
             _ => unreachable!(),
         }
     }
@@ -13428,7 +13430,8 @@ impl SseEncode for crate::api::workspace::BridgeMutationKind {
                 crate::api::workspace::BridgeMutationKind::AddOption => 39,
                 crate::api::workspace::BridgeMutationKind::AddRow => 40,
                 crate::api::workspace::BridgeMutationKind::RemoveRow => 41,
-                crate::api::workspace::BridgeMutationKind::SetCell => 42,
+                crate::api::workspace::BridgeMutationKind::MoveRow => 42,
+                crate::api::workspace::BridgeMutationKind::SetCell => 43,
                 _ => {
                     unimplemented!("");
                 }

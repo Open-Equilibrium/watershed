@@ -354,6 +354,21 @@ class FakeWorkspace implements LiquidWorkspace {
         );
         _changed(_tableResource(mutation.block));
         return BridgeApplied(elements: const [], action: _id(), row: row.id);
+      case BridgeMutationKind.moveRow:
+        final table = rows[mutation.block]!;
+        final at = table.indexWhere((row) => row.id == mutation.row);
+        if (at < 0) throw 'not found';
+        final moved = table.removeAt(at);
+        table.insert(
+          mutation.last
+              ? table.length
+              : mutation.after == null
+              ? 0
+              : table.indexWhere((row) => row.id == mutation.after) + 1,
+          moved,
+        );
+        _changed(_tableResource(mutation.block));
+        return BridgeApplied(elements: const [], action: _id());
       case BridgeMutationKind.removeRow:
         final table = rows[mutation.block]!;
         final at = table.indexWhere((row) => row.id == mutation.row);

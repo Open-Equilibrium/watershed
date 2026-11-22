@@ -347,6 +347,7 @@ enum BridgeMutationKind {
   addOption,
   addRow,
   removeRow,
+  moveRow,
   setCell,
 }
 

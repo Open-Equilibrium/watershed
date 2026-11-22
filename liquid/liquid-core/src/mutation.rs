@@ -332,6 +332,11 @@ pub enum Mutation {
         block: BlockId,
         row: RowId,
     },
+    MoveRow {
+        block: BlockId,
+        row: RowId,
+        place: Place<RowId>,
+    },
     SetCell {
         block: BlockId,
         row: RowId,

@@ -491,6 +491,12 @@ impl<S: Store> Workspace<S> {
                 let row = database::add_row(doc, index, block, place.as_ref())?;
                 Ok(table_changed(block, Some(Created::Row(row))))
             }
+            Mutation::MoveRow { block, row, place } => {
+                self.table_doc(block)?;
+                let (doc, index) = self.database_index(block)?;
+                database::move_row(doc, index, block, row, place.as_ref())?;
+                Ok(table_changed(block, None))
+            }
             Mutation::RemoveRow { block, row } => {
                 self.table_doc(block)?;
                 let (doc, index) = self.database_index(block)?;

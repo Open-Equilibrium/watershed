@@ -815,3 +815,27 @@ fn an_unticked_filter_finds_boxes_never_ticked() {
     let rows = sheet.workspace.rows(&sheet.block, &query).unwrap().rows;
     assert_eq!(rows.iter().map(|row| &row.id).collect::<Vec<_>>(), [&never]);
 }
+
+#[test]
+fn a_moved_row_keeps_its_cells_at_its_new_place() {
+    let mut sheet = Sheet::new();
+    let name = sheet.name_field();
+    let a = sheet.row(None);
+    let b = sheet.row(Some(&a));
+    let c = sheet.row(Some(&b));
+    sheet.set(&c, &name, Cell::Text("Rent".into())).unwrap();
+    let mut moved = |row: &RowId, place| {
+        sheet.edit(Mutation::MoveRow {
+            block: sheet.block.clone(),
+            row: row.clone(),
+            place,
+        })
+    };
+    moved(&c, Place::First).unwrap();
+    moved(&a, Place::After(b.clone())).unwrap();
+    let missing = RowId::parse(&"0".repeat(32)).unwrap();
+    assert_eq!(moved(&missing, Place::Last), Err(Error::NotFound));
+    sheet.workspace.close_page(&sheet.page);
+    assert_eq!(sheet.ids(&all()), [c.clone(), b, a]);
+    assert_eq!(sheet.cells(&all(), &name)[0], Cell::Text("Rent".into()));
+}

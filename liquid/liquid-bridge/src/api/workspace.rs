@@ -56,6 +56,7 @@ pub enum BridgeMutationKind {
     AddOption,
     AddRow,
     RemoveRow,
+    MoveRow,
     SetCell,
 }
 
@@ -557,6 +558,11 @@ impl BridgeMutation {
             BridgeMutationKind::RemoveRow => Mutation::RemoveRow {
                 block: block()?,
                 row: row()?,
+            },
+            BridgeMutationKind::MoveRow => Mutation::MoveRow {
+                block: block()?,
+                row: row()?,
+                place: self.place(RowId::parse)?,
             },
             BridgeMutationKind::SetCell => Mutation::SetCell {
                 block: block()?,

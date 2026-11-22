@@ -10,12 +10,14 @@ import '../theme/icons.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
 import 'anchored_menu.dart';
+import 'board_layout.dart';
 import 'cell_pickers.dart';
 import 'explorer.dart' show untitled;
 import 'field_menu.dart';
 import 'field_panel.dart';
 import 'media_block.dart';
 import 'row_menu.dart';
+import 'row_popover.dart';
 import 'stored_name.dart';
 import 'table_cells.dart';
 import 'table_query.dart';
@@ -99,6 +101,55 @@ class _TableBlockState extends State<TableBlock> implements CellDrop {
     kept: 5,
   );
   GroupLines? _lines;
+
+  int _revision = 0;
+
+  TableData _data(BridgeDatabase database, NumberFormat numbers, String days) =>
+      TableData(
+        page: _page,
+        block: _block,
+        database: database,
+        read: _state.read,
+        write: (change) => widget.views.write(change, const []),
+        numbers: numbers,
+        days: days,
+      );
+
+  Future<void> _addGroupField() async {
+    try {
+      final added = await widget.views.write(
+        mutation(
+          BridgeMutationKind.addField,
+          page: _page,
+          block: _block,
+          text: 'Status',
+          fieldKind: BridgeFieldKind.select,
+          last: true,
+        ),
+        const [],
+      );
+      for (final (color, name) in [
+        'Not started',
+        'In progress',
+        'Done',
+      ].indexed) {
+        await widget.views.write(
+          mutation(
+            BridgeMutationKind.addOption,
+            page: _page,
+            block: _block,
+            field: added.field,
+            text: name,
+            color: color,
+          ),
+          const [],
+        );
+      }
+      _setGroup(added.field);
+    } on Object {
+      return;
+    }
+  }
 
   BridgeField? get _grouping => switch (_database) {
     final database?
@@ -899,6 +950,7 @@ class _TableBlockState extends State<TableBlock> implements CellDrop {
       setState(() {
         _database = answer.database;
         _read1 = true;
+        _revision++;
       });
       _fieldMenus.read();
       _cells.relocate((id) => _rows.indexWhere((row) => row.id == id));
@@ -1283,7 +1335,18 @@ class _TableBlockState extends State<TableBlock> implements CellDrop {
                           : 'This Table was deleted.',
                     ),
                 ],
-                if (database != null)
+                if (database != null &&
+                    !widget.fullPage &&
+                    _tab.layout == BridgeLayout.board)
+                  BoardLayout(
+                    data: _data(database, numberFormat, days),
+                    tab: _tab,
+                    group: _groupOf(database),
+                    search: _search.isEmpty ? null : _search,
+                    revision: _revision,
+                    onAddGroup: () => unawaited(_addGroupField()),
+                  )
+                else if (database != null)
                   Focus(
                     focusNode: _cells.cellsFocus,
                     includeSemantics: false,
