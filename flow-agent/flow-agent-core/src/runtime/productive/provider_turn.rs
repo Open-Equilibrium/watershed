@@ -576,6 +576,7 @@ where
 {
     crate::runtime::cancellation::ensure_productive_dispatch_allowed()?;
     let conversation_id = context.execution.conversation_id;
+    let workspace = context.execution.workspace.canonical_path().to_owned();
     let mut named = Vec::new();
     let mut refused = false;
     let mut checked = || {
@@ -591,7 +592,7 @@ where
             .map(|request| request.flow.clone())
             .collect::<Vec<_>>();
         named = subflow_launcher()
-            .and_then(|launcher| launcher.names(conversation_id, &flows))
+            .and_then(|launcher| launcher.names(&workspace, conversation_id, &flows))
             .inspect_err(|_| refused = true)?;
         for (request, name) in requests.iter_mut().zip(&named) {
             request.name.clone_from(name);
@@ -615,8 +616,11 @@ where
     let outcomes = match recorded.outcomes {
         Some(outcomes) => outcomes,
         None => {
-            let outcomes =
-                subflow_launcher()?.run(context.execution.conversation_id, &recorded.instances);
+            let outcomes = subflow_launcher()?.run(
+                &workspace,
+                context.execution.conversation_id,
+                &recorded.instances,
+            );
             mark_recovery_failure(
                 &mut context.recovery_failed,
                 context

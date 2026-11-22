@@ -27,6 +27,7 @@ struct FakeLauncher {
 impl SubflowLauncher for FakeLauncher {
     fn names(
         &self,
+        _workspace: &Path,
         _parent_conversation_id: &str,
         flows: &[String],
     ) -> Result<Vec<String>, RuntimeError> {
@@ -45,6 +46,7 @@ impl SubflowLauncher for FakeLauncher {
 
     fn run(
         &self,
+        _workspace: &Path,
         _parent_conversation_id: &str,
         instances: &[SubflowInstanceRequest],
     ) -> Vec<SubflowOutcome> {

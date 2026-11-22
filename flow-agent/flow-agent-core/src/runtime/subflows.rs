@@ -1,6 +1,9 @@
 use crate::runtime::types::RuntimeError;
 use serde::{Deserialize, Serialize};
-use std::sync::{Arc, PoisonError, RwLock};
+use std::{
+    path::Path,
+    sync::{Arc, PoisonError, RwLock},
+};
 
 pub const MAX_SUBFLOW_BATCH: usize = core_script::MAX_FLOW_FANOUT;
 pub(crate) const SUBFLOW_TOOL_PREFIX: &str = "subflow-";
@@ -23,6 +26,7 @@ pub enum SubflowOutcome {
 pub trait SubflowLauncher: Send + Sync {
     fn names(
         &self,
+        workspace: &Path,
         parent_conversation_id: &str,
         flows: &[String],
     ) -> Result<Vec<String>, RuntimeError>;
@@ -31,6 +35,7 @@ pub trait SubflowLauncher: Send + Sync {
 
     fn run(
         &self,
+        workspace: &Path,
         parent_conversation_id: &str,
         instances: &[SubflowInstanceRequest],
     ) -> Vec<SubflowOutcome>;

@@ -6,7 +6,7 @@ use serde_json::{Value, json};
 use std::{
     collections::{BTreeMap, BTreeSet},
     io::{self, BufRead, BufReader, Write},
-    path::PathBuf,
+    path::{Path, PathBuf},
     process::{ChildStdin, Command, ExitCode, Stdio},
     sync::{
         Arc, Mutex, OnceLock, PoisonError,
@@ -142,8 +142,12 @@ impl ProcessLauncher {
         }
     }
 
-    fn allocate(&self, root: &str, flows: &[String]) -> Result<Vec<String>, String> {
-        let workspace = std::env::current_dir().map_err(|error| error.to_string())?;
+    fn allocate(
+        &self,
+        workspace: &Path,
+        root: &str,
+        flows: &[String],
+    ) -> Result<Vec<String>, String> {
         let mut tree = self.tree.lock().unwrap_or_else(PoisonError::into_inner);
         if tree.started + flows.len() > MAX_TREE_INSTANCES {
             return Err(format!(
@@ -162,7 +166,7 @@ impl ProcessLauncher {
                 *count += 1;
                 let name = format!("{flow}-{count}");
                 let conversation = format!("{root}{CONVERSATION_SEPARATOR}{name}");
-                if flow_agent_core::conversation_state(&workspace, &conversation)
+                if flow_agent_core::conversation_state(workspace, &conversation)
                     .map_err(|error| error.to_string())?
                     == flow_agent_core::ConversationState::Absent
                 {
@@ -186,6 +190,7 @@ impl ProcessLauncher {
             let flows =
                 serde_json::from_value::<Vec<String>>(request["flows"].clone()).unwrap_or_default();
             let reply = match self.names(
+                Path::new(request["workspace"].as_str().unwrap_or_default()),
                 request["conversation_id"].as_str().unwrap_or_default(),
                 &flows,
             ) {
@@ -245,6 +250,7 @@ impl SubflowLauncher for ProcessLauncher {
 
     fn names(
         &self,
+        workspace: &Path,
         parent_conversation_id: &str,
         flows: &[String],
     ) -> Result<Vec<String>, RuntimeError> {
@@ -255,7 +261,9 @@ impl SubflowLauncher for ProcessLauncher {
             .clone()
             .unwrap_or_else(|| parent_conversation_id.to_owned());
         let Some(upstream) = &self.upstream else {
-            return self.allocate(&root, flows).map_err(RuntimeError::Protocol);
+            return self
+                .allocate(workspace, &root, flows)
+                .map_err(RuntimeError::Protocol);
         };
         let id = upstream.next.fetch_add(1, Ordering::Relaxed);
         let (sender, receiver) = mpsc::channel();
@@ -265,7 +273,12 @@ impl SubflowLauncher for ProcessLauncher {
             .unwrap_or_else(PoisonError::into_inner)
             .insert(id, sender);
         upstream
-            .send(&json!({"name_request": {"id": id, "conversation_id": root, "flows": flows}}))
+            .send(&json!({"name_request": {
+                "id": id,
+                "workspace": workspace,
+                "conversation_id": root,
+                "flows": flows,
+            }}))
             .map_err(|source| RuntimeError::Io {
                 path: PathBuf::from("<parent>"),
                 source,
@@ -278,6 +291,7 @@ impl SubflowLauncher for ProcessLauncher {
 
     fn run(
         &self,
+        workspace: &Path,
         parent_conversation_id: &str,
         instances: &[SubflowInstanceRequest],
     ) -> Vec<SubflowOutcome> {
@@ -291,7 +305,7 @@ impl SubflowLauncher for ProcessLauncher {
         let mut outcomes = vec![None; instances.len()];
         let mut running = BTreeSet::new();
         for (index, instance) in instances.iter().enumerate() {
-            match self.start(&root, index, instance, sender.clone()) {
+            match self.start(workspace, &root, index, instance, sender.clone()) {
                 Ok(()) => {
                     running.insert(index);
                 }
@@ -338,6 +352,7 @@ impl SubflowLauncher for ProcessLauncher {
 impl ProcessLauncher {
     fn start(
         &self,
+        workspace: &Path,
         root: &str,
         index: usize,
         instance: &SubflowInstanceRequest,
@@ -352,6 +367,7 @@ impl ProcessLauncher {
         let program = std::env::current_exe().map_err(|error| error.to_string())?;
         let mut process = Command::new(program)
             .arg("subflow-run")
+            .current_dir(workspace)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit())

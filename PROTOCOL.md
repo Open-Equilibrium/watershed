@@ -431,10 +431,10 @@ All listed payload fields are strings unless noted otherwise; string arrays are 
 
 A Phase's `subflows` start as one batch before its first provider turn (`start: each`) or per provider turn whose calls name `subflow-<flow>` with a text `input` (`start: llm`). The batch's instance list, then its results, are recorded in `recovery.jsonl` as `subflow-batch` and `subflow-outcomes` before use; exact Resume replays them, and a batch without results fails as uncertain. An `each` batch reaches the provider as one user message `Subflow results: [...]`; an `llm` batch returns each result as that call's `function_call_output`, as `{"name", "result"}` or `{"name", "error"}`.
 
-Each instance runs as the hidden `flow subflow-run` in the parent's working directory, as the first Run of the Conversation `<root-conversation>__<name>`. Parent and child exchange JSON lines on the child's stdin and stdout:
+Each instance runs as the hidden `flow subflow-run` in the parent Run's Workspace, as the first Run of the Conversation `<root-conversation>__<name>`. Parent and child exchange JSON lines on the child's stdin and stdout:
 
-- Parent to child: `start` (conversation ids, name, flow, typed input) first, then `steer` (`target`, `text`), `pause`, `resume`, `cancel`, and `name` answers.
-- Child to parent: `name_request` (`id`, `flow`) for a nested instance, `instance` (`started`, or `finished` with `failed`), then one `result` (typed value) or `error`.
+- Parent to child: `start` (conversation ids, name, flow, typed input) first, then `steer` (`target`, `text`), `pause`, `resume`, `cancel` and `names` answers.
+- Child to parent: `name_request` (`id`, `workspace`, `conversation_id`, `flows`) for a nested batch, answered by `names` (`id`, `names` or `error`); `release` (names) for a batch that did not start; `instance` (`started`, or `finished` with `failed`); then one `result` (typed value) or `error`.
 
 The root process numbers instances per subflow id across its whole tree. A failed instance without `continue_on_error` cancels its running siblings. A closed stdin ends the child's Run as cancelled.
 

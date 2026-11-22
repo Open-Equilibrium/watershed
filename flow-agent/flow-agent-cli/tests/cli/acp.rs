@@ -694,7 +694,7 @@ fn a_phase_runs_two_scraper_instances_at_once_and_reads_their_results() {
     let workspace = workspace_copy("hello-flow");
     let config_root = empty_workspace_under(Path::new(env!("CARGO_TARGET_TMPDIR")));
     install_flows(&base_url, &config_root, &RESEARCH_FLOW);
-    let mut acp = Acp::start(&workspace, &config_root);
+    let mut acp = Acp::start(&config_root, &config_root);
     let (session_id, _) = acp.open(&workspace);
     let mut seen = Vec::new();
 
