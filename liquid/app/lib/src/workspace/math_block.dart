@@ -153,21 +153,55 @@ class _MathBlockState extends State<MathBlock> {
       return;
     }
     widget.views.caret.value = null;
-    _open();
+    _open(caret.offset);
   }
 
-  void _open() {
+  void _open([int? offset]) {
     setState(() => _editing = true);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       _focus.requestFocus();
-      _text.selection = TextSelection.collapsed(offset: _text.text.length);
+      _text.selection = TextSelection.collapsed(
+        offset: (offset ?? _text.text.length).clamp(0, _text.text.length),
+      );
     });
+  }
+
+  bool _move(int by) {
+    final index = widget.views.indexOf(widget.view.id);
+    if (index == null || widget.views.editor.busy) return false;
+    final neighbour = widget.views.caretFrom(index + by, by);
+    if (neighbour == null) return false;
+    _focus.unfocus();
+    widget.views.caret.value = Caret(
+      neighbour.id,
+      by < 0 ? caretEnd : 0,
+      kind: neighbour.kind,
+    );
+    return true;
   }
 
   KeyEventResult _key(KeyEvent event) {
     if (event is KeyUpEvent || _stored == null) return KeyEventResult.ignored;
+    final keys = HardwareKeyboard.instance;
+    final selection = _text.selection;
+    final text = _text.text;
+    final at = selection.baseOffset;
+    final edge =
+        selection.isValid &&
+        selection.isCollapsed &&
+        !keys.isShiftPressed &&
+        !keys.isMetaPressed &&
+        !keys.isAltPressed;
     switch (event.logicalKey) {
+      case LogicalKeyboardKey.arrowUp
+          when edge && !text.substring(0, at).contains('\n'):
+      case LogicalKeyboardKey.arrowLeft when edge && at == 0:
+        return _move(-1) ? KeyEventResult.handled : KeyEventResult.ignored;
+      case LogicalKeyboardKey.arrowDown
+          when edge && !text.substring(at).contains('\n'):
+      case LogicalKeyboardKey.arrowRight when edge && at == text.length:
+        return _move(1) ? KeyEventResult.handled : KeyEventResult.ignored;
       case LogicalKeyboardKey.escape:
         _focus.unfocus();
       case LogicalKeyboardKey.backspace when _text.text.isEmpty:

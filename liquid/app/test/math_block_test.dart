@@ -142,7 +142,11 @@ void main() {
   });
 
   testWidgets('↓ from the Text Block above opens a Math Block', (tester) async {
-    await kit.show(tester, [const TextPart('Roots'), const TextPart('x')]);
+    await kit.show(tester, [
+      const TextPart('Roots'),
+      const TextPart('x'),
+      const TextPart('Below'),
+    ]);
     await kit.workspace.apply(
       mutation(
         BridgeMutationKind.turnIntoMath,
@@ -159,5 +163,12 @@ void main() {
     await tester.pump();
     await key(tester, LogicalKeyboardKey.arrowDown);
     expect(tester.widget<TextField>(source).focusNode!.hasFocus, isTrue);
+    expect(
+      tester.widget<TextField>(source).controller!.selection.baseOffset,
+      0,
+      reason: 'arriving from above, the caret starts the LaTeX',
+    );
+    await key(tester, LogicalKeyboardKey.arrowDown);
+    expect(field(tester, 1).focusNode!.hasFocus, isTrue, reason: 'and leaves');
   });
 }
