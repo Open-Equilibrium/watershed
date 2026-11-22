@@ -179,6 +179,26 @@ fn an_oversized_line_is_refused_and_the_chat_goes_on() {
 }
 
 #[test]
+fn a_first_message_beyond_the_run_input_limit_is_refused() {
+    if run_current_test_isolated_session_home() {
+        return;
+    }
+    let workspace = workspace_copy("hello-flow");
+    let config_root = empty_workspace_under(Path::new(env!("CARGO_TARGET_TMPDIR")));
+    let mut acp = Acp::start(&workspace, &config_root);
+    let (session_id, _) = acp.open(&workspace);
+
+    let text = "x".repeat(flow_agent_core::MAX_FLOW_RUN_INPUT_BYTES + 1);
+    let prompt = acp.send(
+        "session/prompt",
+        json!({"sessionId": session_id, "prompt": [{"type": "text", "text": text}]}),
+    );
+
+    let answer = acp.reply(prompt, &mut Vec::new());
+    assert_eq!(answer["error"]["code"], -32602, "{answer}");
+}
+
+#[test]
 fn a_chat_needs_a_productive_provider() {
     if run_current_test_isolated_session_home() {
         return;

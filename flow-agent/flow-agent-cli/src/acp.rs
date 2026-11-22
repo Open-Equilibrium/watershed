@@ -174,6 +174,8 @@ impl<W: Write> Agent<W> {
         let id = new_session_id().map_err(internal)?;
         let flows = installed_flows()?;
         let flow = flows.first().map(|flow| flow.id.clone());
+        self.held.clear();
+        self.view = RunView::default();
         let session = self.session.insert(Session {
             id,
             cwd,
@@ -197,6 +199,8 @@ impl<W: Write> Agent<W> {
         let flow = flow_agent_core::conversation_flow(&cwd, id)
             .map_err(internal)?
             .or_else(|| flows.first().map(|flow| flow.id.clone()));
+        self.held.clear();
+        self.view = RunView::default();
         let session = self.session.insert(Session {
             id: id.to_owned(),
             cwd,
@@ -238,6 +242,16 @@ impl<W: Write> Agent<W> {
         };
         if self.prompt.is_some() {
             return self.fail(&id, INVALID_PARAMS, "a prompt is already running");
+        }
+        if text.len() > flow_agent_core::MAX_FLOW_RUN_INPUT_BYTES {
+            return self.fail(
+                &id,
+                INVALID_PARAMS,
+                &format!(
+                    "a message may hold at most {} bytes",
+                    flow_agent_core::MAX_FLOW_RUN_INPUT_BYTES
+                ),
+            );
         }
         if self.running {
             if let Err(error) = flow_agent_core::steer_productive_run(text) {
