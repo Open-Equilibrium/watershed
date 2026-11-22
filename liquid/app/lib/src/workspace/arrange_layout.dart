@@ -9,19 +9,23 @@ const narrowWidth = 760.0;
 const tileGap = 16.0;
 
 class TileSpec {
-  TileSpec(this.views, this.first);
+  TileSpec(this.views, this.first, {this.inner = false});
 
   final List<BridgeView> views;
 
   final int first;
 
+  final bool inner;
+
   BridgeView get lead => views.first;
 
-  bool get section => lead.kind == BridgeBlockKind.text;
+  bool get section => !inner && lead.kind == BridgeBlockKind.text;
 
-  int get column => lead.tile?.column ?? 0;
+  BridgeTile? get _tile => inner ? lead.inner : lead.tile;
 
-  int get span => lead.tile?.span ?? gridColumns;
+  int get column => _tile?.column ?? 0;
+
+  int get span => _tile?.span ?? gridColumns;
 
   int get last => first + views.length - 1;
 }
@@ -76,9 +80,7 @@ List<Rect> place(
     }
     final top = tops.sublist(column, column + span).reduce(math.max);
     final height = heightOf(tile);
-    placed.add(
-      Rect.fromLTWH(column * step, top, span * step - gap, height),
-    );
+    placed.add(Rect.fromLTWH(column * step, top, span * step - gap, height));
     for (var at = column; at < column + span; at++) {
       tops[at] = top + height + gap;
     }

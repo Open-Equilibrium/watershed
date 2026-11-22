@@ -64,6 +64,8 @@ class PageViews extends ChangeNotifier {
 
   final arranging = ValueNotifier(false);
 
+  final narrowPreview = ValueNotifier(false);
+
   final caret = ValueNotifier<Caret?>(null);
 
   final pastedCopy = ValueNotifier<({String view, CopiedView copied})?>(null);
@@ -244,6 +246,7 @@ class PageViews extends ChangeNotifier {
     caret.dispose();
     pastedCopy.dispose();
     arranging.dispose();
+    narrowPreview.dispose();
     styles.dispose();
     uploads.dispose();
     for (final (board, _) in _boards.values) {
