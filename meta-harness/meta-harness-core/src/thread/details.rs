@@ -198,6 +198,22 @@ fn pace(window: &Value, used: f64, resets_at: Option<u64>, now_ms: u64) -> Optio
     })
 }
 
+fn schedule_json(schedule: &Schedule) -> Value {
+    match schedule.kind {
+        ScheduleKind::Interval => json!({"type": "interval", "everyMs": schedule.every_ms}),
+        ScheduleKind::FixedTime if schedule.weekdays.is_empty() => {
+            json!({"type": "fixed_time", "timeOfDay": schedule.time_of_day})
+        }
+        ScheduleKind::FixedTime => json!({
+            "type": "fixed_time",
+            "timeOfDay": schedule.time_of_day,
+            "weekdays": schedule.weekdays,
+        }),
+        ScheduleKind::Once => json!({"type": "once", "runAt": schedule.run_at}),
+        ScheduleKind::Webhook => json!({"type": "webhook"}),
+    }
+}
+
 fn now_ms() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -247,6 +263,82 @@ impl Thread {
             .call("scheduledTasks.runNow", json!({"id": id}))
             .await
             .map(|_| ())
+    }
+
+    pub(crate) async fn add_routine(
+        &self,
+        agent: &crate::agents::Agent,
+        routine: &crate::agents::NewRoutine,
+    ) -> Result<crate::agents::AddedRoutine, String> {
+        let project = self.state().projection.thread["projectId"].clone();
+        let answer = self
+            .client
+            .call(
+                "scheduledTasks.upsert",
+                json!({
+                    "title": routine.title,
+                    "prompt": routine.prompt,
+                    "enabled": true,
+                    "schedule": schedule_json(&routine.schedule),
+                    "projectId": project,
+                    "threadId": self.id,
+                    "threadMode": "continue",
+                    "workspaceStrategy": {"type": "root"},
+                    "modelSelection": agent.model.to_t3(),
+                    "runtimeMode": agent.permissions.mode(),
+                    "interactionMode": "default",
+                }),
+            )
+            .await?;
+        let task = &answer["task"];
+        Ok(crate::agents::AddedRoutine {
+            id: task["id"]
+                .as_str()
+                .ok_or("T3 saved the routine without an id")?
+                .to_owned(),
+            webhook: task["webhook"]["url"]
+                .as_str()
+                .or_else(|| task["webhook"]["path"].as_str())
+                .map(str::to_owned),
+        })
+    }
+
+    pub(crate) async fn remove_routine(&self, id: &str) -> Result<(), String> {
+        self.client
+            .call("scheduledTasks.delete", json!({"id": id}))
+            .await
+            .map(|_| ())
+    }
+
+    pub(crate) async fn rebind_routines(&self, to: &str) -> Result<(), String> {
+        let mut stream = self
+            .client
+            .stream("scheduledTasks.subscribe", json!({}))
+            .await?;
+        let list = stream.recv().await.ok_or("T3 sent no routines")?;
+        for task in list["tasks"].as_array().into_iter().flatten() {
+            if task["threadId"] != self.id.as_str() {
+                continue;
+            }
+            let mut moved =
+                json!({"requireExisting": true, "threadId": to, "threadMode": "continue"});
+            for key in [
+                "id",
+                "title",
+                "prompt",
+                "enabled",
+                "schedule",
+                "projectId",
+                "workspaceStrategy",
+                "modelSelection",
+                "runtimeMode",
+                "interactionMode",
+            ] {
+                moved[key] = task[key].clone();
+            }
+            self.client.call("scheduledTasks.upsert", moved).await?;
+        }
+        Ok(())
     }
 
     pub async fn usage_limits(&self) -> Result<Option<UsageLimits>, String> {

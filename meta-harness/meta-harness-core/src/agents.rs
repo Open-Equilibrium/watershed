@@ -36,6 +36,19 @@ pub struct Agent {
     pub generation: u64,
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+pub struct NewRoutine {
+    pub title: String,
+    pub prompt: String,
+    pub schedule: crate::thread::Schedule,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+pub struct AddedRoutine {
+    pub id: String,
+    pub webhook: Option<String>,
+}
+
 pub(crate) fn memory(home: &Path, name: &str) -> PathBuf {
     home.join("agents").join(name).join("memory")
 }
