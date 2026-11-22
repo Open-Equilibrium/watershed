@@ -45,7 +45,7 @@ M1 Flow Agent emits the families exercised by the explicit fixture profile and r
 ### v0 lifecycle ordering
 
 - `session.started` is the first event. `session.completed` or `session.failed` is last and requires every started flow, Phase execution, Tool and message to be terminal.
-- A flow-scoped event follows its unique `flow.started` and precedes that flow's `flow.completed` or `flow.failed`. A subflow's `parent_flow_id` identifies its unchanged, active parent.
+- A flow-scoped event follows its unique `flow.started` and precedes that flow's `flow.completed` or `flow.failed`.
 - `phase.entered` opens one uniquely identified Phase iteration. A composite Phase may open only its ordered child Phases; it makes no provider turn. A leaf Phase may open provider messages and provider-requested Tools. The matching `phase.completed` carries the typed result; `phase.failed` closes that Phase and its active ancestors on failure.
 - Repeating a Phase creates a new `phase_execution_id` and increments its local `iteration`. Repetition stops when exact typed equality satisfies the declared `until` predicate; reaching `max_iterations` first fails the Phase. All nested iterations count toward the top-level Flow limit.
 - `tool.started` belongs to the active leaf Phase. Its progress and terminal event use the same flow, Phase and Tool identity. The retained Executor must first return `Ready`; Flow Agent commits `tool.started` and only then sends `Start` to that same process. A preflight `Error` occurs without `tool.started`, `Start` or a Tool result; after `tool.started`, exactly one terminal Tool event follows.
@@ -64,7 +64,7 @@ The v0 wire format is one UTF-8 JSON object per event. JSONL mode and the sessio
 | `event_type` | one of the v0 runtime event names above |
 | `session_id` | exactly the `run_session_id` of the linear run that emitted the event |
 | `flow_id` | optional runtime flow invocation id when flow-scoped; unique within the session |
-| `parent_flow_id` | optional parent runtime flow invocation id for subflow events |
+| `parent_flow_id` | optional parent runtime flow invocation id; Flow Agent's Runs leave it out, because a subflow runs as a Run of its own |
 | `sequence` | unsigned integer, starts at 1 and increases by exactly 1 per `run_session_id` |
 | `timestamp` | canonical RFC 3339 UTC form ending in literal `Z`; numeric zero offsets are not accepted |
 | `source` | non-empty opaque string identifying the emitter, e.g. `flow-agent-cli` |
@@ -78,7 +78,7 @@ M1 Flow Agent derives timestamps from its event clock: `timestamp = base + (sequ
 ## v0 ID safety and flow identity
 
 - `conversation_id` and `run_session_id` are opaque tokens, not paths. Both match `^[a-z0-9_-]{1,128}$` except Windows DOS device basenames (`con`, `prn`, `aux`, `nul`, `com1`–`com9`, `lpt1`–`lpt9`). Producers reject path separators (`/`, `\`), drive prefixes, absolute paths, percent-encoded separators, `.`, `..`, empty strings and all other non-matching values before filesystem access. Lowercase-only ids avoid filename aliases on case-insensitive targets. In M1.1 every runtime event `session_id` is byte-for-byte its run's `run_session_id`; the enclosing `conversation_id` is supplied by the addressed command or resolved from `history.jsonl`, never inferred from event bytes.
-- `flow_id` is a runtime invocation id, not the registry/definition id. The root flow and every subflow invocation get distinct `flow_id` values within the session. Reusing one subflow definition twice therefore emits two different `flow_id` values, each with `parent_flow_id` equal to the containing runtime flow invocation id.
+- `flow_id` is a runtime invocation id, not the registry/definition id.
 - Flow definition identity travels in payload fields, not in `flow_id`. `flow.*` events carry `flow_definition_id`; `flow_name` is optional display metadata.
 
 ## M1.1 authoring CLI grammar
@@ -424,7 +424,19 @@ All listed payload fields are strings unless noted otherwise; string arrays are 
 - `session/prompt` reads the first text block, or the text inside its last `<user_request>` element, and refuses more than 1 MiB. With no Run active, it starts the chosen Flow with the text as its string root input, continues the Conversation in a new Run when the last Run ended, or resumes an interrupted Run exactly with the text as a steering message.
 - While a Run is active, `session/cancel` for the open session answers its prompt `cancelled` at once and asks the Run to pause, and the next `session/prompt` is a steering message of at most 1 MiB; at most 16 wait at once. The Run takes it after its running provider turn, records it in `recovery.jsonl`, emits it as a `user` message and passes it to the active leaf Phase's next provider turn; a Phase that has its result takes one more turn instead. A paused Run waits, without emitting `session.paused`, for the next message, even when an earlier one is still queued, and then takes them in order. A message no Run took starts the next Run after a Run that ended; after a failed Run, the prompt's error counts the messages not delivered.
 - Refused with `-32602`: `session/new` or `session/load` while a Run is active, a second open prompt, a relative `cwd` and a `session/load` id not in the `chat-` form. A line that is too long or not JSON gets `-32700` with a null id; other methods get `-32601`.
-- Updates: Phases as `plan` entries, each agent message as one `agent_message_chunk` (a string result shown as its value, Tool-request summaries left out), Tools as `tool_call` and `tool_call_update`, and `error` events as text; the newest 256 updates made while no prompt is open follow when the next one opens. The prompt answers `end_turn` when its Run ends, or a JSON-RPC error.
+- A message beginning with `@<instance>` steers that Subflow instance; an unknown name is refused with the active names. Stop also pauses every instance, and any next message resumes the whole tree before it reaches its target.
+- Updates: Phases and Subflow instances (`<Phase> › <instance>`) as `plan` entries, each agent message as one `agent_message_chunk` (a string result shown as its value, Tool-request summaries left out), Tools as `tool_call` and `tool_call_update`, and `error` events as text; the newest 256 updates made while no prompt is open follow when the next one opens. The prompt answers `end_turn` when its Run ends, or a JSON-RPC error.
+
+## Subflow instances
+
+A Phase's `subflows` start as one batch before its first provider turn (`start: each`) or per provider turn whose calls name `subflow-<flow>` with a text `input` (`start: llm`). The batch's instance list, then its results, are recorded in `recovery.jsonl` as `subflow-batch` and `subflow-outcomes` before use; exact Resume replays them, and a batch without results fails as uncertain. An `each` batch reaches the provider as one user message `Subflow results: [...]`; an `llm` batch returns each result as that call's `function_call_output`, as `{"name", "result"}` or `{"name", "error"}`.
+
+Each instance runs as the hidden `flow subflow-run` in the parent's working directory, as the first Run of the Conversation `<root-conversation>__<name>`. Parent and child exchange JSON lines on the child's stdin and stdout:
+
+- Parent to child: `start` (conversation ids, name, flow, typed input) first, then `steer` (`target`, `text`), `pause`, `resume`, `cancel`, and `name` answers.
+- Child to parent: `name_request` (`id`, `flow`) for a nested instance, `instance` (`started`, or `finished` with `failed`), then one `result` (typed value) or `error`.
+
+The root process numbers instances per subflow id across its whole tree. A failed instance without `continue_on_error` cancels its running siblings. A closed stdin ends the child's Run as cancelled.
 
 ## CLI exit status
 
