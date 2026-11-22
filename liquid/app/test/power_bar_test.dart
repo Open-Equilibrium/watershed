@@ -105,6 +105,12 @@ void main() {
   testWidgets('/ lists the Blocks, and ⏎ adds one to the Page', (tester) async {
     await kit.show(tester, [const TextPart('Plan')]);
     await open(tester);
+    await type(tester, '/');
+    expect(
+      find.descendant(of: bar(), matching: find.textContaining('Add to ')),
+      findsOneWidget,
+      reason: 'one heading over all the new Blocks',
+    );
     await type(tester, '/white');
     expect(inBar('Whiteboard'), findsOneWidget);
     expect(inBar('Text'), findsNothing);

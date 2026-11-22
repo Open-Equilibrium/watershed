@@ -265,20 +265,25 @@ class _PowerBarState extends State<PowerBar> {
       final views = _state.currentPage.value;
       if (views == null) return const [];
       final title = _titleOf(views.page);
+      final commands = slashCommandsFor(typed.substring(1).trim()).where(
+        (command) =>
+            command.block != null || command.style == BridgeTextStyle.paragraph,
+      );
       return [
-        for (final command in slashCommandsFor(typed.substring(1).trim()))
-          if (command.block != null ||
-              command.style == BridgeTextStyle.paragraph)
-            (
-              group: command.existing
-                  ? 'Reuse'
-                  : 'Add to $title, below the selection',
-              icon: command.icon,
-              label: command.label,
-              detail: command.description,
-              keys: null,
-              run: () => _add(command),
-            ),
+        for (final command in [
+          ...commands.where((command) => !command.existing),
+          ...commands.where((command) => command.existing),
+        ])
+          (
+            group: command.existing
+                ? 'Reuse'
+                : 'Add to $title, below the selection',
+            icon: command.icon,
+            label: command.label,
+            detail: command.description,
+            keys: null,
+            run: () => _add(command),
+          ),
       ];
     }
     if (typed.trim().isNotEmpty) {
@@ -415,29 +420,37 @@ class _PowerBarState extends State<PowerBar> {
               children: [
                 Icon(item.icon, size: 15, color: ws.textMuted),
                 const SizedBox(width: WsMetrics.space3),
-                Flexible(
-                  child: Text(
-                    item.label,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(fontSize: WsMetrics.fsUi, color: ws.text),
+                Expanded(
+                  child: Row(
+                    children: [
+                      Flexible(
+                        child: Text(
+                          item.label,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: WsMetrics.fsUi,
+                            color: ws.text,
+                          ),
+                        ),
+                      ),
+                      if (item.detail case final detail?) ...[
+                        const SizedBox(width: WsMetrics.space2),
+                        Flexible(
+                          child: Text(
+                            detail,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontSize: WsMetrics.fsCompact,
+                              color: ws.textFaint,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ],
                   ),
                 ),
-                if (item.detail case final detail?) ...[
-                  const SizedBox(width: WsMetrics.space2),
-                  Flexible(
-                    child: Text(
-                      detail,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        fontSize: WsMetrics.fsCompact,
-                        color: ws.textFaint,
-                      ),
-                    ),
-                  ),
-                ],
-                const Spacer(),
                 if (item.keys case final keys?)
                   Text(
                     keys,
@@ -461,81 +474,84 @@ class _PowerBarState extends State<PowerBar> {
           ),
         ),
         Align(
-          alignment: const Alignment(0, -0.6),
-          child: Focus(
-            onKeyEvent: (node, event) => _key(node, event, items),
-            child: Container(
-              key: const Key('power bar'),
-              width: _width,
-              constraints: const BoxConstraints(maxHeight: 520),
-              decoration: BoxDecoration(
-                color: ws.surface,
-                borderRadius: BorderRadius.circular(WsMetrics.radiusLg),
-                boxShadow: ws.shadow,
-              ),
-              child: Material(
-                type: MaterialType.transparency,
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    Container(
-                      height: 48,
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: WsMetrics.space3,
-                      ),
-                      decoration: BoxDecoration(
-                        border: Border(bottom: BorderSide(color: ws.border)),
-                      ),
-                      child: Row(
-                        children: [
-                          Icon(
-                            LucideIcons.search,
-                            size: 16,
-                            color: ws.textFaint,
-                          ),
-                          const SizedBox(width: WsMetrics.space3),
-                          Expanded(
-                            child: TextField(
-                              controller: _text,
-                              focusNode: _focus,
-                              style: TextStyle(
-                                fontSize: WsMetrics.fsProse,
-                                color: ws.text,
-                              ),
-                              decoration: InputDecoration.collapsed(
-                                hintText: 'Search or run a command',
-                                hintStyle: TextStyle(color: ws.textFaint),
+          alignment: Alignment.topCenter,
+          child: Padding(
+            padding: const EdgeInsets.only(top: 96),
+            child: Focus(
+              onKeyEvent: (node, event) => _key(node, event, items),
+              child: Container(
+                key: const Key('power bar'),
+                width: _width,
+                constraints: const BoxConstraints(maxHeight: 520),
+                decoration: BoxDecoration(
+                  color: ws.surface,
+                  borderRadius: BorderRadius.circular(WsMetrics.radiusLg),
+                  boxShadow: ws.shadow,
+                ),
+                child: Material(
+                  type: MaterialType.transparency,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Container(
+                        height: 48,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: WsMetrics.space3,
+                        ),
+                        decoration: BoxDecoration(
+                          border: Border(bottom: BorderSide(color: ws.border)),
+                        ),
+                        child: Row(
+                          children: [
+                            Icon(
+                              LucideIcons.search,
+                              size: 16,
+                              color: ws.textFaint,
+                            ),
+                            const SizedBox(width: WsMetrics.space3),
+                            Expanded(
+                              child: TextField(
+                                controller: _text,
+                                focusNode: _focus,
+                                style: TextStyle(
+                                  fontSize: WsMetrics.fsProse,
+                                  color: ws.text,
+                                ),
+                                decoration: InputDecoration.collapsed(
+                                  hintText: 'Search or run a command',
+                                  hintStyle: TextStyle(color: ws.textFaint),
+                                ),
                               ),
                             ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    Flexible(
-                      child: ListView(
-                        shrinkWrap: true,
-                        padding: const EdgeInsets.all(WsMetrics.space1),
-                        children: rows,
-                      ),
-                    ),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: WsMetrics.space3,
-                        vertical: WsMetrics.space2,
-                      ),
-                      decoration: BoxDecoration(
-                        border: Border(top: BorderSide(color: ws.border)),
-                      ),
-                      child: Text(
-                        footer,
-                        style: TextStyle(
-                          fontSize: WsMetrics.fsSmall,
-                          color: ws.textFaint,
+                          ],
                         ),
                       ),
-                    ),
-                  ],
+                      Flexible(
+                        child: ListView(
+                          shrinkWrap: true,
+                          padding: const EdgeInsets.all(WsMetrics.space1),
+                          children: rows,
+                        ),
+                      ),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: WsMetrics.space3,
+                          vertical: WsMetrics.space2,
+                        ),
+                        decoration: BoxDecoration(
+                          border: Border(top: BorderSide(color: ws.border)),
+                        ),
+                        child: Text(
+                          footer,
+                          style: TextStyle(
+                            fontSize: WsMetrics.fsSmall,
+                            color: ws.textFaint,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ),
