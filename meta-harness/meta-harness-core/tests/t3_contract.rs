@@ -13,8 +13,8 @@ use meta_harness_core::{
 };
 use meta_harness_core::{
     AcpAgent, AgentEvent, GitAction, GitActionRequest, GitProgress, Group, Harness, Host,
-    HostConfig, LineCount, ModelChoice, Permissions, Relation, Request, Snapshot, StartThread,
-    Thread, ThreadEvent, TurnStatus, Workspace,
+    HostConfig, ItemDetail, ItemKind, LineCount, ModelChoice, Permissions, Relation, Request,
+    Snapshot, StartThread, StepStatus, TaskStep, Thread, ThreadEvent, TurnStatus, Workspace,
 };
 
 const AGENT: &str = "scripted";
@@ -259,6 +259,36 @@ async fn a_thread_runs_turns_and_reverts_files_in_its_worktree() {
     assert_eq!(
         thread.worktree().await.unwrap().as_deref(),
         Some(repo.as_path())
+    );
+    service.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_agent_s_plan_reaches_the_transcript_as_a_task_list() {
+    let (_dir, repo, home) = fixture();
+    let (service, host) = start_service(&home).await;
+    let project = host.project(&repo).await.unwrap();
+    let thread = project
+        .start(start("plan", worktree(), Permissions::FullAccess))
+        .await
+        .unwrap();
+
+    let snapshot = wait(&thread, completed(1)).await;
+
+    let tasks = snapshot
+        .transcript
+        .iter()
+        .find(|item| item.kind == ItemKind::TaskList)
+        .expect("the plan is a task list item");
+    let step = |text: &str| TaskStep {
+        text: text.to_owned(),
+        status: StepStatus::Completed,
+    };
+    assert_eq!(
+        tasks.detail,
+        ItemDetail::Tasks {
+            steps: vec![step("Explore"), step("Explore › scraper-1")]
+        }
     );
     service.stop().await;
 }

@@ -24,7 +24,7 @@ pub use config::{
 pub use context::Context;
 pub use event::{
     AgentEvent, ApprovalOption, ItemDetail, ItemId, ItemKind, ItemStatus, PendingRequest, Question,
-    Request, RequestId, TurnId, Usage,
+    Request, RequestId, StepStatus, TaskStep, TurnId, Usage,
 };
 pub use git::{
     BranchChanges, BranchPullRequest, ChangedFile, Git, GitAction, GitActionRequest, GitProgress,

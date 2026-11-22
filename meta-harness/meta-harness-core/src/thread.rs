@@ -8,7 +8,7 @@ use tokio::task::JoinHandle;
 
 use crate::event::{
     AgentEvent, ApprovalOption, ItemDetail, ItemId, ItemKind, ItemStatus, PendingRequest, Question,
-    Request, RequestId, TurnId, Usage,
+    Request, RequestId, StepStatus, TaskStep, TurnId, Usage,
 };
 use crate::git::count;
 pub(crate) mod details;
@@ -637,13 +637,17 @@ fn translate(state: &mut State, change: Change, payload: &Value) -> Vec<AgentEve
             let turn = turn_of(&state.projection, payload);
             let item = state.item(&payload["id"]);
             let mut events = Vec::new();
-            if before.is_none() {
-                events.push(AgentEvent::ItemStarted {
+            match before.as_ref().and_then(describe) {
+                None => events.push(AgentEvent::ItemStarted {
                     turn,
                     item,
                     kind,
                     detail,
-                });
+                }),
+                Some((_, old)) if old != detail && matches!(detail, ItemDetail::Tasks { .. }) => {
+                    events.push(AgentEvent::ItemUpdated { item, detail });
+                }
+                Some(_) => {}
             }
             let old = before.as_ref().map_or("", |b| text_of(b));
             let new = text_of(payload);
@@ -909,6 +913,23 @@ pub(crate) fn describe(item: &Value) -> Option<(ItemKind, ItemDetail)> {
             tool("edit".to_owned(), line("fileName")),
         ),
         "error" => (ItemKind::Error, ItemDetail::None),
+        "todo_list" => (
+            ItemKind::TaskList,
+            ItemDetail::Tasks {
+                steps: item["steps"]
+                    .as_array()?
+                    .iter()
+                    .map(|step| TaskStep {
+                        text: step["text"].as_str().unwrap_or_default().to_owned(),
+                        status: match step["status"].as_str() {
+                            Some("completed") => StepStatus::Completed,
+                            Some("running") => StepStatus::Running,
+                            _ => StepStatus::Pending,
+                        },
+                    })
+                    .collect(),
+            },
+        ),
         "dynamic_tool" | "file_search" | "web_search" => (
             ItemKind::DynamicToolCall,
             tool(

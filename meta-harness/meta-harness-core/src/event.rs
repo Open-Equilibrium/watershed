@@ -13,12 +13,27 @@ pub enum ItemKind {
     FileChange,
     DynamicToolCall,
     Error,
+    TaskList,
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq, Eq)]
 pub enum ItemDetail {
     None,
     Tool { name: String, target: String },
+    Tasks { steps: Vec<TaskStep> },
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq, Eq)]
+pub struct TaskStep {
+    pub text: String,
+    pub status: StepStatus,
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StepStatus {
+    Pending,
+    Running,
+    Completed,
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -104,6 +119,10 @@ pub enum AgentEvent {
     ContentDelta {
         item: ItemId,
         delta: String,
+    },
+    ItemUpdated {
+        item: ItemId,
+        detail: ItemDetail,
     },
     ItemCompleted {
         turn: TurnId,
