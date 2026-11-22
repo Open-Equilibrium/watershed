@@ -14,6 +14,7 @@ const ROWS: &str = "rows";
 const CELLS: &str = "cells";
 const OPTIONS: &str = "options";
 const COLOR: &str = "color";
+const FORMULA: &str = "formula";
 
 pub const MAX_FIELDS: usize = 500;
 pub const MAX_OPTIONS: usize = 500;
@@ -32,6 +33,7 @@ pub struct Field {
     pub name: String,
     pub kind: FieldKind,
     pub options: Vec<SelectOption>,
+    pub formula: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -45,6 +47,7 @@ pub struct SelectOption {
 pub struct Row {
     pub id: RowId,
     pub cells: Vec<(FieldId, Cell)>,
+    pub computed: Vec<(FieldId, crate::Value)>,
 }
 
 impl Row {
@@ -132,11 +135,12 @@ impl Index {
         Ok(Self { rows })
     }
 
-    pub(crate) fn column<'a>(
-        &'a self,
-        field: &'a FieldId,
-    ) -> impl Iterator<Item = Option<&'a Cell>> + 'a {
-        self.rows.iter().map(|row| row.cells.get(field.as_str()))
+    pub(crate) fn cell(&self, row: &RowId, field: &FieldId) -> Option<&Cell> {
+        self.rows[self.position(row)?].cells.get(field.as_str())
+    }
+
+    pub(crate) fn ids(&self) -> impl Iterator<Item = &RowId> {
+        self.rows.iter().map(|row| &row.id)
     }
 
     fn position(&self, row: &RowId) -> Option<usize> {
@@ -204,6 +208,7 @@ fn kind_name(kind: FieldKind) -> &'static str {
         FieldKind::Date => "date",
         FieldKind::Checkbox => "checkbox",
         FieldKind::File => "file",
+        FieldKind::Formula => "formula",
     }
 }
 
@@ -215,6 +220,7 @@ fn kind(name: Option<&str>) -> Option<FieldKind> {
         "date" => FieldKind::Date,
         "checkbox" => FieldKind::Checkbox,
         "file" => FieldKind::File,
+        "formula" => FieldKind::Formula,
         _ => return None,
     })
 }
@@ -305,6 +311,20 @@ pub(crate) fn rename_field(
 ) -> Result<(), Error> {
     let (entry, _) = field(doc, block, field_id)?;
     Ok(doc.put(&entry, NAME, name)?)
+}
+
+pub(crate) fn set_formula(
+    doc: &mut AutoCommit,
+    block: &BlockId,
+    field_id: &FieldId,
+    formula: &str,
+) -> Result<(), Error> {
+    let (entry, kind) = field(doc, block, field_id)?;
+    if kind != FieldKind::Formula {
+        return Err(Error::WrongKind);
+    }
+    crate::calculation::check_formula(formula)?;
+    Ok(doc.put(&entry, FORMULA, formula)?)
 }
 
 pub(crate) fn remove_field(
@@ -556,6 +576,7 @@ pub(crate) fn read(doc: &AutoCommit, block: &BlockId) -> Result<Option<Database>
                 name: field.get(NAME).unwrap_or_default().to_string(),
                 kind,
                 options,
+                formula: field.get(FORMULA).unwrap_or_default().to_string(),
             })
         })
         .collect();
@@ -727,7 +748,7 @@ fn matching<'a>(
 
 pub(crate) fn check_sort(doc: &AutoCommit, block: &BlockId, sort: &Sort) -> Result<(), Error> {
     match field(doc, block, &sort.field)? {
-        (_, FieldKind::File) => Err(Error::WrongKind),
+        (_, FieldKind::File | FieldKind::Formula) => Err(Error::WrongKind),
         _ => Ok(()),
     }
 }
@@ -740,6 +761,7 @@ pub(crate) fn check_filter(
     let (entry, kind) = field(doc, block, &filter.field)?;
     let long = |text: &str| text.chars().count() > MAX_FILTER_TEXT;
     match (kind, &filter.matches) {
+        (FieldKind::Formula, _) => Err(Error::WrongKind),
         (_, Match::Empty | Match::NotEmpty) => Ok(()),
         (FieldKind::Text, Match::Contains(text) | Match::Is(Cell::Text(text))) if long(text) => {
             Err(Error::TooLong)
@@ -767,6 +789,7 @@ fn shown(live: &[&FieldId], row: &Indexed) -> Row {
     Row {
         id: row.id.clone(),
         cells,
+        computed: Vec::new(),
     }
 }
 

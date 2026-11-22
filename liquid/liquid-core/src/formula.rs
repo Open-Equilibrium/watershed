@@ -919,6 +919,8 @@ impl fmt::Display for Failure {
     }
 }
 
+impl Eq for Value {}
+
 impl fmt::Display for Value {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {

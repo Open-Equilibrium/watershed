@@ -358,3 +358,139 @@ fn lines_are_checked_before_they_are_written() {
         Err(Error::TooMany)
     );
 }
+
+#[test]
+fn a_formula_field_computes_each_row_from_the_row_s_fields() {
+    let mut home = Home::new();
+    let (table, amount) = (home.table.clone(), home.amount.clone());
+    let field = |home: &mut Home, name: &str| {
+        let Some(Created::Field(field)) = home
+            .edit(Mutation::AddField {
+                block: table.clone(),
+                place: Place::Last,
+                name: name.into(),
+                kind: FieldKind::Formula,
+            })
+            .unwrap()
+            .created
+        else {
+            panic!("a field")
+        };
+        field
+    };
+    let (with_tip, share) = (field(&mut home, "With tip"), field(&mut home, "Share"));
+    let formula = |home: &mut Home, field: &FieldId, formula: String| {
+        home.edit(Mutation::SetFieldFormula {
+            block: table.clone(),
+            field: field.clone(),
+            formula,
+        })
+    };
+    formula(&mut home, &with_tip, format!("{{{amount}}} * 1.1")).unwrap();
+    formula(&mut home, &share, format!("{{{with_tip}}} / 2")).unwrap();
+    let computed = |home: &mut Home| {
+        let rows = home
+            .workspace
+            .rows(
+                &table,
+                &liquid_core::RowQuery {
+                    sort: None,
+                    filter: None,
+                    within: None,
+                    start: 0,
+                    limit: 10,
+                    search: None,
+                },
+            )
+            .unwrap();
+        rows.rows
+            .iter()
+            .map(|row| {
+                row.computed
+                    .iter()
+                    .map(|(field, value)| (field.clone(), value.to_string()))
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        computed(&mut home),
+        [
+            [
+                (with_tip.clone(), "990".to_string()),
+                (share.clone(), "495".to_string())
+            ],
+            [
+                (with_tip.clone(), "422.95".to_string()),
+                (share.clone(), "211.475".to_string())
+            ],
+        ]
+    );
+
+    let page = home.page.clone();
+    let report = home.calculation(&page);
+    let first = home
+        .workspace
+        .calculation(&page, &report)
+        .unwrap()
+        .unwrap()
+        .lines[0]
+        .id
+        .clone();
+    home.edit(Mutation::SetLine {
+        page: page.clone(),
+        block: report.clone(),
+        line: first,
+        setup: line(
+            "Shares",
+            &format!("SUM({{{table}.{share}}})"),
+            LineStyle::Plain,
+        ),
+    })
+    .unwrap();
+    assert_eq!(home.lines(&page, &report), shown(&[("Shares", "706.475")]));
+
+    formula(&mut home, &with_tip, format!("{{{share}}} + 1")).unwrap();
+    assert_eq!(
+        computed(&mut home)[0][0].1,
+        "#REF!",
+        "two fields that need each other"
+    );
+
+    let view = home
+        .workspace
+        .views(&page, 0, 10)
+        .unwrap()
+        .into_iter()
+        .find(|view| view.block == table)
+        .unwrap();
+    let by_share = home.edit(Mutation::SetTabSort {
+        page: page.clone(),
+        view: view.id.clone(),
+        tab: view.tabs[0].id.clone(),
+        sort: Some(liquid_core::Sort {
+            field: share.clone(),
+            descending: false,
+        }),
+    });
+    let row = home.row();
+    for (refused, error) in [
+        (by_share, Error::WrongKind),
+        (
+            home.edit(Mutation::SetCell {
+                block: table.clone(),
+                row,
+                field: share.clone(),
+                value: Cell::Number(1.0),
+            }),
+            Error::WrongKind,
+        ),
+        (formula(&mut home, &amount, "1".into()), Error::WrongKind),
+        (
+            formula(&mut home, &share, "SUM(".into()),
+            Error::Formula { at: 4 },
+        ),
+    ] {
+        assert_eq!(refused.map(|_| ()), Err(error));
+    }
+}

@@ -373,7 +373,9 @@ impl<S: Store> Workspace<S> {
             return Err(Error::NotFound);
         }
         let (doc, index) = self.database_index(table)?;
-        database::rows(doc, index, table, query)
+        let mut rows = database::rows(doc, index, table, query)?;
+        calculation::fill(self, table, &mut rows.rows)?;
+        Ok(rows)
     }
 
     pub fn groups(
@@ -386,7 +388,11 @@ impl<S: Store> Workspace<S> {
             return Err(Error::NotFound);
         }
         let (doc, index) = self.database_index(table)?;
-        database::groups(doc, index, table, query, field)
+        let mut groups = database::groups(doc, index, table, query, field)?;
+        for group in &mut groups {
+            calculation::fill(self, table, &mut group.rows)?;
+        }
+        Ok(groups)
     }
 
     pub fn remembered(&mut self, key: &str) -> Result<Option<String>, Error> {
@@ -750,6 +756,14 @@ impl<S: Store> Workspace<S> {
                 let doc = self.table_doc(block)?;
                 let field = database::add_field(doc, block, place.as_ref(), name, *kind)?;
                 Ok(table_changed(block, Some(Created::Field(field))))
+            }
+            Mutation::SetFieldFormula {
+                block,
+                field,
+                formula,
+            } => {
+                database::set_formula(self.table_doc(block)?, block, field, formula)?;
+                Ok(table_changed(block, None))
             }
             Mutation::RenameField { block, field, name } => {
                 database::rename_field(self.table_doc(block)?, block, field, name)?;

@@ -34,6 +34,7 @@ pub enum FieldKind {
     Date,
     Checkbox,
     File,
+    Formula,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -349,6 +350,11 @@ pub enum Mutation {
         block: BlockId,
         field: FieldId,
         name: String,
+    },
+    SetFieldFormula {
+        block: BlockId,
+        field: FieldId,
+        formula: String,
     },
     RemoveField {
         block: BlockId,

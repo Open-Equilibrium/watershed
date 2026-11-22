@@ -7,8 +7,8 @@ use serde::{Deserialize, Serialize};
 use crate::model::{self, BLOCKS, KIND, SORT, STYLE};
 use crate::store::Store;
 use crate::{
-    BlockId, BlockKind, Cell, Document, Error, FieldId, Formula, LineId, Operand, PageId, Place,
-    Reference, Resolve, Value, Workspace,
+    BlockId, BlockKind, Cell, Document, Error, Field, FieldKind, Formula, LineId, Operand, PageId,
+    Place, Reference, Resolve, RowId, Value, Workspace,
 };
 
 const LINES: &str = "lines";
@@ -108,12 +108,18 @@ fn stored(doc: &AutoCommit, block: &BlockId) -> Option<Vec<Stored>> {
 }
 
 fn check(setup: &LineSetup) -> Result<(), Error> {
-    if setup.label.chars().count() > MAX_LABEL || setup.formula.chars().count() > crate::MAX_FORMULA
-    {
+    if setup.label.chars().count() > MAX_LABEL {
         return Err(Error::TooLong);
     }
-    if !setup.formula.trim().is_empty() {
-        Formula::parse(&setup.formula).map_err(|syntax| Error::Formula { at: syntax.at })?;
+    check_formula(&setup.formula)
+}
+
+pub(crate) fn check_formula(formula: &str) -> Result<(), Error> {
+    if formula.chars().count() > crate::MAX_FORMULA {
+        return Err(Error::TooLong);
+    }
+    if !formula.trim().is_empty() {
+        Formula::parse(formula).map_err(|syntax| Error::Formula { at: syntax.at })?;
     }
     Ok(())
 }
@@ -196,6 +202,7 @@ pub(crate) fn read<S: Store>(
         memo: HashMap::new(),
         visiting: HashSet::new(),
         context: None,
+        fields: HashMap::new(),
     };
     let lines = (0..lines.len())
         .map(|at| Line {
@@ -216,7 +223,14 @@ struct Values<'w, S: Store> {
     workspace: &'w mut Workspace<S>,
     memo: HashMap<Key, Value>,
     visiting: HashSet<Key>,
-    context: Option<(PageId, BlockId, Vec<Stored>, usize)>,
+    context: Option<Context>,
+    fields: HashMap<BlockId, Vec<Field>>,
+}
+
+#[derive(Clone)]
+enum Context {
+    Line(PageId, BlockId, Vec<Stored>, usize),
+    Row(BlockId, RowId),
 }
 
 const MISSING: Value = Value::Error(crate::Failure::Ref);
@@ -240,9 +254,12 @@ impl<S: Store> Values<'_, S> {
         } else {
             match Formula::parse(source) {
                 Ok(formula) => {
-                    let outer =
-                        self.context
-                            .replace((page.clone(), block.clone(), lines.to_vec(), at));
+                    let outer = self.context.replace(Context::Line(
+                        page.clone(),
+                        block.clone(),
+                        lines.to_vec(),
+                        at,
+                    ));
                     let value = formula.evaluate(self);
                     self.context = outer;
                     value
@@ -297,29 +314,115 @@ impl<S: Store> Values<'_, S> {
             .collect()
     }
 
+    fn field(&mut self, table: &BlockId, field: &str) -> Option<Field> {
+        if !self.fields.contains_key(table) {
+            let database = self.workspace.database(table).ok()??;
+            self.fields.insert(table.clone(), database.fields);
+        }
+        self.fields[table]
+            .iter()
+            .find(|known| known.id.as_str() == field)
+            .cloned()
+    }
+
+    fn field_value(&mut self, table: &BlockId, row: &RowId, field: &Field) -> Value {
+        if field.kind != FieldKind::Formula {
+            let Ok((_, index)) = self.workspace.database_index(table) else {
+                return MISSING;
+            };
+            return value_of(index.cell(row, &field.id), field);
+        }
+        let key = (
+            table.as_str().to_string(),
+            row.as_str().to_string(),
+            field.id.as_str().to_string(),
+        );
+        if let Some(value) = self.memo.get(&key) {
+            return value.clone();
+        }
+        if !self.visiting.insert(key.clone()) {
+            return MISSING;
+        }
+        let value = match Formula::parse(&field.formula) {
+            _ if field.formula.trim().is_empty() => Value::Blank,
+            Ok(formula) => {
+                let outer = self
+                    .context
+                    .replace(Context::Row(table.clone(), row.clone()));
+                let value = formula.evaluate(self);
+                self.context = outer;
+                value
+            }
+            Err(_) => Value::Error(crate::Failure::Name),
+        };
+        self.visiting.remove(&key);
+        self.memo.insert(key, value.clone());
+        value
+    }
+
     fn column(&mut self, table: &str, field: &str) -> Operand {
-        let (Some(table), Some(field)) = (BlockId::parse(table), FieldId::parse(field)) else {
+        let Some(table) = BlockId::parse(table) else {
             return Operand::Value(MISSING);
         };
-        let Ok(Some(database)) = self.workspace.database(&table) else {
-            return Operand::Value(MISSING);
-        };
-        let Some(field) = database.fields.into_iter().find(|f| f.id == field) else {
+        let Some(field) = self.field(&table, field) else {
             return Operand::Value(MISSING);
         };
         let Ok((_, index)) = self.workspace.database_index(&table) else {
             return Operand::Value(MISSING);
         };
+        let rows: Vec<RowId> = index.ids().cloned().collect();
         Operand::Range(
-            index
-                .column(&field.id)
-                .map(|cell| value_of(cell, &field))
+            rows.iter()
+                .map(|row| self.field_value(&table, row, &field))
                 .collect(),
         )
     }
+
+    fn own(&mut self, field: &str) -> Value {
+        let Some(Context::Row(table, row)) = self.context.clone() else {
+            return MISSING;
+        };
+        match self.field(&table, field) {
+            Some(field) => self.field_value(&table, &row, &field),
+            None => MISSING,
+        }
+    }
 }
 
-fn value_of(cell: Option<&Cell>, field: &crate::Field) -> Value {
+pub(crate) fn fill<S: Store>(
+    workspace: &mut Workspace<S>,
+    table: &BlockId,
+    rows: &mut [crate::Row],
+) -> Result<(), Error> {
+    let Some(database) = workspace.database(table)? else {
+        return Ok(());
+    };
+    let formulas: Vec<Field> = database
+        .fields
+        .iter()
+        .filter(|field| field.kind == FieldKind::Formula)
+        .cloned()
+        .collect();
+    if formulas.is_empty() {
+        return Ok(());
+    }
+    let mut values = Values {
+        workspace,
+        memo: HashMap::new(),
+        visiting: HashSet::new(),
+        context: None,
+        fields: HashMap::from([(table.clone(), database.fields)]),
+    };
+    for row in rows {
+        row.computed = formulas
+            .iter()
+            .map(|field| (field.id.clone(), values.field_value(table, &row.id, field)))
+            .collect();
+    }
+    Ok(())
+}
+
+fn value_of(cell: Option<&Cell>, field: &Field) -> Value {
     match cell {
         None | Some(Cell::Empty) => Value::Blank,
         Some(Cell::Text(text) | Cell::Date(text)) => Value::Text(text.clone()),
@@ -343,6 +446,7 @@ fn value_of(cell: Option<&Cell>, field: &crate::Field) -> Value {
 impl<S: Store> Resolve for Values<'_, S> {
     fn resolve(&mut self, reference: &Reference) -> Operand {
         match reference.ids() {
+            [field] => Operand::Value(self.own(field)),
             [table, field] => self.column(table, field),
             [page, block, line] => Operand::Value(self.line(page, block, line)),
             _ => Operand::Value(MISSING),
@@ -350,7 +454,7 @@ impl<S: Store> Resolve for Values<'_, S> {
     }
 
     fn above(&mut self) -> Operand {
-        let Some((page, block, lines, at)) = self.context.clone() else {
+        let Some(Context::Line(page, block, lines, at)) = self.context.clone() else {
             return Operand::Value(MISSING);
         };
         let start = lines[..at]
