@@ -79,7 +79,7 @@
   </section>
   <section>
     <h3 class="sec">4 · Connections</h3>
-    <p class="sub">A Connection is created where data is needed: the Chart's panel picks its data from a Database or a Source. The panel lists what the Block uses and what uses it. Placing Blocks side by side never connects them.</p>
+    <p class="sub">A Connection is created where data is needed: the Chart's panel picks its data from a Database, a Source or a Calculation Block. From a Calculation Block each line but the subtotals and the total is one bar, point or slice, in the Block's order; a line chart needs two lines, and its axis follows the labels, not time. The panel lists what the Block uses and what uses it. Placing Blocks side by side never connects them.</p>
     <div class="stage"><div class="scaler"><div class="win" id="w-conn" data-w="1240"></div></div></div>
   </section>
   <section>
@@ -115,7 +115,7 @@
       <li>The synced marker "Synced · on 2 Pages" with the other Pages on hover.</li>
       <li>Block menu: Add to Page, Duplicate, Copy, Copy link to Block, Move to, Protect, Block history, Remove from this Page (Delete when it is the last View) and Delete everywhere.</li>
       <li>Deleting without dependents needs no dialog and offers Undo; with dependents a dialog lists them.</li>
-      <li>A Connection is made in the panel of the Block that needs the data; the panel lists "Uses" and "Used by".</li>
+      <li>A Connection is made in the panel of the Block that needs the data; the panel lists "Uses" and "Used by". Each line of a Calculation Block is a value formulas reference, and a Chart may draw its lines.</li>
       <li>M3a Automation actions: change a field, add a row, create a Page from a template and show a notification.</li>
     </ol>
     <h4 class="qh">Added on request, approved the same day</h4>
@@ -266,7 +266,7 @@ const chartPanel=`<div class="panel"><div class="ttlr">${I.chart}Spending by cat
 <span class="l">Kind</span><span class="sel">Bar<span class="c">⌄</span></span></div>
 <h5>Uses</h5><div class="flist"><div class="frow"><span class="ico">${I.db}</span>Expenses<span class="r">Database · Household budget</span></div></div>
 <h5>Used by</h5><div class="cap">Nothing yet. A formula or Automation that reads this Chart appears here.</div>
-<div class="cap">The data list offers Databases and Sources you may read. Removing a Connection leaves both Blocks in place.</div></div>`;
+<div class="cap">The data list offers Databases, Sources and Calculation Blocks you may read. Removing a Connection leaves both Blocks in place.</div></div>`;
 frame('w-conn',{h:580,head:head('Private <span>›</span> <b>💰 Household budget</b>'),main:`<div style="display:flex;flex:1;min-height:0"><div class="pg"><div class="col" style="width:580px">
 <div class="blk">${dbHead({synced:true})}${dbTable({n:3})}</div>
 <div class="blk focus" style="padding:6px 8px">${chartBlk}</div></div></div>${chartPanel}</div>`});
