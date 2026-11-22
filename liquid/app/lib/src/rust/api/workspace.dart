@@ -33,6 +33,7 @@ class BridgeAnswer {
   final List<BridgeShown> shown;
   final String? icon;
   final List<BridgeLine> lines;
+  final List<BridgeComputed> totals;
 
   const BridgeAnswer({
     required this.areas,
@@ -53,6 +54,7 @@ class BridgeAnswer {
     required this.shown,
     this.icon,
     required this.lines,
+    required this.totals,
   });
 
   @override
@@ -74,7 +76,8 @@ class BridgeAnswer {
       tables.hashCode ^
       shown.hashCode ^
       icon.hashCode ^
-      lines.hashCode;
+      lines.hashCode ^
+      totals.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -98,7 +101,8 @@ class BridgeAnswer {
           tables == other.tables &&
           shown == other.shown &&
           icon == other.icon &&
-          lines == other.lines;
+          lines == other.lines &&
+          totals == other.totals;
 }
 
 class BridgeApplied {
@@ -268,6 +272,7 @@ class BridgeMutation {
   final BridgeDrawingEdit? drawing;
   final String? line;
   final BridgeLineSetup? lineSetup;
+  final BridgeTotal? total;
 
   const BridgeMutation({
     required this.kind,
@@ -301,6 +306,7 @@ class BridgeMutation {
     this.drawing,
     this.line,
     this.lineSetup,
+    this.total,
   });
 
   @override
@@ -335,7 +341,8 @@ class BridgeMutation {
       drawingStyle.hashCode ^
       drawing.hashCode ^
       line.hashCode ^
-      lineSetup.hashCode;
+      lineSetup.hashCode ^
+      total.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -372,7 +379,8 @@ class BridgeMutation {
           drawingStyle == other.drawingStyle &&
           drawing == other.drawing &&
           line == other.line &&
-          lineSetup == other.lineSetup;
+          lineSetup == other.lineSetup &&
+          total == other.total;
 }
 
 enum BridgeMutationKind {
@@ -394,6 +402,7 @@ enum BridgeMutationKind {
   setTabDate,
   setTabSort,
   setTabFilter,
+  setTabTotal,
   setTabFolded,
   moveTab,
   removeTab,
@@ -462,6 +471,7 @@ class BridgeQuery {
   final BridgeFilter? filter;
   final BridgeFilter? within;
   final String? search;
+  final List<BridgeFieldTotal> totals;
 
   const BridgeQuery({
     required this.kind,
@@ -475,6 +485,7 @@ class BridgeQuery {
     this.filter,
     this.within,
     this.search,
+    required this.totals,
   });
 
   @override
@@ -489,7 +500,8 @@ class BridgeQuery {
       sort.hashCode ^
       filter.hashCode ^
       within.hashCode ^
-      search.hashCode;
+      search.hashCode ^
+      totals.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -506,7 +518,8 @@ class BridgeQuery {
           sort == other.sort &&
           filter == other.filter &&
           within == other.within &&
-          search == other.search;
+          search == other.search &&
+          totals == other.totals;
 }
 
 enum BridgeQueryKind {

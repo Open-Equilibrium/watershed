@@ -5,8 +5,8 @@ use liquid_core::{
 
 use super::calculation::{BridgeLine, BridgeLineSetup};
 use super::database::{
-    BridgeCell, BridgeDatabase, BridgeFieldKind, BridgeFilter, BridgeGroup, BridgeLayout,
-    BridgeRow, BridgeSort, BridgeTab, filter, sort,
+    BridgeCell, BridgeComputed, BridgeDatabase, BridgeFieldKind, BridgeFieldTotal, BridgeFilter,
+    BridgeGroup, BridgeLayout, BridgeRow, BridgeSort, BridgeTab, BridgeTotal, filter, sort,
 };
 use super::drawing::{BridgeDrawing, BridgeDrawingEdit, BridgeDrawingStyle};
 use super::media::BridgeMedia;
@@ -33,6 +33,7 @@ pub enum BridgeMutationKind {
     SetTabDate,
     SetTabSort,
     SetTabFilter,
+    SetTabTotal,
     SetTabFolded,
     MoveTab,
     RemoveTab,
@@ -145,6 +146,7 @@ pub struct BridgeMutation {
     pub drawing: Option<BridgeDrawingEdit>,
     pub line: Option<String>,
     pub line_setup: Option<BridgeLineSetup>,
+    pub total: Option<BridgeTotal>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -194,6 +196,7 @@ pub struct BridgeQuery {
     pub filter: Option<BridgeFilter>,
     pub within: Option<BridgeFilter>,
     pub search: Option<String>,
+    pub totals: Vec<BridgeFieldTotal>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -304,6 +307,7 @@ pub struct BridgeAnswer {
     pub shown: Vec<BridgeShown>,
     pub icon: Option<String>,
     pub lines: Vec<BridgeLine>,
+    pub totals: Vec<BridgeComputed>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -495,6 +499,13 @@ impl BridgeMutation {
                 view: view()?,
                 tab: tab()?,
                 filter: filter(&self.filter)?,
+            },
+            BridgeMutationKind::SetTabTotal => Mutation::SetTabTotal {
+                page: page()?,
+                view: view()?,
+                tab: tab()?,
+                field: field()?,
+                total: self.total.map(BridgeTotal::to_core),
             },
             BridgeMutationKind::SetTabFolded => Mutation::SetTabFolded {
                 page: page()?,

@@ -5439,6 +5439,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  BridgeTotal dco_decode_box_autoadd_bridge_total(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return dco_decode_bridge_total(raw);
+  }
+
+  @protected
   BridgeUsage dco_decode_box_autoadd_bridge_usage(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return dco_decode_bridge_usage(raw);
@@ -5460,8 +5466,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   BridgeAnswer dco_decode_bridge_answer(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 18)
-      throw Exception('unexpected arr length: expect 18 but see ${arr.length}');
+    if (arr.length != 19)
+      throw Exception('unexpected arr length: expect 19 but see ${arr.length}');
     return BridgeAnswer(
       areas: dco_decode_list_bridge_area(arr[0]),
       pages: dco_decode_list_bridge_page(arr[1]),
@@ -5481,6 +5487,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       shown: dco_decode_list_bridge_shown(arr[15]),
       icon: dco_decode_opt_String(arr[16]),
       lines: dco_decode_list_bridge_line(arr[17]),
+      totals: dco_decode_list_bridge_computed(arr[18]),
     );
   }
 
@@ -5858,6 +5865,18 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  BridgeFieldTotal dco_decode_bridge_field_total(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 2)
+      throw Exception('unexpected arr length: expect 2 but see ${arr.length}');
+    return BridgeFieldTotal(
+      field: dco_decode_String(arr[0]),
+      total: dco_decode_bridge_total(arr[1]),
+    );
+  }
+
+  @protected
   BridgeFileChange dco_decode_bridge_file_change(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
@@ -5950,12 +5969,13 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   BridgeGroup dco_decode_bridge_group(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 3)
-      throw Exception('unexpected arr length: expect 3 but see ${arr.length}');
+    if (arr.length != 4)
+      throw Exception('unexpected arr length: expect 4 but see ${arr.length}');
     return BridgeGroup(
       value: dco_decode_bridge_cell(arr[0]),
       count: dco_decode_i_64(arr[1]),
       rows: dco_decode_list_bridge_row(arr[2]),
+      totals: dco_decode_list_bridge_computed(arr[3]),
     );
   }
 
@@ -6291,8 +6311,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   BridgeMutation dco_decode_bridge_mutation(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 31)
-      throw Exception('unexpected arr length: expect 31 but see ${arr.length}');
+    if (arr.length != 32)
+      throw Exception('unexpected arr length: expect 32 but see ${arr.length}');
     return BridgeMutation(
       kind: dco_decode_bridge_mutation_kind(arr[0]),
       area: dco_decode_opt_String(arr[1]),
@@ -6325,6 +6345,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       drawing: dco_decode_opt_box_autoadd_bridge_drawing_edit(arr[28]),
       line: dco_decode_opt_String(arr[29]),
       lineSetup: dco_decode_opt_box_autoadd_bridge_line_setup(arr[30]),
+      total: dco_decode_opt_box_autoadd_bridge_total(arr[31]),
     );
   }
 
@@ -6450,8 +6471,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   BridgeQuery dco_decode_bridge_query(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 11)
-      throw Exception('unexpected arr length: expect 11 but see ${arr.length}');
+    if (arr.length != 12)
+      throw Exception('unexpected arr length: expect 12 but see ${arr.length}');
     return BridgeQuery(
       kind: dco_decode_bridge_query_kind(arr[0]),
       area: dco_decode_opt_String(arr[1]),
@@ -6464,6 +6485,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       filter: dco_decode_opt_box_autoadd_bridge_filter(arr[8]),
       within: dco_decode_opt_box_autoadd_bridge_filter(arr[9]),
       search: dco_decode_opt_String(arr[10]),
+      totals: dco_decode_list_bridge_field_total(arr[11]),
     );
   }
 
@@ -6707,8 +6729,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   BridgeTab dco_decode_bridge_tab(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 8)
-      throw Exception('unexpected arr length: expect 8 but see ${arr.length}');
+    if (arr.length != 9)
+      throw Exception('unexpected arr length: expect 9 but see ${arr.length}');
     return BridgeTab(
       id: dco_decode_String(arr[0]),
       name: dco_decode_String(arr[1]),
@@ -6718,6 +6740,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       sort: dco_decode_opt_box_autoadd_bridge_sort(arr[5]),
       filter: dco_decode_opt_box_autoadd_bridge_filter(arr[6]),
       folded: dco_decode_list_bridge_cell(arr[7]),
+      totals: dco_decode_list_bridge_field_total(arr[8]),
     );
   }
 
@@ -6786,6 +6809,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       open: dco_decode_i_64(arr[4]),
       durationMs: dco_decode_opt_box_autoadd_i_64(arr[5]),
     );
+  }
+
+  @protected
+  BridgeTotal dco_decode_bridge_total(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return BridgeTotal.values[raw as int];
   }
 
   @protected
@@ -7009,6 +7038,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   List<BridgeFieldCell> dco_decode_list_bridge_field_cell(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return (raw as List<dynamic>).map(dco_decode_bridge_field_cell).toList();
+  }
+
+  @protected
+  List<BridgeFieldTotal> dco_decode_list_bridge_field_total(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return (raw as List<dynamic>).map(dco_decode_bridge_field_total).toList();
   }
 
   @protected
@@ -7386,6 +7421,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   BridgeTile? dco_decode_opt_box_autoadd_bridge_tile(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return raw == null ? null : dco_decode_box_autoadd_bridge_tile(raw);
+  }
+
+  @protected
+  BridgeTotal? dco_decode_opt_box_autoadd_bridge_total(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return raw == null ? null : dco_decode_box_autoadd_bridge_total(raw);
   }
 
   @protected
@@ -7958,6 +7999,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  BridgeTotal sse_decode_box_autoadd_bridge_total(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return (sse_decode_bridge_total(deserializer));
+  }
+
+  @protected
   BridgeUsage sse_decode_box_autoadd_bridge_usage(
     SseDeserializer deserializer,
   ) {
@@ -8000,6 +8049,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_shown = sse_decode_list_bridge_shown(deserializer);
     var var_icon = sse_decode_opt_String(deserializer);
     var var_lines = sse_decode_list_bridge_line(deserializer);
+    var var_totals = sse_decode_list_bridge_computed(deserializer);
     return BridgeAnswer(
       areas: var_areas,
       pages: var_pages,
@@ -8019,6 +8069,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       shown: var_shown,
       icon: var_icon,
       lines: var_lines,
+      totals: var_totals,
     );
   }
 
@@ -8443,6 +8494,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  BridgeFieldTotal sse_decode_bridge_field_total(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_field = sse_decode_String(deserializer);
+    var var_total = sse_decode_bridge_total(deserializer);
+    return BridgeFieldTotal(field: var_field, total: var_total);
+  }
+
+  @protected
   BridgeFileChange sse_decode_bridge_file_change(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     var var_path = sse_decode_String(deserializer);
@@ -8561,7 +8620,13 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_value = sse_decode_bridge_cell(deserializer);
     var var_count = sse_decode_i_64(deserializer);
     var var_rows = sse_decode_list_bridge_row(deserializer);
-    return BridgeGroup(value: var_value, count: var_count, rows: var_rows);
+    var var_totals = sse_decode_list_bridge_computed(deserializer);
+    return BridgeGroup(
+      value: var_value,
+      count: var_count,
+      rows: var_rows,
+      totals: var_totals,
+    );
   }
 
   @protected
@@ -8989,6 +9054,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_lineSetup = sse_decode_opt_box_autoadd_bridge_line_setup(
       deserializer,
     );
+    var var_total = sse_decode_opt_box_autoadd_bridge_total(deserializer);
     return BridgeMutation(
       kind: var_kind,
       area: var_area,
@@ -9021,6 +9087,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       drawing: var_drawing,
       line: var_line,
       lineSetup: var_lineSetup,
+      total: var_total,
     );
   }
 
@@ -9173,6 +9240,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_filter = sse_decode_opt_box_autoadd_bridge_filter(deserializer);
     var var_within = sse_decode_opt_box_autoadd_bridge_filter(deserializer);
     var var_search = sse_decode_opt_String(deserializer);
+    var var_totals = sse_decode_list_bridge_field_total(deserializer);
     return BridgeQuery(
       kind: var_kind,
       area: var_area,
@@ -9185,6 +9253,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       filter: var_filter,
       within: var_within,
       search: var_search,
+      totals: var_totals,
     );
   }
 
@@ -9451,6 +9520,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_sort = sse_decode_opt_box_autoadd_bridge_sort(deserializer);
     var var_filter = sse_decode_opt_box_autoadd_bridge_filter(deserializer);
     var var_folded = sse_decode_list_bridge_cell(deserializer);
+    var var_totals = sse_decode_list_bridge_field_total(deserializer);
     return BridgeTab(
       id: var_id,
       name: var_name,
@@ -9460,6 +9530,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       sort: var_sort,
       filter: var_filter,
       folded: var_folded,
+      totals: var_totals,
     );
   }
 
@@ -9533,6 +9604,13 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       open: var_open,
       durationMs: var_durationMs,
     );
+  }
+
+  @protected
+  BridgeTotal sse_decode_bridge_total(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var inner = sse_decode_i_32(deserializer);
+    return BridgeTotal.values[inner];
   }
 
   @protected
@@ -9848,6 +9926,20 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var ans_ = <BridgeFieldCell>[];
     for (var idx_ = 0; idx_ < len_; ++idx_) {
       ans_.add(sse_decode_bridge_field_cell(deserializer));
+    }
+    return ans_;
+  }
+
+  @protected
+  List<BridgeFieldTotal> sse_decode_list_bridge_field_total(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    var len_ = sse_decode_i_32(deserializer);
+    var ans_ = <BridgeFieldTotal>[];
+    for (var idx_ = 0; idx_ < len_; ++idx_) {
+      ans_.add(sse_decode_bridge_field_total(deserializer));
     }
     return ans_;
   }
@@ -10583,6 +10675,19 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  BridgeTotal? sse_decode_opt_box_autoadd_bridge_total(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    if (sse_decode_bool(deserializer)) {
+      return (sse_decode_box_autoadd_bridge_total(deserializer));
+    } else {
+      return null;
+    }
+  }
+
+  @protected
   BridgeUsage? sse_decode_opt_box_autoadd_bridge_usage(
     SseDeserializer deserializer,
   ) {
@@ -11300,6 +11405,15 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_box_autoadd_bridge_total(
+    BridgeTotal self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_bridge_total(self, serializer);
+  }
+
+  @protected
   void sse_encode_box_autoadd_bridge_usage(
     BridgeUsage self,
     SseSerializer serializer,
@@ -11347,6 +11461,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_list_bridge_shown(self.shown, serializer);
     sse_encode_opt_String(self.icon, serializer);
     sse_encode_list_bridge_line(self.lines, serializer);
+    sse_encode_list_bridge_computed(self.totals, serializer);
   }
 
   @protected
@@ -11681,6 +11796,16 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_bridge_field_total(
+    BridgeFieldTotal self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_String(self.field, serializer);
+    sse_encode_bridge_total(self.total, serializer);
+  }
+
+  @protected
   void sse_encode_bridge_file_change(
     BridgeFileChange self,
     SseSerializer serializer,
@@ -11771,6 +11896,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_bridge_cell(self.value, serializer);
     sse_encode_i_64(self.count, serializer);
     sse_encode_list_bridge_row(self.rows, serializer);
+    sse_encode_list_bridge_computed(self.totals, serializer);
   }
 
   @protected
@@ -12099,6 +12225,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_opt_box_autoadd_bridge_drawing_edit(self.drawing, serializer);
     sse_encode_opt_String(self.line, serializer);
     sse_encode_opt_box_autoadd_bridge_line_setup(self.lineSetup, serializer);
+    sse_encode_opt_box_autoadd_bridge_total(self.total, serializer);
   }
 
   @protected
@@ -12218,6 +12345,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_opt_box_autoadd_bridge_filter(self.filter, serializer);
     sse_encode_opt_box_autoadd_bridge_filter(self.within, serializer);
     sse_encode_opt_String(self.search, serializer);
+    sse_encode_list_bridge_field_total(self.totals, serializer);
   }
 
   @protected
@@ -12431,6 +12559,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_opt_box_autoadd_bridge_sort(self.sort, serializer);
     sse_encode_opt_box_autoadd_bridge_filter(self.filter, serializer);
     sse_encode_list_bridge_cell(self.folded, serializer);
+    sse_encode_list_bridge_field_total(self.totals, serializer);
   }
 
   @protected
@@ -12487,6 +12616,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_i_64(self.cancelled, serializer);
     sse_encode_i_64(self.open, serializer);
     sse_encode_opt_box_autoadd_i_64(self.durationMs, serializer);
+  }
+
+  @protected
+  void sse_encode_bridge_total(BridgeTotal self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.index, serializer);
   }
 
   @protected
@@ -12744,6 +12879,18 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_i_32(self.length, serializer);
     for (final item in self) {
       sse_encode_bridge_field_cell(item, serializer);
+    }
+  }
+
+  @protected
+  void sse_encode_list_bridge_field_total(
+    List<BridgeFieldTotal> self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.length, serializer);
+    for (final item in self) {
+      sse_encode_bridge_field_total(item, serializer);
     }
   }
 
@@ -13451,6 +13598,19 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_bool(self != null, serializer);
     if (self != null) {
       sse_encode_box_autoadd_bridge_tile(self, serializer);
+    }
+  }
+
+  @protected
+  void sse_encode_opt_box_autoadd_bridge_total(
+    BridgeTotal? self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    sse_encode_bool(self != null, serializer);
+    if (self != null) {
+      sse_encode_box_autoadd_bridge_total(self, serializer);
     }
   }
 

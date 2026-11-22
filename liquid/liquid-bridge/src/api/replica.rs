@@ -10,7 +10,7 @@ use liquid_storage::Sqlite;
 
 use super::calculation::BridgeLine;
 use super::database::{
-    BridgeCell, BridgeDatabase, BridgeGroup, BridgeRow, BridgeTab, filter, sort,
+    BridgeCell, BridgeDatabase, BridgeGroup, BridgeRow, BridgeTab, computed, filter, sort, totals,
 };
 use super::drawing::BridgeDrawing;
 use super::media::BridgeMedia;
@@ -222,6 +222,7 @@ impl LiquidWorkspace {
             shown: Vec::new(),
             icon: None,
             lines: Vec::new(),
+            totals: Vec::new(),
         };
         match query.kind {
             BridgeQueryKind::Workspace => {
@@ -342,6 +343,7 @@ impl LiquidWorkspace {
                 let rows = workspace
                     .rows(&block, &row_query(query, start, limit)?)
                     .map_err(message)?;
+                answer.totals = computed(&rows.totals);
                 answer.count = rows.count as i64;
                 answer.rows = rows.rows.into_iter().map(BridgeRow::of).collect();
             }
@@ -372,6 +374,7 @@ impl LiquidWorkspace {
                     .map(|group| BridgeGroup {
                         value: BridgeCell::of(&group.value),
                         count: group.count as i64,
+                        totals: computed(&group.totals),
                         rows: group.rows.into_iter().map(BridgeRow::of).collect(),
                     })
                     .collect();
@@ -500,5 +503,6 @@ fn row_query(query: &BridgeQuery, start: usize, limit: usize) -> Result<RowQuery
         start,
         limit,
         search: query.search.clone(),
+        totals: totals(&query.totals)?,
     })
 }

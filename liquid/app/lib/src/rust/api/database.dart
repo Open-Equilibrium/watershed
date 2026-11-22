@@ -9,8 +9,8 @@ import 'media.dart';
 
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `filter`, `of`, `of`, `of`, `of`, `of`, `of`, `of`, `of`, `sort`, `to_core`, `to_core`, `to_core`, `to_core`
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
+// These functions are ignored because they are not marked as `pub`: `computed`, `filter`, `of`, `of`, `of`, `of`, `of`, `of`, `of`, `of`, `of`, `of`, `sort`, `to_core`, `to_core`, `to_core`, `to_core`, `to_core`, `to_core`, `totals`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
 
 class BridgeCell {
   final BridgeCellKind kind;
@@ -150,6 +150,24 @@ class BridgeFieldCell {
 
 enum BridgeFieldKind { text, number, select, date, checkbox, file, formula }
 
+class BridgeFieldTotal {
+  final String field;
+  final BridgeTotal total;
+
+  const BridgeFieldTotal({required this.field, required this.total});
+
+  @override
+  int get hashCode => field.hashCode ^ total.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeFieldTotal &&
+          runtimeType == other.runtimeType &&
+          field == other.field &&
+          total == other.total;
+}
+
 class BridgeFilter {
   final String field;
   final BridgeMatch matches;
@@ -182,15 +200,18 @@ class BridgeGroup {
   final BridgeCell value;
   final PlatformInt64 count;
   final List<BridgeRow> rows;
+  final List<BridgeComputed> totals;
 
   const BridgeGroup({
     required this.value,
     required this.count,
     required this.rows,
+    required this.totals,
   });
 
   @override
-  int get hashCode => value.hashCode ^ count.hashCode ^ rows.hashCode;
+  int get hashCode =>
+      value.hashCode ^ count.hashCode ^ rows.hashCode ^ totals.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -199,7 +220,8 @@ class BridgeGroup {
           runtimeType == other.runtimeType &&
           value == other.value &&
           count == other.count &&
-          rows == other.rows;
+          rows == other.rows &&
+          totals == other.totals;
 }
 
 enum BridgeLayout { table, board, calendar }
@@ -281,6 +303,7 @@ class BridgeTab {
   final BridgeSort? sort;
   final BridgeFilter? filter;
   final List<BridgeCell> folded;
+  final List<BridgeFieldTotal> totals;
 
   const BridgeTab({
     required this.id,
@@ -291,6 +314,7 @@ class BridgeTab {
     this.sort,
     this.filter,
     required this.folded,
+    required this.totals,
   });
 
   @override
@@ -302,7 +326,8 @@ class BridgeTab {
       date.hashCode ^
       sort.hashCode ^
       filter.hashCode ^
-      folded.hashCode;
+      folded.hashCode ^
+      totals.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -316,5 +341,8 @@ class BridgeTab {
           date == other.date &&
           sort == other.sort &&
           filter == other.filter &&
-          folded == other.folded;
+          folded == other.folded &&
+          totals == other.totals;
 }
+
+enum BridgeTotal { sum, average, count, min, max, empty, filled }

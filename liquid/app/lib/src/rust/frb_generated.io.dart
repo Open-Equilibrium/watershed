@@ -311,6 +311,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   BridgeTile dco_decode_box_autoadd_bridge_tile(dynamic raw);
 
   @protected
+  BridgeTotal dco_decode_box_autoadd_bridge_total(dynamic raw);
+
+  @protected
   BridgeUsage dco_decode_box_autoadd_bridge_usage(dynamic raw);
 
   @protected
@@ -414,6 +417,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   BridgeFieldKind dco_decode_bridge_field_kind(dynamic raw);
+
+  @protected
+  BridgeFieldTotal dco_decode_bridge_field_total(dynamic raw);
 
   @protected
   BridgeFileChange dco_decode_bridge_file_change(dynamic raw);
@@ -637,6 +643,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   BridgeToolCalls dco_decode_bridge_tool_calls(dynamic raw);
 
   @protected
+  BridgeTotal dco_decode_bridge_total(dynamic raw);
+
+  @protected
   BridgeTranscriptItem dco_decode_bridge_transcript_item(dynamic raw);
 
   @protected
@@ -709,6 +718,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   List<BridgeFieldCell> dco_decode_list_bridge_field_cell(dynamic raw);
+
+  @protected
+  List<BridgeFieldTotal> dco_decode_list_bridge_field_total(dynamic raw);
 
   @protected
   List<BridgeFileChange> dco_decode_list_bridge_file_change(dynamic raw);
@@ -898,6 +910,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   BridgeTile? dco_decode_opt_box_autoadd_bridge_tile(dynamic raw);
+
+  @protected
+  BridgeTotal? dco_decode_opt_box_autoadd_bridge_total(dynamic raw);
 
   @protected
   BridgeUsage? dco_decode_opt_box_autoadd_bridge_usage(dynamic raw);
@@ -1208,6 +1223,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   BridgeTile sse_decode_box_autoadd_bridge_tile(SseDeserializer deserializer);
 
   @protected
+  BridgeTotal sse_decode_box_autoadd_bridge_total(SseDeserializer deserializer);
+
+  @protected
   BridgeUsage sse_decode_box_autoadd_bridge_usage(SseDeserializer deserializer);
 
   @protected
@@ -1331,6 +1349,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   BridgeFieldKind sse_decode_bridge_field_kind(SseDeserializer deserializer);
+
+  @protected
+  BridgeFieldTotal sse_decode_bridge_field_total(SseDeserializer deserializer);
 
   @protected
   BridgeFileChange sse_decode_bridge_file_change(SseDeserializer deserializer);
@@ -1588,6 +1609,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   BridgeToolCalls sse_decode_bridge_tool_calls(SseDeserializer deserializer);
 
   @protected
+  BridgeTotal sse_decode_bridge_total(SseDeserializer deserializer);
+
+  @protected
   BridgeTranscriptItem sse_decode_bridge_transcript_item(
     SseDeserializer deserializer,
   );
@@ -1678,6 +1702,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   List<BridgeFieldCell> sse_decode_list_bridge_field_cell(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  List<BridgeFieldTotal> sse_decode_list_bridge_field_total(
     SseDeserializer deserializer,
   );
 
@@ -1929,6 +1958,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   BridgeTile? sse_decode_opt_box_autoadd_bridge_tile(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgeTotal? sse_decode_opt_box_autoadd_bridge_total(
     SseDeserializer deserializer,
   );
 
@@ -2312,6 +2346,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_box_autoadd_bridge_total(
+    BridgeTotal self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_box_autoadd_bridge_usage(
     BridgeUsage self,
     SseSerializer serializer,
@@ -2485,6 +2525,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_bridge_field_kind(
     BridgeFieldKind self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_bridge_field_total(
+    BridgeFieldTotal self,
     SseSerializer serializer,
   );
 
@@ -2834,6 +2880,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_bridge_total(BridgeTotal self, SseSerializer serializer);
+
+  @protected
   void sse_encode_bridge_transcript_item(
     BridgeTranscriptItem self,
     SseSerializer serializer,
@@ -2950,6 +2999,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_list_bridge_field_cell(
     List<BridgeFieldCell> self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_list_bridge_field_total(
+    List<BridgeFieldTotal> self,
     SseSerializer serializer,
   );
 
@@ -3286,6 +3341,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_opt_box_autoadd_bridge_tile(
     BridgeTile? self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_opt_box_autoadd_bridge_total(
+    BridgeTotal? self,
     SseSerializer serializer,
   );
 

@@ -6171,6 +6171,7 @@ impl SseDecode for crate::api::workspace::BridgeAnswer {
         let mut var_shown = <Vec<crate::api::workspace::BridgeShown>>::sse_decode(deserializer);
         let mut var_icon = <Option<String>>::sse_decode(deserializer);
         let mut var_lines = <Vec<crate::api::calculation::BridgeLine>>::sse_decode(deserializer);
+        let mut var_totals = <Vec<crate::api::database::BridgeComputed>>::sse_decode(deserializer);
         return crate::api::workspace::BridgeAnswer {
             areas: var_areas,
             pages: var_pages,
@@ -6190,6 +6191,7 @@ impl SseDecode for crate::api::workspace::BridgeAnswer {
             shown: var_shown,
             icon: var_icon,
             lines: var_lines,
+            totals: var_totals,
         };
     }
 }
@@ -6722,6 +6724,18 @@ impl SseDecode for crate::api::database::BridgeFieldKind {
     }
 }
 
+impl SseDecode for crate::api::database::BridgeFieldTotal {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_field = <String>::sse_decode(deserializer);
+        let mut var_total = <crate::api::database::BridgeTotal>::sse_decode(deserializer);
+        return crate::api::database::BridgeFieldTotal {
+            field: var_field,
+            total: var_total,
+        };
+    }
+}
+
 impl SseDecode for crate::api::events::BridgeFileChange {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -6862,10 +6876,12 @@ impl SseDecode for crate::api::database::BridgeGroup {
         let mut var_value = <crate::api::database::BridgeCell>::sse_decode(deserializer);
         let mut var_count = <i64>::sse_decode(deserializer);
         let mut var_rows = <Vec<crate::api::database::BridgeRow>>::sse_decode(deserializer);
+        let mut var_totals = <Vec<crate::api::database::BridgeComputed>>::sse_decode(deserializer);
         return crate::api::database::BridgeGroup {
             value: var_value,
             count: var_count,
             rows: var_rows,
+            totals: var_totals,
         };
     }
 }
@@ -7376,6 +7392,7 @@ impl SseDecode for crate::api::workspace::BridgeMutation {
         let mut var_line = <Option<String>>::sse_decode(deserializer);
         let mut var_lineSetup =
             <Option<crate::api::calculation::BridgeLineSetup>>::sse_decode(deserializer);
+        let mut var_total = <Option<crate::api::database::BridgeTotal>>::sse_decode(deserializer);
         return crate::api::workspace::BridgeMutation {
             kind: var_kind,
             area: var_area,
@@ -7408,6 +7425,7 @@ impl SseDecode for crate::api::workspace::BridgeMutation {
             drawing: var_drawing,
             line: var_line,
             line_setup: var_lineSetup,
+            total: var_total,
         };
     }
 }
@@ -7435,40 +7453,41 @@ impl SseDecode for crate::api::workspace::BridgeMutationKind {
             15 => crate::api::workspace::BridgeMutationKind::SetTabDate,
             16 => crate::api::workspace::BridgeMutationKind::SetTabSort,
             17 => crate::api::workspace::BridgeMutationKind::SetTabFilter,
-            18 => crate::api::workspace::BridgeMutationKind::SetTabFolded,
-            19 => crate::api::workspace::BridgeMutationKind::MoveTab,
-            20 => crate::api::workspace::BridgeMutationKind::RemoveTab,
-            21 => crate::api::workspace::BridgeMutationKind::SplitTextBlock,
-            22 => crate::api::workspace::BridgeMutationKind::JoinTextBlock,
-            23 => crate::api::workspace::BridgeMutationKind::SetTextStyle,
-            24 => crate::api::workspace::BridgeMutationKind::SetSectionBoundary,
-            25 => crate::api::workspace::BridgeMutationKind::TurnIntoCode,
-            26 => crate::api::workspace::BridgeMutationKind::TurnIntoText,
-            27 => crate::api::workspace::BridgeMutationKind::SetCodeLanguage,
-            28 => crate::api::workspace::BridgeMutationKind::AddMediaBlock,
-            29 => crate::api::workspace::BridgeMutationKind::AddWhiteboardBlock,
-            30 => crate::api::workspace::BridgeMutationKind::AddCalculationBlock,
-            31 => crate::api::workspace::BridgeMutationKind::AddLine,
-            32 => crate::api::workspace::BridgeMutationKind::SetLine,
-            33 => crate::api::workspace::BridgeMutationKind::RemoveLine,
-            34 => crate::api::workspace::BridgeMutationKind::SetDrawingStyle,
-            35 => crate::api::workspace::BridgeMutationKind::EditDrawing,
-            36 => crate::api::workspace::BridgeMutationKind::AddDatabaseBlock,
-            37 => crate::api::workspace::BridgeMutationKind::CreateTable,
-            38 => crate::api::workspace::BridgeMutationKind::AddTableView,
-            39 => crate::api::workspace::BridgeMutationKind::DuplicateTable,
-            40 => crate::api::workspace::BridgeMutationKind::RenameView,
-            41 => crate::api::workspace::BridgeMutationKind::DeleteTable,
-            42 => crate::api::workspace::BridgeMutationKind::RenameDatabase,
-            43 => crate::api::workspace::BridgeMutationKind::AddField,
-            44 => crate::api::workspace::BridgeMutationKind::RenameField,
-            45 => crate::api::workspace::BridgeMutationKind::SetFieldFormula,
-            46 => crate::api::workspace::BridgeMutationKind::RemoveField,
-            47 => crate::api::workspace::BridgeMutationKind::AddOption,
-            48 => crate::api::workspace::BridgeMutationKind::AddRow,
-            49 => crate::api::workspace::BridgeMutationKind::RemoveRow,
-            50 => crate::api::workspace::BridgeMutationKind::MoveRow,
-            51 => crate::api::workspace::BridgeMutationKind::SetCell,
+            18 => crate::api::workspace::BridgeMutationKind::SetTabTotal,
+            19 => crate::api::workspace::BridgeMutationKind::SetTabFolded,
+            20 => crate::api::workspace::BridgeMutationKind::MoveTab,
+            21 => crate::api::workspace::BridgeMutationKind::RemoveTab,
+            22 => crate::api::workspace::BridgeMutationKind::SplitTextBlock,
+            23 => crate::api::workspace::BridgeMutationKind::JoinTextBlock,
+            24 => crate::api::workspace::BridgeMutationKind::SetTextStyle,
+            25 => crate::api::workspace::BridgeMutationKind::SetSectionBoundary,
+            26 => crate::api::workspace::BridgeMutationKind::TurnIntoCode,
+            27 => crate::api::workspace::BridgeMutationKind::TurnIntoText,
+            28 => crate::api::workspace::BridgeMutationKind::SetCodeLanguage,
+            29 => crate::api::workspace::BridgeMutationKind::AddMediaBlock,
+            30 => crate::api::workspace::BridgeMutationKind::AddWhiteboardBlock,
+            31 => crate::api::workspace::BridgeMutationKind::AddCalculationBlock,
+            32 => crate::api::workspace::BridgeMutationKind::AddLine,
+            33 => crate::api::workspace::BridgeMutationKind::SetLine,
+            34 => crate::api::workspace::BridgeMutationKind::RemoveLine,
+            35 => crate::api::workspace::BridgeMutationKind::SetDrawingStyle,
+            36 => crate::api::workspace::BridgeMutationKind::EditDrawing,
+            37 => crate::api::workspace::BridgeMutationKind::AddDatabaseBlock,
+            38 => crate::api::workspace::BridgeMutationKind::CreateTable,
+            39 => crate::api::workspace::BridgeMutationKind::AddTableView,
+            40 => crate::api::workspace::BridgeMutationKind::DuplicateTable,
+            41 => crate::api::workspace::BridgeMutationKind::RenameView,
+            42 => crate::api::workspace::BridgeMutationKind::DeleteTable,
+            43 => crate::api::workspace::BridgeMutationKind::RenameDatabase,
+            44 => crate::api::workspace::BridgeMutationKind::AddField,
+            45 => crate::api::workspace::BridgeMutationKind::RenameField,
+            46 => crate::api::workspace::BridgeMutationKind::SetFieldFormula,
+            47 => crate::api::workspace::BridgeMutationKind::RemoveField,
+            48 => crate::api::workspace::BridgeMutationKind::AddOption,
+            49 => crate::api::workspace::BridgeMutationKind::AddRow,
+            50 => crate::api::workspace::BridgeMutationKind::RemoveRow,
+            51 => crate::api::workspace::BridgeMutationKind::MoveRow,
+            52 => crate::api::workspace::BridgeMutationKind::SetCell,
             _ => unreachable!("Invalid variant for BridgeMutationKind: {}", inner),
         };
     }
@@ -7646,6 +7665,8 @@ impl SseDecode for crate::api::workspace::BridgeQuery {
         let mut var_filter = <Option<crate::api::database::BridgeFilter>>::sse_decode(deserializer);
         let mut var_within = <Option<crate::api::database::BridgeFilter>>::sse_decode(deserializer);
         let mut var_search = <Option<String>>::sse_decode(deserializer);
+        let mut var_totals =
+            <Vec<crate::api::database::BridgeFieldTotal>>::sse_decode(deserializer);
         return crate::api::workspace::BridgeQuery {
             kind: var_kind,
             area: var_area,
@@ -7658,6 +7679,7 @@ impl SseDecode for crate::api::workspace::BridgeQuery {
             filter: var_filter,
             within: var_within,
             search: var_search,
+            totals: var_totals,
         };
     }
 }
@@ -8001,6 +8023,8 @@ impl SseDecode for crate::api::database::BridgeTab {
         let mut var_sort = <Option<crate::api::database::BridgeSort>>::sse_decode(deserializer);
         let mut var_filter = <Option<crate::api::database::BridgeFilter>>::sse_decode(deserializer);
         let mut var_folded = <Vec<crate::api::database::BridgeCell>>::sse_decode(deserializer);
+        let mut var_totals =
+            <Vec<crate::api::database::BridgeFieldTotal>>::sse_decode(deserializer);
         return crate::api::database::BridgeTab {
             id: var_id,
             name: var_name,
@@ -8010,6 +8034,7 @@ impl SseDecode for crate::api::database::BridgeTab {
             sort: var_sort,
             filter: var_filter,
             folded: var_folded,
+            totals: var_totals,
         };
     }
 }
@@ -8103,6 +8128,23 @@ impl SseDecode for crate::api::thread::BridgeToolCalls {
             cancelled: var_cancelled,
             open: var_open,
             duration_ms: var_durationMs,
+        };
+    }
+}
+
+impl SseDecode for crate::api::database::BridgeTotal {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut inner = <i32>::sse_decode(deserializer);
+        return match inner {
+            0 => crate::api::database::BridgeTotal::Sum,
+            1 => crate::api::database::BridgeTotal::Average,
+            2 => crate::api::database::BridgeTotal::Count,
+            3 => crate::api::database::BridgeTotal::Min,
+            4 => crate::api::database::BridgeTotal::Max,
+            5 => crate::api::database::BridgeTotal::Empty,
+            6 => crate::api::database::BridgeTotal::Filled,
+            _ => unreachable!("Invalid variant for BridgeTotal: {}", inner),
         };
     }
 }
@@ -8447,6 +8489,20 @@ impl SseDecode for Vec<crate::api::database::BridgeFieldCell> {
         let mut ans_ = Vec::with_capacity(len_ as usize);
         for idx_ in 0..len_ {
             ans_.push(<crate::api::database::BridgeFieldCell>::sse_decode(
+                deserializer,
+            ));
+        }
+        return ans_;
+    }
+}
+
+impl SseDecode for Vec<crate::api::database::BridgeFieldTotal> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut len_ = <i32>::sse_decode(deserializer);
+        let mut ans_ = Vec::with_capacity(len_ as usize);
+        for idx_ in 0..len_ {
+            ans_.push(<crate::api::database::BridgeFieldTotal>::sse_decode(
                 deserializer,
             ));
         }
@@ -9191,6 +9247,19 @@ impl SseDecode for Option<crate::api::workspace::BridgeTile> {
     }
 }
 
+impl SseDecode for Option<crate::api::database::BridgeTotal> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        if (<bool>::sse_decode(deserializer)) {
+            return Some(<crate::api::database::BridgeTotal>::sse_decode(
+                deserializer,
+            ));
+        } else {
+            return None;
+        }
+    }
+}
+
 impl SseDecode for Option<crate::api::events::BridgeUsage> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -9885,6 +9954,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::workspace::BridgeAnswer {
             self.shown.into_into_dart().into_dart(),
             self.icon.into_into_dart().into_dart(),
             self.lines.into_into_dart().into_dart(),
+            self.totals.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -10645,6 +10715,27 @@ impl flutter_rust_bridge::IntoIntoDart<crate::api::database::BridgeFieldKind>
     }
 }
 // Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::database::BridgeFieldTotal {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.field.into_into_dart().into_dart(),
+            self.total.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::database::BridgeFieldTotal
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::database::BridgeFieldTotal>
+    for crate::api::database::BridgeFieldTotal
+{
+    fn into_into_dart(self) -> crate::api::database::BridgeFieldTotal {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
 impl flutter_rust_bridge::IntoDart for crate::api::events::BridgeFileChange {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         [
@@ -10826,6 +10917,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::database::BridgeGroup {
             self.value.into_into_dart().into_dart(),
             self.count.into_into_dart().into_dart(),
             self.rows.into_into_dart().into_dart(),
+            self.totals.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -11526,6 +11618,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::workspace::BridgeMutation {
             self.drawing.into_into_dart().into_dart(),
             self.line.into_into_dart().into_dart(),
             self.line_setup.into_into_dart().into_dart(),
+            self.total.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -11563,40 +11656,41 @@ impl flutter_rust_bridge::IntoDart for crate::api::workspace::BridgeMutationKind
             Self::SetTabDate => 15.into_dart(),
             Self::SetTabSort => 16.into_dart(),
             Self::SetTabFilter => 17.into_dart(),
-            Self::SetTabFolded => 18.into_dart(),
-            Self::MoveTab => 19.into_dart(),
-            Self::RemoveTab => 20.into_dart(),
-            Self::SplitTextBlock => 21.into_dart(),
-            Self::JoinTextBlock => 22.into_dart(),
-            Self::SetTextStyle => 23.into_dart(),
-            Self::SetSectionBoundary => 24.into_dart(),
-            Self::TurnIntoCode => 25.into_dart(),
-            Self::TurnIntoText => 26.into_dart(),
-            Self::SetCodeLanguage => 27.into_dart(),
-            Self::AddMediaBlock => 28.into_dart(),
-            Self::AddWhiteboardBlock => 29.into_dart(),
-            Self::AddCalculationBlock => 30.into_dart(),
-            Self::AddLine => 31.into_dart(),
-            Self::SetLine => 32.into_dart(),
-            Self::RemoveLine => 33.into_dart(),
-            Self::SetDrawingStyle => 34.into_dart(),
-            Self::EditDrawing => 35.into_dart(),
-            Self::AddDatabaseBlock => 36.into_dart(),
-            Self::CreateTable => 37.into_dart(),
-            Self::AddTableView => 38.into_dart(),
-            Self::DuplicateTable => 39.into_dart(),
-            Self::RenameView => 40.into_dart(),
-            Self::DeleteTable => 41.into_dart(),
-            Self::RenameDatabase => 42.into_dart(),
-            Self::AddField => 43.into_dart(),
-            Self::RenameField => 44.into_dart(),
-            Self::SetFieldFormula => 45.into_dart(),
-            Self::RemoveField => 46.into_dart(),
-            Self::AddOption => 47.into_dart(),
-            Self::AddRow => 48.into_dart(),
-            Self::RemoveRow => 49.into_dart(),
-            Self::MoveRow => 50.into_dart(),
-            Self::SetCell => 51.into_dart(),
+            Self::SetTabTotal => 18.into_dart(),
+            Self::SetTabFolded => 19.into_dart(),
+            Self::MoveTab => 20.into_dart(),
+            Self::RemoveTab => 21.into_dart(),
+            Self::SplitTextBlock => 22.into_dart(),
+            Self::JoinTextBlock => 23.into_dart(),
+            Self::SetTextStyle => 24.into_dart(),
+            Self::SetSectionBoundary => 25.into_dart(),
+            Self::TurnIntoCode => 26.into_dart(),
+            Self::TurnIntoText => 27.into_dart(),
+            Self::SetCodeLanguage => 28.into_dart(),
+            Self::AddMediaBlock => 29.into_dart(),
+            Self::AddWhiteboardBlock => 30.into_dart(),
+            Self::AddCalculationBlock => 31.into_dart(),
+            Self::AddLine => 32.into_dart(),
+            Self::SetLine => 33.into_dart(),
+            Self::RemoveLine => 34.into_dart(),
+            Self::SetDrawingStyle => 35.into_dart(),
+            Self::EditDrawing => 36.into_dart(),
+            Self::AddDatabaseBlock => 37.into_dart(),
+            Self::CreateTable => 38.into_dart(),
+            Self::AddTableView => 39.into_dart(),
+            Self::DuplicateTable => 40.into_dart(),
+            Self::RenameView => 41.into_dart(),
+            Self::DeleteTable => 42.into_dart(),
+            Self::RenameDatabase => 43.into_dart(),
+            Self::AddField => 44.into_dart(),
+            Self::RenameField => 45.into_dart(),
+            Self::SetFieldFormula => 46.into_dart(),
+            Self::RemoveField => 47.into_dart(),
+            Self::AddOption => 48.into_dart(),
+            Self::AddRow => 49.into_dart(),
+            Self::RemoveRow => 50.into_dart(),
+            Self::MoveRow => 51.into_dart(),
+            Self::SetCell => 52.into_dart(),
             _ => unreachable!(),
         }
     }
@@ -11843,6 +11937,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::workspace::BridgeQuery {
             self.filter.into_into_dart().into_dart(),
             self.within.into_into_dart().into_dart(),
             self.search.into_into_dart().into_dart(),
+            self.totals.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -12336,6 +12431,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::database::BridgeTab {
             self.sort.into_into_dart().into_dart(),
             self.filter.into_into_dart().into_dart(),
             self.folded.into_into_dart().into_dart(),
+            self.totals.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -12473,6 +12569,32 @@ impl flutter_rust_bridge::IntoIntoDart<crate::api::thread::BridgeToolCalls>
     for crate::api::thread::BridgeToolCalls
 {
     fn into_into_dart(self) -> crate::api::thread::BridgeToolCalls {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::database::BridgeTotal {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        match self {
+            Self::Sum => 0.into_dart(),
+            Self::Average => 1.into_dart(),
+            Self::Count => 2.into_dart(),
+            Self::Min => 3.into_dart(),
+            Self::Max => 4.into_dart(),
+            Self::Empty => 5.into_dart(),
+            Self::Filled => 6.into_dart(),
+            _ => unreachable!(),
+        }
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::database::BridgeTotal
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::database::BridgeTotal>
+    for crate::api::database::BridgeTotal
+{
+    fn into_into_dart(self) -> crate::api::database::BridgeTotal {
         self
     }
 }
@@ -12966,6 +13088,7 @@ impl SseEncode for crate::api::workspace::BridgeAnswer {
         <Vec<crate::api::workspace::BridgeShown>>::sse_encode(self.shown, serializer);
         <Option<String>>::sse_encode(self.icon, serializer);
         <Vec<crate::api::calculation::BridgeLine>>::sse_encode(self.lines, serializer);
+        <Vec<crate::api::database::BridgeComputed>>::sse_encode(self.totals, serializer);
     }
 }
 
@@ -13390,6 +13513,14 @@ impl SseEncode for crate::api::database::BridgeFieldKind {
     }
 }
 
+impl SseEncode for crate::api::database::BridgeFieldTotal {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <String>::sse_encode(self.field, serializer);
+        <crate::api::database::BridgeTotal>::sse_encode(self.total, serializer);
+    }
+}
+
 impl SseEncode for crate::api::events::BridgeFileChange {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
@@ -13507,6 +13638,7 @@ impl SseEncode for crate::api::database::BridgeGroup {
         <crate::api::database::BridgeCell>::sse_encode(self.value, serializer);
         <i64>::sse_encode(self.count, serializer);
         <Vec<crate::api::database::BridgeRow>>::sse_encode(self.rows, serializer);
+        <Vec<crate::api::database::BridgeComputed>>::sse_encode(self.totals, serializer);
     }
 }
 
@@ -13918,6 +14050,7 @@ impl SseEncode for crate::api::workspace::BridgeMutation {
         <Option<crate::api::drawing::BridgeDrawingEdit>>::sse_encode(self.drawing, serializer);
         <Option<String>>::sse_encode(self.line, serializer);
         <Option<crate::api::calculation::BridgeLineSetup>>::sse_encode(self.line_setup, serializer);
+        <Option<crate::api::database::BridgeTotal>>::sse_encode(self.total, serializer);
     }
 }
 
@@ -13944,40 +14077,41 @@ impl SseEncode for crate::api::workspace::BridgeMutationKind {
                 crate::api::workspace::BridgeMutationKind::SetTabDate => 15,
                 crate::api::workspace::BridgeMutationKind::SetTabSort => 16,
                 crate::api::workspace::BridgeMutationKind::SetTabFilter => 17,
-                crate::api::workspace::BridgeMutationKind::SetTabFolded => 18,
-                crate::api::workspace::BridgeMutationKind::MoveTab => 19,
-                crate::api::workspace::BridgeMutationKind::RemoveTab => 20,
-                crate::api::workspace::BridgeMutationKind::SplitTextBlock => 21,
-                crate::api::workspace::BridgeMutationKind::JoinTextBlock => 22,
-                crate::api::workspace::BridgeMutationKind::SetTextStyle => 23,
-                crate::api::workspace::BridgeMutationKind::SetSectionBoundary => 24,
-                crate::api::workspace::BridgeMutationKind::TurnIntoCode => 25,
-                crate::api::workspace::BridgeMutationKind::TurnIntoText => 26,
-                crate::api::workspace::BridgeMutationKind::SetCodeLanguage => 27,
-                crate::api::workspace::BridgeMutationKind::AddMediaBlock => 28,
-                crate::api::workspace::BridgeMutationKind::AddWhiteboardBlock => 29,
-                crate::api::workspace::BridgeMutationKind::AddCalculationBlock => 30,
-                crate::api::workspace::BridgeMutationKind::AddLine => 31,
-                crate::api::workspace::BridgeMutationKind::SetLine => 32,
-                crate::api::workspace::BridgeMutationKind::RemoveLine => 33,
-                crate::api::workspace::BridgeMutationKind::SetDrawingStyle => 34,
-                crate::api::workspace::BridgeMutationKind::EditDrawing => 35,
-                crate::api::workspace::BridgeMutationKind::AddDatabaseBlock => 36,
-                crate::api::workspace::BridgeMutationKind::CreateTable => 37,
-                crate::api::workspace::BridgeMutationKind::AddTableView => 38,
-                crate::api::workspace::BridgeMutationKind::DuplicateTable => 39,
-                crate::api::workspace::BridgeMutationKind::RenameView => 40,
-                crate::api::workspace::BridgeMutationKind::DeleteTable => 41,
-                crate::api::workspace::BridgeMutationKind::RenameDatabase => 42,
-                crate::api::workspace::BridgeMutationKind::AddField => 43,
-                crate::api::workspace::BridgeMutationKind::RenameField => 44,
-                crate::api::workspace::BridgeMutationKind::SetFieldFormula => 45,
-                crate::api::workspace::BridgeMutationKind::RemoveField => 46,
-                crate::api::workspace::BridgeMutationKind::AddOption => 47,
-                crate::api::workspace::BridgeMutationKind::AddRow => 48,
-                crate::api::workspace::BridgeMutationKind::RemoveRow => 49,
-                crate::api::workspace::BridgeMutationKind::MoveRow => 50,
-                crate::api::workspace::BridgeMutationKind::SetCell => 51,
+                crate::api::workspace::BridgeMutationKind::SetTabTotal => 18,
+                crate::api::workspace::BridgeMutationKind::SetTabFolded => 19,
+                crate::api::workspace::BridgeMutationKind::MoveTab => 20,
+                crate::api::workspace::BridgeMutationKind::RemoveTab => 21,
+                crate::api::workspace::BridgeMutationKind::SplitTextBlock => 22,
+                crate::api::workspace::BridgeMutationKind::JoinTextBlock => 23,
+                crate::api::workspace::BridgeMutationKind::SetTextStyle => 24,
+                crate::api::workspace::BridgeMutationKind::SetSectionBoundary => 25,
+                crate::api::workspace::BridgeMutationKind::TurnIntoCode => 26,
+                crate::api::workspace::BridgeMutationKind::TurnIntoText => 27,
+                crate::api::workspace::BridgeMutationKind::SetCodeLanguage => 28,
+                crate::api::workspace::BridgeMutationKind::AddMediaBlock => 29,
+                crate::api::workspace::BridgeMutationKind::AddWhiteboardBlock => 30,
+                crate::api::workspace::BridgeMutationKind::AddCalculationBlock => 31,
+                crate::api::workspace::BridgeMutationKind::AddLine => 32,
+                crate::api::workspace::BridgeMutationKind::SetLine => 33,
+                crate::api::workspace::BridgeMutationKind::RemoveLine => 34,
+                crate::api::workspace::BridgeMutationKind::SetDrawingStyle => 35,
+                crate::api::workspace::BridgeMutationKind::EditDrawing => 36,
+                crate::api::workspace::BridgeMutationKind::AddDatabaseBlock => 37,
+                crate::api::workspace::BridgeMutationKind::CreateTable => 38,
+                crate::api::workspace::BridgeMutationKind::AddTableView => 39,
+                crate::api::workspace::BridgeMutationKind::DuplicateTable => 40,
+                crate::api::workspace::BridgeMutationKind::RenameView => 41,
+                crate::api::workspace::BridgeMutationKind::DeleteTable => 42,
+                crate::api::workspace::BridgeMutationKind::RenameDatabase => 43,
+                crate::api::workspace::BridgeMutationKind::AddField => 44,
+                crate::api::workspace::BridgeMutationKind::RenameField => 45,
+                crate::api::workspace::BridgeMutationKind::SetFieldFormula => 46,
+                crate::api::workspace::BridgeMutationKind::RemoveField => 47,
+                crate::api::workspace::BridgeMutationKind::AddOption => 48,
+                crate::api::workspace::BridgeMutationKind::AddRow => 49,
+                crate::api::workspace::BridgeMutationKind::RemoveRow => 50,
+                crate::api::workspace::BridgeMutationKind::MoveRow => 51,
+                crate::api::workspace::BridgeMutationKind::SetCell => 52,
                 _ => {
                     unimplemented!("");
                 }
@@ -14124,6 +14258,7 @@ impl SseEncode for crate::api::workspace::BridgeQuery {
         <Option<crate::api::database::BridgeFilter>>::sse_encode(self.filter, serializer);
         <Option<crate::api::database::BridgeFilter>>::sse_encode(self.within, serializer);
         <Option<String>>::sse_encode(self.search, serializer);
+        <Vec<crate::api::database::BridgeFieldTotal>>::sse_encode(self.totals, serializer);
     }
 }
 
@@ -14400,6 +14535,7 @@ impl SseEncode for crate::api::database::BridgeTab {
         <Option<crate::api::database::BridgeSort>>::sse_encode(self.sort, serializer);
         <Option<crate::api::database::BridgeFilter>>::sse_encode(self.filter, serializer);
         <Vec<crate::api::database::BridgeCell>>::sse_encode(self.folded, serializer);
+        <Vec<crate::api::database::BridgeFieldTotal>>::sse_encode(self.totals, serializer);
     }
 }
 
@@ -14468,6 +14604,27 @@ impl SseEncode for crate::api::thread::BridgeToolCalls {
         <i64>::sse_encode(self.cancelled, serializer);
         <i64>::sse_encode(self.open, serializer);
         <Option<i64>>::sse_encode(self.duration_ms, serializer);
+    }
+}
+
+impl SseEncode for crate::api::database::BridgeTotal {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(
+            match self {
+                crate::api::database::BridgeTotal::Sum => 0,
+                crate::api::database::BridgeTotal::Average => 1,
+                crate::api::database::BridgeTotal::Count => 2,
+                crate::api::database::BridgeTotal::Min => 3,
+                crate::api::database::BridgeTotal::Max => 4,
+                crate::api::database::BridgeTotal::Empty => 5,
+                crate::api::database::BridgeTotal::Filled => 6,
+                _ => {
+                    unimplemented!("");
+                }
+            },
+            serializer,
+        );
     }
 }
 
@@ -14724,6 +14881,16 @@ impl SseEncode for Vec<crate::api::database::BridgeFieldCell> {
         <i32>::sse_encode(self.len() as _, serializer);
         for item in self {
             <crate::api::database::BridgeFieldCell>::sse_encode(item, serializer);
+        }
+    }
+}
+
+impl SseEncode for Vec<crate::api::database::BridgeFieldTotal> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(self.len() as _, serializer);
+        for item in self {
+            <crate::api::database::BridgeFieldTotal>::sse_encode(item, serializer);
         }
     }
 }
@@ -15294,6 +15461,16 @@ impl SseEncode for Option<crate::api::workspace::BridgeTile> {
         <bool>::sse_encode(self.is_some(), serializer);
         if let Some(value) = self {
             <crate::api::workspace::BridgeTile>::sse_encode(value, serializer);
+        }
+    }
+}
+
+impl SseEncode for Option<crate::api::database::BridgeTotal> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <bool>::sse_encode(self.is_some(), serializer);
+        if let Some(value) = self {
+            <crate::api::database::BridgeTotal>::sse_encode(value, serializer);
         }
     }
 }
