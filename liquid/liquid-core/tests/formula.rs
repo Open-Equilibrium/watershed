@@ -29,7 +29,7 @@ impl Sheet {
 }
 
 impl Resolve for Sheet {
-    fn resolve(&self, reference: &Reference) -> Operand {
+    fn resolve(&mut self, reference: &Reference) -> Operand {
         self.0
             .get(&reference.ids().join("."))
             .cloned()
@@ -48,7 +48,7 @@ fn expand(source: &str) -> String {
 fn run(source: &str) -> Value {
     Formula::parse(&expand(source))
         .unwrap()
-        .evaluate(&Sheet::new())
+        .evaluate(&mut Sheet::new())
 }
 
 fn shown(source: &str) -> String {

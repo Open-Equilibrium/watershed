@@ -265,6 +265,27 @@ pub enum Mutation {
         page: PageId,
         after: Option<ViewId>,
     },
+    AddCalculationBlock {
+        page: PageId,
+        after: Option<ViewId>,
+    },
+    AddLine {
+        page: PageId,
+        block: BlockId,
+        after: Option<crate::LineId>,
+        line: crate::LineSetup,
+    },
+    SetLine {
+        page: PageId,
+        block: BlockId,
+        line: crate::LineId,
+        setup: crate::LineSetup,
+    },
+    RemoveLine {
+        page: PageId,
+        block: BlockId,
+        line: crate::LineId,
+    },
     #[serde(alias = "SetWhiteboardStyle")]
     SetDrawingStyle {
         page: PageId,
@@ -379,6 +400,7 @@ pub enum Created {
     Option(OptionId),
     Tab(TabId),
     Elements(Vec<crate::ElementId>),
+    Line(crate::LineId),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -410,6 +432,7 @@ pub enum Error {
     TooMany,
     TooLong,
     TooLarge,
+    Formula { at: usize },
     Changed,
     Random,
     Document(String),

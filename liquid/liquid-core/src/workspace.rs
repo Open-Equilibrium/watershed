@@ -21,7 +21,7 @@ use crate::{
     Permission, PersonId, Place, Request, RowId, TabId, TabSetup, TableEntry, TextStyle, Tile,
     View, ViewId, search_words,
 };
-use crate::{database, drawing, tab};
+use crate::{calculation, database, drawing, tab};
 
 const COMPACT_AFTER: usize = 1_000;
 pub const MAX_DEVICE_KEY: usize = 256;
@@ -336,6 +336,14 @@ impl<S: Store> Workspace<S> {
         drawing::read(self.doc(&Document::Page(page.clone()))?, block, pages)
     }
 
+    pub fn calculation(
+        &mut self,
+        page: &PageId,
+        block: &BlockId,
+    ) -> Result<Option<calculation::Calculation>, Error> {
+        calculation::read(self, page, block)
+    }
+
     pub fn name_and_icon(&mut self) -> Result<(String, String), Error> {
         let doc = self.doc(&Document::Workspace)?;
         Ok((
@@ -443,7 +451,7 @@ impl<S: Store> Workspace<S> {
         Ok((&mut loaded.doc, order))
     }
 
-    fn database_index(
+    pub(crate) fn database_index(
         &mut self,
         block: &BlockId,
     ) -> Result<(&mut AutoCommit, &mut database::Index), Error> {
@@ -458,7 +466,7 @@ impl<S: Store> Workspace<S> {
         Ok((&mut loaded.doc, index))
     }
 
-    fn doc(&mut self, document: &Document) -> Result<&mut AutoCommit, Error> {
+    pub(crate) fn doc(&mut self, document: &Document) -> Result<&mut AutoCommit, Error> {
         if !self.docs.contains_key(document) {
             let chunks = self.store.chunks(document)?;
             if chunks.is_empty() {
@@ -495,6 +503,7 @@ impl<S: Store> Workspace<S> {
             | Mutation::TurnIntoText { page, .. }
             | Mutation::AddMediaBlock { page, .. }
             | Mutation::AddWhiteboardBlock { page, .. }
+            | Mutation::AddCalculationBlock { page, .. }
             | Mutation::AddDatabaseBlock { page, .. }
             | Mutation::AddTableView { page, .. }
             | Mutation::DuplicateTable { page, .. }
@@ -658,6 +667,34 @@ impl<S: Store> Workspace<S> {
             } => self.write_add_media_block(page, after.as_ref(), name, media_type, attachment),
             Mutation::AddWhiteboardBlock { page, after } => {
                 self.write_add_whiteboard_block(page, after.as_ref())
+            }
+            Mutation::AddCalculationBlock { page, after } => {
+                self.write_add_calculation_block(page, after.as_ref())
+            }
+            Mutation::AddLine {
+                page,
+                block,
+                after,
+                line,
+            } => {
+                let doc = self.doc(&Document::Page(page.clone()))?;
+                let id = calculation::add_line(doc, block, after.as_ref(), line)?;
+                Ok(block_changed(page, block, Some(Created::Line(id))))
+            }
+            Mutation::SetLine {
+                page,
+                block,
+                line,
+                setup,
+            } => {
+                let doc = self.doc(&Document::Page(page.clone()))?;
+                calculation::set_line(doc, block, line, setup)?;
+                Ok(block_changed(page, block, None))
+            }
+            Mutation::RemoveLine { page, block, line } => {
+                let doc = self.doc(&Document::Page(page.clone()))?;
+                calculation::remove_line(doc, block, line)?;
+                Ok(block_changed(page, block, None))
             }
             Mutation::SetDrawingStyle { page, block, style } => {
                 let doc = self.doc(&Document::Page(page.clone()))?;
@@ -1136,6 +1173,21 @@ impl<S: Store> Workspace<S> {
         drawing::create(doc, &block)?;
         let sort = order.key_after(after)?;
         let view = add_view(doc, order, sort, &block, BlockKind::Whiteboard)?;
+        let mut written = Written::new(Document::Page(page.clone()), Changed::Views(page.clone()));
+        written.created = Some(Created::Block { block, view });
+        Ok(written)
+    }
+
+    fn write_add_calculation_block(
+        &mut self,
+        page: &PageId,
+        after: Option<&ViewId>,
+    ) -> Result<Written, Error> {
+        let (doc, order) = self.page(page)?;
+        let block = BlockId::new()?;
+        calculation::create(doc, &block)?;
+        let sort = order.key_after(after)?;
+        let view = add_view(doc, order, sort, &block, BlockKind::Calculation)?;
         let mut written = Written::new(Document::Page(page.clone()), Changed::Views(page.clone()));
         written.created = Some(Created::Block { block, view });
         Ok(written)

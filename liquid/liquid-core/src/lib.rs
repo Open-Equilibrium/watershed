@@ -1,4 +1,5 @@
 mod attachment;
+mod calculation;
 mod database;
 mod drawing;
 mod formula;
@@ -14,6 +15,7 @@ mod tab;
 mod workspace;
 
 pub use attachment::{Attachment, AttachmentId, MAX_ATTACHMENT, Media, PART, Upload};
+pub use calculation::{Calculation, Line, LineSetup, LineStyle, MAX_LABEL, MAX_LINES};
 pub use database::{
     Database, Field, Filter, Group, MAX_FIELDS, MAX_FILES, MAX_FILTER_TEXT, MAX_OPTIONS, Match,
     Row, RowQuery, Rows, SelectOption, Sort,
@@ -28,7 +30,8 @@ pub use formula::{
 };
 pub use history::{Action, Document, Operation, Permission};
 pub use id::{
-    ActionId, AreaId, BlockId, ElementId, FieldId, OptionId, PageId, PersonId, RowId, TabId, ViewId,
+    ActionId, AreaId, BlockId, ElementId, FieldId, LineId, OptionId, PageId, PersonId, RowId,
+    TabId, ViewId,
 };
 pub use model::{Area, BlockKind, Code, GRID_COLUMNS, PageEntry, TableEntry, Tile, View};
 pub use mutation::{

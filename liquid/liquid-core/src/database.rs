@@ -132,6 +132,13 @@ impl Index {
         Ok(Self { rows })
     }
 
+    pub(crate) fn column<'a>(
+        &'a self,
+        field: &'a FieldId,
+    ) -> impl Iterator<Item = Option<&'a Cell>> + 'a {
+        self.rows.iter().map(|row| row.cells.get(field.as_str()))
+    }
+
     fn position(&self, row: &RowId) -> Option<usize> {
         self.rows.iter().position(|indexed| &indexed.id == row)
     }

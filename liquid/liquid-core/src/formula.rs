@@ -1,3 +1,4 @@
+use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::fmt;
 
@@ -38,7 +39,11 @@ impl Reference {
 }
 
 pub trait Resolve {
-    fn resolve(&self, reference: &Reference) -> Operand;
+    fn resolve(&mut self, reference: &Reference) -> Operand;
+
+    fn above(&mut self) -> Operand {
+        Operand::Value(Value::Error(Failure::Name))
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -72,6 +77,7 @@ enum Op {
 enum Expr {
     Value(Value),
     Ref(usize),
+    Above,
     Name,
     Call(String, Vec<Expr>),
     Sign { negate: bool, operand: Box<Expr> },
@@ -104,9 +110,9 @@ impl Formula {
         self.references.iter()
     }
 
-    pub fn evaluate(&self, resolver: &dyn Resolve) -> Value {
+    pub fn evaluate(&self, resolver: &mut dyn Resolve) -> Value {
         Eval {
-            resolver,
+            resolver: RefCell::new(resolver),
             references: &self.references,
         }
         .value(&self.expr)
@@ -401,6 +407,7 @@ impl Parser {
             Token::Name(name) => Ok(match name.as_str() {
                 "TRUE" => Expr::Value(Value::Bool(true)),
                 "FALSE" => Expr::Value(Value::Bool(false)),
+                "ABOVE" => Expr::Above,
                 _ => Expr::Name,
             }),
             _ => Err(error),
@@ -409,7 +416,7 @@ impl Parser {
 }
 
 struct Eval<'a> {
-    resolver: &'a dyn Resolve,
+    resolver: RefCell<&'a mut dyn Resolve>,
     references: &'a [Reference],
 }
 
@@ -418,7 +425,8 @@ type Outcome<T> = Result<T, Failure>;
 impl Eval<'_> {
     fn operand(&self, expr: &Expr) -> Operand {
         match expr {
-            Expr::Ref(index) => self.resolver.resolve(&self.references[*index]),
+            Expr::Ref(index) => self.resolver.borrow_mut().resolve(&self.references[*index]),
+            Expr::Above => self.resolver.borrow_mut().above(),
             expr => Operand::Value(self.value(expr)),
         }
     }
@@ -426,7 +434,7 @@ impl Eval<'_> {
     fn value(&self, expr: &Expr) -> Value {
         match expr {
             Expr::Value(value) => value.clone(),
-            Expr::Ref(_) => match self.operand(expr) {
+            Expr::Ref(_) | Expr::Above => match self.operand(expr) {
                 Operand::Value(value) => value,
                 Operand::Range(_) => Value::Error(Failure::Value),
             },
