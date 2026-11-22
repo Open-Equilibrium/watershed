@@ -74,6 +74,7 @@ pub struct BridgeLine {
     pub style: BridgeLineStyle,
     pub value: String,
     pub kind: BridgeValueKind,
+    pub references: Vec<Option<String>>,
 }
 
 impl BridgeLine {
@@ -85,6 +86,7 @@ impl BridgeLine {
             style: BridgeLineStyle::of(line.style),
             value: line.value.to_string(),
             kind: BridgeValueKind::of(&line.value),
+            references: line.references,
         }
     }
 }

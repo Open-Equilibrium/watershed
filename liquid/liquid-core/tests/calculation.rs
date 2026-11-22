@@ -229,6 +229,18 @@ fn a_calculation_block_computes_a_report_in_excel_s_layout() {
         ("Left over", "1865.5"),
     ];
     assert_eq!(home.lines(&page, &report), shown(&expected));
+    let named = home.workspace.calculation(&page, &report).unwrap().unwrap();
+    assert_eq!(
+        named.lines[5].references,
+        [Some("Expenses.Amount".to_string())]
+    );
+    assert_eq!(
+        named.lines[8].references,
+        [
+            Some("Total income".to_string()),
+            Some("Total spending".to_string())
+        ]
+    );
 
     let row = home.row();
     home.set(&row, Cell::Number(15.5));
@@ -285,6 +297,12 @@ fn a_calculation_block_computes_a_report_in_excel_s_layout() {
         "a line that refers to itself, through others"
     );
     assert_eq!(lines[7].1, "#REF!", "a removed line");
+    let named = home.workspace.calculation(&page, &report).unwrap().unwrap();
+    assert_eq!(
+        named.lines[7].references,
+        [Some("Earned".to_string()), None],
+        "a removed line has no name"
+    );
 }
 
 #[test]

@@ -803,6 +803,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   List<BridgeView> dco_decode_list_bridge_view(dynamic raw);
 
   @protected
+  List<String?> dco_decode_list_opt_String(dynamic raw);
+
+  @protected
   Float64List dco_decode_list_prim_f_64_strict(dynamic raw);
 
   @protected
@@ -1787,6 +1790,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   List<BridgeView> sse_decode_list_bridge_view(SseDeserializer deserializer);
+
+  @protected
+  List<String?> sse_decode_list_opt_String(SseDeserializer deserializer);
 
   @protected
   Float64List sse_decode_list_prim_f_64_strict(SseDeserializer deserializer);
@@ -3100,6 +3106,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
     List<BridgeView> self,
     SseSerializer serializer,
   );
+
+  @protected
+  void sse_encode_list_opt_String(List<String?> self, SseSerializer serializer);
 
   @protected
   void sse_encode_list_prim_f_64_strict(

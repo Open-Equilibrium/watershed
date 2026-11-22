@@ -41,6 +41,7 @@ pub struct Line {
     pub formula: String,
     pub style: LineStyle,
     pub value: Value,
+    pub references: Vec<Option<String>>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -200,6 +201,7 @@ pub(crate) fn read<S: Store>(
         .map(|at| Line {
             id: LineId::stored(&lines[at].id),
             value: values.line_at(page, block, &lines, at),
+            references: values.names(&lines[at].setup.formula),
             label: lines[at].setup.label.clone(),
             formula: lines[at].setup.formula.clone(),
             style: lines[at].setup.style,
@@ -267,6 +269,32 @@ impl<S: Store> Values<'_, S> {
             Some(at) => self.line_at(&page, &block, &lines, at),
             None => MISSING,
         }
+    }
+
+    fn names(&mut self, source: &str) -> Vec<Option<String>> {
+        let Ok(formula) = Formula::parse(source) else {
+            return Vec::new();
+        };
+        formula
+            .references()
+            .map(|reference| match reference.ids() {
+                [table, field] => {
+                    let database = self.workspace.database(&BlockId::parse(table)?).ok()??;
+                    let field = database.fields.iter().find(|f| f.id.as_str() == field)?;
+                    Some(format!("{}.{}", database.name, field.name))
+                }
+                [page, block, line] => {
+                    let doc = self
+                        .workspace
+                        .doc(&Document::Page(PageId::parse(page)?))
+                        .ok()?;
+                    let lines = stored(doc, &BlockId::parse(block)?)?;
+                    let found = lines.into_iter().find(|stored| stored.id == *line)?;
+                    Some(found.setup.label)
+                }
+                _ => None,
+            })
+            .collect()
     }
 
     fn column(&mut self, table: &str, field: &str) -> Operand {

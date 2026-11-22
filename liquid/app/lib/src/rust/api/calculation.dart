@@ -17,6 +17,7 @@ class BridgeLine {
   final BridgeLineStyle style;
   final String value;
   final BridgeValueKind kind;
+  final List<String?> references;
 
   const BridgeLine({
     required this.id,
@@ -25,6 +26,7 @@ class BridgeLine {
     required this.style,
     required this.value,
     required this.kind,
+    required this.references,
   });
 
   @override
@@ -34,7 +36,8 @@ class BridgeLine {
       formula.hashCode ^
       style.hashCode ^
       value.hashCode ^
-      kind.hashCode;
+      kind.hashCode ^
+      references.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -46,7 +49,8 @@ class BridgeLine {
           formula == other.formula &&
           style == other.style &&
           value == other.value &&
-          kind == other.kind;
+          kind == other.kind &&
+          references == other.references;
 }
 
 class BridgeLineSetup {

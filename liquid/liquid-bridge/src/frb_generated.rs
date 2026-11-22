@@ -6988,6 +6988,7 @@ impl SseDecode for crate::api::calculation::BridgeLine {
         let mut var_style = <crate::api::calculation::BridgeLineStyle>::sse_decode(deserializer);
         let mut var_value = <String>::sse_decode(deserializer);
         let mut var_kind = <crate::api::calculation::BridgeValueKind>::sse_decode(deserializer);
+        let mut var_references = <Vec<Option<String>>>::sse_decode(deserializer);
         return crate::api::calculation::BridgeLine {
             id: var_id,
             label: var_label,
@@ -6995,6 +6996,7 @@ impl SseDecode for crate::api::calculation::BridgeLine {
             style: var_style,
             value: var_value,
             kind: var_kind,
+            references: var_references,
         };
     }
 }
@@ -8816,6 +8818,18 @@ impl SseDecode for Vec<crate::api::workspace::BridgeView> {
             ans_.push(<crate::api::workspace::BridgeView>::sse_decode(
                 deserializer,
             ));
+        }
+        return ans_;
+    }
+}
+
+impl SseDecode for Vec<Option<String>> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut len_ = <i32>::sse_decode(deserializer);
+        let mut ans_ = Vec::with_capacity(len_ as usize);
+        for idx_ in 0..len_ {
+            ans_.push(<Option<String>>::sse_decode(deserializer));
         }
         return ans_;
     }
@@ -10966,6 +10980,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::calculation::BridgeLine {
             self.style.into_into_dart().into_dart(),
             self.value.into_into_dart().into_dart(),
             self.kind.into_into_dart().into_dart(),
+            self.references.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -13547,6 +13562,7 @@ impl SseEncode for crate::api::calculation::BridgeLine {
         <crate::api::calculation::BridgeLineStyle>::sse_encode(self.style, serializer);
         <String>::sse_encode(self.value, serializer);
         <crate::api::calculation::BridgeValueKind>::sse_encode(self.kind, serializer);
+        <Vec<Option<String>>>::sse_encode(self.references, serializer);
     }
 }
 
@@ -14920,6 +14936,16 @@ impl SseEncode for Vec<crate::api::workspace::BridgeView> {
         <i32>::sse_encode(self.len() as _, serializer);
         for item in self {
             <crate::api::workspace::BridgeView>::sse_encode(item, serializer);
+        }
+    }
+}
+
+impl SseEncode for Vec<Option<String>> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(self.len() as _, serializer);
+        for item in self {
+            <Option<String>>::sse_encode(item, serializer);
         }
     }
 }

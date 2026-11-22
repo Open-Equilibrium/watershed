@@ -119,6 +119,7 @@ fn a_calculation_block_s_lines_cross_and_come_back_computed() {
         ]
     );
     assert_eq!(lines[1].formula, format!("{reference} / 2"));
+    assert_eq!(lines[1].references, [Some("Flights".to_string())]);
 
     assert_eq!(
         edit(
