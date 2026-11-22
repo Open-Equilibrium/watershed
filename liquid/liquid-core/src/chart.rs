@@ -6,7 +6,7 @@ use crate::model::{self, BLOCKS, KIND};
 use crate::store::Store;
 use crate::{
     BlockId, BlockKind, Cell, Document, Error, FieldId, FieldKind, LineStyle, PageId, RowQuery,
-    Value, Workspace,
+    Used, Value, Workspace,
 };
 
 const SETUP: &str = "chart";
@@ -54,6 +54,7 @@ pub struct Chart {
     pub setup: ChartSetup,
     pub source_name: Option<String>,
     pub points: Vec<ChartPoint>,
+    pub uses: Vec<Used>,
 }
 
 pub(crate) fn create(doc: &mut AutoCommit, block: &BlockId) -> Result<(), Error> {
@@ -131,12 +132,14 @@ pub(crate) fn read<S: Store>(
     let Some(setup) = stored(workspace.doc(&Document::Page(page.clone()))?, block) else {
         return Ok(None);
     };
+    let mut uses = Vec::new();
     let (source_name, mut points) = match &setup.source {
         None => (None, Vec::new()),
         Some(ChartSource::Table(table)) => match workspace.database(table)? {
             None => (None, Vec::new()),
             Some(database) => {
-                let points = table_points(workspace, table, &database, &setup)?;
+                let points = table_points(workspace, table, &database, &setup, &mut uses)?;
+                uses.push(Used::Table(table.clone()));
                 (Some(database.name), points)
             }
         },
@@ -149,7 +152,11 @@ pub(crate) fn read<S: Store>(
             match workspace.calculation(page, block)? {
                 None => (None, Vec::new()),
                 Some(calculation) => (
-                    name,
+                    {
+                        uses.extend(calculation.uses);
+                        uses.push(Used::Block(page.clone(), block.clone()));
+                        name
+                    },
                     calculation
                         .lines
                         .into_iter()
@@ -167,10 +174,13 @@ pub(crate) fn read<S: Store>(
         }
     };
     points.truncate(MAX_CHART_POINTS);
+    uses.sort();
+    uses.dedup();
     Ok(Some(Chart {
         setup,
         source_name,
         points,
+        uses,
     }))
 }
 
@@ -179,6 +189,7 @@ fn table_points<S: Store>(
     table: &BlockId,
     database: &crate::Database,
     setup: &ChartSetup,
+    uses: &mut Vec<Used>,
 ) -> Result<Vec<ChartPoint>, Error> {
     let all = RowQuery {
         sort: None,
@@ -189,7 +200,9 @@ fn table_points<S: Store>(
         search: None,
         totals: Vec::new(),
     };
-    let rows = workspace.rows(table, &all)?.rows;
+    let read = workspace.rows(table, &all)?;
+    uses.extend(read.uses);
+    let rows = read.rows;
     let group = setup
         .group
         .as_ref()

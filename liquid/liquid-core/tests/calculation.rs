@@ -795,3 +795,133 @@ fn a_chart_draws_a_table_s_groups_or_a_calculation_s_lines() {
         assert!(set(&mut home, refused).is_err());
     }
 }
+
+#[test]
+fn a_formula_field_that_reads_its_own_column_stops_at_once() {
+    let mut home = Home::new();
+    let table = home.table.clone();
+    for _ in 0..4_000 {
+        home.row();
+    }
+    let Some(Created::Field(share)) = home
+        .edit(Mutation::AddField {
+            block: table.clone(),
+            place: Place::Last,
+            name: "Share".into(),
+            kind: FieldKind::Formula,
+        })
+        .unwrap()
+        .created
+    else {
+        panic!("a field")
+    };
+    home.edit(Mutation::SetFieldFormula {
+        block: table.clone(),
+        field: share.clone(),
+        formula: format!("1 / SUM({{{table}.{share}}})"),
+    })
+    .unwrap();
+    let rows = home
+        .workspace
+        .rows(&table, &query(Vec::new()))
+        .unwrap()
+        .rows;
+    assert_eq!(rows[0].computed[0].1.to_string(), "#REF!");
+}
+
+#[test]
+fn a_computed_value_names_every_block_and_table_it_read() {
+    use liquid_core::{ChartSetup, ChartSource, ChartValue, Used};
+    let mut home = Home::new();
+    let (table, amount, page, other) = (
+        home.table.clone(),
+        home.amount.clone(),
+        home.page.clone(),
+        home.other.clone(),
+    );
+    let source = home.calculation(&page);
+    let first = home
+        .workspace
+        .calculation(&page, &source)
+        .unwrap()
+        .unwrap()
+        .lines[0]
+        .id
+        .clone();
+    home.edit(Mutation::SetLine {
+        page: page.clone(),
+        block: source.clone(),
+        line: first.clone(),
+        setup: line(
+            "Spent",
+            &format!("SUM({{{table}.{amount}}})"),
+            LineStyle::Plain,
+        ),
+    })
+    .unwrap();
+    let reader = home.calculation(&other);
+    let reading = home
+        .workspace
+        .calculation(&other, &reader)
+        .unwrap()
+        .unwrap()
+        .lines[0]
+        .id
+        .clone();
+    home.edit(Mutation::SetLine {
+        page: other.clone(),
+        block: reader.clone(),
+        line: reading,
+        setup: line(
+            "Twice",
+            &format!("{{{page}.{source}.{first}}} * 2"),
+            LineStyle::Plain,
+        ),
+    })
+    .unwrap();
+    let uses = home
+        .workspace
+        .calculation(&other, &reader)
+        .unwrap()
+        .unwrap()
+        .uses;
+    assert_eq!(
+        uses,
+        [
+            Used::Table(table.clone()),
+            Used::Block(page.clone(), source.clone())
+        ]
+    );
+
+    let Some(Created::Block { block: chart, .. }) = home
+        .edit(Mutation::AddChartBlock {
+            page: other.clone(),
+            after: None,
+        })
+        .unwrap()
+        .created
+    else {
+        panic!("a Chart")
+    };
+    home.edit(Mutation::SetChart {
+        page: other.clone(),
+        block: chart.clone(),
+        setup: ChartSetup {
+            source: Some(ChartSource::Calculation {
+                page: other.clone(),
+                block: reader.clone(),
+            }),
+            value: ChartValue::Count,
+            ..ChartSetup::default()
+        },
+    })
+    .unwrap();
+    let uses = home.workspace.chart(&other, &chart).unwrap().unwrap().uses;
+    let mut expected = vec![
+        Used::Table(table),
+        Used::Block(page, source),
+        Used::Block(other, reader),
+    ];
+    expected.sort();
+    assert_eq!(uses, expected);
+}

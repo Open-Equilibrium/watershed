@@ -38,6 +38,11 @@ class _CalculationBlockState extends State<CalculationBlock> {
   String? _editing;
   String? _labelled;
   List<Suggestion> _tables = const [];
+  late final FollowedSources _sourcesFollowed = FollowedSources(
+    _state.workspace,
+    changed: () => unawaited(_read()),
+    failed: _report,
+  );
 
   WorkspaceState get _state => widget.views.state;
   String get _page => widget.views.page;
@@ -95,6 +100,7 @@ class _CalculationBlockState extends State<CalculationBlock> {
     _state.finishing.remove(_name.typed);
     unawaited(_followed?.cancel());
     unawaited(_settled?.cancel());
+    _sourcesFollowed.dispose();
     _name.dispose();
     _nameFocus.dispose();
     super.dispose();
@@ -121,6 +127,7 @@ class _CalculationBlockState extends State<CalculationBlock> {
       return;
     }
     if (!mounted || read != _reads) return;
+    _sourcesFollowed.sync(answer.follows);
     setState(() => _lines = answer.lines);
   }
 

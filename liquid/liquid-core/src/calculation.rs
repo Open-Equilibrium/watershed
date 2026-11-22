@@ -1,4 +1,5 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
+use std::rc::Rc;
 
 use automerge::transaction::Transactable;
 use automerge::{AutoCommit, ObjId, ObjType};
@@ -7,8 +8,8 @@ use serde::{Deserialize, Serialize};
 use crate::model::{self, BLOCKS, KIND, SORT, STYLE};
 use crate::store::Store;
 use crate::{
-    BlockId, BlockKind, Cell, Document, Error, Field, FieldKind, Formula, LineId, Operand, PageId,
-    Place, Reference, Resolve, RowId, Value, Workspace,
+    BlockId, BlockKind, Cell, Document, Error, Field, FieldId, FieldKind, Formula, LineId, Operand,
+    PageId, Place, Reference, Resolve, RowId, Value, Workspace,
 };
 
 const LINES: &str = "lines";
@@ -47,6 +48,7 @@ pub struct Line {
 #[derive(Clone, Debug, PartialEq)]
 pub struct Calculation {
     pub lines: Vec<Line>,
+    pub uses: Vec<Used>,
 }
 
 #[derive(Clone)]
@@ -194,15 +196,10 @@ pub(crate) fn read<S: Store>(
     page: &PageId,
     block: &BlockId,
 ) -> Result<Option<Calculation>, Error> {
-    let Some(lines) = stored(workspace.doc(&Document::Page(page.clone()))?, block) else {
+    workspace.doc(&Document::Page(page.clone()))?;
+    let mut values = Values::new(workspace);
+    let Some(lines) = values.lines(page, block) else {
         return Ok(None);
-    };
-    let mut values = Values {
-        workspace,
-        memo: HashMap::new(),
-        visiting: HashSet::new(),
-        context: None,
-        fields: HashMap::new(),
     };
     let lines = (0..lines.len())
         .map(|at| Line {
@@ -214,7 +211,21 @@ pub(crate) fn read<S: Store>(
             style: lines[at].setup.style,
         })
         .collect();
-    Ok(Some(Calculation { lines }))
+    let itself = Used::Block(page.clone(), block.clone());
+    Ok(Some(Calculation {
+        lines,
+        uses: values
+            .uses
+            .into_iter()
+            .filter(|used| *used != itself)
+            .collect(),
+    }))
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum Used {
+    Table(BlockId),
+    Block(PageId, BlockId),
 }
 
 type Key = (String, String, String);
@@ -225,18 +236,53 @@ struct Values<'w, S: Store> {
     visiting: HashSet<Key>,
     context: Option<Context>,
     fields: HashMap<BlockId, Vec<Field>>,
+    lines: HashMap<(PageId, BlockId), Option<Rc<[Stored]>>>,
+    columns: HashSet<(BlockId, FieldId)>,
+    uses: BTreeSet<Used>,
 }
 
 #[derive(Clone)]
 enum Context {
-    Line(PageId, BlockId, Vec<Stored>, usize),
+    Line(PageId, BlockId, Rc<[Stored]>, usize),
     Row(BlockId, RowId),
 }
 
 const MISSING: Value = Value::Error(crate::Failure::Ref);
 
-impl<S: Store> Values<'_, S> {
-    fn line_at(&mut self, page: &PageId, block: &BlockId, lines: &[Stored], at: usize) -> Value {
+impl<'w, S: Store> Values<'w, S> {
+    fn new(workspace: &'w mut Workspace<S>) -> Self {
+        Self {
+            workspace,
+            memo: HashMap::new(),
+            visiting: HashSet::new(),
+            context: None,
+            fields: HashMap::new(),
+            lines: HashMap::new(),
+            columns: HashSet::new(),
+            uses: BTreeSet::new(),
+        }
+    }
+
+    fn lines(&mut self, page: &PageId, block: &BlockId) -> Option<Rc<[Stored]>> {
+        let key = (page.clone(), block.clone());
+        if !self.lines.contains_key(&key) {
+            let read = match self.workspace.doc(&Document::Page(page.clone())) {
+                Ok(doc) => stored(doc, block).map(Rc::from),
+                Err(_) => None,
+            };
+            self.lines.insert(key.clone(), read);
+        }
+        self.uses.insert(Used::Block(page.clone(), block.clone()));
+        self.lines[&key].clone()
+    }
+
+    fn line_at(
+        &mut self,
+        page: &PageId,
+        block: &BlockId,
+        lines: &Rc<[Stored]>,
+        at: usize,
+    ) -> Value {
         let key = (
             page.as_str().to_string(),
             block.as_str().to_string(),
@@ -257,7 +303,7 @@ impl<S: Store> Values<'_, S> {
                     let outer = self.context.replace(Context::Line(
                         page.clone(),
                         block.clone(),
-                        lines.to_vec(),
+                        Rc::clone(lines),
                         at,
                     ));
                     let value = formula.evaluate(self);
@@ -273,13 +319,14 @@ impl<S: Store> Values<'_, S> {
     }
 
     fn line(&mut self, page: &str, block: &str, line: &str) -> Value {
+        let key = (page.to_string(), block.to_string(), line.to_string());
+        if let Some(value) = self.memo.get(&key) {
+            return value.clone();
+        }
         let (Some(page), Some(block)) = (PageId::parse(page), BlockId::parse(block)) else {
             return MISSING;
         };
-        let Ok(doc) = self.workspace.doc(&Document::Page(page.clone())) else {
-            return MISSING;
-        };
-        let Some(lines) = stored(doc, &block) else {
+        let Some(lines) = self.lines(&page, &block) else {
             return MISSING;
         };
         match lines.iter().position(|stored| stored.id == line) {
@@ -301,13 +348,9 @@ impl<S: Store> Values<'_, S> {
                     Some(format!("{}.{}", database.name, field.name))
                 }
                 [page, block, line] => {
-                    let doc = self
-                        .workspace
-                        .doc(&Document::Page(PageId::parse(page)?))
-                        .ok()?;
-                    let lines = stored(doc, &BlockId::parse(block)?)?;
-                    let found = lines.into_iter().find(|stored| stored.id == *line)?;
-                    Some(found.setup.label)
+                    let lines = self.lines(&PageId::parse(page)?, &BlockId::parse(block)?)?;
+                    let found = lines.iter().find(|stored| stored.id == *line)?;
+                    Some(found.setup.label.clone())
                 }
                 _ => None,
             })
@@ -319,6 +362,7 @@ impl<S: Store> Values<'_, S> {
             let database = self.workspace.database(table).ok()??;
             self.fields.insert(table.clone(), database.fields);
         }
+        self.uses.insert(Used::Table(table.clone()));
         self.fields[table]
             .iter()
             .find(|known| known.id.as_str() == field)
@@ -367,15 +411,23 @@ impl<S: Store> Values<'_, S> {
         let Some(field) = self.field(&table, field) else {
             return Operand::Value(MISSING);
         };
-        let Ok((_, index)) = self.workspace.database_index(&table) else {
+        let reading = (table.clone(), field.id.clone());
+        if !self.columns.insert(reading.clone()) {
             return Operand::Value(MISSING);
+        }
+        let rows: Vec<RowId> = match self.workspace.database_index(&table) {
+            Ok((_, index)) => index.ids().cloned().collect(),
+            Err(_) => {
+                self.columns.remove(&reading);
+                return Operand::Value(MISSING);
+            }
         };
-        let rows: Vec<RowId> = index.ids().cloned().collect();
-        Operand::Range(
-            rows.iter()
-                .map(|row| self.field_value(&table, row, &field))
-                .collect(),
-        )
+        let values = rows
+            .iter()
+            .map(|row| self.field_value(&table, row, &field))
+            .collect();
+        self.columns.remove(&reading);
+        Operand::Range(values)
     }
 
     fn own(&mut self, field: &str) -> Value {
@@ -393,9 +445,9 @@ pub(crate) fn fill<S: Store>(
     workspace: &mut Workspace<S>,
     table: &BlockId,
     rows: &mut [crate::Row],
-) -> Result<(), Error> {
+) -> Result<Vec<Used>, Error> {
     let Some(database) = workspace.database(table)? else {
-        return Ok(());
+        return Ok(Vec::new());
     };
     let formulas: Vec<Field> = database
         .fields
@@ -404,22 +456,22 @@ pub(crate) fn fill<S: Store>(
         .cloned()
         .collect();
     if formulas.is_empty() {
-        return Ok(());
+        return Ok(Vec::new());
     }
-    let mut values = Values {
-        workspace,
-        memo: HashMap::new(),
-        visiting: HashSet::new(),
-        context: None,
-        fields: HashMap::from([(table.clone(), database.fields)]),
-    };
+    let mut values = Values::new(workspace);
+    values.fields.insert(table.clone(), database.fields);
     for row in rows {
         row.computed = formulas
             .iter()
             .map(|field| (field.id.clone(), values.field_value(table, &row.id, field)))
             .collect();
     }
-    Ok(())
+    let itself = Used::Table(table.clone());
+    Ok(values
+        .uses
+        .into_iter()
+        .filter(|used| *used != itself)
+        .collect())
 }
 
 fn value_of(cell: Option<&Cell>, field: &Field) -> Value {

@@ -378,7 +378,7 @@ impl<S: Store> Workspace<S> {
         }
         let (doc, index) = self.database_index(table)?;
         let mut rows = database::rows(doc, index, table, query)?;
-        calculation::fill(self, table, &mut rows.rows)?;
+        rows.uses = calculation::fill(self, table, &mut rows.rows)?;
         if !query.totals.is_empty() {
             let all = self.all_rows(table, query)?;
             rows.totals = crate::total::compute(&all, &query.totals);

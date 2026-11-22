@@ -315,6 +315,7 @@ pub struct BridgeAnswer {
     pub lines: Vec<BridgeLine>,
     pub totals: Vec<BridgeComputed>,
     pub chart: Option<BridgeChart>,
+    pub follows: Vec<BridgeResource>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -340,6 +341,25 @@ pub struct BridgeResource {
 pub struct BridgeChange {
     pub resource: BridgeResource,
     pub seq: i64,
+}
+
+pub(crate) fn follows(uses: &[liquid_core::Used]) -> Vec<BridgeResource> {
+    uses.iter()
+        .map(|used| match used {
+            liquid_core::Used::Table(table) => BridgeResource {
+                kind: BridgeResourceKind::Table,
+                area: None,
+                page: None,
+                block: Some(table.to_string()),
+            },
+            liquid_core::Used::Block(page, block) => BridgeResource {
+                kind: BridgeResourceKind::Block,
+                area: None,
+                page: Some(page.to_string()),
+                block: Some(block.to_string()),
+            },
+        })
+        .collect()
 }
 
 pub(crate) fn message(error: Error) -> String {

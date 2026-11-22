@@ -1123,6 +1123,7 @@ class FakeWorkspace implements LiquidWorkspace {
       List<BridgeLine> lines = const [],
       List<BridgeComputed> totals = const [],
       BridgeChart? chart,
+      List<BridgeResource> follows = const [],
     }) => BridgeAnswer(
       areas: areas,
       pages: pages,
@@ -1144,6 +1145,7 @@ class FakeWorkspace implements LiquidWorkspace {
       lines: lines,
       totals: totals,
       chart: chart,
+      follows: follows,
     );
     final code = _isCode(query.block);
     return switch (query.kind) {
@@ -1206,7 +1208,24 @@ class FakeWorkspace implements LiquidWorkspace {
         },
       ),
       BridgeQueryKind.calculation => answer(
-        lines: [...?calculations[query.block]],
+        lines: [
+          for (final kept in calculations[query.block] ?? const <BridgeLine>[])
+            line(
+              kept.id,
+              BridgeLineSetup(
+                label: kept.label,
+                formula: kept.formula,
+                style: kept.style,
+              ),
+            ),
+        ],
+        follows: {
+          for (final kept in calculations[query.block] ?? const <BridgeLine>[])
+            for (final token in RegExp(
+              r'\{([^}.]+)\.[^}.]+\}',
+            ).allMatches(kept.formula))
+              BridgeResource(kind: BridgeResourceKind.table, block: token[1]),
+        }.toList(),
       ),
       BridgeQueryKind.rows => () {
         final shown = _shownRows(query);

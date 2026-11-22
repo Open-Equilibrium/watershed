@@ -3,6 +3,7 @@ use crate::api::calculation::{BridgeLineSetup, BridgeLineStyle, BridgeValueKind}
 use crate::api::replica::LiquidWorkspace;
 use crate::api::workspace::{
     BridgeBlockKind, BridgeMutation, BridgeMutationKind, BridgeQuery, BridgeQueryKind,
+    BridgeResource, BridgeResourceKind,
 };
 
 fn setup(label: &str, formula: &str, style: BridgeLineStyle) -> Option<BridgeLineSetup> {
@@ -202,15 +203,23 @@ fn a_chart_s_setup_crosses_and_its_points_come_back() {
             ..mutation(BridgeMutationKind::SetChart)
         })
         .unwrap();
-    let read = workspace
+    let answer = workspace
         .query(BridgeQuery {
             page: Some(page.clone()),
             block: Some(chart),
             ..query(BridgeQueryKind::Chart)
         })
-        .unwrap()
-        .chart
         .unwrap();
+    assert_eq!(
+        answer.follows,
+        [BridgeResource {
+            kind: BridgeResourceKind::Block,
+            area: None,
+            page: Some(page.clone()),
+            block: drawn.block.clone(),
+        }]
+    );
+    let read = answer.chart.unwrap();
     assert_eq!(read.setup, drawn);
     assert_eq!(
         read.points

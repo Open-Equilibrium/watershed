@@ -17,7 +17,7 @@ mod total;
 mod workspace;
 
 pub use attachment::{Attachment, AttachmentId, MAX_ATTACHMENT, Media, PART, Upload};
-pub use calculation::{Calculation, Line, LineSetup, LineStyle, MAX_LABEL, MAX_LINES};
+pub use calculation::{Calculation, Line, LineSetup, LineStyle, MAX_LABEL, MAX_LINES, Used};
 pub use chart::{
     Chart, ChartKind, ChartPoint, ChartSetup, ChartSource, ChartValue, MAX_CHART_POINTS,
 };

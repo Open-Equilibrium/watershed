@@ -5,6 +5,7 @@ import 'package:liquid/src/rust/api/calculation.dart';
 import 'package:liquid/src/rust/api/database.dart';
 import 'package:liquid/src/rust/api/workspace.dart';
 import 'package:liquid/src/workspace/calculation_block.dart';
+import 'package:liquid/src/workspace/workspace_state.dart';
 
 import 'page_kit.dart';
 
@@ -175,5 +176,40 @@ void main() {
       'Salary',
       'Side project',
     ]);
+  });
+
+  testWidgets('a Calculation reads again when a Table its formula reads '
+      'changes', (tester) async {
+    await kit.show(tester, [
+      TablePart(expenses),
+      CalculationPart([setup('Spent', '')]),
+    ]);
+    final table = blockOf(0);
+    final formula = 'SUM({$table.amount})';
+    kit.fake.computed[formula] = '180.2';
+    await kit.workspace.apply(
+      mutation(
+        BridgeMutationKind.setLine,
+        page: kit.page,
+        block: blockOf(1),
+        line: 'line 0',
+        lineSetup: setup('Spent', formula),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(inBlock(find.text('180.2')), findsOneWidget);
+
+    kit.fake.computed[formula] = '200.2';
+    await kit.workspace.apply(
+      mutation(
+        BridgeMutationKind.setCell,
+        block: table,
+        row: 'r1',
+        field: 'amount',
+        cell: cell(BridgeCellKind.number, number: 104.2),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(inBlock(find.text('200.2')), findsOneWidget);
   });
 }

@@ -6173,6 +6173,8 @@ impl SseDecode for crate::api::workspace::BridgeAnswer {
         let mut var_lines = <Vec<crate::api::calculation::BridgeLine>>::sse_decode(deserializer);
         let mut var_totals = <Vec<crate::api::database::BridgeComputed>>::sse_decode(deserializer);
         let mut var_chart = <Option<crate::api::chart::BridgeChart>>::sse_decode(deserializer);
+        let mut var_follows =
+            <Vec<crate::api::workspace::BridgeResource>>::sse_decode(deserializer);
         return crate::api::workspace::BridgeAnswer {
             areas: var_areas,
             pages: var_pages,
@@ -6194,6 +6196,7 @@ impl SseDecode for crate::api::workspace::BridgeAnswer {
             lines: var_lines,
             totals: var_totals,
             chart: var_chart,
+            follows: var_follows,
         };
     }
 }
@@ -8864,6 +8867,20 @@ impl SseDecode for Vec<crate::api::events::BridgeRequest> {
     }
 }
 
+impl SseDecode for Vec<crate::api::workspace::BridgeResource> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut len_ = <i32>::sse_decode(deserializer);
+        let mut ans_ = Vec::with_capacity(len_ as usize);
+        for idx_ in 0..len_ {
+            ans_.push(<crate::api::workspace::BridgeResource>::sse_decode(
+                deserializer,
+            ));
+        }
+        return ans_;
+    }
+}
+
 impl SseDecode for Vec<crate::api::database::BridgeRow> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -10076,6 +10093,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::workspace::BridgeAnswer {
             self.lines.into_into_dart().into_dart(),
             self.totals.into_into_dart().into_dart(),
             self.chart.into_into_dart().into_dart(),
+            self.follows.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -13329,6 +13347,7 @@ impl SseEncode for crate::api::workspace::BridgeAnswer {
         <Vec<crate::api::calculation::BridgeLine>>::sse_encode(self.lines, serializer);
         <Vec<crate::api::database::BridgeComputed>>::sse_encode(self.totals, serializer);
         <Option<crate::api::chart::BridgeChart>>::sse_encode(self.chart, serializer);
+        <Vec<crate::api::workspace::BridgeResource>>::sse_encode(self.follows, serializer);
     }
 }
 
@@ -15400,6 +15419,16 @@ impl SseEncode for Vec<crate::api::events::BridgeRequest> {
         <i32>::sse_encode(self.len() as _, serializer);
         for item in self {
             <crate::api::events::BridgeRequest>::sse_encode(item, serializer);
+        }
+    }
+}
+
+impl SseEncode for Vec<crate::api::workspace::BridgeResource> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(self.len() as _, serializer);
+        for item in self {
+            <crate::api::workspace::BridgeResource>::sse_encode(item, serializer);
         }
     }
 }

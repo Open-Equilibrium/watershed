@@ -12,7 +12,7 @@ import 'media.dart';
 
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `id`, `line_setup`, `message`, `normalized`, `of`, `of`, `of`, `optional_id`, `page`, `place`, `table`, `to_core`, `to_core`, `to_core`, `units`, `window`
+// These functions are ignored because they are not marked as `pub`: `follows`, `id`, `line_setup`, `message`, `normalized`, `of`, `of`, `of`, `optional_id`, `page`, `place`, `table`, `to_core`, `to_core`, `to_core`, `units`, `window`
 // These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `hash`, `hash`
 
 class BridgeAnswer {
@@ -36,6 +36,7 @@ class BridgeAnswer {
   final List<BridgeLine> lines;
   final List<BridgeComputed> totals;
   final BridgeChart? chart;
+  final List<BridgeResource> follows;
 
   const BridgeAnswer({
     required this.areas,
@@ -58,6 +59,7 @@ class BridgeAnswer {
     required this.lines,
     required this.totals,
     this.chart,
+    required this.follows,
   });
 
   @override
@@ -81,7 +83,8 @@ class BridgeAnswer {
       icon.hashCode ^
       lines.hashCode ^
       totals.hashCode ^
-      chart.hashCode;
+      chart.hashCode ^
+      follows.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -107,7 +110,8 @@ class BridgeAnswer {
           icon == other.icon &&
           lines == other.lines &&
           totals == other.totals &&
-          chart == other.chart;
+          chart == other.chart &&
+          follows == other.follows;
 }
 
 class BridgeApplied {

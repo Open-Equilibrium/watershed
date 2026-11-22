@@ -18,7 +18,7 @@ use super::media::BridgeMedia;
 use super::workspace::{
     BridgeAnswer, BridgeApplied, BridgeArea, BridgeBlockKind, BridgeChange, BridgeFound, BridgeHit,
     BridgeMutation, BridgePage, BridgeQuery, BridgeQueryKind, BridgeResource, BridgeShown,
-    BridgeTable, BridgeTextStyle, BridgeTile, BridgeView, id, message, window,
+    BridgeTable, BridgeTextStyle, BridgeTile, BridgeView, follows, id, message, window,
 };
 use crate::frb_generated::StreamSink;
 use crate::keys::{Keychain, Keys, random_hex, replica_key};
@@ -225,6 +225,7 @@ impl LiquidWorkspace {
             lines: Vec::new(),
             totals: Vec::new(),
             chart: None,
+            follows: Vec::new(),
         };
         match query.kind {
             BridgeQueryKind::Workspace => {
@@ -328,19 +329,18 @@ impl LiquidWorkspace {
             BridgeQueryKind::Calculation => {
                 let page = id(&query.page, PageId::parse, "page")?;
                 let block = id(&query.block, BlockId::parse, "block")?;
-                answer.lines = workspace
-                    .calculation(&page, &block)
-                    .map_err(message)?
-                    .map(|calculation| calculation.lines.into_iter().map(BridgeLine::of).collect())
-                    .unwrap_or_default();
+                if let Some(calculation) = workspace.calculation(&page, &block).map_err(message)? {
+                    answer.follows = follows(&calculation.uses);
+                    answer.lines = calculation.lines.into_iter().map(BridgeLine::of).collect();
+                }
             }
             BridgeQueryKind::Chart => {
                 let page = id(&query.page, PageId::parse, "page")?;
                 let block = id(&query.block, BlockId::parse, "block")?;
-                answer.chart = workspace
-                    .chart(&page, &block)
-                    .map_err(message)?
-                    .map(BridgeChart::of);
+                if let Some(chart) = workspace.chart(&page, &block).map_err(message)? {
+                    answer.follows = follows(&chart.uses);
+                    answer.chart = Some(BridgeChart::of(chart));
+                }
             }
             BridgeQueryKind::Database => {
                 let block = id(&query.block, BlockId::parse, "block")?;
@@ -355,6 +355,7 @@ impl LiquidWorkspace {
                     .rows(&block, &row_query(query, start, limit)?)
                     .map_err(message)?;
                 answer.totals = computed(&rows.totals);
+                answer.follows = follows(&rows.uses);
                 answer.count = rows.count as i64;
                 answer.rows = rows.rows.into_iter().map(BridgeRow::of).collect();
             }

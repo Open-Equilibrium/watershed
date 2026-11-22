@@ -809,6 +809,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   List<BridgeRequest> dco_decode_list_bridge_request(dynamic raw);
 
   @protected
+  List<BridgeResource> dco_decode_list_bridge_resource(dynamic raw);
+
+  @protected
   List<BridgeRow> dco_decode_list_bridge_row(dynamic raw);
 
   @protected
@@ -1847,6 +1850,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   List<BridgeRequest> sse_decode_list_bridge_request(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  List<BridgeResource> sse_decode_list_bridge_resource(
     SseDeserializer deserializer,
   );
 
@@ -3233,6 +3241,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_list_bridge_request(
     List<BridgeRequest> self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_list_bridge_resource(
+    List<BridgeResource> self,
     SseSerializer serializer,
   );
 

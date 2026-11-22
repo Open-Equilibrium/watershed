@@ -94,6 +94,7 @@ class _TableBlockState extends State<TableBlock> implements CellDrop {
         ),
       );
       if (start == 0) {
+        _sourcesFollowed.sync(answer.follows);
         await _readTotals(filter, search);
         _allRows = filter == null && search == null
             ? answer.count
@@ -109,6 +110,11 @@ class _TableBlockState extends State<TableBlock> implements CellDrop {
   GroupLines? _lines;
 
   Map<String, BridgeComputed> _totals = const {};
+  late final FollowedSources _sourcesFollowed = FollowedSources(
+    _state.workspace,
+    changed: () => unawaited(_rows.reread()),
+    failed: _report,
+  );
   final _totalMenus = <String, OverlayPortalController>{};
   var _footerHovered = false;
 
@@ -383,22 +389,24 @@ class _TableBlockState extends State<TableBlock> implements CellDrop {
             )).count;
     }
     final rows = <BridgeRow>[];
+    final follows = <BridgeResource>[];
     for (final part in lines.within(start, limit)) {
-      rows.addAll(
-        (await _state.read(
-          query(
-            BridgeQueryKind.rows,
-            block: _block,
-            start: part.start,
-            limit: part.count,
-            sort: sort,
-            filter: filter,
-            within: groupFilter(grouped, part.group.value),
-            search: search,
-          ),
-        )).rows,
+      final answer = await _state.read(
+        query(
+          BridgeQueryKind.rows,
+          block: _block,
+          start: part.start,
+          limit: part.count,
+          sort: sort,
+          filter: filter,
+          within: groupFilter(grouped, part.group.value),
+          search: search,
+        ),
       );
+      rows.addAll(answer.rows);
+      follows.addAll(answer.follows);
     }
+    if (start == 0) _sourcesFollowed.sync(follows);
     return (lines.rowCount, rows);
   }
 
@@ -835,6 +843,7 @@ class _TableBlockState extends State<TableBlock> implements CellDrop {
 
   @override
   void dispose() {
+    _sourcesFollowed.dispose();
     if (widget.views.cellDrops[widget.view.id] == this) {
       widget.views.cellDrops.remove(widget.view.id);
     }

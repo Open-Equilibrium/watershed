@@ -106,6 +106,7 @@ pub struct Rows {
     pub count: usize,
     pub rows: Vec<Row>,
     pub totals: Vec<(FieldId, crate::Value)>,
+    pub uses: Vec<crate::Used>,
 }
 
 pub(crate) struct Index {
@@ -610,6 +611,7 @@ pub(crate) fn rows(
             count: index.rows.len(),
             rows: window.map(|row| shown(&live, row)).collect(),
             totals: Vec::new(),
+            uses: Vec::new(),
         });
     }
     let rows = matching(&database, &live, index, query, true);
@@ -622,6 +624,7 @@ pub(crate) fn rows(
             .map(|row| shown(&live, row))
             .collect(),
         totals: Vec::new(),
+        uses: Vec::new(),
     })
 }
 

@@ -53,8 +53,11 @@ class _ChartBlockState extends State<ChartBlock> {
   List<ChartSourceChoice> _sources = const [];
   int _reads = 0;
   StreamSubscription<BridgeChange>? _followed;
-  StreamSubscription<BridgeChange>? _table;
-  String? _followedTable;
+  late final FollowedSources _sourcesFollowed = FollowedSources(
+    _state.workspace,
+    changed: () => unawaited(_read()),
+    failed: _report,
+  );
   final _panel = OverlayPortalController();
   final _kinds = OverlayPortalController();
 
@@ -112,7 +115,7 @@ class _ChartBlockState extends State<ChartBlock> {
   void dispose() {
     _state.finishing.remove(_name.typed);
     unawaited(_followed?.cancel());
-    unawaited(_table?.cancel());
+    _sourcesFollowed.dispose();
     _name.dispose();
     _nameFocus.dispose();
     super.dispose();
@@ -125,16 +128,17 @@ class _ChartBlockState extends State<ChartBlock> {
   Future<void> _read() async {
     final read = ++_reads;
     try {
-      final chart = (await _state.read(
+      final answer = await _state.read(
         query(BridgeQueryKind.chart, page: _page, block: _block),
-      )).chart;
+      );
+      final chart = answer.chart;
       final table = chart?.setup.table;
       final database = table == null
           ? null
           : (await _state.read(query(BridgeQueryKind.database, block: table)))
                 .database;
       if (!mounted || read != _reads) return;
-      if (table != null) _followTable(table);
+      _sourcesFollowed.sync(answer.follows);
       setState(() {
         _chart = chart;
         _database = database;
@@ -142,16 +146,6 @@ class _ChartBlockState extends State<ChartBlock> {
     } on Object catch (error) {
       _report(error);
     }
-  }
-
-  void _followTable(String table) {
-    if (table == _followedTable) return;
-    _followedTable = table;
-    unawaited(_table?.cancel());
-    _table = follow(
-      _state.workspace,
-      BridgeResource(kind: BridgeResourceKind.table, block: table),
-    ).listen((_) => unawaited(_read()), onError: _report);
   }
 
   Future<void> _loadSources() async {
@@ -180,7 +174,6 @@ class _ChartBlockState extends State<ChartBlock> {
   }
 
   void _set(BridgeChartSetup setup) {
-    if (setup.table case final table?) _followTable(table);
     unawaited(
       widget.views
           .write(
