@@ -1,8 +1,8 @@
 #![allow(clippy::unwrap_used)]
 
 use liquid_core::{
-    Actor, Applied, AreaId, BlockId, Created, Error, Found, Hit, MemoryStore, Mutation, Origin,
-    PageId, PersonId, Request, ViewId,
+    Actor, Applied, AreaId, BlockId, Created, Document, Error, Found, Hit, MemoryStore, Mutation,
+    Origin, PageId, PersonId, Request, Store, ViewId,
 };
 
 type Workspace = liquid_core::Workspace<MemoryStore>;
@@ -154,5 +154,25 @@ fn a_replica_without_its_index_builds_it_once_opened() {
     assert_eq!(
         workspace.search(&long, Found::Text, 10),
         Err(Error::TooLong)
+    );
+}
+
+#[test]
+fn an_unreadable_page_neither_stops_the_open_nor_the_rest_of_the_index() {
+    let mut home = Home::new();
+    let trip = home.page("Trip to Lisbon");
+    home.text(&trip, "We fly on 12 November.");
+    let broken = home.page("Broken");
+    home.text(&broken, "Never read");
+    let mut store = home.workspace.into_store();
+    store.drop_index();
+    store.spoil(&Document::Page(broken));
+    let mut workspace = Workspace::open(store).unwrap();
+    assert_eq!(workspace.search("novem", Found::Text, 10).unwrap().len(), 1);
+    let mut store = workspace.into_store();
+    assert_eq!(
+        store.index_version().unwrap(),
+        0,
+        "the next open tries again"
     );
 }

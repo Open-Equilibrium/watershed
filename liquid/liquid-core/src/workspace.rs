@@ -127,17 +127,13 @@ impl<S: Store> Workspace<S> {
             return Ok(());
         }
         let mut writes = Vec::new();
+        let mut complete = true;
         for area in self.areas()? {
             for page in self.pages(&area.id)? {
                 writes.push(page_entry(&page.id, &page.title));
-                let blocks: Vec<BlockId> = self
-                    .views(&page.id, 0, usize::MAX)?
-                    .into_iter()
-                    .filter(|view| matches!(view.kind, BlockKind::Text | BlockKind::Code))
-                    .map(|view| view.block)
-                    .collect();
-                for block in blocks {
-                    writes.push(self.text_entry(&page.id, &block)?);
+                match self.page_text(&page.id) {
+                    Ok(text) => writes.extend(text),
+                    Err(_) => complete = false,
                 }
                 self.close_page(&page.id);
             }
@@ -145,7 +141,20 @@ impl<S: Store> Workspace<S> {
         for table in self.tables()? {
             writes.push(table_entry(&table.id, Some(&table.name)));
         }
-        self.store.index(&writes, Some(INDEX_VERSION))
+        self.store.index(&writes, complete.then_some(INDEX_VERSION))
+    }
+
+    fn page_text(&mut self, page: &PageId) -> Result<Vec<IndexWrite>, Error> {
+        let blocks: Vec<BlockId> = self
+            .views(page, 0, usize::MAX)?
+            .into_iter()
+            .filter(|view| matches!(view.kind, BlockKind::Text | BlockKind::Code))
+            .map(|view| view.block)
+            .collect();
+        blocks
+            .iter()
+            .map(|block| self.text_entry(page, block))
+            .collect()
     }
 
     fn text_entry(&mut self, page: &PageId, block: &BlockId) -> Result<IndexWrite, Error> {

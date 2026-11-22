@@ -58,6 +58,11 @@ impl MemoryStore {
         self.version = 0;
     }
 
+    pub fn spoil(&mut self, document: &Document) {
+        self.chunks
+            .insert(document.clone(), vec![b"spoiled".to_vec()]);
+    }
+
     fn write_index(&mut self, writes: &[IndexWrite]) {
         for write in writes {
             self.search

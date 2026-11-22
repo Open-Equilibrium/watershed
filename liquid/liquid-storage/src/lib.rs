@@ -362,7 +362,8 @@ impl Store for Sqlite {
         let mut statement = self
             .connection
             .prepare_cached(
-                "SELECT id, page, snippet(search, 3, '', '', '…', 12) FROM search \
+                "SELECT id, page, CASE found WHEN 'text' \
+                 THEN snippet(search, 3, '', '', '…', 12) ELSE text END FROM search \
                  WHERE search MATCH ?1 AND found = ?2 ORDER BY rank LIMIT ?3",
             )
             .map_err(failed)?;
