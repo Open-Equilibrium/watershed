@@ -1009,6 +1009,7 @@ class _TableBlockState extends State<TableBlock> implements CellDrop {
     fieldOf: (id) =>
         _database?.fields.where((field) => field.id == id).firstOrNull,
     fields: () => _database?.fields ?? const [],
+    table: () => (_block, _database?.name ?? ''),
     formula: (field, formula) => _writeField(
       mutation(
         BridgeMutationKind.setFieldFormula,

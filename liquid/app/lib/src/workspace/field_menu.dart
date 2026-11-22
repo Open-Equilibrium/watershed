@@ -234,6 +234,7 @@ class FieldMenus extends ChangeNotifier {
   FieldMenus({
     required this.fieldOf,
     required this.fields,
+    required this.table,
     required this.formula,
     required this.rename,
     required this.remove,
@@ -243,6 +244,8 @@ class FieldMenus extends ChangeNotifier {
   final BridgeField? Function(String? id) fieldOf;
 
   final List<BridgeField> Function() fields;
+
+  final (String, String) Function() table;
 
   final Future<void> Function(String field, String formula) formula;
 
@@ -324,7 +327,19 @@ class FieldMenus extends ChangeNotifier {
       onClose: close,
       onDelete: () => unawaited(delete()),
       formula: FieldFormula(
-        names: tokenNames(field.formula, (ids) => fieldOf(ids.single)?.name),
+        names: tokenNames(field.formula, (ids) {
+          final (id, name) = table();
+          return switch (ids) {
+            [final field] => fieldOf(field)?.name,
+            [final other, final field] when other == id => switch (fieldOf(
+              field,
+            )) {
+              final known? => '$name.${known.name}',
+              null => null,
+            },
+            _ => 'Reference',
+          };
+        }),
         known: () => [
           for (final other in fields())
             if (other.id != field.id)

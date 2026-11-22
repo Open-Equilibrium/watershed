@@ -5,6 +5,7 @@ import 'package:liquid/src/rust/api/calculation.dart';
 import 'package:liquid/src/rust/api/database.dart';
 import 'package:liquid/src/rust/api/workspace.dart';
 import 'package:liquid/src/workspace/formula_field.dart';
+import 'package:liquid/src/workspace/workspace_state.dart';
 
 import 'page_kit.dart';
 
@@ -128,5 +129,26 @@ void main() {
       kit.applied(BridgeMutationKind.setFieldFormula).map((set) => set.text),
       ['{$amount} * 2'],
     );
+  });
+
+  testWidgets('a field formula that reads another Table opens in the menu', (
+    tester,
+  ) async {
+    await kit.show(tester, [table]);
+    final block = kit.fake.views[kit.page]!.first.block;
+    await kit.workspace.apply(
+      mutation(
+        BridgeMutationKind.setFieldFormula,
+        page: kit.page,
+        block: block,
+        field: half,
+        text: 'SUM({$block.$amount}) / 2',
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(kit.inTable(find.text('Half')), buttons: 2);
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+    expect(inMenu(find.text('Expenses.Amount')), findsOneWidget);
   });
 }
