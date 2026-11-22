@@ -19,16 +19,11 @@
 .toast .u{color:var(--ws-canvas);opacity:.75}
 .pastechip{display:inline-flex;gap:6px;align-items:center;height:28px;padding:0 4px 0 10px;border-radius:6px;background:var(--ws-surface);box-shadow:var(--ws-shadow);font-size:13px;color:var(--ws-text-muted)}
 .pastechip .btn{height:22px;padding:0 8px;font-size:12px}
-.panel{width:320px;flex:none;box-shadow:inset 1px 0 0 var(--ws-border);padding:12px 16px;display:flex;flex-direction:column;gap:14px;font-size:13px;box-sizing:border-box}
-.panel h5{margin:0;font-size:12px;color:var(--ws-text-faint);font-weight:500}
-.panel .ttlr{display:flex;align-items:center;gap:8px;font-size:14px;font-weight:600;height:28px}
 .fld{display:grid;grid-template-columns:96px 1fr;gap:6px 10px;align-items:center}
 .fld .l{color:var(--ws-text-muted)}
 .sel{height:28px;border-radius:6px;box-shadow:inset 0 0 0 1px var(--ws-border-strong);display:flex;align-items:center;gap:6px;padding:0 8px;white-space:nowrap;overflow:hidden}
 .sel .c{margin-left:auto;color:var(--ws-text-faint)}
 .sel.bad{box-shadow:inset 0 0 0 1px var(--ws-danger);color:var(--ws-danger)}
-.focus{box-shadow:0 0 0 2px var(--ws-accent);border-radius:8px}
-.fxin{display:flex;align-items:center;gap:4px;flex-wrap:wrap;height:36px;padding:0 10px;border-radius:6px;box-shadow:inset 0 0 0 1.5px var(--ws-accent);font-family:var(--ws-font-mono);font-size:13px;background:var(--ws-canvas)}
 .err{display:flex;gap:8px;align-items:center;color:var(--ws-danger);font-size:13px}
 .board{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
 .bcol{background:var(--ws-subtle);border-radius:8px;padding:8px;display:flex;flex-direction:column;gap:6px;font-size:13px}
@@ -58,7 +53,7 @@
   </div>
   <section>
     <h1>Liquid Workspace: Blocks</h1>
-    <p class="sub">Mockups for the M3a slice in <a href="../../../PLAN.md#m3a--local-workspace-foundation">PLAN.md</a>, approved by the maintainer on 2026-11-01: synchronized Views over one Block, copying, the deletion cascade and Automations. Connections and formulas are built; the V-Spec holds their rules. They follow the <a href="../../concept/V-Spec_Liquid.html#model">V-Spec</a>, ADR-0235 and <a href="../guidelines.md">guidelines.md</a>; the shell is the one in the <a href="liquid-workspace-pages.html">Pages mockups</a>.</p>
+    <p class="sub">Mockups for the M3a slice in <a href="../../../PLAN.md#m3a--local-workspace-foundation">PLAN.md</a>, approved by the maintainer on 2026-11-01: synchronized Views over one Block, copying, the deletion cascade and Automations. Connections and formulas are built; the <a href="../../concept/V-Spec_Liquid.html#logic">V-Spec</a> holds their rules. They follow the <a href="../../concept/V-Spec_Liquid.html#model">V-Spec</a>, ADR-0235 and <a href="../guidelines.md">guidelines.md</a>; the shell is the one in the <a href="liquid-workspace-pages.html">Pages mockups</a>.</p>
     <p class="sub"><b>Revised by ADR-0239 and ADR-0241:</b> the rail with the Workspace switcher, Inbox and Settings, tabs side by side, Chats in place of agent sessions and Notion's scale are in <a href="liquid-app-concept.html">the app's structure</a>; this file keeps its slice's content, and the shell is redrawn as each slice is built.</p>
   </section>
   <section>
@@ -171,7 +166,6 @@ ${rows.slice(0,o.n||5).map(r=>`<div class="tr"><span>${r[0]}</span><span>${r[1]}
 const dbHead=(o={})=>`<div class="bh"><span class="ico">${I.db}</span><b>Expenses</b><span class="chip">Table ⌄</span><span class="end">${o.synced?'<span class="cap">Synced · on 2 Pages</span>':''}<span class="ib">${I.more}</span></span></div>`;
 const chart=(h=120)=>`<div class="bars" style="height:${h}px">${[['Home',1046],['Leisure',112],['Food',84],['Travel',43]].map(([k,v])=>`<div><span>€ ${v}</span><i style="height:${Math.max(4,v/1046*(h-30))}px"></i></div>`).join('')}</div><div class="blab"><span>Home</span><span>Leisure</span><span>Food</span><span>Travel</span></div>`;
 const chartBlk=`<div class="bh"><span class="ico">${I.chart}</span><b>Spending by category</b><span class="chip">Bar ⌄</span><span class="end"><span class="cap">from Expenses</span></span></div>${chart()}`;
-const fxBlk=(o={})=>`<div class="card"><div class="cap">Left this month</div><div class="big">€ 715.50</div>${o.f!==false?`<div class="fx" style="margin-top:4px">= 2000 − SUM(<span class="ref">${I.db} Expenses › Amount</span>)</div>`:''}</div>`;
 
 Object.assign(I,{
 lock:sv('<rect x="3.5" y="7" width="9" height="7" rx="1.2"/><path d="M5.5 7V5a2.5 2.5 0 015 0v2"/>'),
@@ -238,7 +232,7 @@ const after=`<div class="win" style="width:740px;flex:none;padding:20px 24px 24p
 <div class="prose"><p>October is almost done. Rent is the largest share, as every month.</p></div>
 <div class="bh"><span class="ico">${I.chart}</span><b>Spending by category</b></div>
 <div class="emb" style="height:110px"><span>No data: its Database “Expenses” was deleted.</span><span class="btn">Choose data…</span></div>
-<div class="card" style="margin-top:14px"><div class="cap">Left this month</div><div class="err">${I.warn}<span>#REF: “Expenses” was deleted</span></div></div>
+<div class="card" style="margin-top:14px"><div class="cap">Left this month</div><div class="err">${I.warn}<span>#REF! “Expenses” was deleted</span></div></div>
 <div class="toast" style="bottom:16px"><span>Deleted <b>Expenses</b>; 1 Automation needs attention</span><span class="u">Undo ⌘Z</span><span class="u">Show in History</span></div></div>`;
 const removed=`<div class="win" style="width:440px;flex:none;padding:20px 24px;box-sizing:border-box;position:relative;height:430px">
 <div class="ttl" style="font-size:24px;line-height:32px">Monthly review</div>

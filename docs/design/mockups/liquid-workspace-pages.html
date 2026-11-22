@@ -183,7 +183,7 @@ frame('w-icon',{h:520,head:head('Private <span>›</span> <b>💰 Household budg
 // 4 · Slash
 const chooser=`<div class="pop" style="left:394px;top:200px;width:360px">
 <div class="lbl">Blocks</div>
-${[['text','Text','A paragraph, heading, list item or to-do',1],['db','Database','Rows with typed fields; Table, Board or Calendar'],['chart','Chart','Draws data from a Database or Source'],['fx','Calculation','Labeled values, from one line to a report'],['code','Code','Code with highlighting'],['img','Media','Image, video, file or embed'],['pen','Whiteboard','Draw and place shapes freely']].map(([i,n,d,on])=>`<div class="it ${on?'on':''}"><span class="bi">${I[i]}</span><span class="tx"><span>${n}</span><span class="d">${d}</span></span></div>`).join('')}
+${[['text','Text','A paragraph, heading, list item or to-do',1],['db','Database','Rows with typed fields; Table, Board or Calendar'],['chart','Chart','Draws data from a Table, a Source or a Calculation Block'],['fx','Calculation','Labeled values, from one line to a report'],['code','Code','Code with highlighting'],['img','Media','Image, video, file or embed'],['pen','Whiteboard','Draw and place shapes freely']].map(([i,n,d,on])=>`<div class="it ${on?'on':''}"><span class="bi">${I[i]}</span><span class="tx"><span>${n}</span><span class="d">${d}</span></span></div>`).join('')}
 <hr><div class="lbl">Reuse</div><div class="it"><span class="bi">${I.link}</span><span class="tx"><span>Existing Block…</span><span class="d">Add a View of a Block from any Page</span></span></div>
 <hr><div class="lbl">Templates</div><div class="it"><span class="bi">${I.tpl}</span><span>Budget</span><span class="r">Text, Database, Chart, Calculation</span></div></div>`;
 frame('w-slash',{h:760,side:{sel:'new',newp:'Weekly plan'},head:head('Private <span>›</span> <b>🗓️ Weekly plan</b>'),main:`<div class="pg"><div class="col">
@@ -208,7 +208,7 @@ frame('w-text',{h:560,side:{sel:'trip'},head:head('Private <span>›</span> <b>�
 const G=[
 ['text','Text','one paragraph, heading or item',`<div class="prose" style="font-size:15px;line-height:22px"><b>Monday</b><br>Call the landlord about the heating.<div class="todo" style="margin-top:4px"><span class="cb"></span>Pay the electricity bill</div></div>`,'⏎ starts the next Text Block; consecutive ones form a Section, one tile in Arrange mode.'],
 ['db','Database','Table · Board · Calendar',`${dbTable({n:3})}`,'Typed fields: text, number, select, date, checkbox, file, link to a row, formula and button.'],
-['chart','Chart','bar, line or pie',chart(100),'Its data comes through a Connection from a Database, a Source or a Calculation Block.'],
+['chart','Chart','bar, line or pie',chart(100),'Its data comes through a Connection from a Table, a Source or a Calculation Block.'],
 ['fx','Calculation','one line to a report',fxBlk(),'Excel function names; references are chips bound to stable IDs, so renaming breaks nothing.'],
 ['code','Code','highlighted, never run',`<div class="code"><i class="kw">export function</i> share(part, total) {\n  <i class="kw">return</i> Math.round(part / total * <i class="nu">100</i>);\n}</div>`,'Language picked from the paste or the menu; Apps that run code come with M3b.'],
 ['img','Media','image, file, embed',`<div class="img"></div><div class="emb">${I.link}<span>Embed from youtube.com</span><span class="btn">Load content</span><span class="cap">Loading sends your address to youtube.com.</span></div>`,'Images and files are Workspace attachments. A pasted link stays a link in its line; embeds load after a click.'],

@@ -203,7 +203,8 @@ Canonical terms. Use these exactly; do not introduce synonyms. Tool names are fi
 - **Attachment** — A file's bytes in a Workspace, kept in the encrypted replica in parts and named by the SHA-256 of its bytes, so a file added twice is kept once (ADR-0305).
 - **Math Block** — A Block that shows one LaTeX formula typeset and never computes it; `$…$` in a Text Block typesets one inside a sentence (ADR-0316).
 - **Chart Block** — A Block that draws a Table's groups or a Calculation Block's lines as bars, a line or a pie, through a Connection (ADR-0315).
-- **Formula field** — A Table field whose formula computes each row's value from the row's other fields; it takes no typing (ADR-0244).
+- **Formula field** — A Table field whose formula computes each row's value from the row's other fields or a Table's columns; it takes no typing (ADR-0244).
+- **Total row** — A Table tab's footer: its row count and, per field, a total over the rows the tab shows (ADR-0244).
 - **Calculation Block** — A Block of lines that each pair a label with a value or formula, laid out as labels left and values right, for reports in Excel's layout (ADR-0244).
 - **Section** — Consecutive Text Blocks up to `---`, a Block of another type or the Page's edge; Arrange mode places it as one tile, inside which its Text Blocks can be arranged in columns. It is layout only and owns no content, rights or Views (ADR-0235).
 - **Chat** — Liquid's one kind of conversation, as in WhatsApp: one-to-one or a group, whose participants are people or agents alike; a Block that Pages can show. A planned replacement for separate agent sessions and projects (ADR-0239, ADR-0241).
