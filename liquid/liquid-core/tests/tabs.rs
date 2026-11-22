@@ -2,8 +2,9 @@
 
 use liquid_core::{
     Actor, Applied, BlockId, Cell, Created, Error, FieldId, FieldKind, Filter, Group, Layout,
-    MAX_TABS, Match, MemoryStore, Mutation, OptionId, Origin, PageId, PersonId, Place, Request,
-    RowId, RowQuery, Sort, Tab, TabId, TabSetup, ViewId,
+    MAX_DEVICE_KEY, MAX_DEVICE_VALUE, MAX_DEVICE_VALUES, MAX_TABS, Match, MemoryStore, Mutation,
+    OptionId, Origin, PageId, PersonId, Place, Request, RowId, RowQuery, Sort, Tab, TabId,
+    TabSetup, ViewId,
 };
 
 type Workspace = liquid_core::Workspace<MemoryStore>;
@@ -545,4 +546,59 @@ fn actions_recorded_before_tabs_still_read() {
         let read: Result<Mutation, _> = serde_json::from_str(stored);
         assert!(read.is_ok(), "{stored}");
     }
+}
+
+#[test]
+fn a_tab_folds_groups_for_everyone_by_their_value() {
+    let mut home = Home::new();
+    let (table, view) = home.table("Tasks", Layout::Board);
+    let status = home.workspace.database(&table).unwrap().unwrap().fields[1].clone();
+    let tab = home.tabs(&view)[0].id.clone();
+    let fold = |folded: Vec<Cell>| Mutation::SetTabFolded {
+        page: home.page.clone(),
+        view: view.clone(),
+        tab: tab.clone(),
+        folded,
+    };
+    let done = Cell::Select(status.options[2].id.clone());
+    let (text, kept) = (
+        fold(vec![Cell::Text("Done".into())]),
+        fold(vec![Cell::Empty, done.clone()]),
+    );
+    assert_eq!(home.edit(text), Err(Error::WrongKind));
+    home.edit(kept).unwrap();
+    home.workspace.close_page(&home.page);
+    assert_eq!(home.tabs(&view)[0].setup.folded, [Cell::Empty, done]);
+}
+
+#[test]
+fn a_device_value_stays_out_of_history_and_within_its_bounds() {
+    let mut home = Home::new();
+    let before = home.workspace.history(None, 100).unwrap().len();
+    home.workspace.remember("tab/v", Some("t")).unwrap();
+    assert_eq!(
+        home.workspace.remembered("tab/v").unwrap().as_deref(),
+        Some("t")
+    );
+    assert_eq!(home.workspace.history(None, 100).unwrap().len(), before);
+    home.workspace.remember("tab/v", None).unwrap();
+    assert_eq!(home.workspace.remembered("tab/v").unwrap(), None);
+    let long_key = "k".repeat(MAX_DEVICE_KEY + 1);
+    let long_value = "v".repeat(MAX_DEVICE_VALUE + 1);
+    assert_eq!(
+        home.workspace.remember(&long_key, Some("t")),
+        Err(Error::TooLong)
+    );
+    assert_eq!(
+        home.workspace.remember("k", Some(&long_value)),
+        Err(Error::TooLong)
+    );
+    for at in 0..MAX_DEVICE_VALUES {
+        home.workspace.remember(&at.to_string(), Some("t")).unwrap();
+    }
+    assert_eq!(
+        home.workspace.remember("one more", Some("t")),
+        Err(Error::TooMany)
+    );
+    home.workspace.remember("0", Some("u")).unwrap();
 }

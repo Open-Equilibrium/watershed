@@ -32,7 +32,7 @@ pub use mutation::{
 };
 pub use store::{Commit, MemoryStore, Store, Write};
 pub use tab::{Layout, MAX_TABS, Tab, TabSetup};
-pub use workspace::Workspace;
+pub use workspace::{MAX_DEVICE_KEY, MAX_DEVICE_VALUE, MAX_DEVICE_VALUES, Workspace};
 
 #[cfg(test)]
 mod tests;

@@ -187,6 +187,12 @@ pub enum Mutation {
         tab: TabId,
         filter: Option<crate::Filter>,
     },
+    SetTabFolded {
+        page: PageId,
+        view: ViewId,
+        tab: TabId,
+        folded: Vec<Cell>,
+    },
     MoveTab {
         page: PageId,
         view: ViewId,

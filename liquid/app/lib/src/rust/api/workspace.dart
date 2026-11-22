@@ -320,6 +320,7 @@ enum BridgeMutationKind {
   setTabDate,
   setTabSort,
   setTabFilter,
+  setTabFolded,
   moveTab,
   removeTab,
   splitTextBlock,

@@ -78,7 +78,7 @@ class RustLib extends BaseEntrypoint<RustLibApi, RustLibApiImpl, RustLibWire> {
   String get codegenVersion => '2.13.0';
 
   @override
-  int get rustContentHash => 1600610245;
+  int get rustContentHash => 2008454458;
 
   static const kDefaultExternalLibraryLoaderConfig =
       ExternalLibraryLoaderConfig(
@@ -582,6 +582,17 @@ abstract class RustLibApi extends BaseApi {
   Future<Uint8List> crateApiReplicaLiquidWorkspaceReadAttachment({
     required LiquidWorkspace that,
     required String attachment,
+  });
+
+  Future<void> crateApiReplicaLiquidWorkspaceRemember({
+    required LiquidWorkspace that,
+    required String key,
+    String? value,
+  });
+
+  Future<String?> crateApiReplicaLiquidWorkspaceRemembered({
+    required LiquidWorkspace that,
+    required String key,
   });
 
   Future<void> crateApiReplicaLiquidWorkspaceSaveAttachment({
@@ -4602,6 +4613,84 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
+  Future<void> crateApiReplicaLiquidWorkspaceRemember({
+    required LiquidWorkspace that,
+    required String key,
+    String? value,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerLiquidWorkspace(
+            that,
+            serializer,
+          );
+          sse_encode_String(key, serializer);
+          sse_encode_opt_String(value, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 104,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_unit,
+          decodeErrorData: sse_decode_String,
+        ),
+        constMeta: kCrateApiReplicaLiquidWorkspaceRememberConstMeta,
+        argValues: [that, key, value],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiReplicaLiquidWorkspaceRememberConstMeta =>
+      const TaskConstMeta(
+        debugName: "LiquidWorkspace_remember",
+        argNames: ["that", "key", "value"],
+      );
+
+  @override
+  Future<String?> crateApiReplicaLiquidWorkspaceRemembered({
+    required LiquidWorkspace that,
+    required String key,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerLiquidWorkspace(
+            that,
+            serializer,
+          );
+          sse_encode_String(key, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 105,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_opt_String,
+          decodeErrorData: sse_decode_String,
+        ),
+        constMeta: kCrateApiReplicaLiquidWorkspaceRememberedConstMeta,
+        argValues: [that, key],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiReplicaLiquidWorkspaceRememberedConstMeta =>
+      const TaskConstMeta(
+        debugName: "LiquidWorkspace_remembered",
+        argNames: ["that", "key"],
+      );
+
+  @override
   Future<void> crateApiReplicaLiquidWorkspaceSaveAttachment({
     required LiquidWorkspace that,
     required String attachment,
@@ -4620,7 +4709,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 104,
+            funcId: 106,
             port: port_,
           );
         },
@@ -4663,7 +4752,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
             pdeCallFfi(
               generalizedFrbRustBinding,
               serializer,
-              funcId: 105,
+              funcId: 107,
               port: port_,
             );
           },
@@ -4695,7 +4784,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 106,
+            funcId: 108,
             port: port_,
           );
         },
@@ -4725,7 +4814,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 107,
+            funcId: 109,
             port: port_,
           );
         },
@@ -4753,7 +4842,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 108,
+            funcId: 110,
             port: port_,
           );
         },
@@ -4788,7 +4877,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 109,
+            funcId: 111,
             port: port_,
           );
         },
@@ -4818,7 +4907,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 110,
+            funcId: 112,
             port: port_,
           );
         },
@@ -4851,7 +4940,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 111,
+            funcId: 113,
             port: port_,
           );
         },
@@ -6524,8 +6613,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   BridgeTab dco_decode_bridge_tab(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 7)
-      throw Exception('unexpected arr length: expect 7 but see ${arr.length}');
+    if (arr.length != 8)
+      throw Exception('unexpected arr length: expect 8 but see ${arr.length}');
     return BridgeTab(
       id: dco_decode_String(arr[0]),
       name: dco_decode_String(arr[1]),
@@ -6534,6 +6623,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       date: dco_decode_opt_String(arr[4]),
       sort: dco_decode_opt_box_autoadd_bridge_sort(arr[5]),
       filter: dco_decode_opt_box_autoadd_bridge_filter(arr[6]),
+      folded: dco_decode_list_bridge_cell(arr[7]),
     );
   }
 
@@ -6761,6 +6851,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   List<BridgeAutomation> dco_decode_list_bridge_automation(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return (raw as List<dynamic>).map(dco_decode_bridge_automation).toList();
+  }
+
+  @protected
+  List<BridgeCell> dco_decode_list_bridge_cell(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return (raw as List<dynamic>).map(dco_decode_bridge_cell).toList();
   }
 
   @protected
@@ -9090,6 +9186,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_date = sse_decode_opt_String(deserializer);
     var var_sort = sse_decode_opt_box_autoadd_bridge_sort(deserializer);
     var var_filter = sse_decode_opt_box_autoadd_bridge_filter(deserializer);
+    var var_folded = sse_decode_list_bridge_cell(deserializer);
     return BridgeTab(
       id: var_id,
       name: var_name,
@@ -9098,6 +9195,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       date: var_date,
       sort: var_sort,
       filter: var_filter,
+      folded: var_folded,
     );
   }
 
@@ -9373,6 +9471,18 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var ans_ = <BridgeAutomation>[];
     for (var idx_ = 0; idx_ < len_; ++idx_) {
       ans_.add(sse_decode_bridge_automation(deserializer));
+    }
+    return ans_;
+  }
+
+  @protected
+  List<BridgeCell> sse_decode_list_bridge_cell(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    var len_ = sse_decode_i_32(deserializer);
+    var ans_ = <BridgeCell>[];
+    for (var idx_ = 0; idx_ < len_; ++idx_) {
+      ans_.add(sse_decode_bridge_cell(deserializer));
     }
     return ans_;
   }
@@ -11873,6 +11983,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_opt_String(self.date, serializer);
     sse_encode_opt_box_autoadd_bridge_sort(self.sort, serializer);
     sse_encode_opt_box_autoadd_bridge_filter(self.filter, serializer);
+    sse_encode_list_bridge_cell(self.folded, serializer);
   }
 
   @protected
@@ -12084,6 +12195,18 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_i_32(self.length, serializer);
     for (final item in self) {
       sse_encode_bridge_automation(item, serializer);
+    }
+  }
+
+  @protected
+  void sse_encode_list_bridge_cell(
+    List<BridgeCell> self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.length, serializer);
+    for (final item in self) {
+      sse_encode_bridge_cell(item, serializer);
     }
   }
 
@@ -13540,6 +13663,16 @@ class LiquidWorkspaceImpl extends RustOpaque implements LiquidWorkspace {
         that: this,
         attachment: attachment,
       );
+
+  Future<void> remember({required String key, String? value}) =>
+      RustLib.instance.api.crateApiReplicaLiquidWorkspaceRemember(
+        that: this,
+        key: key,
+        value: value,
+      );
+
+  Future<String?> remembered({required String key}) => RustLib.instance.api
+      .crateApiReplicaLiquidWorkspaceRemembered(that: this, key: key);
 
   Future<void> saveAttachment({
     required String attachment,

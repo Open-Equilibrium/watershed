@@ -523,8 +523,35 @@ fn a_view_s_tabs_and_their_groups_cross_the_bridge() {
             ..mutation(BridgeMutationKind::SetTabLayout)
         })
         .unwrap();
+    expenses
+        .apply(BridgeMutation {
+            view: Some(view.id.clone()),
+            tab: Some(board.clone()),
+            tabs: vec![BridgeTab {
+                folded: vec![BridgeCell {
+                    checked: true,
+                    ..cell(BridgeCellKind::Checkbox)
+                }],
+                ..view.tabs[0].clone()
+            }],
+            ..mutation(BridgeMutationKind::SetTabFolded)
+        })
+        .unwrap();
     let tabs = views().tabs;
     assert_eq!(tabs[1].id, board);
+    assert_eq!(
+        tabs[1].folded.iter().map(|c| c.checked).collect::<Vec<_>>(),
+        [true]
+    );
+    let key = format!("tab/{}", view.id);
+    expenses
+        .workspace
+        .remember(key.clone(), Some(board.clone()))
+        .unwrap();
+    assert_eq!(
+        expenses.workspace.remembered(key).unwrap(),
+        Some(board.clone())
+    );
     assert_eq!(
         (
             tabs[1].layout,
@@ -624,6 +651,7 @@ fn a_table_shows_on_two_pages_keeps_its_name_and_goes_with_all_its_views() {
                     descending: true,
                 }),
                 filter: None,
+                folded: Vec::new(),
             }],
             ..mutation(BridgeMutationKind::AddTableView)
         })

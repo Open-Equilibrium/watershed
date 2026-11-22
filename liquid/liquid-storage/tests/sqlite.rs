@@ -273,3 +273,17 @@ fn an_attachment_is_kept_encrypted_and_there_after_a_reopen() {
     assert_eq!(read, file);
     assert_eq!(store.part(&attachment.id, 2).unwrap(), None);
 }
+
+#[test]
+fn a_device_value_is_there_after_a_reopen() {
+    let scratch = Scratch::new("device");
+    let mut store = Sqlite::open(&scratch.db(), &KEY).unwrap();
+    store.remember("tab/v", Some("t")).unwrap();
+    store.remember("gone", Some("x")).unwrap();
+    store.remember("gone", None).unwrap();
+    drop(store);
+    let mut store = Sqlite::open(&scratch.db(), &KEY).unwrap();
+    assert_eq!(store.remembered("tab/v").unwrap().as_deref(), Some("t"));
+    assert_eq!(store.remembered("gone").unwrap(), None);
+    assert_eq!(store.device_values().unwrap(), 1);
+}

@@ -35,6 +35,13 @@ const ATTACHMENTS: &str = "
     );
 ";
 
+const DEVICE: &str = "
+    CREATE TABLE IF NOT EXISTS device (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+    );
+";
+
 pub struct Sqlite {
     connection: Connection,
 }
@@ -94,7 +101,7 @@ impl Sqlite {
         };
         connection
             .execute_batch(&format!(
-                "BEGIN; {create} PRAGMA user_version = {VERSION}; \
+                "BEGIN; {create} {DEVICE} PRAGMA user_version = {VERSION}; \
                  DELETE FROM parts WHERE upload NOT IN (SELECT upload FROM attachments); COMMIT;"
             ))
             .map_err(failed)?;
@@ -260,6 +267,38 @@ impl Store for Sqlite {
                     .optional()
             })
             .map_err(failed)
+    }
+
+    fn remembered(&mut self, key: &str) -> Result<Option<String>, Error> {
+        self.connection
+            .query_row("SELECT value FROM device WHERE key = ?1", [key], |row| {
+                row.get(0)
+            })
+            .optional()
+            .map_err(failed)
+    }
+
+    fn remember(&mut self, key: &str, value: Option<&str>) -> Result<(), Error> {
+        match value {
+            Some(value) => self.connection.execute(
+                "INSERT INTO device (key, value) VALUES (?1, ?2) \
+                 ON CONFLICT (key) DO UPDATE SET value = excluded.value",
+                [key, value],
+            ),
+            None => self
+                .connection
+                .execute("DELETE FROM device WHERE key = ?1", [key]),
+        }
+        .map(|_| ())
+        .map_err(failed)
+    }
+
+    fn device_values(&mut self) -> Result<usize, Error> {
+        let count: i64 = self
+            .connection
+            .query_row("SELECT COUNT(*) FROM device", [], |row| row.get(0))
+            .map_err(failed)?;
+        usize::try_from(count).map_err(failed)
     }
 }
 

@@ -33,6 +33,10 @@ abstract class LiquidWorkspace implements RustOpaqueInterface {
 
   Future<Uint8List> readAttachment({required String attachment});
 
+  Future<void> remember({required String key, String? value});
+
+  Future<String?> remembered({required String key});
+
   Future<void> saveAttachment({
     required String attachment,
     required String path,

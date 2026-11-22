@@ -232,6 +232,7 @@ class BridgeTab {
   final String? date;
   final BridgeSort? sort;
   final BridgeFilter? filter;
+  final List<BridgeCell> folded;
 
   const BridgeTab({
     required this.id,
@@ -241,6 +242,7 @@ class BridgeTab {
     this.date,
     this.sort,
     this.filter,
+    required this.folded,
   });
 
   @override
@@ -251,7 +253,8 @@ class BridgeTab {
       group.hashCode ^
       date.hashCode ^
       sort.hashCode ^
-      filter.hashCode;
+      filter.hashCode ^
+      folded.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -264,5 +267,6 @@ class BridgeTab {
           group == other.group &&
           date == other.date &&
           sort == other.sort &&
-          filter == other.filter;
+          filter == other.filter &&
+          folded == other.folded;
 }

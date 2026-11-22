@@ -33,6 +33,9 @@ pub trait Store {
     fn discard_upload(&mut self, upload: &str) -> Result<(), Error>;
     fn attachment_size(&mut self, attachment: &AttachmentId) -> Result<Option<u64>, Error>;
     fn part(&mut self, attachment: &AttachmentId, index: u64) -> Result<Option<Vec<u8>>, Error>;
+    fn remembered(&mut self, key: &str) -> Result<Option<String>, Error>;
+    fn remember(&mut self, key: &str, value: Option<&str>) -> Result<(), Error>;
+    fn device_values(&mut self) -> Result<usize, Error>;
 }
 
 #[derive(Default)]
@@ -41,6 +44,7 @@ pub struct MemoryStore {
     actions: Vec<Action>,
     uploads: HashMap<String, Vec<Vec<u8>>>,
     attachments: HashMap<AttachmentId, (u64, Vec<Vec<u8>>)>,
+    device: HashMap<String, String>,
 }
 
 impl Store for MemoryStore {
@@ -126,5 +130,21 @@ impl Store for MemoryStore {
             .attachments
             .get(attachment)
             .and_then(|(_, parts)| parts.get(usize::try_from(index).ok()?).cloned()))
+    }
+
+    fn remembered(&mut self, key: &str) -> Result<Option<String>, Error> {
+        Ok(self.device.get(key).cloned())
+    }
+
+    fn remember(&mut self, key: &str, value: Option<&str>) -> Result<(), Error> {
+        match value {
+            Some(value) => self.device.insert(key.to_string(), value.to_string()),
+            None => self.device.remove(key),
+        };
+        Ok(())
+    }
+
+    fn device_values(&mut self) -> Result<usize, Error> {
+        Ok(self.device.len())
     }
 }

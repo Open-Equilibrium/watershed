@@ -29,6 +29,7 @@ pub enum BridgeMutationKind {
     SetTabDate,
     SetTabSort,
     SetTabFilter,
+    SetTabFolded,
     MoveTab,
     RemoveTab,
     SplitTextBlock,
@@ -409,6 +410,12 @@ impl BridgeMutation {
                 view: view()?,
                 tab: tab()?,
                 filter: filter(&self.filter)?,
+            },
+            BridgeMutationKind::SetTabFolded => Mutation::SetTabFolded {
+                page: page()?,
+                view: view()?,
+                tab: tab()?,
+                folded: self.tabs.first().ok_or("tabs is empty")?.to_core()?.folded,
             },
             BridgeMutationKind::MoveTab => Mutation::MoveTab {
                 page: page()?,

@@ -23,6 +23,9 @@ use crate::{
 use crate::{database, drawing, tab};
 
 const COMPACT_AFTER: usize = 1_000;
+pub const MAX_DEVICE_KEY: usize = 256;
+pub const MAX_DEVICE_VALUE: usize = 4_096;
+pub const MAX_DEVICE_VALUES: usize = 10_000;
 
 pub struct Workspace<S: Store> {
     pub(crate) store: S,
@@ -234,6 +237,23 @@ impl<S: Store> Workspace<S> {
         }
         let (doc, index) = self.database_index(table)?;
         database::groups(doc, index, table, query, field)
+    }
+
+    pub fn remembered(&mut self, key: &str) -> Result<Option<String>, Error> {
+        self.store.remembered(key)
+    }
+
+    pub fn remember(&mut self, key: &str, value: Option<&str>) -> Result<(), Error> {
+        if key.len() > MAX_DEVICE_KEY || value.is_some_and(|value| value.len() > MAX_DEVICE_VALUE) {
+            return Err(Error::TooLong);
+        }
+        if value.is_some()
+            && self.store.remembered(key)?.is_none()
+            && self.store.device_values()? >= MAX_DEVICE_VALUES
+        {
+            return Err(Error::TooMany);
+        }
+        self.store.remember(key, value)
     }
 
     pub fn table_views(&mut self, table: &BlockId) -> Result<Vec<(PageId, ViewId)>, Error> {
@@ -526,6 +546,12 @@ impl<S: Store> Workspace<S> {
                 tab,
                 filter,
             } => self.write_tab(page, view, tab, |setup| setup.filter.clone_from(filter)),
+            Mutation::SetTabFolded {
+                page,
+                view,
+                tab,
+                folded,
+            } => self.write_tab(page, view, tab, |setup| setup.folded.clone_from(folded)),
             Mutation::MoveTab {
                 page,
                 view,

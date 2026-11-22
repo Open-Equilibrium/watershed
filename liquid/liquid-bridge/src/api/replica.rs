@@ -174,6 +174,18 @@ impl LiquidWorkspace {
         Ok(answer)
     }
 
+    pub fn remembered(&self, key: String) -> Result<Option<String>, String> {
+        self.state()?.workspace.remembered(&key).map_err(message)
+    }
+
+    pub fn remember(&self, key: String, value: Option<String>) -> Result<(), String> {
+        let mut inner = self.state()?;
+        inner
+            .workspace
+            .remember(&key, value.as_deref())
+            .map_err(message)
+    }
+
     pub fn query(&self, query: BridgeQuery) -> Result<BridgeAnswer, String> {
         let mut inner = self.state()?;
         let (start, limit) = window(query.start, query.limit)?;

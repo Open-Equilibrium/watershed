@@ -150,6 +150,7 @@ pub struct BridgeTab {
     pub date: Option<String>,
     pub sort: Option<BridgeSort>,
     pub filter: Option<BridgeFilter>,
+    pub folded: Vec<BridgeCell>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -187,6 +188,7 @@ impl BridgeTab {
             date: setup.date.as_ref().map(ToString::to_string),
             sort: setup.sort.as_ref().map(BridgeSort::of),
             filter: setup.filter.as_ref().map(BridgeFilter::of),
+            folded: setup.folded.iter().map(BridgeCell::of).collect(),
         }
     }
 
@@ -203,6 +205,11 @@ impl BridgeTab {
             date: field(&self.date, "date")?,
             sort: sort(&self.sort)?,
             filter: filter(&self.filter)?,
+            folded: self
+                .folded
+                .iter()
+                .map(BridgeCell::to_core)
+                .collect::<Result<_, _>>()?,
         })
     }
 }
