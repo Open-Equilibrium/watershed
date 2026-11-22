@@ -9,6 +9,7 @@ import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
 import 'explorer.dart' show untitled;
 import 'media_block.dart';
+import 'page_views.dart';
 import 'slash_commands.dart';
 import 'table_pickers.dart';
 import 'workspace_state.dart';
@@ -117,6 +118,24 @@ class _PowerBarState extends State<PowerBar> {
   Future<void> _openPage(String page) async {
     final area = _areaOf(page);
     if (area != null) _state.open.value = OpenPage(area, page);
+  }
+
+  Future<void> _caretTo(String page, String block) async {
+    final state = _state;
+    for (var tries = 0; tries < 30; tries++) {
+      await WidgetsBinding.instance.endOfFrame;
+      final views = state.currentPage.value;
+      final count = views?.count;
+      if (views == null || views.page != page || count == null) continue;
+      for (var at = 0; at < count; at++) {
+        final view = await views.viewAt(at);
+        if (view?.block == block) {
+          views.moveCaret(Caret(view!.id, 0));
+          return;
+        }
+      }
+      return;
+    }
   }
 
   String? get _areaName {
@@ -292,7 +311,10 @@ class _PowerBarState extends State<PowerBar> {
               detail: hit.page == null ? null : _titleOf(hit.page!),
               keys: null,
               run: () async {
-                if (hit.page case final page?) await _openPage(page);
+                if (hit.page case final page?) {
+                  await _openPage(page);
+                  await _caretTo(page, hit.id);
+                }
               },
             ),
           },

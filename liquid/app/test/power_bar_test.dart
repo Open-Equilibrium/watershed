@@ -72,6 +72,36 @@ void main() {
     expect(kit.fake.device['recent'], contains(trip.page));
   });
 
+  testWidgets('a text hit opens its Page with the caret in that Block', (
+    tester,
+  ) async {
+    await kit.show(tester, [const TextPart('Plan')]);
+    final area = kit.workspace.open.value!.area;
+    final trip = (await kit.workspace.apply(
+      mutation(BridgeMutationKind.createPage, area: area, text: 'Trip'),
+    )).page!;
+    await kit.workspace.apply(
+      mutation(BridgeMutationKind.addTextBlock, page: trip, text: 'Intro'),
+    );
+    final found = await kit.workspace.apply(
+      mutation(
+        BridgeMutationKind.addTextBlock,
+        page: trip,
+        after: kit.fake.views[trip]!.first.id,
+        text: 'Book the flat in Alfama',
+      ),
+    );
+    await open(tester);
+    await type(tester, 'alfa');
+    await enter(tester);
+    expect(kit.workspace.open.value?.page, trip);
+    final focused = tester
+        .widgetList<TextField>(find.byType(TextField))
+        .where((field) => field.focusNode?.hasFocus ?? false);
+    expect(focused.single.controller?.text, 'Book the flat in Alfama');
+    expect(found.view, isNotNull);
+  });
+
   testWidgets('/ lists the Blocks, and ⏎ adds one to the Page', (tester) async {
     await kit.show(tester, [const TextPart('Plan')]);
     await open(tester);
