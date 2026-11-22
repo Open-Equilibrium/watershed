@@ -821,6 +821,7 @@ BridgeItem item(
   bool ended = false,
   bool failed = false,
   int? durationMs,
+  List<BridgeTaskStep> steps = const [],
 }) => BridgeItem(
   id: id,
   kind: kind,
@@ -829,7 +830,11 @@ BridgeItem item(
   ended: ended,
   failed: failed,
   durationMs: durationMs,
+  steps: steps,
 );
+
+BridgeTaskStep step(String text, BridgeStepStatus status) =>
+    BridgeTaskStep(text: text, status: status);
 
 BridgeTranscriptItem chatItem(BridgeItem item, int turn, String text) =>
     BridgeTranscriptItem(item: item, turn: turn, text: text);

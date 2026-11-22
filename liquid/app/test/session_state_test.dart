@@ -475,6 +475,48 @@ void main() {
       );
     });
 
+    test('a task list keeps its steps when it completes and names the running instances', () async {
+      const running = BridgeStepStatus.running;
+      const completed = BridgeStepStatus.completed;
+      await open();
+      await emit(
+        startItem(
+          1,
+          1,
+          item(4, BridgeItemKind.taskList, steps: [step('Explore', running)]),
+        ),
+      );
+      final tasks = state.items.value.single;
+      final later = [
+        step('Explore', running),
+        step('Explore › scraper-1', running),
+        step('Explore › scraper-2', completed),
+      ];
+
+      await emit(
+        event(
+          BridgeEventKind.itemUpdated,
+          2,
+          item: item(4, BridgeItemKind.taskList, steps: later),
+        ),
+      );
+      expect(tasks.steps.value, later);
+      expect(state.runningInstances.value, [
+        (name: 'scraper-1', phase: 'Explore'),
+      ]);
+
+      await emit(
+        event(
+          BridgeEventKind.itemCompleted,
+          3,
+          turn: 1,
+          item: item(4, BridgeItemKind.taskList, ended: true),
+          text: '',
+        ),
+      );
+      expect(tasks.steps.value, later);
+    });
+
     test('a finished model request adds its tokens to the totals, cached input included', () async {
       await open();
 
@@ -1199,7 +1241,13 @@ void main() {
     group('moves (ADR-0308)', () {
       BridgeTranscriptItem entry(int id, BridgeItemKind kind, String text) =>
           BridgeTranscriptItem(
-            item: BridgeItem(id: id, kind: kind, ended: true, failed: false),
+            item: BridgeItem(
+              id: id,
+              kind: kind,
+              ended: true,
+              failed: false,
+              steps: const [],
+            ),
             turn: 1,
             text: text,
           );

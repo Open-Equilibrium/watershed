@@ -14,6 +14,7 @@ import '../rust/api/thread.dart';
 import 'agent_host_set.dart';
 import 'move_rule.dart';
 import 'move_settle.dart';
+import 'task_tree.dart';
 import 'backend.dart';
 import 'chat_items.dart';
 import 'git_state.dart';
@@ -221,6 +222,8 @@ class SessionState {
   final sessionTitle = ValueNotifier<String?>(null);
 
   final draft = ValueNotifier<String?>(null);
+  final runningInstances = ValueNotifier<List<RunningInstance>>(const []);
+  final mention = ValueNotifier<String?>(null);
   final notice = ValueNotifier<Notice?>(null);
   final notices = ValueNotifier<List<Notice>>(const []);
   final totals = ValueNotifier(const SessionTotals());
@@ -938,6 +941,7 @@ class SessionState {
     _byId.clear();
     _requests.clear();
     items.value = const [];
+    runningInstances.value = const [];
     request.value = null;
     queued.value = const [];
     turns.value = const [];
@@ -1098,6 +1102,7 @@ class SessionState {
 
   ItemView _settled(ItemView view, BridgeTranscriptItem entry) {
     view.text.value = entry.text;
+    view.steps.value = entry.item.steps;
     if (entry.item.ended) {
       view.outcome.value = (
         failed: entry.item.failed,
@@ -1113,7 +1118,7 @@ class SessionState {
     turn: turn,
     tool: item.tool,
     target: item.target,
-  );
+  )..steps.value = item.steps;
 
   void _setTurns(List<BridgeTurn> read) {
     turns.value = read;
@@ -1149,6 +1154,14 @@ class SessionState {
 
   void _status() {
     request.value = _requests.values.firstOrNull;
+    final tasks = items.value.lastWhere(
+      (item) => item.kind == BridgeItemKind.taskList,
+      orElse: () => ItemView(id: 0, kind: BridgeItemKind.taskList, turn: 0),
+    );
+    final names = instancesOf(tasks.steps.value);
+    if (!listEquals(names, runningInstances.value)) {
+      runningInstances.value = names;
+    }
     final running = turns.value.any(
       (t) => t.status == BridgeTurnStatus.running,
     );
@@ -1211,6 +1224,8 @@ class SessionState {
       case BridgeEventKind.contentDelta:
         final view = _byId[event.item!.id];
         if (view != null) view.text.value += event.text ?? '';
+      case BridgeEventKind.itemUpdated:
+        _byId[event.item!.id]?.steps.value = event.item!.steps;
       case BridgeEventKind.itemCompleted:
         final view = _byId[event.item!.id];
         if (view != null) {

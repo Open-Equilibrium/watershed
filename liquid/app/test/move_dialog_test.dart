@@ -644,7 +644,13 @@ void main() {
       await tester.binding.setSurfaceSize(const Size(1400, 900));
       BridgeTranscriptItem entry(int id, BridgeItemKind kind, String text) =>
           BridgeTranscriptItem(
-            item: BridgeItem(id: id, kind: kind, ended: true, failed: false),
+            item: BridgeItem(
+              id: id,
+              kind: kind,
+              ended: true,
+              failed: false,
+              steps: const [],
+            ),
             turn: 1,
             text: text,
           );

@@ -140,6 +140,7 @@ class _AgentShellState extends State<AgentShell> {
     if (widget.state case final state?) {
       state.hostLabel = _hostName;
       state.draft.addListener(_applyDraft);
+      state.mention.addListener(_applyMention);
       state.request.addListener(_requestChanged);
       unawaited(state.loadStart());
     }
@@ -218,6 +219,22 @@ class _AgentShellState extends State<AgentShell> {
     state.draft.value = null;
   }
 
+  void _applyMention() {
+    final state = widget.state!;
+    final name = state.mention.value;
+    if (name == null) return;
+    final rest = _composer.text.replaceFirst(RegExp(r'^@\S*\s*'), '');
+    final text = '@$name $rest';
+    _writeComposer(
+      TextEditingValue(
+        text: text,
+        selection: TextSelection.collapsed(offset: text.length),
+      ),
+    );
+    _composerFocus.requestFocus();
+    state.mention.value = null;
+  }
+
   void _hideWhitespace() =>
       widget.state?.hideWhitespace.value = _diffSettings.value.hideWhitespace;
 
@@ -229,6 +246,7 @@ class _AgentShellState extends State<AgentShell> {
     widget.workspace?.open.removeListener(_pageOpened);
     _lifecycle.dispose();
     widget.state?.draft.removeListener(_applyDraft);
+    widget.state?.mention.removeListener(_applyMention);
     widget.state?.request.removeListener(_requestChanged);
     _composer.dispose();
     _composerFocus.dispose();

@@ -29,6 +29,8 @@ class ItemView {
   final ValueNotifier<String> text = ValueNotifier('');
 
   final ValueNotifier<ItemOutcome?> outcome = ValueNotifier(null);
+
+  final ValueNotifier<List<BridgeTaskStep>> steps = ValueNotifier(const []);
 }
 
 typedef ItemOutcome = ({bool failed, int? durationMs});
