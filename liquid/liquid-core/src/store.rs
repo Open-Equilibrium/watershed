@@ -34,9 +34,7 @@ pub trait Store {
     fn attachment_size(&mut self, attachment: &AttachmentId) -> Result<Option<u64>, Error>;
     fn part(&mut self, attachment: &AttachmentId, index: u64) -> Result<Option<Vec<u8>>, Error>;
     fn remembered(&mut self, key: &str) -> Result<Option<String>, Error>;
-    fn remember(&mut self, key: &str, value: Option<&str>) -> Result<(), Error>;
-    fn device_values(&mut self) -> Result<usize, Error>;
-    fn forget_oldest(&mut self) -> Result<(), Error>;
+    fn remember(&mut self, key: &str, value: Option<&str>, most: usize) -> Result<(), Error>;
 }
 
 #[derive(Default)]
@@ -141,21 +139,12 @@ impl Store for MemoryStore {
             .map(|(_, value)| value.clone()))
     }
 
-    fn remember(&mut self, key: &str, value: Option<&str>) -> Result<(), Error> {
+    fn remember(&mut self, key: &str, value: Option<&str>, most: usize) -> Result<(), Error> {
         self.device.retain(|(kept, _)| kept != key);
         if let Some(value) = value {
+            let over = (self.device.len() + 1).saturating_sub(most);
+            self.device.drain(..over.min(self.device.len()));
             self.device.push((key.to_string(), value.to_string()));
-        }
-        Ok(())
-    }
-
-    fn device_values(&mut self) -> Result<usize, Error> {
-        Ok(self.device.len())
-    }
-
-    fn forget_oldest(&mut self) -> Result<(), Error> {
-        if !self.device.is_empty() {
-            self.device.remove(0);
         }
         Ok(())
     }

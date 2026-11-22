@@ -275,20 +275,20 @@ fn an_attachment_is_kept_encrypted_and_there_after_a_reopen() {
 }
 
 #[test]
-fn a_device_value_is_there_after_a_reopen() {
+fn a_device_value_is_there_after_a_reopen_and_the_oldest_makes_room() {
     let scratch = Scratch::new("device");
     let mut store = Sqlite::open(&scratch.db(), &KEY).unwrap();
-    store.remember("tab/v", Some("t")).unwrap();
-    store.remember("gone", Some("x")).unwrap();
-    store.remember("gone", None).unwrap();
+    store.remember("tab/v", Some("t"), 2).unwrap();
+    store.remember("gone", Some("x"), 2).unwrap();
+    store.remember("gone", None, 2).unwrap();
     drop(store);
     let mut store = Sqlite::open(&scratch.db(), &KEY).unwrap();
     assert_eq!(store.remembered("tab/v").unwrap().as_deref(), Some("t"));
     assert_eq!(store.remembered("gone").unwrap(), None);
-    assert_eq!(store.device_values().unwrap(), 1);
-    store.remember("later", Some("u")).unwrap();
-    store.remember("tab/v", Some("t2")).unwrap();
-    store.forget_oldest().unwrap();
+    store.remember("later", Some("u"), 2).unwrap();
+    store.remember("tab/v", Some("t2"), 2).unwrap();
+    store.remember("newest", Some("n"), 2).unwrap();
     assert_eq!(store.remembered("later").unwrap(), None);
     assert_eq!(store.remembered("tab/v").unwrap().as_deref(), Some("t2"));
+    assert_eq!(store.remembered("newest").unwrap().as_deref(), Some("n"));
 }

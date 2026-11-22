@@ -278,41 +278,28 @@ impl Store for Sqlite {
             .map_err(failed)
     }
 
-    fn remember(&mut self, key: &str, value: Option<&str>) -> Result<(), Error> {
-        match value {
-            Some(value) => self
-                .connection
-                .execute("DELETE FROM device WHERE key = ?1", [key])
+    fn remember(&mut self, key: &str, value: Option<&str>, most: usize) -> Result<(), Error> {
+        let most = i64::try_from(most).map_err(failed)?;
+        let transaction = self.connection.transaction().map_err(failed)?;
+        transaction
+            .execute("DELETE FROM device WHERE key = ?1", [key])
+            .map_err(failed)?;
+        if let Some(value) = value {
+            transaction
+                .execute(
+                    "DELETE FROM device WHERE rowid IN (SELECT rowid FROM device \
+                     ORDER BY rowid LIMIT max(0, (SELECT COUNT(*) FROM device) - ?1 + 1))",
+                    [most],
+                )
                 .and_then(|_| {
-                    self.connection.execute(
+                    transaction.execute(
                         "INSERT INTO device (key, value) VALUES (?1, ?2)",
                         [key, value],
                     )
-                }),
-            None => self
-                .connection
-                .execute("DELETE FROM device WHERE key = ?1", [key]),
+                })
+                .map_err(failed)?;
         }
-        .map(|_| ())
-        .map_err(failed)
-    }
-
-    fn device_values(&mut self) -> Result<usize, Error> {
-        let count: i64 = self
-            .connection
-            .query_row("SELECT COUNT(*) FROM device", [], |row| row.get(0))
-            .map_err(failed)?;
-        usize::try_from(count).map_err(failed)
-    }
-
-    fn forget_oldest(&mut self) -> Result<(), Error> {
-        self.connection
-            .execute(
-                "DELETE FROM device WHERE rowid = (SELECT MIN(rowid) FROM device)",
-                [],
-            )
-            .map(|_| ())
-            .map_err(failed)
+        transaction.commit().map_err(failed)
     }
 }
 

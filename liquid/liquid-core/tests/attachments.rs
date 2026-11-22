@@ -379,6 +379,13 @@ fn a_file_cell_holds_files_of_finished_attachments() {
         apply(&mut workspace, set(Cell::Text("Invoice.pdf".into()))),
         Err(Error::WrongKind)
     );
+    workspace.close_page(&page);
+    let kept = workspace.rows(&block, &all).unwrap().rows;
+    assert_eq!(
+        kept[0].cell(&files),
+        Some(&Cell::Files(read.clone())),
+        "a refused write leaves the files as they were"
+    );
     apply(&mut workspace, set(Cell::Files(Vec::new()))).unwrap();
     let rows = workspace.rows(&block, &all).unwrap();
     assert_eq!(rows.count, 0, "no files is an empty cell");

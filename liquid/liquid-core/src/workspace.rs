@@ -247,13 +247,7 @@ impl<S: Store> Workspace<S> {
         if key.len() > MAX_DEVICE_KEY || value.is_some_and(|value| value.len() > MAX_DEVICE_VALUE) {
             return Err(Error::TooLong);
         }
-        if value.is_some()
-            && self.store.remembered(key)?.is_none()
-            && self.store.device_values()? >= MAX_DEVICE_VALUES
-        {
-            self.store.forget_oldest()?;
-        }
-        self.store.remember(key, value)
+        self.store.remember(key, value, MAX_DEVICE_VALUES)
     }
 
     pub fn table_views(&mut self, table: &BlockId) -> Result<Vec<(PageId, ViewId)>, Error> {

@@ -156,16 +156,8 @@ impl Store for Flaky {
         self.inner.remembered(key)
     }
 
-    fn remember(&mut self, key: &str, value: Option<&str>) -> Result<(), Error> {
-        self.inner.remember(key, value)
-    }
-
-    fn device_values(&mut self) -> Result<usize, Error> {
-        self.inner.device_values()
-    }
-
-    fn forget_oldest(&mut self) -> Result<(), Error> {
-        self.inner.forget_oldest()
+    fn remember(&mut self, key: &str, value: Option<&str>, most: usize) -> Result<(), Error> {
+        self.inner.remember(key, value, most)
     }
 }
 
