@@ -26,15 +26,15 @@ BridgeTab tabOfLayout(BridgeLayout layout) => BridgeTab(
   folded: const [],
 );
 
-BridgeTab copiedTab(BridgeTab tab, {String? name, String? id}) => BridgeTab(
-  id: id ?? tab.id,
-  name: name ?? tab.name,
+BridgeTab copiedTab(BridgeTab tab, {List<BridgeCell>? folded}) => BridgeTab(
+  id: tab.id,
+  name: tab.name,
   layout: tab.layout,
   group: tab.group,
   date: tab.date,
   sort: tab.sort,
   filter: tab.filter,
-  folded: tab.folded,
+  folded: folded ?? tab.folded,
 );
 
 bool sameGroup(BridgeCell a, BridgeCell b) =>

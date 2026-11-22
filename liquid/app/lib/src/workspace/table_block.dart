@@ -19,6 +19,7 @@ import 'row_menu.dart';
 import 'stored_name.dart';
 import 'table_cells.dart';
 import 'table_query.dart';
+import 'table_groups.dart';
 import 'table_selection.dart';
 import 'table_tabs.dart';
 import 'table_view_parts.dart';
@@ -68,6 +69,12 @@ class _TableBlockState extends State<TableBlock> implements CellDrop {
       final sort = widget.fullPage ? _pageSort : _tab.sort;
       final filter = widget.fullPage ? null : _tab.filter;
       final search = _search.isEmpty ? null : _search;
+      final grouped = _grouping;
+      if (grouped == null) {
+        _lines = null;
+      } else {
+        return _groupedRows(grouped, start, limit, sort, filter, search);
+      }
       final answer = await _state.read(
         query(
           BridgeQueryKind.rows,
@@ -91,6 +98,69 @@ class _TableBlockState extends State<TableBlock> implements CellDrop {
     _report,
     kept: 5,
   );
+  GroupLines? _lines;
+
+  BridgeField? get _grouping => switch (_database) {
+    final database?
+        when !widget.fullPage && _tab.layout == BridgeLayout.table =>
+      _groupOf(database),
+    _ => null,
+  };
+
+  Future<(int, List<BridgeRow>)> _groupedRows(
+    BridgeField grouped,
+    int start,
+    int limit,
+    BridgeSort? sort,
+    BridgeFilter? filter,
+    String? search,
+  ) async {
+    var lines = _lines;
+    if (start == 0 || lines == null) {
+      final groups = (await _state.read(
+        query(
+          BridgeQueryKind.groups,
+          block: _block,
+          field: grouped.id,
+          filter: filter,
+          search: search,
+        ),
+      )).groups;
+      final tab = _tab;
+      lines = _lines = GroupLines(groups, (value) => folds(tab, value));
+      _allRows = filter == null && search == null
+          ? lines.total
+          : (await _state.read(
+              query(BridgeQueryKind.rows, block: _block, limit: 0),
+            )).count;
+    }
+    final rows = <BridgeRow>[];
+    for (final part in lines.within(start, limit)) {
+      rows.addAll(
+        (await _state.read(
+          query(
+            BridgeQueryKind.rows,
+            block: _block,
+            start: part.start,
+            limit: part.count,
+            sort: sort,
+            filter: filter,
+            within: groupFilter(grouped, part.group.value),
+            search: search,
+          ),
+        )).rows,
+      );
+    }
+    return (lines.rowCount, rows);
+  }
+
+  void _toggleFold(BridgeCell value) => _setQuery(
+    _tabWrite(
+      BridgeMutationKind.setTabFolded,
+      tabs: [copiedTab(_tab, folded: foldedToggled(_tab, value))],
+    ),
+  );
+
   final _sideways = ScrollController();
   final _down = ScrollController();
 
@@ -130,8 +200,9 @@ class _TableBlockState extends State<TableBlock> implements CellDrop {
     if (box is! RenderBox || !box.hasSize) return null;
     final local = box.globalToLocal(global);
     if (!(Offset.zero & box.size).contains(local)) return null;
-    final row = ((local.dy + _down.offset) / WsMetrics.rowTable).floor();
-    if (row < 0 || row >= (_rows.count ?? 0)) return null;
+    final line = ((local.dy + _down.offset) / WsMetrics.rowTable).floor();
+    final row = _lines == null ? line : _lines!.at(line).row;
+    if (row == null || row < 0 || row >= (_rows.count ?? 0)) return null;
     final offset = _sideways.hasClients ? _sideways.offset : 0.0;
     var field = 0;
     if (local.dx - offset >= _first) {
@@ -755,7 +826,7 @@ class _TableBlockState extends State<TableBlock> implements CellDrop {
         if (!mounted) return;
         _scrollingItself = true;
         if (_down.hasClients) {
-          final top = row * WsMetrics.rowTable;
+          final top = (_lines?.lineOf(row) ?? row) * WsMetrics.rowTable;
           final view = _down.position.viewportDimension;
           if (top < _down.offset) {
             _down.jumpTo(top);
@@ -1151,6 +1222,7 @@ class _TableBlockState extends State<TableBlock> implements CellDrop {
     final days = intlLocale(locale, DateFormat.localeExists);
     _cells.days = days;
     final count = _rows.count ?? 0;
+    final lineCount = _lines?.lineCount ?? count;
     final numberFormat = NumberFormat.decimalPattern(numbers);
     final sort = _liveSort;
     final filter = _liveFilter;
@@ -1162,7 +1234,7 @@ class _TableBlockState extends State<TableBlock> implements CellDrop {
         if (down && _down.hasClients) {
           _scrollingItself = true;
           _down.jumpTo(
-            (count - math.min(count, _shownRows)) * WsMetrics.rowTable,
+            (lineCount - math.min(lineCount, _shownRows)) * WsMetrics.rowTable,
           );
           _scrollingItself = false;
         }
@@ -1260,7 +1332,11 @@ class _TableBlockState extends State<TableBlock> implements CellDrop {
                                 ),
                                 alignment: Alignment.centerLeft,
                                 child: Text(
-                                  _rowCount(numberFormat, count, filter),
+                                  _rowCount(
+                                    numberFormat,
+                                    _lines?.total ?? count,
+                                    filter,
+                                  ),
                                   style: TextStyle(
                                     fontSize: WsMetrics.fsCompact,
                                     color: ws.textFaint,
@@ -1312,6 +1388,8 @@ class _TableBlockState extends State<TableBlock> implements CellDrop {
     _starts = starts;
     _first = first;
     final count = _rows.count ?? 0;
+    final lines = _lines;
+    final grouped = _grouping;
     final options = {
       for (final field in fields)
         if (field.kind == BridgeFieldKind.select)
@@ -1504,14 +1582,41 @@ class _TableBlockState extends State<TableBlock> implements CellDrop {
               ),
             ),
             SizedBox(
-              height: math.min(count, _shownRows) * WsMetrics.rowTable,
+              height:
+                  math.min(lines?.lineCount ?? count, _shownRows) *
+                  WsMetrics.rowTable,
               key: _rowsKey,
               child: ListView.builder(
                 key: const Key('table rows'),
                 controller: _down,
-                itemCount: count,
+                itemCount: lines?.lineCount ?? count,
                 itemExtent: WsMetrics.rowTable,
-                itemBuilder: (context, rowIndex) {
+                itemBuilder: (context, shownLine) {
+                  final at = lines?.at(shownLine);
+                  if (at?.group case final index? when grouped != null) {
+                    final group = lines!.groups[index];
+                    return ListenableBuilder(
+                      listenable: _sideways,
+                      builder: (context, _) => Padding(
+                        padding: EdgeInsets.only(
+                          left: _sideways.hasClients ? _sideways.offset : 0,
+                        ),
+                        child: GroupHeader(
+                          label: GroupLabel(
+                            field: grouped,
+                            value: group.value,
+                            days: days,
+                            numbers: numbers,
+                          ),
+                          count: group.count,
+                          folded: folds(_tab, group.value),
+                          onToggle: () => _toggleFold(group.value),
+                          numbers: numbers,
+                        ),
+                      ),
+                    );
+                  }
+                  final rowIndex = at?.row ?? shownLine;
                   final row = _rows.at(rowIndex);
                   final cells = {
                     for (final cell in row?.cells ?? const <BridgeFieldCell>[])
