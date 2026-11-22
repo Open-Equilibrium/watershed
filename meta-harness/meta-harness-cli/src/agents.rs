@@ -182,14 +182,11 @@ fn blank(kind: ScheduleKind) -> Schedule {
 
 fn duration(text: &str) -> Result<u64, String> {
     let wrong = || format!("{text:?} is no duration such as 30m, 2h or 1d.");
-    let (count, unit) = text.split_at(text.len().saturating_sub(1));
+    let (count, minutes) = [("m", 1), ("h", 60), ("d", 24 * 60)]
+        .into_iter()
+        .find_map(|(unit, minutes)| Some((text.strip_suffix(unit)?, minutes)))
+        .ok_or_else(wrong)?;
     let count: u64 = count.parse().map_err(|_| wrong())?;
-    let minutes = match unit {
-        "m" => 1,
-        "h" => 60,
-        "d" => 24 * 60,
-        _ => return Err(wrong()),
-    };
     count
         .checked_mul(minutes * MINUTE_MS)
         .filter(|ms| *ms >= MINUTE_MS)
@@ -291,6 +288,7 @@ mod tests {
             &["--prompt", "No schedule."][..],
             &["--every", "30s", "--prompt", "Too often."],
             &["--every", "0m", "--prompt", "Never."],
+            &["--every", "5ü", "--prompt", "Not a unit."],
             &["--webhook"],
             &["--webhook", "--days", "mon", "--prompt", "Days need --at."],
             &["--at", "07:30", "--days", "someday", "--prompt", "Plan."],

@@ -64,17 +64,26 @@ pub(super) async fn call(shared: &Arc<Shared>, call: AgentsCall) -> Result<Value
         }
         AgentsCall::Remove(name) => {
             let agent = named(shared, &name)?;
-            shared.agents.stop(&name);
-            let thread = current(shared, &agent).await?;
-            for routine in thread.automations().await?.current() {
-                thread.remove_routine(&routine.id).await?;
+            for id in [Some(&agent.thread), agent.previous.as_ref()]
+                .into_iter()
+                .flatten()
+            {
+                if let Some(thread) = existing(shared, &agent.root, id).await? {
+                    for routine in thread.automations().await?.current() {
+                        thread.remove_routine(&routine.id).await?;
+                    }
+                }
             }
             agents::remove(&shared.store.db(), &name)?;
+            shared.agents.stop(&name);
             to(agent.memory)
         }
         AgentsCall::Routines(name) => {
-            let thread = current(shared, &named(shared, &name)?).await?;
-            to(thread.automations().await?.current())
+            let agent = named(shared, &name)?;
+            match existing(shared, &agent.root, &agent.thread).await? {
+                Some(thread) => to(thread.automations().await?.current()),
+                None => to(Vec::<crate::Automation>::new()),
+            }
         }
         AgentsCall::AddRoutine { name, routine } => {
             let agent = named(shared, &name)?;
@@ -82,7 +91,10 @@ pub(super) async fn call(shared: &Arc<Shared>, call: AgentsCall) -> Result<Value
             to(thread.add_routine(&agent, &routine).await?)
         }
         AgentsCall::RemoveRoutine { name, id } => {
-            let thread = current(shared, &named(shared, &name)?).await?;
+            let agent = named(shared, &name)?;
+            let thread = existing(shared, &agent.root, &agent.thread)
+                .await?
+                .ok_or_else(|| format!("Agent {name} has no routine {id}."))?;
             if !thread
                 .automations()
                 .await?
@@ -100,6 +112,15 @@ pub(super) async fn call(shared: &Arc<Shared>, call: AgentsCall) -> Result<Value
 fn named(shared: &Shared, name: &str) -> Result<Agent, String> {
     agents::get(&shared.store.db(), &shared.home, name)?
         .ok_or_else(|| format!("No agent is named {name}."))
+}
+
+async fn existing(shared: &Shared, root: &str, id: &str) -> Result<Option<Thread>, String> {
+    let project = shared.host.project(Path::new(root)).await?;
+    if project.is_listed(id).await? {
+        Ok(Some(project.open(id).await?))
+    } else {
+        Ok(None)
+    }
 }
 
 async fn current(shared: &Shared, agent: &Agent) -> Result<Thread, String> {
