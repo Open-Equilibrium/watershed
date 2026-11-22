@@ -184,6 +184,9 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
     if (choice.block == BridgeBlockKind.whiteboard) {
       return _addBlock(BridgeMutationKind.addWhiteboardBlock, 'Whiteboard');
     }
+    if (choice.block == BridgeBlockKind.chart) {
+      return _addBlock(BridgeMutationKind.addChartBlock, 'Chart');
+    }
     if (choice.block == BridgeBlockKind.calculation) {
       return _addBlock(BridgeMutationKind.addCalculationBlock, 'Calculation');
     }

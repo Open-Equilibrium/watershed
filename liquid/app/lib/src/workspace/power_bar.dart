@@ -227,6 +227,8 @@ class _PowerBarState extends State<PowerBar> {
             change(BridgeMutationKind.addWhiteboardBlock),
             const [],
           );
+        case SlashCommand(block: BridgeBlockKind.chart):
+          await views.write(change(BridgeMutationKind.addChartBlock), const []);
         case SlashCommand(block: BridgeBlockKind.calculation):
           await views.write(
             change(BridgeMutationKind.addCalculationBlock),

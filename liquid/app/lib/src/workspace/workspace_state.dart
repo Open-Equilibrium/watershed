@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 
 import '../rust/api/calculation.dart';
+import '../rust/api/chart.dart';
 import '../rust/api/database.dart';
 import '../rust/api/replica.dart';
 import '../settings_file.dart';
@@ -46,6 +47,7 @@ BridgeMutation mutation(
   String? line,
   BridgeLineSetup? lineSetup,
   BridgeTotal? total,
+  BridgeChartSetup? chart,
 }) => BridgeMutation(
   kind: kind,
   area: area,
@@ -79,6 +81,7 @@ BridgeMutation mutation(
   line: line,
   lineSetup: lineSetup,
   total: total,
+  chart: chart,
 );
 
 BridgeQuery query(

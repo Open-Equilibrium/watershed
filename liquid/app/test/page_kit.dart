@@ -6,6 +6,7 @@ import 'package:liquid/src/agent/sidebar.dart';
 import 'package:liquid/src/app.dart';
 import 'package:liquid/src/launch.dart';
 import 'package:liquid/src/rust/api/calculation.dart';
+import 'package:liquid/src/rust/api/chart.dart';
 import 'package:liquid/src/rust/api/database.dart';
 import 'package:liquid/src/rust/api/drawing.dart';
 import 'package:liquid/src/rust/api/workspace.dart';
@@ -58,6 +59,12 @@ class CalculationPart extends Part {
   const CalculationPart(this.lines, {this.title = ''});
   final List<BridgeLineSetup> lines;
   final String title;
+}
+
+class ChartPart extends Part {
+  const ChartPart(this.setup, this.points);
+  final BridgeChartSetup setup;
+  final List<BridgeChartPoint> points;
 }
 
 class UnknownPart extends Part {
@@ -299,6 +306,10 @@ class PageKit {
               ),
             );
           }
+        case ChartPart(:final setup, :final points):
+          final added = await add(BridgeMutationKind.addChartBlock);
+          fake.charts[added.block!] = setup;
+          fake.chartPoints[added.block!] = points;
         case UnknownPart(:final boundary):
           final views = fake.views[page] ??= [];
           final at = after == null

@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:liquid/src/rust/api/calculation.dart';
+import 'package:liquid/src/rust/api/chart.dart';
 import 'package:liquid/src/rust/api/database.dart';
 import 'package:liquid/src/rust/api/media.dart';
 import 'package:liquid/src/rust/api/replica.dart';
@@ -39,6 +40,17 @@ class FakeWorkspace implements LiquidWorkspace {
   final whiteboards = <String, BridgeDrawing>{};
 
   final calculations = <String, List<BridgeLine>>{};
+
+  final charts = <String, BridgeChartSetup>{};
+
+  final chartPoints = <String, List<BridgeChartPoint>>{};
+
+  String? chartSource(BridgeChartSetup setup) => switch (setup) {
+    BridgeChartSetup(:final table?) => databases[table]?.name,
+    BridgeChartSetup(:final page?, :final block?) =>
+      views[page]?.where((view) => view.block == block).firstOrNull?.title,
+    _ => null,
+  };
 
   final computed = <String, String>{};
 
@@ -651,6 +663,18 @@ class FakeWorkspace implements LiquidWorkspace {
           ),
         ];
         return _placeView(mutation, view);
+      case BridgeMutationKind.addChartBlock:
+        final view = _newView(BridgeBlockKind.chart);
+        charts[view.block] = const BridgeChartSetup(
+          kind: BridgeChartKind.bar,
+          value: BridgeChartValue.count,
+        );
+        return _placeView(mutation, view);
+      case BridgeMutationKind.setChart:
+        if (!charts.containsKey(mutation.block)) throw 'not found';
+        charts[mutation.block!] = mutation.chart!;
+        _changed(_blockResource(mutation));
+        return BridgeApplied(elements: const [], action: _id());
       case BridgeMutationKind.addLine:
         final lines = calculations[mutation.block] ?? (throw 'not found');
         final at = mutation.after == null
@@ -1098,6 +1122,7 @@ class FakeWorkspace implements LiquidWorkspace {
       String? icon,
       List<BridgeLine> lines = const [],
       List<BridgeComputed> totals = const [],
+      BridgeChart? chart,
     }) => BridgeAnswer(
       areas: areas,
       pages: pages,
@@ -1118,6 +1143,7 @@ class FakeWorkspace implements LiquidWorkspace {
       icon: icon,
       lines: lines,
       totals: totals,
+      chart: chart,
     );
     final code = _isCode(query.block);
     return switch (query.kind) {
@@ -1167,6 +1193,18 @@ class FakeWorkspace implements LiquidWorkspace {
         },
       ),
       BridgeQueryKind.database => answer(database: databases[query.block]),
+      BridgeQueryKind.chart => answer(
+        chart: switch (charts[query.block]) {
+          final setup? => BridgeChart(
+            setup: setup,
+            source: chartSource(setup),
+            points: chartSource(setup) == null
+                ? const []
+                : chartPoints[query.block] ?? const [],
+          ),
+          null => null,
+        },
+      ),
       BridgeQueryKind.calculation => answer(
         lines: [...?calculations[query.block]],
       ),
@@ -1175,9 +1213,7 @@ class FakeWorkspace implements LiquidWorkspace {
         return answer(
           count: shown.length,
           rows: window(shown),
-          totals: [
-            for (final total in query.totals) _total(shown, total),
-          ],
+          totals: [for (final total in query.totals) _total(shown, total)],
         );
       }(),
       BridgeQueryKind.groups => answer(groups: _groups(query)),
