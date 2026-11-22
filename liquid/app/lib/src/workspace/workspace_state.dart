@@ -217,8 +217,11 @@ class WorkspaceState {
   }
 
   void _opened() {
-    final page = open.value?.table ?? open.value?.page;
-    if (page == null || page.isEmpty || recent.value.firstOrNull == page) {
+    final page = open.value?.page;
+    if (open.value?.table != null ||
+        page == null ||
+        page.isEmpty ||
+        recent.value.firstOrNull == page) {
       return;
     }
     recent.value = [

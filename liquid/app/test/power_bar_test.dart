@@ -95,9 +95,7 @@ void main() {
     expect(kit.workspace.recent.value, [kit.page]);
   });
 
-  testWidgets('an opened Table leaves the three recent Pages shown', (
-    tester,
-  ) async {
+  testWidgets('an opened Table is not a recent Page', (tester) async {
     await kit.show(tester, [TablePart(expenses)]);
     final area = kit.workspace.open.value!.area;
     for (final title in ['Two', 'Three']) {
@@ -107,8 +105,10 @@ void main() {
       kit.workspace.open.value = OpenPage(area, page.page!);
       await tester.pumpAndSettle();
     }
-    kit.workspace.openTable(kit.fake.tables.single.id);
+    final table = kit.fake.tables.single.id;
+    kit.workspace.openTable(table);
     await tester.pumpAndSettle();
+    expect(kit.workspace.recent.value, isNot(contains(table)));
     await open(tester);
     for (final title in ['Three', 'Two', 'Untitled']) {
       expect(inBar(title), findsOneWidget, reason: title);
