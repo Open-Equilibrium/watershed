@@ -108,11 +108,14 @@ class RowPopover extends StatefulWidget {
     required this.data,
     required this.row,
     required this.onClose,
+    required this.group,
   });
 
   final TableData data;
   final BridgeRow row;
   final VoidCallback onClose;
+
+  final Object group;
 
   static const width = 360.0;
 
@@ -285,6 +288,7 @@ class _RowPopoverState extends State<RowPopover> {
               );
         return AnchoredMenu(
           controller: _picks.putIfAbsent(field.id, OverlayPortalController.new),
+          group: widget.group,
           height: date
               ? DatePicker.height
               : SelectPicker.heightFor(field.options.length),
@@ -296,14 +300,23 @@ class _RowPopoverState extends State<RowPopover> {
                   onDay: (day) {
                     _write(
                       field,
-                      textValue(
-                        BridgeCellKind.date,
-                        DateFormat('yyyy-MM-dd').format(day),
-                      ),
+                      textValue(BridgeCellKind.date, storedDays.format(day)),
                     );
                     _closePick();
                   },
-                  onEnter: _closePick,
+                  onEnter: () {
+                    final typed = _pickText.text.trim();
+                    final day = parseDay(typed, _data.days);
+                    if (typed.isEmpty) {
+                      if (held != null) _write(field, emptyValue);
+                    } else if (day != null) {
+                      _write(
+                        field,
+                        textValue(BridgeCellKind.date, storedDays.format(day)),
+                      );
+                    }
+                    _closePick();
+                  },
                   onClear: () {
                     _write(field, emptyValue);
                     _closePick();
@@ -330,7 +343,9 @@ class _RowPopoverState extends State<RowPopover> {
             behavior: HitTestBehavior.opaque,
             onTap: () {
               _closePick();
-              _pickText.text = '';
+              final day = date ? DateTime.tryParse(held?.text ?? '') : null;
+              final typed = day == null ? '' : days.format(day);
+              _pickText.text = typed;
               _picks[field.id]?.show();
             },
             child: Align(alignment: Alignment.centerLeft, child: shown),

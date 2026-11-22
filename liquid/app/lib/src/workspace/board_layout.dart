@@ -48,6 +48,7 @@ class _BoardLayoutState extends State<BoardLayout> {
   final _limits = <String, int>{};
   int _reads = 0;
   String? _open;
+  final _popover = Object();
 
   @override
   void initState() {
@@ -228,12 +229,14 @@ class _BoardLayoutState extends State<BoardLayout> {
       shown = AnchoredMenu(
         key: ValueKey('open ${row.id}'),
         beside: RowPopover.width,
+        group: _popover,
         height: 60 + 30.0 * fields.length,
         onTapOutside: (_) => setState(() => _open = null),
         menu: (_) => RowPopover(
           data: data,
           row: row,
           onClose: () => setState(() => _open = null),
+          group: _popover,
         ),
         child: shown,
       );

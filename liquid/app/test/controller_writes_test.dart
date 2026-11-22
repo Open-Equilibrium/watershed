@@ -86,7 +86,7 @@ void main() {
       ),
       (
         'lib/src/workspace/row_popover.dart',
-        '_pickText.text = \'\';',
+        '_pickText.text = typed;',
         'A row popover\'s picker text, emptied as the picker opens; the picker is built only while open.',
       ),
       (

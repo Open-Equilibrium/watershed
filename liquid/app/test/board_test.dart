@@ -3,6 +3,8 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:liquid/src/rust/api/database.dart';
 import 'package:liquid/src/rust/api/workspace.dart';
+import 'package:liquid/src/workspace/cell_pickers.dart';
+import 'package:liquid/src/workspace/table_cells.dart';
 import 'package:liquid/src/workspace/workspace_state.dart';
 
 import 'page_kit.dart';
@@ -162,6 +164,60 @@ void main() {
     await tap(tester, find.byKey(const Key('row popover actions')));
     await tap(tester, find.text('Delete row'));
     expect(kit.applied(BridgeMutationKind.removeRow).single.row, 'r3');
+  });
+
+  testWidgets('a row’s fields change in its popover with the Table’s '
+      'pickers', (tester) async {
+    await board(tester, rows);
+    await tap(tester, card('Electricity'));
+    final popover = find.byKey(const Key('row popover'));
+    await tap(tester, find.byKey(const Key('pick category')));
+    await tap(tester, find.text('Food').last);
+    await tap(tester, find.byKey(const Key('pick date')));
+    await tester.enterText(
+      find.descendant(
+        of: find.byType(DatePicker),
+        matching: find.byType(TextField),
+      ),
+      '2026-11-15',
+    );
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+    await tap(
+      tester,
+      find.descendant(
+        of: popover,
+        matching: find.byWidgetPredicate(
+          (widget) =>
+              widget is CellView && widget.kind == BridgeFieldKind.checkbox,
+        ),
+      ),
+    );
+    final amount = find
+        .descendant(of: popover, matching: find.byType(TextField))
+        .at(1);
+    await tester.enterText(amount, '120');
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await tester.pumpAndSettle();
+    expect(
+      [
+        for (final set in cellsSet())
+          (
+            set.field,
+            switch (set.cell?.kind) {
+              BridgeCellKind.checkbox => set.cell!.checked,
+              BridgeCellKind.number => set.cell!.number,
+              _ => set.cell?.text,
+            },
+          ),
+      ],
+      [
+        ('category', 'food'),
+        ('date', '2026-11-15'),
+        ('paid', true),
+        ('amount', 120.0),
+      ],
+    );
   });
 
   testWidgets('a Board without a Select field offers to add one', (

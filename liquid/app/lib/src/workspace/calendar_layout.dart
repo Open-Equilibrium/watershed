@@ -52,6 +52,7 @@ class _CalendarLayoutState extends State<CalendarLayout> {
   int _undatedCount = 0;
   int _reads = 0;
   String? _open;
+  final _popover = Object();
   String? _listed;
   String? _hovered;
   DateTime? _first;
@@ -217,12 +218,14 @@ class _CalendarLayoutState extends State<CalendarLayout> {
     return AnchoredMenu(
       key: key ?? ValueKey('open $_open'),
       beside: RowPopover.width,
+      group: _popover,
       height: 60 + 30.0 * widget.data.database.fields.length,
       onTapOutside: (_) => setState(() => _open = null),
       menu: (_) => RowPopover(
         data: widget.data,
         row: open,
         onClose: () => setState(() => _open = null),
+        group: _popover,
       ),
       child: child,
     );
