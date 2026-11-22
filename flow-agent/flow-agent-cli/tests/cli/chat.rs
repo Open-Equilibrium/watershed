@@ -71,7 +71,7 @@ fn chat_failed_flow_exits_with_failed_status() {
     let workspace = workspace_copy("negative");
     fs::write(
         session_home_path().join("registry/flows/hello-flow.yaml"),
-        "flow:\n  id: hello-flow\n  name: HelloFlow\n  phase_refs: [negative-write]\n  subflow_refs: []\n",
+        "flow:\n  id: hello-flow\n  name: HelloFlow\n  phase_refs: [negative-write]\n",
     )
     .expect("chat flow fixture written");
     let output = run_chat(&workspace, b"/hello-flow\n");

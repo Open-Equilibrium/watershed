@@ -2,4 +2,3 @@ flow:
   id: negative-network
   name: NegativeNetwork
   phase_refs: [negative-network]
-  subflow_refs: []

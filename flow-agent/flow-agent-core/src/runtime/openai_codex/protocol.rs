@@ -53,11 +53,13 @@ pub(crate) fn build_responses_request_body(
     instructions: &str,
     input: &[serde_json::Value],
     tools: &[&core_script::ToolBlock],
+    subflow_tools: &[serde_json::Value],
 ) -> Result<serde_json::Value, RuntimeError> {
-    let tools = tools
+    let mut tools = tools
         .iter()
         .map(|tool| provider_tool_schema(tool))
         .collect::<Result<Vec<_>, _>>()?;
+    tools.extend(subflow_tools.iter().cloned());
     let mut body = serde_json::json!({
         "include": ["reasoning.encrypted_content"],
         "input": input,

@@ -1,3 +1,4 @@
+use crate::runtime::subflows::{SubflowInstanceRequest, SubflowOutcome};
 use crate::runtime::{
     context::{ContextHistory, ContextObject},
     digest::sha256_hex,
@@ -269,6 +270,11 @@ pub(crate) trait ProductiveAttemptLog {
     fn terminal(&mut self, result: &RunAttemptResult) -> Result<(), RuntimeError>;
 }
 
+pub(crate) struct RecordedSubflowBatch {
+    pub(crate) instances: Vec<SubflowInstanceRequest>,
+    pub(crate) outcomes: Option<Vec<SubflowOutcome>>,
+}
+
 pub(crate) trait ProductiveRecovery {
     fn recover_attempt(
         &mut self,
@@ -317,6 +323,27 @@ pub(crate) trait ProductiveRecovery {
         live: &mut dyn FnMut() -> Result<Option<String>, RuntimeError>,
     ) -> Result<Option<String>, RuntimeError> {
         live()
+    }
+
+    fn subflow_batch(
+        &mut self,
+        _phase_execution_id: &str,
+        _before_attempt_id: &str,
+        live: &mut dyn FnMut() -> Result<Vec<SubflowInstanceRequest>, RuntimeError>,
+    ) -> Result<RecordedSubflowBatch, RuntimeError> {
+        Ok(RecordedSubflowBatch {
+            instances: live()?,
+            outcomes: None,
+        })
+    }
+
+    fn subflow_outcomes(
+        &mut self,
+        _phase_execution_id: &str,
+        _before_attempt_id: &str,
+        _outcomes: &[SubflowOutcome],
+    ) -> Result<(), RuntimeError> {
+        Ok(())
     }
 
     fn flow_boundary(

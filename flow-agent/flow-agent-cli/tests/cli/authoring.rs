@@ -114,16 +114,18 @@ fn init_create_and_validate_custom_recursive_flow() {
         "create phase --id review-leaf --name ReviewLeaf --instruction-ref review
             --tool-ref report --tool-ref script-report --output-contract-file string-contract.yaml
             --loop --loop-max-iterations 2 --loop-until-file done-predicate.yaml --end-loop",
+        "create flow --id publish-subflow --name PublishSubflow --phase-ref review-leaf",
         "create phase --id publish-leaf --name PublishLeaf --instruction-ref review
-            --tool-ref report --output-contract-file string-contract.yaml",
+            --tool-ref report --output-contract-file string-contract.yaml
+            --subflow --subflow-ref publish-subflow --subflow-start-llm
+            --subflow-continue-on-error --end-subflow",
         "create phase --id review-cycle --name ReviewCycle --phase-ref review-leaf
             --phase-ref publish-leaf --output-contract-file string-contract.yaml
             --result-from publish-leaf --transition --transition-from-phase-ref review-leaf
             --transition-to-phase-ref publish-leaf --transition-when-file done-predicate.yaml
             --end-transition",
-        "create flow --id publish-subflow --name PublishSubflow --phase-ref publish-leaf",
         "create flow --id custom-review --name CustomReview --phase-ref review-leaf
-            --phase-ref publish-leaf --subflow-ref publish-subflow --transition
+            --phase-ref publish-leaf --transition
             --transition-from-phase-ref review-leaf --transition-to-phase-ref publish-leaf
             --transition-when-file done-predicate.yaml --end-transition",
     ] {
@@ -299,6 +301,8 @@ fn authoring_help_exposes_each_complete_block_grammar() {
                 "--result-from",
                 "--loop-max-iterations",
                 "--end-loop",
+                "--subflow-start-each",
+                "--end-subflow",
                 "--transition-from-phase-ref",
                 "--end-transition",
             ][..],
@@ -307,7 +311,6 @@ fn authoring_help_exposes_each_complete_block_grammar() {
             "flow",
             &[
                 "--phase-ref",
-                "--subflow-ref",
                 "--transition-from-phase-ref",
                 "--end-transition",
             ][..],

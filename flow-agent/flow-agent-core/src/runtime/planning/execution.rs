@@ -9,10 +9,9 @@ use crate::runtime::{
         RuntimeToolPolicy,
     },
     failures::{
-        emit_runtime_error_failure, emit_runtime_failure, emit_runtime_flow_failure,
-        emit_runtime_tool_failure, fixture_failure_capacity_candidates,
-        runtime_failure_for_unhandled_error, sandbox_out_of_phase_failure,
-        sandbox_tool_dispatch_failure,
+        emit_runtime_error_failure, emit_runtime_failure, emit_runtime_tool_failure,
+        fixture_failure_capacity_candidates, runtime_failure_for_unhandled_error,
+        sandbox_out_of_phase_failure, sandbox_tool_dispatch_failure,
     },
     fixture_effects::compile_fixture_tool_effect,
     phase_control::{PhaseSequenceState, phase_should_repeat},
@@ -66,11 +65,6 @@ pub fn emit_flow_block(
     ancestor_flows: &[PlannedFlowFailureBoundary],
 ) -> Result<ExecutionOutcome, RuntimeError> {
     let invocation = builder.next_flow_invocation(parent_flow_id)?;
-    let current_flow = PlannedFlowFailureBoundary {
-        flow_definition_id: flow_block.identity.id.clone(),
-        flow_id: invocation.flow_id.clone(),
-        parent_flow_id: invocation.parent_flow_id.clone(),
-    };
     let live_invocation_failure = runtime_failure_for_unhandled_error(&RuntimeError::Protocol(
         "global live flow invocation limit reached".to_owned(),
     ));
@@ -84,7 +78,7 @@ pub fn emit_flow_block(
         flow_started_payload(flow_block),
     )?;
 
-    let mut result = match emit_phase_sequence(
+    let result = match emit_phase_sequence(
         context,
         flow_block,
         &flow_block.phase_refs,
@@ -108,35 +102,6 @@ pub fn emit_flow_block(
         Err(err) => return Err(err),
     };
 
-    for subflow_ref in &flow_block.subflow_refs {
-        let subflow = context
-            .registry
-            .flow_block(subflow_ref)
-            .expect("validated subflow reference remains in the registry");
-        let mut child_ancestors = ancestor_flows.to_vec();
-        child_ancestors.push(current_flow.clone());
-        match emit_flow_block(
-            context,
-            subflow,
-            Some(invocation.flow_id.clone()),
-            result,
-            builder,
-            &child_ancestors,
-        ) {
-            Ok(ExecutionOutcome::Failed(failure)) => {
-                emit_runtime_flow_failure(flow_block, &invocation, &failure.reason, builder)?;
-                return Ok(ExecutionOutcome::Failed(failure));
-            }
-            Ok(ExecutionOutcome::Completed(subflow_result)) => result = subflow_result,
-            Err(err) if should_terminalize_error(&err) => {
-                let reason = runtime_failure_for_unhandled_error(&err).reason;
-                emit_runtime_flow_failure(flow_block, &invocation, &reason, builder)?;
-                return Err(err);
-            }
-            Err(err) => return Err(err),
-        }
-    }
-
     builder.emit(
         Some(&invocation),
         EventType::FlowCompleted,
@@ -156,6 +121,12 @@ pub fn emit_phase(
     builder: &mut RuntimeEventBuilder,
     input: Option<core_script::FlowValue>,
 ) -> Result<ExecutionOutcome, RuntimeError> {
+    if !phase.subflows.is_empty() {
+        return Err(RuntimeError::Usage(format!(
+            "Phase {} starts subflows, which need a productive execution backend",
+            phase.identity.id
+        )));
+    }
     let core_script::PhaseBlock { loop_config, .. } = phase;
     let max_iterations = loop_config
         .as_ref()

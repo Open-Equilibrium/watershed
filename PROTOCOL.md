@@ -45,7 +45,7 @@ M1 Flow Agent emits the families exercised by the explicit fixture profile and r
 ### v0 lifecycle ordering
 
 - `session.started` is the first event. `session.completed` or `session.failed` is last and requires every started flow, Phase execution, Tool and message to be terminal.
-- A flow-scoped event follows its unique `flow.started` and precedes that flow's `flow.completed` or `flow.failed`. A subflow's `parent_flow_id` identifies its unchanged, active parent.
+- A flow-scoped event follows its unique `flow.started` and precedes that flow's `flow.completed` or `flow.failed`.
 - `phase.entered` opens one uniquely identified Phase iteration. A composite Phase may open only its ordered child Phases; it makes no provider turn. A leaf Phase may open provider messages and provider-requested Tools. The matching `phase.completed` carries the typed result; `phase.failed` closes that Phase and its active ancestors on failure.
 - Repeating a Phase creates a new `phase_execution_id` and increments its local `iteration`. Repetition stops when exact typed equality satisfies the declared `until` predicate; reaching `max_iterations` first fails the Phase. All nested iterations count toward the top-level Flow limit.
 - `tool.started` belongs to the active leaf Phase. Its progress and terminal event use the same flow, Phase and Tool identity. The retained Executor must first return `Ready`; Flow Agent commits `tool.started` and only then sends `Start` to that same process. A preflight `Error` occurs without `tool.started`, `Start` or a Tool result; after `tool.started`, exactly one terminal Tool event follows.
@@ -64,7 +64,7 @@ The v0 wire format is one UTF-8 JSON object per event. JSONL mode and the sessio
 | `event_type` | one of the v0 runtime event names above |
 | `session_id` | exactly the `run_session_id` of the linear run that emitted the event |
 | `flow_id` | optional runtime flow invocation id when flow-scoped; unique within the session |
-| `parent_flow_id` | optional parent runtime flow invocation id for subflow events |
+| `parent_flow_id` | optional parent runtime flow invocation id; Flow Agent's Runs leave it out, because a subflow runs as a Run of its own |
 | `sequence` | unsigned integer, starts at 1 and increases by exactly 1 per `run_session_id` |
 | `timestamp` | canonical RFC 3339 UTC form ending in literal `Z`; numeric zero offsets are not accepted |
 | `source` | non-empty opaque string identifying the emitter, e.g. `flow-agent-cli` |
@@ -78,7 +78,7 @@ M1 Flow Agent derives timestamps from its event clock: `timestamp = base + (sequ
 ## v0 ID safety and flow identity
 
 - `conversation_id` and `run_session_id` are opaque tokens, not paths. Both match `^[a-z0-9_-]{1,128}$` except Windows DOS device basenames (`con`, `prn`, `aux`, `nul`, `com1`–`com9`, `lpt1`–`lpt9`). Producers reject path separators (`/`, `\`), drive prefixes, absolute paths, percent-encoded separators, `.`, `..`, empty strings and all other non-matching values before filesystem access. Lowercase-only ids avoid filename aliases on case-insensitive targets. In M1.1 every runtime event `session_id` is byte-for-byte its run's `run_session_id`; the enclosing `conversation_id` is supplied by the addressed command or resolved from `history.jsonl`, never inferred from event bytes.
-- `flow_id` is a runtime invocation id, not the registry/definition id. The root flow and every subflow invocation get distinct `flow_id` values within the session. Reusing one subflow definition twice therefore emits two different `flow_id` values, each with `parent_flow_id` equal to the containing runtime flow invocation id.
+- `flow_id` is a runtime invocation id, not the registry/definition id.
 - Flow definition identity travels in payload fields, not in `flow_id`. `flow.*` events carry `flow_definition_id`; `flow_name` is optional display metadata.
 
 ## M1.1 authoring CLI grammar
@@ -93,9 +93,9 @@ instruction         := flow create instruction common
                        (--prompt-file PATH | --prompt-stdin) instruction-parameter*
 phase               := flow create phase common [--instruction-ref REF]* [--tool-ref REF]*
                        [--phase-ref REF]* --output-contract-file PATH
-                       [--result-from REF] [phase-loop] transition*
+                       [--result-from REF] [phase-loop] transition* subflow*
 flow                 := flow create flow common --phase-ref REF [--phase-ref REF]*
-                       [--subflow-ref REF]* transition*
+                       transition*
 predefined tool     := flow create tool common --tool-kind predefined-command
                        --command-id COMMAND_ID [--argv TEXT]* parameter*
 own-script tool     := flow create tool common --tool-kind own-script
@@ -112,6 +112,9 @@ parameter           := --parameter --parameter-name PARAM_NAME
                        [--parameter-max-length U16]
                        [--parameter-min I64] [--parameter-max I64]
                        --end-parameter
+subflow             := --subflow --subflow-ref REF
+                       (--subflow-start-llm | --subflow-start-each FIELD)
+                       [--subflow-continue-on-error] --end-subflow
 phase-loop          := --loop --loop-max-iterations U8
                        --loop-until-file PATH --end-loop
 transition          := --transition --transition-from-phase-ref REF
@@ -121,9 +124,9 @@ transition          := --transition --transition-from-phase-ref REF
 
 `flow init`, `flow validate` and `flow create` operate only on the Global Flow home.
 
-The field mapping is literal: `--id`/`--name` map to every block's `id`/`name`; hyphenated singleton flags map to the same snake-case field; singular repeat flags map to arrays (`--argv` to `command.argv`, `--instruction-ref` to `instruction_refs`, `--tool-ref` to `tool_refs`, `--phase-ref` to `phase_refs`, `--subflow-ref` to `subflow_refs`). Instruction parameter groups map to `parameters[]`; Tool parameter groups map to `allowed_parameters[]`. Loop and Transition files contain one bounded `ValuePredicate`; output and parameter files contain one closed `ValueContract`. For own-script Tools, the body maps to `script_body`; `command: script:<tool-id>` and `script_runtime: posix-sh` are derived.
+The field mapping is literal: `--id`/`--name` map to every block's `id`/`name`; hyphenated singleton flags map to the same snake-case field; singular repeat flags map to arrays (`--argv` to `command.argv`, `--instruction-ref` to `instruction_refs`, `--tool-ref` to `tool_refs`, `--phase-ref` to `phase_refs`). Instruction parameter groups map to `parameters[]`; Tool parameter groups map to `allowed_parameters[]`; subflow groups map to `subflows[]` with `flow`, `start: llm` or `start: {each: FIELD}`, and `continue_on_error`. Loop and Transition files contain one bounded `ValuePredicate`; output and parameter files contain one closed `ValueContract`. For own-script Tools, the body maps to `script_body`; `command: script:<tool-id>` and `script_runtime: posix-sh` are derived.
 
-Group fields occur only inside their matching begin/end markers and in the displayed order, except that a Tool parameter's optional constraint flags may appear in any order after its required `name`, `value_type` and `required` fields. Type `none` permits no constraint flags; `string` requires exactly one pattern and maximum length; `enum` requires at least one allowed value; `integer` permits only optional minimum/maximum; `workspace-relative-path` permits only optional pattern/maximum length. A pattern is a finite Rust `regex` that must match the whole value; it is refused when an inline flag group names the verbose flag `x`, such as `(?x)`, `(?ix:…)` or `(?i-x)`, and an escaped or bracketed look-alike is refused too, since the check fails closed. A Flow requires at least one direct Phase. A leaf Phase has no child `phase_refs`, omits `result_from` and child Transitions, and may declare Instructions and Tools. A composite Phase has child `phase_refs`, declares exactly one `result_from` child with the same output contract, and declares no Instructions or Tools. A loop permits 1–32 iterations. Each Transition names two direct sibling Phases, points strictly forward, and its predicate is valid against the source output contract.
+Group fields occur only inside their matching begin/end markers and in the displayed order, except that a Tool parameter's optional constraint flags may appear in any order after its required `name`, `value_type` and `required` fields. Type `none` permits no constraint flags; `string` requires exactly one pattern and maximum length; `enum` requires at least one allowed value; `integer` permits only optional minimum/maximum; `workspace-relative-path` permits only optional pattern/maximum length. A pattern is a finite Rust `regex` that must match the whole value; it is refused when an inline flag group names the verbose flag `x`, such as `(?x)`, `(?ix:…)` or `(?i-x)`, and an escaped or bracketed look-alike is refused too, since the check fails closed. A Flow requires at least one direct Phase. A leaf Phase has no child `phase_refs`, omits `result_from` and child Transitions, and may declare Instructions and Tools. A composite Phase has child `phase_refs`, declares exactly one `result_from` child with the same output contract, and declares no Instructions, Tools or subflows. A loop permits 1–32 iterations. Each Transition names two direct sibling Phases, points strictly forward, and its predicate is valid against the source output contract.
 
 Each Tool value placeholder consumes exactly one argv token. Text is preserved as exact UTF-8 after OS-shell argument decoding; Flow Agent performs no secondary splitting, unescaping, interpolation or locale conversion. Enums and Boolean values are the exact lowercase literals shown. `I64` uses `0` or `-?[1-9][0-9]*` within signed 64-bit range; unsigned values use canonical decimal without leading zeroes and remain within their schema bounds. Prompt and script-body sources are mutually exclusive, stdin may be consumed once, and input is rejected incrementally on byte 65,537 before UTF-8 decoding or filesystem mutation, without waiting for later EOF. A prompt file's name has no semantics: an explicitly selected file may be named `SYSTEM.md` or anything else. Separately, Flow Agent reads optional `AGENTS.md` instructions first from the global home and then from the harness-start Workspace, so the local file has later context precedence; they have [no technical authority](SECURITY.md#m12-tool-execution-trust-boundary). The resulting one-block YAML must round-trip through the parser and semantic validator before publication.
 
@@ -137,7 +140,7 @@ Depth is at most 16 including the root. One list or map has at most 1,024 member
 
 The versioned run-input document is `{"schema":"flow-run-input-v0","value":value}` and enters through at most one `flow run ... --inputs <file|->` source. The raw input source is capped at 1 MiB and rejected while reading before JSON parsing; canonical JSON has the separate 1 MiB limit above. The parser rejects duplicate member names and enforces the exclusive container-recursion limit of 128; semantic value depth is enforced separately. The complete value enters the selected root Flow's first selected Phase. No M1.1 registry Connection, port or implicit parameter route exists.
 
-A successful Phase returns exactly one value matching its declared `output` contract. The complete value becomes the input of the next selected sibling Phase; the last selected direct Phase result becomes the Flow result and then the input of each declared subflow in order. A composite Phase makes no provider call: it runs its direct child sequence and returns the executed child named by `result_from`, whose output contract must exactly match the composite contract. Skipping that child through a Transition fails the composite.
+A successful Phase returns exactly one value matching its declared `output` contract. The complete value becomes the input of the next selected sibling Phase; the last selected direct Phase result becomes the Flow result. A composite Phase makes no provider call: it runs its direct child sequence and returns the executed child named by `result_from`, whose output contract must exactly match the composite contract. Skipping that child through a Transition fails the composite.
 
 A successful leaf-Phase provider/Tool loop follows this durable path:
 
@@ -170,7 +173,7 @@ A leaf Phase runs the provider loop. Its Instructions are rendered from their de
 
 After one sibling Phase succeeds, its owner's ordered Transitions whose `from_phase_ref` names that Phase are evaluated in declaration order. The first predicate whose path resolves and whose value is exactly equal in type and value selects its later sibling target; otherwise execution falls through to the next sibling. Predicates do not coerce, project or transform the handed-off result. A Transition cannot point backward or leave its owner's direct sibling list. Failure never takes a Transition.
 
-An optional Phase loop repeats that whole Phase, including a composite's children, with the prior successful result as the next iteration input. `until` uses the same exact typed predicate; a match completes the Phase, while a miss repeats until the declared 1–32 maximum. Reaching the maximum without a match fails. One top-level Flow permits at most 512 Phase iterations across all nesting, loops and subflows.
+An optional Phase loop repeats that whole Phase, including a composite's children, with the prior successful result as the next iteration input. `until` uses the same exact typed predicate; a match completes the Phase, while a miss repeats until the declared 1–32 maximum. Reaching the maximum without a match fails. One top-level Flow permits at most 512 Phase iterations across all nesting and loops; each [subflow instance](#subflow-instances) is its own Run.
 
 M1.1 has no value projection/mapping language, backward edge, general retry/fallback policy, automatic Instruction-to-Tool import, dynamic structural proposal or addressable artifact routing.
 
@@ -421,7 +424,19 @@ All listed payload fields are strings unless noted otherwise; string arrays are 
 - `session/prompt` reads the first text block, or the text inside its last `<user_request>` element, and refuses more than 1 MiB. With no Run active, it starts the chosen Flow with the text as its string root input, continues the Conversation in a new Run when the last Run ended, or resumes an interrupted Run exactly with the text as a steering message.
 - While a Run is active, `session/cancel` for the open session answers its prompt `cancelled` at once and asks the Run to pause, and the next `session/prompt` is a steering message of at most 1 MiB; at most 16 wait at once. The Run takes it after its running provider turn, records it in `recovery.jsonl`, emits it as a `user` message and passes it to the active leaf Phase's next provider turn; a Phase that has its result takes one more turn instead. A paused Run waits, without emitting `session.paused`, for the next message, even when an earlier one is still queued, and then takes them in order. A message no Run took starts the next Run after a Run that ended; after a failed Run, the prompt's error counts the messages not delivered.
 - Refused with `-32602`: `session/new` or `session/load` while a Run is active, a second open prompt, a relative `cwd` and a `session/load` id not in the `chat-` form. A line that is too long or not JSON gets `-32700` with a null id; other methods get `-32601`.
-- Updates: Phases as `plan` entries, each agent message as one `agent_message_chunk` (a string result shown as its value, Tool-request summaries left out), Tools as `tool_call` and `tool_call_update`, and `error` events as text; the newest 256 updates made while no prompt is open follow when the next one opens. The prompt answers `end_turn` when its Run ends, or a JSON-RPC error.
+- While Subflow instances run, a message beginning with `@<instance> ` steers that instance; an unknown name or an empty message is refused with the active names. Without running instances, such a message is ordinary text. Stop also pauses every instance, and any next message resumes the whole tree before it reaches its target.
+- Updates: Phases and Subflow instances (`<Phase> › <instance>`) as `plan` entries, each agent message as one `agent_message_chunk` (a string result shown as its value, Tool-request summaries left out), Tools as `tool_call` and `tool_call_update`, and `error` events as text; the newest 256 updates made while no prompt is open follow when the next one opens. The prompt answers `end_turn` when its Run ends, or a JSON-RPC error.
+
+## Subflow instances
+
+A Phase's `subflows` start as one batch before its first provider turn (`start: each`) or per provider turn whose calls name `subflow-<flow>` with a text `input` (`start: llm`). A leaf Phase names each `llm` subflow once; its function name has at most 64 characters and is no Tool id of that Phase. The batch's instance list, then its results, are recorded in `recovery.jsonl` as `subflow-batch` and `subflow-outcomes` before use; exact Resume replays them, and a batch without results fails as uncertain. An `each` batch reaches the provider as one user message `Subflow results: [...]`; an `llm` batch returns each result as that call's `function_call_output`, as `{"name", "result"}` or `{"name", "error"}`.
+
+Each instance runs as the hidden `flow subflow-run` in the parent Run's Workspace, as the first Run of the Conversation `<root-conversation>__<name>`. Parent and child exchange JSON lines on the child's stdin and stdout:
+
+- Parent to child: `start` (conversation ids, name, flow, typed input) first, then `steer` (`target`, `text`), `pause`, `resume`, `cancel` and `names` answers.
+- Child to parent: `name_request` (`id`, `workspace`, `conversation_id`, `flows`) for a nested batch, answered by `names` (`id`, `names` or `error`); `release` (names) for a batch that did not start; `instance` (`started`, or `finished` with `failed`); then one `result` (typed value) or `error`.
+
+The root process numbers instances per subflow id across its whole tree. A failed instance without `continue_on_error` cancels its running siblings. A closed stdin ends the child's Run as cancelled.
 
 ## CLI exit status
 

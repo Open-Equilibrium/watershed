@@ -1,5 +1,5 @@
 use super::super::load::parse_registry_block;
-use super::super::model::{FlowValue, RegistryBlock, ScriptRuntime};
+use super::super::model::{FlowValue, PhaseSubflow, RegistryBlock, ScriptRuntime, SubflowStart};
 use super::super::parser::{MAX_YAML_BYTES, MAX_YAML_DEPTH, parse_safe_yaml_config};
 use super::super::paths::{is_valid_block_id, is_valid_command_id};
 use proptest::prelude::*;
@@ -220,7 +220,6 @@ fn parser_defaults_optional_flow_reference_lists() {
     let RegistryBlock::Flow(flow_block) = block else {
         panic!("expected flow block");
     };
-    assert!(flow_block.subflow_refs.is_empty());
     assert!(flow_block.transitions.is_empty());
 }
 
@@ -352,4 +351,55 @@ fn ids_follow_v0_token_rules() {
     assert!(is_valid_command_id("agent-read"));
     assert!(!is_valid_command_id("1-agent-read"));
     assert!(!is_valid_command_id("agent.read"));
+}
+
+#[test]
+fn a_phase_declares_subflows_started_by_its_llm_or_per_list_item() {
+    let block = parse_registry_block(
+        "explore.yaml",
+        concat!(
+            "phase:\n",
+            "  id: explore\n",
+            "  name: Explore\n",
+            "  instruction_refs: []\n",
+            "  tool_refs: []\n",
+            "  subflows:\n",
+            "    - flow: scraper\n",
+            "      start: llm\n",
+            "      continue_on_error: true\n",
+            "    - flow: fact-check\n",
+            "      start:\n",
+            "        each: claims\n",
+            "  output:\n",
+            "    type: string\n",
+        ),
+    )
+    .expect("a Phase with subflows parses");
+
+    let RegistryBlock::Phase(phase) = block else {
+        panic!("expected phase block");
+    };
+    assert_eq!(
+        phase.subflows,
+        [
+            PhaseSubflow {
+                flow: "scraper".to_owned(),
+                start: SubflowStart::Llm,
+                continue_on_error: true,
+            },
+            PhaseSubflow {
+                flow: "fact-check".to_owned(),
+                start: SubflowStart::Each("claims".to_owned()),
+                continue_on_error: false,
+            },
+        ]
+    );
+    assert!(
+        parse_registry_block(
+            "flow.yaml",
+            "flow:\n  id: root\n  name: Root\n  phase_refs: [explore]\n  subflow_refs: [scraper]\n",
+        )
+        .is_err(),
+        "a Flow no longer lists subflows"
+    );
 }

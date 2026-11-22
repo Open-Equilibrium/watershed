@@ -65,6 +65,18 @@ pub(crate) enum ProductiveRecoveryRecord {
         before_attempt_id: String,
         message_object: String,
     },
+    SubflowBatch {
+        schema: String,
+        phase_execution_id: String,
+        before_attempt_id: String,
+        instances_object: String,
+    },
+    SubflowOutcomes {
+        schema: String,
+        phase_execution_id: String,
+        before_attempt_id: String,
+        outcomes_object: String,
+    },
     Flow {
         schema: String,
         flow_execution_id: String,
@@ -223,11 +235,23 @@ pub(super) fn validate_productive_recovery_record(
             schema,
             phase_execution_id,
             before_attempt_id,
-            message_object,
+            message_object: object,
+        }
+        | ProductiveRecoveryRecord::SubflowBatch {
+            schema,
+            phase_execution_id,
+            before_attempt_id,
+            instances_object: object,
+        }
+        | ProductiveRecoveryRecord::SubflowOutcomes {
+            schema,
+            phase_execution_id,
+            before_attempt_id,
+            outcomes_object: object,
         } => {
             validate_id(phase_execution_id, "recovery Phase execution")?;
             validate_attempt_id(before_attempt_id)?;
-            validate_recovery_object_uri(message_object)?;
+            validate_recovery_object_uri(object)?;
             schema
         }
         ProductiveRecoveryRecord::Flow {

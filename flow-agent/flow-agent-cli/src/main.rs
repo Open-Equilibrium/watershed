@@ -8,6 +8,7 @@ mod output;
 mod parsing;
 mod stdin;
 mod streaming;
+mod subflows;
 mod tail;
 
 #[cfg(test)]
@@ -50,6 +51,7 @@ fn main() -> ExitCode {
         }
     };
 
+    subflows::install_root_launcher();
     match dispatch(&args, &interrupts) {
         Ok(code) => code,
         Err(err) => {

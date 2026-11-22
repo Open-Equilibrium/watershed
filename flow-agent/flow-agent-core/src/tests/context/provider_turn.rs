@@ -277,16 +277,15 @@ fn provider_context_rejects_a_phase_outside_its_flow_or_registry() {
     let (registry, _) = fixture_runtime_policy("hello-flow", "hello-flow");
     let (other_registry, _) = fixture_runtime_policy("smoke-flow", "smoke-flow");
     let hello_flow = registry.flow_block("hello-flow").expect("flow exists");
-    let hello_subflow = registry
-        .flow_block("hello-subflow")
-        .expect("subflow exists");
+    let mut inspect_only = hello_flow.clone();
+    inspect_only.phase_refs = vec!["inspect".to_owned()];
     let summarize = registry.phase_block("summarize").expect("phase exists");
     let smoke = other_registry.phase_block("smoke").expect("phase exists");
 
     for (case, flow, phase, expected) in [
         (
             "phase outside the active Flow",
-            hello_subflow,
+            &inspect_only,
             summarize,
             "active Flow",
         ),

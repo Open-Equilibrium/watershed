@@ -774,3 +774,50 @@ fn a_steering_boundary_leaves_the_message_queued_while_a_completed_attempt_await
 
     assert_eq!(taken, None);
 }
+
+#[test]
+fn a_recorded_subflow_batch_replays_its_results_and_an_unfinished_one_is_uncertain() {
+    use crate::runtime::subflows::{SubflowInstanceRequest, SubflowOutcome};
+    let request = |name: &str| SubflowInstanceRequest {
+        name: name.to_owned(),
+        flow: "scraper".to_owned(),
+        input: core_script::FlowValue::String("rust".to_owned()),
+        continue_on_error: false,
+    };
+    let workspace = empty_workspace("conversation-recovery-subflows");
+    let mut recovery =
+        standard_review_recovery_writer(&workspace, None, &ContextHistory::default());
+    let finished = recovery
+        .subflow_batch("phase-000001", "provider-000002", &mut || {
+            Ok(vec![request("scraper-1")])
+        })
+        .expect("the first batch starts");
+    assert!(finished.outcomes.is_none());
+    let outcomes = [SubflowOutcome::Completed(core_script::FlowValue::String(
+        "found".to_owned(),
+    ))];
+    recovery
+        .subflow_outcomes("phase-000001", "provider-000002", &outcomes)
+        .expect("its results are recorded");
+    recovery
+        .subflow_batch("phase-000001", "provider-000003", &mut || {
+            Ok(vec![request("scraper-2")])
+        })
+        .expect("the second batch starts");
+    drop(recovery);
+
+    let mut resumed = open_recovery_snapshot(&workspace);
+    let mut never =
+        || -> Result<Vec<SubflowInstanceRequest>, crate::runtime::types::RuntimeError> {
+            panic!("a recorded batch never starts again")
+        };
+    let replayed = resumed
+        .subflow_batch("phase-000001", "provider-000002", &mut never)
+        .expect("the finished batch replays");
+    assert_eq!(replayed.instances, [request("scraper-1")]);
+    assert_eq!(replayed.outcomes.as_deref(), Some(&outcomes[..]));
+    let Err(error) = resumed.subflow_batch("phase-000001", "provider-000003", &mut never) else {
+        panic!("an unfinished batch is uncertain")
+    };
+    assert!(error.to_string().contains("scraper-2"), "{error}");
+}

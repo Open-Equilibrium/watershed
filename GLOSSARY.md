@@ -76,8 +76,8 @@ Canonical terms. Use these exactly; do not introduce synonyms. Tool names are fi
 - **Phase** — The recursive workflow unit. A leaf exposes Instructions and Tools to one provider loop and returns a typed result; a composite runs ordered child Phases and selects one child's result. Either may use a bounded declarative loop.
 - **Transition** — An ordered inline forward-sibling rule owned by a Flow or composite Phase. It selects a later sibling only when an exact typed equality predicate matches the successful source result; otherwise execution falls through.
 - **Flow** — A fully configured deterministic orchestration of ordered Phases and optional subflows. Whole successful results pass forward by default; a Flow is itself a building block.
-- **Subflow** — A flow used inside another flow. Target (ADR-0314): a Phase starts it ([V-Spec](docs/concept/V-Spec_FlowAgent.html#parallel-subflows)).
-- **Subflow instance** — Target (ADR-0314): one started Subflow, a Run of its own in the same Conversation, linked to the Run whose Phase started it and named by subflow id and start order across its root Run's tree, such as `scraper-5`.
+- **Subflow** — A Flow a Phase starts ([V-Spec](docs/concept/V-Spec_FlowAgent.html#parallel-subflows)).
+- **Subflow instance** — One started Subflow: the Run of its own Conversation, in its own `flow` process, named by subflow id and start order across its root Run's tree, such as `scraper-5`.
 - **Flow execution plan** — The finite typed, deterministic and side-effect-free description of resolved Flow invocations, lifecycle boundaries, context inputs and Tool intents consumed by runtime apply.
 - **Execution request** — One versioned, bounded request for exactly one validated Tool invocation, bound by a canonical digest. Canonical: [PROTOCOL.md](PROTOCOL.md#m12-executor-protocol).
 - **Executor** — A Flow Agent execution component that validates one Execution request, waits for Start, establishes Flow-owned write protection, supervises one Tool invocation and returns a bounded result with enforcement receipt or typed error. Observed cleanup is not a universal hostile-descendant guarantee. Canonical: [PROTOCOL.md](PROTOCOL.md#m12-executor-protocol).
@@ -141,7 +141,7 @@ Canonical terms. Use these exactly; do not introduce synonyms. Tool names are fi
 - **Golden event stream** — A checked-in JSONL event stream with fixed fixture IDs, timestamps, sequence values and canonical event JSONL bytes per `PROTOCOL.md`.
 - **Environment allowlist** — A tool-scoped policy-artifact field; its M1 availability and restrictions are defined in [`SECURITY.md`](SECURITY.md).
 - **Smoke-flow** — The smallest golden flow: one phase, one tool and one instruction, used as the first localizable gate.
-- **Hello-flow** — The showcase golden flow that exercises multiple Phases, scoped Instructions/Tools and subflow reuse.
+- **Hello-flow** — The showcase golden flow that exercises multiple Phases and scoped Instructions/Tools.
 - **Negative fixture** — A tiny flow that intentionally attempts a forbidden operation and must be rejected.
 - **HTML render gate** — The CI validation that browser-renders self-contained HTML docs; `pnpm run docs:render-check` invokes `scripts/check-html-render.mjs` at `1440x900` and `390x844`.
 

@@ -123,6 +123,11 @@ fn a_chat_offers_the_installed_flows_and_keeps_its_choice_until_it_starts() {
         return;
     }
     let workspace = workspace_copy("hello-flow");
+    fs::write(
+        session_home_path().join("registry/flows/hello-summary.yaml"),
+        "flow:\n  id: hello-summary\n  name: HelloSummary\n  phase_refs: [summarize]\n",
+    )
+    .expect("a second Flow is installed");
     let config_root = empty_workspace_under(Path::new(env!("CARGO_TARGET_TMPDIR")));
     let mut acp = Acp::start(&workspace, &config_root);
 
@@ -137,7 +142,7 @@ fn a_chat_offers_the_installed_flows_and_keeps_its_choice_until_it_starts() {
         .iter()
         .map(|choice| choice["value"].as_str().unwrap_or_default())
         .collect::<Vec<_>>();
-    assert_eq!(choices, ["hello-flow", "hello-subflow"]);
+    assert_eq!(choices, ["hello-flow", "hello-summary"]);
     assert_eq!(options[0]["currentValue"], "hello-flow");
 
     let unknown = acp.send(
@@ -147,11 +152,11 @@ fn a_chat_offers_the_installed_flows_and_keeps_its_choice_until_it_starts() {
     assert_eq!(acp.reply(unknown, &mut Vec::new())["error"]["code"], -32602);
     let chosen = acp.send(
         "session/set_config_option",
-        json!({"sessionId": session_id, "configId": "flow", "value": "hello-subflow"}),
+        json!({"sessionId": session_id, "configId": "flow", "value": "hello-summary"}),
     );
     assert_eq!(
         acp.reply(chosen, &mut Vec::new())["result"]["configOptions"][0]["currentValue"],
-        "hello-subflow"
+        "hello-summary"
     );
     let unsupported = acp.send("session/set_mode", json!({"sessionId": session_id}));
     assert_eq!(
@@ -226,11 +231,11 @@ fn a_chat_needs_a_productive_provider() {
 const NOTE_FLOW: [(&str, &str); 4] = [
     (
         "flows/alpha.yaml",
-        "flow:\n  id: alpha\n  name: Alpha\n  phase_refs: [write]\n  subflow_refs: []\n",
+        "flow:\n  id: alpha\n  name: Alpha\n  phase_refs: [write]\n",
     ),
     (
         "flows/note.yaml",
-        "flow:\n  id: note\n  name: Note\n  phase_refs: [write]\n  subflow_refs: []\n",
+        "flow:\n  id: note\n  name: Note\n  phase_refs: [write]\n",
     ),
     (
         "phases/write.yaml",
@@ -243,10 +248,14 @@ const NOTE_FLOW: [(&str, &str); 4] = [
 ];
 
 fn install_note_flow(base_url: &str, config_root: &Path) {
+    install_flows(base_url, config_root, &NOTE_FLOW);
+}
+
+fn install_flows(base_url: &str, config_root: &Path, definitions: &[(&str, &str)]) {
     let home = session_home_path();
     let registry = home.join("registry");
     fs::remove_dir_all(&registry).expect("the fixture registry is replaced");
-    for (path, source) in NOTE_FLOW {
+    for (path, source) in definitions {
         let path = registry.join(path);
         fs::create_dir_all(path.parent().expect("definition has a folder"))
             .expect("registry folder exists");
@@ -575,4 +584,263 @@ fn a_run_the_provider_fails_answers_its_prompt_with_an_error() {
 
     endpoint.join().expect("endpoint completes");
     assert!(answer["error"].is_object(), "{answer} after {seen:#?}");
+}
+
+const RESEARCH_FLOW: [(&str, &str); 5] = [
+    (
+        "flows/research.yaml",
+        "flow:\n  id: research\n  name: Research\n  phase_refs: [explore]\n",
+    ),
+    (
+        "phases/explore.yaml",
+        "phase:\n  id: explore\n  name: Explore\n  instruction_refs: [plan]\n  tool_refs: []\n  subflows:\n    - flow: scraper\n      start: llm\n  output:\n    type: string\n",
+    ),
+    (
+        "instructions/plan.yaml",
+        "instruction:\n  id: plan\n  name: Plan\n  prompt: \"Research the topic with scrapers.\"\n",
+    ),
+    (
+        "flows/scraper.yaml",
+        "flow:\n  id: scraper\n  name: Scraper\n  phase_refs: [scrape]\n",
+    ),
+    (
+        "phases/scrape.yaml",
+        "phase:\n  id: scrape\n  name: Scrape\n  instruction_refs: []\n  tool_refs: []\n  output:\n    type: string\n",
+    ),
+];
+
+fn reply_with_calls(stream: &mut TcpStream, inputs: &[&str]) {
+    let mut events = vec![json!({"type": "response.created", "response": {"id": "resp-calls"}})];
+    for (index, input) in inputs.iter().enumerate() {
+        events.push(json!({"type": "response.output_item.done", "item": {
+            "type": "function_call",
+            "call_id": format!("call-{index}"),
+            "name": "subflow-scraper",
+            "arguments": json!({"input": input}).to_string(),
+        }}));
+    }
+    events.push(json!({"type": "response.completed", "response": {"id": "resp-calls"}}));
+    let body = events
+        .iter()
+        .map(|event| format!("data:{event}\n\n"))
+        .collect::<String>();
+    write!(
+        stream,
+        "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        body.len()
+    )
+    .expect("endpoint reply writes");
+}
+
+fn research_endpoint(
+    listener: TcpListener,
+    hold_children: Option<Receiver<()>>,
+) -> (
+    thread::JoinHandle<()>,
+    std::sync::Arc<std::sync::Mutex<Vec<String>>>,
+) {
+    let bodies = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let seen = std::sync::Arc::clone(&bodies);
+    let hold = std::sync::Arc::new(std::sync::Mutex::new(hold_children));
+    let handle = thread::spawn(move || {
+        for stream in listener.incoming() {
+            let Ok(mut stream) = stream else { return };
+            let seen = std::sync::Arc::clone(&seen);
+            let hold = std::sync::Arc::clone(&hold);
+            thread::spawn(move || {
+                let body = read_request_body(&mut stream);
+                seen.lock().expect("bodies lock").push(body.clone());
+                if body.contains("subflow-scraper") && !body.contains("function_call_output") {
+                    reply_with_calls(&mut stream, &["rust", "dart"]);
+                } else if body.contains("function_call_output") {
+                    reply_with_text(&mut stream, "resp-summary", "summary");
+                } else {
+                    if let Some(hold) = hold.lock().expect("hold lock").as_ref() {
+                        let _ = hold.recv_timeout(Duration::from_secs(30));
+                    }
+                    let topic = if body.contains("dart") {
+                        "dart"
+                    } else {
+                        "rust"
+                    };
+                    let steered = if body.contains("Focus on Flutter") {
+                        " with Flutter"
+                    } else {
+                        ""
+                    };
+                    reply_with_text(
+                        &mut stream,
+                        "resp-scrape",
+                        &format!("{topic} facts{steered}"),
+                    );
+                }
+            });
+        }
+    });
+    (handle, bodies)
+}
+
+#[test]
+fn a_phase_runs_two_scraper_instances_at_once_and_reads_their_results() {
+    if run_current_test_isolated_session_home() {
+        return;
+    }
+    let listener = TcpListener::bind("127.0.0.1:0").expect("fake endpoint binds");
+    let base_url = format!(
+        "http://{}/v1",
+        listener.local_addr().expect("endpoint address")
+    );
+    let (_endpoint, bodies) = research_endpoint(listener, None);
+    let workspace = workspace_copy("hello-flow");
+    let config_root = empty_workspace_under(Path::new(env!("CARGO_TARGET_TMPDIR")));
+    install_flows(&base_url, &config_root, &RESEARCH_FLOW);
+    let mut acp = Acp::start(&config_root, &config_root);
+    let (session_id, _) = acp.open(&workspace);
+    let mut seen = Vec::new();
+
+    let prompt = acp.send(
+        "session/prompt",
+        json!({"sessionId": session_id, "prompt": [{"type": "text", "text": "Compare Rust and Dart"}]}),
+    );
+    let finished = acp.reply(prompt, &mut seen);
+
+    assert_eq!(finished["result"]["stopReason"], "end_turn", "{seen:#?}");
+    let summary = bodies
+        .lock()
+        .unwrap()
+        .iter()
+        .find(|body| body.contains("function_call_output"))
+        .cloned()
+        .expect("the Phase reads its instances' results");
+    assert!(
+        summary.contains("rust facts") && summary.contains("dart facts"),
+        "{summary}"
+    );
+    let plan = seen
+        .iter()
+        .rfind(|message| message["params"]["update"]["sessionUpdate"] == "plan")
+        .expect("the plan shows the instances");
+    let entries = plan["params"]["update"]["entries"].to_string();
+    assert!(
+        entries.contains("Explore › scraper-1") && entries.contains("Explore › scraper-2"),
+        "{entries}"
+    );
+    drop(acp);
+    let mut acp = Acp::start(&workspace, &config_root);
+    acp.send("initialize", json!({"protocolVersion": 1}));
+    let load = acp.send(
+        "session/load",
+        json!({"sessionId": session_id, "cwd": workspace.to_path_buf(), "mcpServers": []}),
+    );
+    acp.reply(load, &mut Vec::new());
+    let again = acp.send(
+        "session/prompt",
+        json!({"sessionId": session_id, "prompt": [{"type": "text", "text": "Once more"}]}),
+    );
+    assert_eq!(
+        acp.reply(again, &mut Vec::new())["result"]["stopReason"],
+        "end_turn"
+    );
+    for name in ["scraper-1", "scraper-2", "scraper-3", "scraper-4"] {
+        assert_eq!(
+            flow_agent_core::conversation_state(&workspace, &format!("{session_id}__{name}"))
+                .expect("the instance has its own Conversation"),
+            flow_agent_core::ConversationState::Settled,
+            "{name}"
+        );
+    }
+}
+
+#[test]
+fn a_mention_steers_one_running_instance_and_an_unknown_name_is_refused() {
+    if run_current_test_isolated_session_home() {
+        return;
+    }
+    let listener = TcpListener::bind("127.0.0.1:0").expect("fake endpoint binds");
+    let base_url = format!(
+        "http://{}/v1",
+        listener.local_addr().expect("endpoint address")
+    );
+    let (release, held) = mpsc::channel::<()>();
+    let (_endpoint, bodies) = research_endpoint(listener, Some(held));
+    let workspace = workspace_copy("hello-flow");
+    let config_root = empty_workspace_under(Path::new(env!("CARGO_TARGET_TMPDIR")));
+    install_flows(&base_url, &config_root, &RESEARCH_FLOW);
+    let mut acp = Acp::start(&workspace, &config_root);
+    let (session_id, _) = acp.open(&workspace);
+    let mut seen = Vec::new();
+    let first = acp.send(
+        "session/prompt",
+        json!({"sessionId": session_id, "prompt": [{"type": "text", "text": "@team Compare Rust and Dart"}]}),
+    );
+    acp.next(
+        |message| {
+            message["params"]["update"]["entries"]
+                .to_string()
+                .contains("scraper-2")
+        },
+        &mut seen,
+    );
+    for _ in 0..200 {
+        if bodies
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|body| !body.contains("subflow-scraper"))
+            .count()
+            == 2
+        {
+            break;
+        }
+        thread::sleep(Duration::from_millis(25));
+    }
+    acp.notify("session/cancel", json!({"sessionId": session_id}));
+    assert_eq!(
+        acp.reply(first, &mut seen)["result"]["stopReason"],
+        "cancelled"
+    );
+
+    let unknown = acp.send(
+        "session/prompt",
+        json!({"sessionId": session_id, "prompt": [{"type": "text", "text": "@scraper-9 Hello"}]}),
+    );
+    let refused = acp.reply(unknown, &mut seen);
+    assert!(
+        refused["error"]["message"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("scraper-2"),
+        "{refused}"
+    );
+    let empty = acp.send(
+        "session/prompt",
+        json!({"sessionId": session_id, "prompt": [{"type": "text", "text": "@scraper-2  "}]}),
+    );
+    assert!(acp.reply(empty, &mut seen)["error"]["message"].is_string());
+    let steer = acp.send(
+        "session/prompt",
+        json!({"sessionId": session_id, "prompt": [{"type": "text", "text": "@scraper-2 Focus on Flutter"}]}),
+    );
+    for _ in 0..3 {
+        release.send(()).expect("a held turn is released");
+    }
+    let finished = acp.reply(steer, &mut seen);
+
+    assert_eq!(finished["result"]["stopReason"], "end_turn", "{seen:#?}");
+    let all = bodies.lock().unwrap().clone();
+    assert!(
+        all.iter()
+            .any(|body| body.contains("dart") && body.contains("Focus on Flutter")),
+        "the steering message reaches scraper-2"
+    );
+    assert!(
+        !all.iter()
+            .any(|body| body.contains("rust") && body.contains("Focus on Flutter")),
+        "scraper-1 never sees it"
+    );
+    let summary = all
+        .iter()
+        .find(|body| body.contains("function_call_output"))
+        .expect("the Phase reads the results");
+    assert!(summary.contains("dart facts with Flutter"), "{summary}");
 }

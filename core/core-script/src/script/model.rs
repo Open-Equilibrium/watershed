@@ -28,6 +28,8 @@ macro_rules! impl_token_serde {
 
 pub const MAX_FLOW_NESTING_DEPTH: usize = 16;
 pub const MAX_FLOW_FANOUT: usize = 32;
+pub const SUBFLOW_TOOL_PREFIX: &str = "subflow-";
+pub const MAX_SUBFLOW_TOOL_NAME_CHARS: usize = 64;
 pub const MAX_PHASE_NESTING_DEPTH: usize = 16;
 pub const MAX_PHASE_FANOUT: usize = 32;
 pub const MAX_PHASE_LOOP_ITERATIONS: u8 = 32;
@@ -321,6 +323,52 @@ pub struct PhaseTransition {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(try_from = "SubflowStartSource", into = "SubflowStartSource")]
+pub enum SubflowStart {
+    Llm,
+    Each(String),
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+enum SubflowStartSource {
+    Mode(String),
+    Each { each: String },
+}
+
+impl TryFrom<SubflowStartSource> for SubflowStart {
+    type Error = String;
+
+    fn try_from(source: SubflowStartSource) -> Result<Self, Self::Error> {
+        match source {
+            SubflowStartSource::Mode(mode) if mode == "llm" => Ok(Self::Llm),
+            SubflowStartSource::Mode(mode) => {
+                Err(format!("subflow start must be llm or each, not {mode}"))
+            }
+            SubflowStartSource::Each { each } => Ok(Self::Each(each)),
+        }
+    }
+}
+
+impl From<SubflowStart> for SubflowStartSource {
+    fn from(start: SubflowStart) -> Self {
+        match start {
+            SubflowStart::Llm => Self::Mode("llm".to_owned()),
+            SubflowStart::Each(each) => Self::Each { each },
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PhaseSubflow {
+    pub flow: String,
+    pub start: SubflowStart,
+    #[serde(default)]
+    pub continue_on_error: bool,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct PhaseBlock {
     #[serde(flatten)]
     pub identity: BlockIdentity,
@@ -335,6 +383,8 @@ pub struct PhaseBlock {
     pub loop_config: Option<PhaseLoop>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub transitions: Vec<PhaseTransition>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub subflows: Vec<PhaseSubflow>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -342,8 +392,6 @@ pub struct FlowBlock {
     #[serde(flatten)]
     pub identity: BlockIdentity,
     pub phase_refs: Vec<String>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub subflow_refs: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub transitions: Vec<PhaseTransition>,
 }

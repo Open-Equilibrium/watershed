@@ -27,7 +27,7 @@ fn invocation_contract_compiles_availability_parameters_environment_and_runtime_
     let blocks = [
         "tool:\n  id: echo\n  name: Echo\n  tool_kind: predefined-command\n  command:\n    command_id: agent-echo\n    argv: [literal]\n  allowed_parameters:\n    - name: --count\n      value_type: integer\n      required: true\n      min: 1\n      max: 3\n",
         "phase:\n  id: say\n  name: Say\n  instruction_refs: []\n  tool_refs: [echo]\n  output:\n    type: string\n",
-        "flow:\n  id: root\n  name: Root\n  phase_refs: [say]\n  subflow_refs: []\n",
+        "flow:\n  id: root\n  name: Root\n  phase_refs: [say]\n",
     ].map(|source| parse_registry_block("invocation.yaml", source).expect("invocation definition parses"));
     let registry = ResolvedRegistry::from_blocks(blocks).expect("invocation registry resolves");
     let policy = compile_policy_artifact(&registry, "root").expect("invocation policy compiles");

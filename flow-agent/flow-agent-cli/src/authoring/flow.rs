@@ -7,8 +7,7 @@ pub(super) static USAGE: LazyLock<String> = LazyLock::new(|| {
     format!(
         concat!(
             "Usage:\n",
-            "  flow create flow --id ID --name NAME --phase-ref ID [--phase-ref ID]... ",
-            "[--subflow-ref ID]... {}",
+            "  flow create flow --id ID --name NAME --phase-ref ID [--phase-ref ID]... {}",
         ),
         TRANSITION_USAGE
     )
@@ -18,13 +17,11 @@ pub(super) fn parse(workspace: &Path, args: &[String]) -> Result<FlowBlock, Runt
     let mut cursor = Cursor::new(args);
     let mut common = Common::default();
     let mut phase_refs = Vec::new();
-    let mut subflow_refs = Vec::new();
     let mut transitions = Vec::new();
     while let Some(flag) = cursor.next() {
         match flag {
             "--id" | "--name" => common.take(flag, cursor.value(flag)?.to_owned())?,
             "--phase-ref" => phase_refs.push(cursor.value(flag)?.to_owned()),
-            "--subflow-ref" => subflow_refs.push(cursor.value(flag)?.to_owned()),
             "--transition" => transitions.push(parse_transition(&mut cursor)?),
             other => return Err(unknown(other)),
         }
@@ -40,7 +37,6 @@ pub(super) fn parse(workspace: &Path, args: &[String]) -> Result<FlowBlock, Runt
     Ok(FlowBlock {
         identity,
         phase_refs,
-        subflow_refs,
         transitions,
     })
 }

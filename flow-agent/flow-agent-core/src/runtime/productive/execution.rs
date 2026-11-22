@@ -116,6 +116,9 @@ where
     T: ProductiveToolExecutor,
 {
     execution.workspace.verify_binding()?;
+    if let Ok(launcher) = crate::runtime::subflows::subflow_launcher() {
+        launcher.run_started();
+    }
     if let ProviderCredential::OpenAiCodex(credential) = execution.credential {
         validate_credential_record(credential)?;
     }
@@ -239,7 +242,7 @@ where
         &mut context.event_commit_failed,
     )?;
     let result = (|| {
-        let mut result = execute_phase_sequence(
+        let result = execute_phase_sequence(
             context,
             builder,
             flow,
@@ -249,20 +252,6 @@ where
             input,
             None,
         )?;
-        for subflow_ref in &flow.subflow_refs {
-            let subflow = context
-                .execution
-                .registry
-                .flow_block(subflow_ref)
-                .expect("validated subflow reference remains in the registry");
-            result = execute_flow(
-                context,
-                builder,
-                subflow,
-                Some(invocation.flow_id.clone()),
-                result,
-            )?;
-        }
         #[cfg(test)]
         observe_productive_completion_commit(ProductiveCompletionCommitPoint::FlowRecovery);
         {

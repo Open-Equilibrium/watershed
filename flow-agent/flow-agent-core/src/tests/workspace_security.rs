@@ -42,7 +42,7 @@ fn shared_workspace_tool_write_parents_are_concurrent_safe() {
             "phase:\n  id: summarize-{index}\n  name: Summarize{index}\n  instruction_refs: [write-output]\n  tool_refs: [write-summary-{index}]\n  output:\n    type: string\n"
         );
         let flow = format!(
-            "flow:\n  id: hello-flow-{index}\n  name: HelloFlow{index}\n  phase_refs: [inspect, summarize-{index}]\n  subflow_refs: []\n"
+            "flow:\n  id: hello-flow-{index}\n  name: HelloFlow{index}\n  phase_refs: [inspect, summarize-{index}]\n"
         );
         fs::write(
             registry.join(format!("tools/write-summary-{index}.yaml")),

@@ -2,4 +2,3 @@ flow:
   id: hello-flow
   name: HelloFlow
   phase_refs: [inspect, summarize]
-  subflow_refs: [hello-subflow, hello-subflow]

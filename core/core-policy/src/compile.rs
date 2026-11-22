@@ -76,7 +76,7 @@ pub fn compile_policy_artifact(
         policy_version: POLICY_VERSION_V0.to_owned(),
         runtime_limits: RuntimeLimits {
             headless: true,
-            timeout_ms: if flow_block.phase_refs.len() > 1 || !flow_block.subflow_refs.is_empty() {
+            timeout_ms: if flow_block.phase_refs.len() > 1 {
                 60_000
             } else {
                 30_000
@@ -107,20 +107,6 @@ fn collect_flow_policy_scope(
             .phase_block(phase_ref)
             .expect("resolved registry validates flow phase references");
         collect_phase_policy_scope(registry, phase, phase_tools, tool_ids, visited_phases);
-    }
-
-    for subflow_ref in &flow_block.subflow_refs {
-        let subflow = registry
-            .flow_block(subflow_ref)
-            .expect("resolved registry validates subflow references");
-        collect_flow_policy_scope(
-            registry,
-            subflow,
-            phase_tools,
-            tool_ids,
-            visited_flows,
-            visited_phases,
-        );
     }
 }
 

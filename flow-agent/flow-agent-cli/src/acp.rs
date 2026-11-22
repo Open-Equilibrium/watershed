@@ -1,4 +1,8 @@
-use crate::{interrupt::InterruptCoordinator, streaming::stream_live_operation_into};
+use crate::{
+    interrupt::InterruptCoordinator,
+    streaming::stream_live_operation_into,
+    subflows::{InstanceEvent, root_launcher},
+};
 use flow_agent_core::{ConversationState, EmitMode, RunOutput, RuntimeError};
 use serde_json::{Value, json};
 use std::{
@@ -31,6 +35,7 @@ enum Input {
     Message(Value),
     Malformed,
     Event(Value),
+    Instance(InstanceEvent),
     Finished(Result<RunOutput, RuntimeError>),
     Closed,
 }
@@ -62,6 +67,18 @@ pub(crate) fn acp_command() -> Result<ExitCode, RuntimeError> {
             path: PathBuf::from("<acp-input-thread>"),
             source,
         })?;
+    if let Some(launcher) = root_launcher() {
+        let (instances, observed) = mpsc::channel();
+        launcher.observe(instances);
+        let forward = sender.clone();
+        thread::spawn(move || {
+            for event in observed {
+                if forward.send(Input::Instance(event)).is_err() {
+                    return;
+                }
+            }
+        });
+    }
     let mut agent = Agent {
         out: io::stdout(),
         sender,
@@ -133,20 +150,29 @@ impl<W: Write> Agent<W> {
             Input::Malformed => self.fail(&Value::Null, PARSE_ERROR, "message is not JSON")?,
             Input::Event(event) => {
                 let updates = self.view.observe(&event);
-                if self.prompt.is_some() {
-                    for update in updates {
-                        self.update(update)?;
-                    }
-                } else {
-                    self.held.extend(updates);
-                    let excess = self.held.len().saturating_sub(MAX_HELD_UPDATES);
-                    self.held.drain(..excess);
-                }
+                self.forward(updates)?;
+            }
+            Input::Instance(event) => {
+                let update = self.view.instance(&event);
+                self.forward(vec![update])?;
             }
             Input::Finished(result) => self.finished(result)?,
             Input::Closed => return Ok(false),
         }
         Ok(true)
+    }
+
+    fn forward(&mut self, updates: Vec<Value>) -> Result<(), RuntimeError> {
+        if self.prompt.is_some() {
+            for update in updates {
+                self.update(update)?;
+            }
+        } else {
+            self.held.extend(updates);
+            let excess = self.held.len().saturating_sub(MAX_HELD_UPDATES);
+            self.held.drain(..excess);
+        }
+        Ok(())
     }
 
     fn message(&mut self, message: Value) -> Result<(), RuntimeError> {
@@ -263,9 +289,50 @@ impl<W: Write> Agent<W> {
                 ),
             );
         }
+        let live = if self.running {
+            root_launcher()
+                .map(|launcher| launcher.live_names())
+                .unwrap_or_default()
+        } else {
+            Vec::new()
+        };
+        if let Some((target, message)) = mention(&text).filter(|_| !live.is_empty()) {
+            if !live.iter().any(|name| name == target) {
+                return self.fail(
+                    &id,
+                    INVALID_PARAMS,
+                    &format!(
+                        "no active subflow instance is named {target}; active: {}",
+                        if live.is_empty() {
+                            "none".to_owned()
+                        } else {
+                            live.join(", ")
+                        }
+                    ),
+                );
+            }
+            if message.trim().is_empty() {
+                return self.fail(
+                    &id,
+                    INVALID_PARAMS,
+                    "a message to an instance must contain text",
+                );
+            }
+            flow_agent_core::resume_productive_run();
+            if let Some(launcher) = root_launcher() {
+                launcher.resume_all();
+                launcher.steer(target, message);
+            }
+            self.prompt = Some(id);
+            self.update(self.view.plan())?;
+            return self.release_held();
+        }
         if self.running {
             if let Err(error) = flow_agent_core::steer_productive_run(text) {
                 return self.fail(&id, INVALID_PARAMS, &error.to_string());
+            }
+            if let Some(launcher) = root_launcher() {
+                launcher.resume_all();
             }
             self.prompt = Some(id);
             self.update(self.view.plan())?;
@@ -326,6 +393,9 @@ impl<W: Write> Agent<W> {
     fn cancel(&mut self) -> Result<(), RuntimeError> {
         if self.running {
             flow_agent_core::request_productive_pause();
+            if let Some(launcher) = root_launcher() {
+                launcher.pause_all();
+            }
         }
         match self.prompt.take() {
             Some(id) => self.respond(&id, json!({"stopReason": "cancelled"})),
@@ -571,6 +641,12 @@ fn user_text(prompt: &Value) -> Option<String> {
     (!request.trim().is_empty()).then(|| request.to_owned())
 }
 
+fn mention(text: &str) -> Option<(&str, &str)> {
+    let rest = text.strip_prefix('@')?;
+    let (target, message) = rest.split_once(char::is_whitespace).unwrap_or((rest, ""));
+    (!target.is_empty()).then(|| (target, message.trim_start()))
+}
+
 fn new_session_id() -> io::Result<String> {
     let mut bytes = [0_u8; SESSION_RANDOM_BYTES];
     File::open("/dev/urandom")?.read_exact(&mut bytes)?;
@@ -597,7 +673,8 @@ fn internal(error: impl ToString) -> (i64, String) {
 
 #[cfg(test)]
 mod tests {
-    use super::{Agent, Input, MAX_HELD_UPDATES, RunView};
+    use super::{Agent, Input, MAX_HELD_UPDATES, RunView, mention};
+    use crate::subflows::InstanceEvent;
     use serde_json::json;
 
     #[test]
@@ -623,8 +700,33 @@ mod tests {
                 .expect("the event is observed");
         }
 
+        agent
+            .handle(Input::Instance(InstanceEvent::Started {
+                name: "scraper-1".to_owned(),
+            }))
+            .expect("the instance is observed");
+
         assert_eq!(agent.held.len(), MAX_HELD_UPDATES);
-        assert_eq!(agent.held[0]["toolCallId"], "tool-10");
+        assert_eq!(agent.held[0]["toolCallId"], "tool-11");
         assert!(agent.out.is_empty());
+    }
+
+    #[test]
+    fn a_bare_mention_names_its_target_with_an_empty_message() {
+        assert_eq!(mention("@scraper-2"), Some(("scraper-2", "")));
+        assert_eq!(mention("@scraper-2 Go on"), Some(("scraper-2", "Go on")));
+        assert_eq!(mention("@ Go on"), None);
+    }
+
+    #[test]
+    fn an_instance_that_never_started_adds_no_plan_entry() {
+        let mut view = RunView::default();
+
+        let plan = view.instance(&InstanceEvent::Finished {
+            name: "scraper-1".to_owned(),
+            failed: true,
+        });
+
+        assert_eq!(plan["entries"], json!([]));
     }
 }

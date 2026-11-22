@@ -5,9 +5,9 @@ use super::load::{
 };
 use super::model::{
     BlockIdentity, FlowBlock, FlowValue, MAX_REGISTRY_ENTRIES, MAX_REGISTRY_FILE_BYTES,
-    MAX_REGISTRY_TOTAL_BYTES, MAX_REGISTRY_TRAVERSAL_DEPTH, PhaseBlock, RegistryBlock,
-    ResolvedRegistry, ScriptRuntime, ToolBlock, ToolCommand, ToolKind, ValueContract,
-    ValuePredicate,
+    MAX_REGISTRY_TOTAL_BYTES, MAX_REGISTRY_TRAVERSAL_DEPTH, PhaseBlock, PhaseSubflow,
+    RegistryBlock, ResolvedRegistry, ScriptRuntime, SubflowStart, ToolBlock, ToolCommand, ToolKind,
+    ValueContract, ValuePredicate,
 };
 use serde_json::Value;
 use std::{
@@ -109,6 +109,15 @@ fn test_phase() -> PhaseBlock {
         result_from: None,
         loop_config: None,
         transitions: Vec::new(),
+        subflows: Vec::new(),
+    }
+}
+
+fn subflow(flow: &str) -> PhaseSubflow {
+    PhaseSubflow {
+        flow: flow.to_owned(),
+        start: SubflowStart::Each("items".to_owned()),
+        continue_on_error: false,
     }
 }
 
@@ -119,7 +128,6 @@ fn test_flow() -> FlowBlock {
             name: "Root".to_owned(),
         },
         phase_refs: vec!["phase".to_owned()],
-        subflow_refs: Vec::new(),
         transitions: Vec::new(),
     }
 }
@@ -143,23 +151,35 @@ fn assert_missing_reference(blocks: Vec<RegistryBlock>, expected: &str) {
 }
 
 fn flow_chain_blocks(depth: usize) -> Vec<RegistryBlock> {
-    let mut blocks = vec![simple_phase_block("chain-phase")];
-    blocks.extend((0..depth).map(|index| RegistryBlock::Flow(flow_chain_block(index, depth))));
-    blocks
+    (0..depth)
+        .flat_map(|index| {
+            let child = (index + 1 < depth).then(|| format!("flow-{:03}", index + 1));
+            [
+                RegistryBlock::Phase(starting_phase(
+                    &format!("chain-phase-{index:03}"),
+                    child.into_iter().collect(),
+                )),
+                RegistryBlock::Flow(FlowBlock {
+                    identity: BlockIdentity {
+                        id: format!("flow-{index:03}"),
+                        name: format!("Flow {index:03}"),
+                    },
+                    phase_refs: vec![format!("chain-phase-{index:03}")],
+                    transitions: Vec::new(),
+                }),
+            ]
+        })
+        .collect()
 }
 
-fn flow_chain_block(index: usize, depth: usize) -> FlowBlock {
-    FlowBlock {
+fn starting_phase(id: &str, flows: Vec<String>) -> PhaseBlock {
+    PhaseBlock {
         identity: BlockIdentity {
-            id: format!("flow-{index:03}"),
-            name: format!("Flow {index:03}"),
+            id: id.to_owned(),
+            name: id.to_owned(),
         },
-        phase_refs: vec!["chain-phase".to_owned()],
-        subflow_refs: (index + 1 < depth)
-            .then(|| format!("flow-{:03}", index + 1))
-            .into_iter()
-            .collect(),
-        transitions: Vec::new(),
+        subflows: flows.iter().map(|flow| subflow(flow)).collect(),
+        ..test_phase()
     }
 }
 
@@ -183,23 +203,28 @@ fn phase_chain_block(index: usize, depth: usize) -> PhaseBlock {
 }
 
 fn duplicated_subflow_tail_blocks(depth: usize) -> Vec<RegistryBlock> {
-    let mut blocks = vec![simple_phase_block("dup-phase")];
-    blocks.extend((0..depth).map(|index| {
-        let child = (index + 1 < depth).then(|| format!("dup-flow-{:03}", index + 1));
-        RegistryBlock::Flow(FlowBlock {
-            identity: BlockIdentity {
-                id: format!("dup-flow-{index:03}"),
-                name: format!("DupFlow {index:03}"),
-            },
-            phase_refs: vec!["dup-phase".to_owned()],
-            subflow_refs: child
-                .into_iter()
-                .flat_map(|child| [child.clone(), child])
-                .collect(),
-            transitions: Vec::new(),
+    (0..depth)
+        .flat_map(|index| {
+            let child = (index + 1 < depth).then(|| format!("dup-flow-{:03}", index + 1));
+            [
+                RegistryBlock::Phase(starting_phase(
+                    &format!("dup-phase-{index:03}"),
+                    child
+                        .into_iter()
+                        .flat_map(|child| [child.clone(), child])
+                        .collect(),
+                )),
+                RegistryBlock::Flow(FlowBlock {
+                    identity: BlockIdentity {
+                        id: format!("dup-flow-{index:03}"),
+                        name: format!("DupFlow {index:03}"),
+                    },
+                    phase_refs: vec![format!("dup-phase-{index:03}")],
+                    transitions: Vec::new(),
+                }),
+            ]
         })
-    }));
-    blocks
+        .collect()
 }
 
 fn registry_schema() -> serde_json::Value {

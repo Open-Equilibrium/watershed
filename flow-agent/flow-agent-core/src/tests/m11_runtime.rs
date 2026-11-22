@@ -20,7 +20,7 @@ fn write_simple_phase(workspace: &Path, id: &str, output: &str) {
 }
 
 #[test]
-fn custom_m11_flow_composes_parameters_loops_transitions_types_and_subflows() {
+fn custom_m11_flow_composes_parameters_loops_transitions_and_types() {
     let workspace = workspace_copy("smoke-flow");
     write_registry_definition(
         &workspace,
@@ -161,18 +161,6 @@ fn custom_m11_flow_composes_parameters_loops_transitions_types_and_subflows() {
   result_from: object-value
 "#,
     );
-    write_simple_phase(&workspace, "subflow-leaf", "    type: boolean\n");
-    write_registry_definition(
-        &workspace,
-        "flows",
-        "custom-child",
-        r#"flow:
-  id: custom-child
-  name: CustomChild
-  phase_refs: [subflow-leaf]
-  subflow_refs: []
-"#,
-    );
     write_registry_definition(
         &workspace,
         "flows",
@@ -181,7 +169,6 @@ fn custom_m11_flow_composes_parameters_loops_transitions_types_and_subflows() {
   id: custom-root
   name: CustomRoot
   phase_refs: [parameterized-input, repeat, must-skip, composite]
-  subflow_refs: [custom-child]
   transitions:
     - from_phase_ref: repeat
       to_phase_ref: composite
@@ -256,10 +243,6 @@ fn custom_m11_flow_composes_parameters_loops_transitions_types_and_subflows() {
             "{phase_id}"
         );
     }
-    assert!(events.iter().any(|event| {
-        event.event_type == EventType::FlowCompleted
-            && event.payload["flow_definition_id"] == "custom-child"
-    }));
     assert_eq!(
         events.last().map(|event| event.event_type),
         Some(EventType::SessionCompleted)

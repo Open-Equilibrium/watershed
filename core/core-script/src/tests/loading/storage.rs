@@ -58,7 +58,7 @@ fn registry_loader_accepts_nested_yaml_files_and_ignores_non_registry_files() {
     write_registry_file(
         &root,
         "flow.yaml",
-        "flow:\n  id: root\n  name: Root\n  phase_refs: [phase]\n  subflow_refs: []\n",
+        "flow:\n  id: root\n  name: Root\n  phase_refs: [phase]\n",
     );
 
     let registry = load_registry(root).expect("nested yml registry loads");

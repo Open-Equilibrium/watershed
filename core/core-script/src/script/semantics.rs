@@ -161,10 +161,13 @@ fn validate_phase_semantics(phase: &PhaseBlock) -> Result<(), SemanticValidation
             ));
         }
     } else {
-        if !phase.instruction_refs.is_empty() || !phase.tool_refs.is_empty() {
+        if !phase.instruction_refs.is_empty()
+            || !phase.tool_refs.is_empty()
+            || !phase.subflows.is_empty()
+        {
             return Err(invalid_phase(
                 phase,
-                "composite Phase must not declare Instructions or Tools",
+                "composite Phase must not declare Instructions, Tools or subflows",
             ));
         }
         if phase.result_from.as_deref().is_none_or(str::is_empty) {

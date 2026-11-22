@@ -67,8 +67,21 @@ fn reject_phase_fields(source_name: &str, value: &noyalib::Value) -> Result<(), 
             "result_from",
             "loop",
             "transitions",
+            "subflows",
         ],
     )?;
+    if let Some(subflows) = sequence_field(value, "subflows") {
+        for subflow in subflows {
+            reject_mapping_fields(
+                source_name,
+                subflow,
+                &["flow", "start", "continue_on_error"],
+            )?;
+            if let Some(start) = mapping_field(subflow, "start") {
+                reject_mapping_fields(source_name, start, &["each"])?;
+            }
+        }
+    }
     if let Some(output) = mapping_field(value, "output") {
         reject_value_contract_fields(source_name, output)?;
     }
@@ -85,7 +98,7 @@ fn reject_flow_fields(source_name: &str, value: &noyalib::Value) -> Result<(), R
     reject_mapping_fields(
         source_name,
         value,
-        &["id", "name", "phase_refs", "subflow_refs", "transitions"],
+        &["id", "name", "phase_refs", "transitions"],
     )?;
     reject_transition_fields(source_name, value)
 }
@@ -411,7 +424,6 @@ mod tests {
   id: review
   name: Review
   phase_refs: [inspect, finish]
-  subflow_refs: []
   transitions:
     - from_phase_ref: inspect
       to_phase_ref: finish
@@ -427,7 +439,6 @@ mod tests {
   id: review
   name: Review
   phase_refs: [inspect, finish]
-  subflow_refs: []
   transitions:
     - from_phase_ref: inspect
       to_phase_ref: finish
@@ -445,7 +456,11 @@ mod tests {
             let name = format!("unknown-registry-field-{index}.yaml");
             let error = parse_registry_block(&name, &source)
                 .expect_err("an unknown registry field must fail closed");
-            assert!(error.to_string().contains("unknown field"), "{error}");
+            let message = error.to_string();
+            assert!(
+                message.contains("unknown field") && message.contains("extra"),
+                "{message}"
+            );
         }
     }
 }

@@ -61,6 +61,7 @@ fn productive_request_is_stateless_and_exposes_only_declared_tools() {
         "Follow the Phase instructions.",
         &[serde_json::json!({"role":"user","content":"inspect"})],
         &[&tool],
+        &[],
     )
     .expect("request body");
 
@@ -121,6 +122,7 @@ fn every_optional_provider_parameter_kind_is_strict_and_nullable() {
         "Follow the Phase instructions.",
         &[],
         &[&tool],
+        &[],
     )
     .expect("request body");
     let parameters = &body["tools"][0]["parameters"];

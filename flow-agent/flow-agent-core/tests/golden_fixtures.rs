@@ -4,7 +4,7 @@ use core_script::{
 };
 use flow_agent_core::{EmitMode, run_flow};
 use proto::{EventEnvelope, EventType};
-use std::{collections::HashSet, fs, path::Path};
+use std::{fs, path::Path};
 
 #[path = "../../tests/support.rs"]
 mod test_support;
@@ -417,7 +417,7 @@ fn assert_hello_flow_payload_dimensions(stream: &[EventEnvelope]) {
         "flow_definition_id",
         serde_json::json!("hello-flow"),
     );
-    let root_flow_id = root_flow
+    let _root_flow_id = root_flow
         .flow_id
         .as_deref()
         .expect("hello-flow root flow.started must include flow_id");
@@ -453,40 +453,6 @@ fn assert_hello_flow_payload_dimensions(stream: &[EventEnvelope]) {
         &["--file"],
     );
     assert_tool_started(stream, "write-summary", "own-script", "WriteSummary", &[]);
-
-    let subflow_started = stream
-        .iter()
-        .filter(|event| {
-            event.event_type == EventType::FlowStarted && event.parent_flow_id.is_some()
-        })
-        .collect::<Vec<_>>();
-    assert_eq!(
-        subflow_started.len(),
-        2,
-        "hello-flow must reuse one subflow definition twice"
-    );
-
-    let mut subflow_ids = HashSet::new();
-    for event in subflow_started {
-        assert_payload_eq(
-            event,
-            "flow_definition_id",
-            serde_json::json!("hello-subflow"),
-        );
-        assert_eq!(
-            event.parent_flow_id.as_deref(),
-            Some(root_flow_id),
-            "hello-flow subflow parent_flow_id must match root flow_id"
-        );
-        let flow_id = event
-            .flow_id
-            .as_deref()
-            .expect("hello-flow subflow must include flow_id");
-        assert!(
-            subflow_ids.insert(flow_id),
-            "hello-flow subflow invocations must use distinct flow_id values"
-        );
-    }
 }
 
 fn assert_tool_started(

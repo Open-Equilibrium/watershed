@@ -2,4 +2,3 @@ flow:
   id: negative-tool-out-of-phase
   name: NegativeToolOutOfPhase
   phase_refs: [negative-no-tools]
-  subflow_refs: []
