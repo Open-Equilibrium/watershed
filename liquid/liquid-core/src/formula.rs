@@ -646,7 +646,10 @@ impl Eval<'_> {
             "NOT" => Value::Bool(!self.truth(arg(0))?),
             "ROUND" | "ROUNDUP" | "ROUNDDOWN" => {
                 let value = self.number(arg(0))?;
-                let scale = 10f64.powf(self.number(arg(1))?.trunc());
+                let scale = 10f64.powf(self.number(arg(1))?.trunc().clamp(-308.0, 308.0));
+                if !(value * scale).is_finite() {
+                    return finite(value);
+                }
                 let scaled = round15(value * scale);
                 let rounded = match name {
                     "ROUND" => scaled.round(),

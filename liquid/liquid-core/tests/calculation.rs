@@ -1101,3 +1101,89 @@ fn lines_that_need_each_other_are_errors_whatever_order_reads_them() {
         assert_eq!(values, ["#REF!", "#REF!"], "swapped: {swapped}");
     }
 }
+
+#[test]
+fn a_chart_of_a_select_with_many_options_draws_the_ones_in_use() {
+    use liquid_core::{ChartSetup, ChartSource, ChartValue, MAX_CHART_POINTS};
+    let mut home = Home::new();
+    let (table, page) = (home.table.clone(), home.page.clone());
+    let Some(Created::Field(kind)) = home
+        .edit(Mutation::AddField {
+            block: table.clone(),
+            place: Place::Last,
+            name: "Kind".into(),
+            kind: FieldKind::Select,
+        })
+        .unwrap()
+        .created
+    else {
+        panic!("a field")
+    };
+    let mut last = None;
+    for at in 0..MAX_CHART_POINTS + 20 {
+        let Some(Created::Option(option)) = home
+            .edit(Mutation::AddOption {
+                block: table.clone(),
+                field: kind.clone(),
+                name: format!("Kind {at}"),
+                color: 0,
+            })
+            .unwrap()
+            .created
+        else {
+            panic!("an option")
+        };
+        last = Some(option);
+    }
+    let row = home
+        .workspace
+        .rows(&table, &query(Vec::new()))
+        .unwrap()
+        .rows[0]
+        .id
+        .clone();
+    home.edit(Mutation::SetCell {
+        block: table.clone(),
+        row,
+        field: kind.clone(),
+        value: Cell::Select(last.unwrap()),
+    })
+    .unwrap();
+    let Some(Created::Block { block: chart, .. }) = home
+        .edit(Mutation::AddChartBlock {
+            page: page.clone(),
+            after: None,
+        })
+        .unwrap()
+        .created
+    else {
+        panic!("a Chart")
+    };
+    home.edit(Mutation::SetChart {
+        page: page.clone(),
+        block: chart.clone(),
+        setup: ChartSetup {
+            source: Some(ChartSource::Table(table)),
+            group: Some(kind),
+            value: ChartValue::Count,
+            ..ChartSetup::default()
+        },
+    })
+    .unwrap();
+    let labels: Vec<_> = home
+        .workspace
+        .chart(&page, &chart)
+        .unwrap()
+        .unwrap()
+        .points
+        .into_iter()
+        .map(|point| (point.label, point.value))
+        .collect();
+    assert_eq!(
+        labels,
+        [
+            (format!("Kind {}", MAX_CHART_POINTS + 19), 1.0),
+            ("Empty".to_string(), 1.0)
+        ]
+    );
+}

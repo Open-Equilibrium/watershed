@@ -137,6 +137,10 @@ fn excel_functions_read_references_and_ranges() {
             "TRUETRUEFALSETRUE",
         ),
         ("ROUND(1, 0, 0)", "#VALUE!"),
+        (
+            "ROUND(1.5, 400) & \"|\" & ROUND(123, -400) & \"|\" & ROUND(1E300, 20)",
+            "1.5|0|1E+300",
+        ),
         ("$X & $X", "#VALUE!"),
         ("CONCAT($X, $X)", "#VALUE!"),
         ("LEN($X & \"x\")", "16385"),

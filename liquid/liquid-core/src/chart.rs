@@ -2,6 +2,7 @@ use automerge::AutoCommit;
 use automerge::transaction::Transactable;
 use serde::{Deserialize, Serialize};
 
+use crate::MAX_OPTIONS;
 use crate::model::{self, BLOCKS, KIND};
 use crate::store::Store;
 use crate::{
@@ -217,6 +218,7 @@ fn table_points<S: Store>(
             .collect(),
     };
     let mut sums: Vec<(f64, usize)> = vec![(0.0, 0); labels.len()];
+    let mut held = vec![0usize; labels.len()];
     for row in &rows {
         let label = match group {
             None => database.name.clone(),
@@ -234,13 +236,15 @@ fn table_points<S: Store>(
         };
         let at = match labels.iter().position(|known| *known == label) {
             Some(at) => at,
-            None if labels.len() < MAX_CHART_POINTS => {
+            None if labels.len() < MAX_CHART_POINTS + MAX_OPTIONS => {
                 labels.push(label);
                 sums.push((0.0, 0));
+                held.push(0);
                 labels.len() - 1
             }
             None => continue,
         };
+        held[at] += 1;
         let number = match &setup.value {
             ChartValue::Count => Some(1.0),
             ChartValue::Sum(field) | ChartValue::Average(field) => number(row, field),
@@ -253,8 +257,9 @@ fn table_points<S: Store>(
     Ok(labels
         .into_iter()
         .zip(sums)
-        .filter(|(label, (_, count))| !label.is_empty() || *count > 0)
-        .map(|(label, (sum, count))| ChartPoint {
+        .zip(held)
+        .filter(|(_, held)| *held > 0)
+        .map(|((label, (sum, count)), _)| ChartPoint {
             label: if label.is_empty() {
                 "Empty".into()
             } else {
