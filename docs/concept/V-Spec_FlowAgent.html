@@ -183,12 +183,10 @@ flow run hello-flow --emit jsonl</code></pre><p>The CLI owns stdout and streams 
       <ul>
         <li>Phase order, forward Transitions and loop bounds are declared by the script.</li>
         <li>Available Tools and Instructions are a pure function of the active leaf Phase.</li>
-        <li>Subflows start only from a Phase that declares them; see <a href="#parallel-subflows">parallel subflows</a>.</li>
+        <li>Subflows start through explicit building-block references; Phases starting them in parallel are the <a href="#parallel-subflows">target</a>.</li>
         <li>Only the provider decides whether and how often to call an available Tool; the runtime validates every request.</li>
         <li>Failures become typed events and never take a Transition or start another loop iteration.</li>
       </ul>
-    </div></section>
-
       <h3 id="parallel-subflows">Parallel subflows (target, ADR-0314)</h3>
       <p>A Phase declares the subflows it may start. Its instances run at the same time, each as a child Run of the Phase's Run in the same Conversation and in a <code>flow</code> process of its own, so a crash or Resume touches only that instance. Flow-level <code>subflow_refs</code> ends with this change.</p>
       <pre><code>phase:
