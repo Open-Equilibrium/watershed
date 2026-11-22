@@ -299,6 +299,13 @@ impl<W: Write> Agent<W> {
         self.running = false;
         let mut waiting = flow_agent_core::drain_productive_steering();
         let result = match result {
+            Ok(output) if output.failed => Err(RuntimeError::Protocol(format!(
+                "Run {} of Flow Agent failed",
+                output.session_id
+            ))),
+            other => other,
+        };
+        let result = match result {
             Ok(_) if !waiting.is_empty() => {
                 let text = waiting.remove(0);
                 match self.start(text, waiting) {

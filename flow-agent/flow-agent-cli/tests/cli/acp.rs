@@ -500,3 +500,41 @@ fn an_interrupted_run_resumes_with_the_next_message_unless_its_flow_changed() {
         flow_agent_core::ConversationState::Settled
     );
 }
+
+#[test]
+fn a_run_the_provider_fails_answers_its_prompt_with_an_error() {
+    if run_current_test_isolated_session_home() {
+        return;
+    }
+    let listener = TcpListener::bind("127.0.0.1:0").expect("fake endpoint binds");
+    let base_url = format!(
+        "http://{}/v1",
+        listener.local_addr().expect("endpoint address")
+    );
+    let endpoint = thread::spawn(move || {
+        let (mut request, _) = listener.accept().expect("the turn arrives");
+        read_request_body(&mut request);
+        let body = r#"{"error":{"message":"quota exhausted"}}"#;
+        write!(
+            request,
+            "HTTP/1.1 429 Too Many Requests\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            body.len()
+        )
+        .expect("endpoint reply writes");
+    });
+    let workspace = workspace_copy("hello-flow");
+    let config_root = empty_workspace_under(Path::new(env!("CARGO_TARGET_TMPDIR")));
+    install_note_flow(&base_url, &config_root);
+    let mut acp = Acp::start(&workspace, &config_root);
+    let (session_id, _) = acp.open(&workspace);
+
+    let prompt = acp.send(
+        "session/prompt",
+        json!({"sessionId": session_id, "prompt": [{"type": "text", "text": "A note"}]}),
+    );
+    let mut seen = Vec::new();
+    let answer = acp.reply(prompt, &mut seen);
+
+    endpoint.join().expect("endpoint completes");
+    assert!(answer["error"].is_object(), "{answer} after {seen:#?}");
+}
