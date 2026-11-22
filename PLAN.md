@@ -60,7 +60,7 @@ The macOS Liquid app runs its agent sessions on a pinned T3 Code server through 
 #### M3a — Local Workspace foundation
 
 - Linux, Windows and Android follow with their clients, each keeping the database key in its operating system's keystore (ADR-0216); `liquid-core`'s CI, which runs Automerge on Linux and macOS, adds Windows and Android with them (ADR-0238).
-- Delivery order, one PR each: Connections and formulas, with the Chart and Calculation Blocks that depend on them; Automations; Roles and protection; History, revert and Restore version; Sources, Page icons, Markdown import and export, and Settings, History and Automations as dialogs.
+- Delivery order, one PR each: Connections and formulas, with the Chart and Calculation Blocks that depend on them; Math Blocks and math in Text Blocks (ADR-0316, mockup first); Automations; Roles and protection; History, revert and Restore version; Sources, Page icons, Markdown import and export, and Settings, History and Automations as dialogs.
 - Input-to-presented-frame latency while typing in a long Page ([PERFORMANCE.md](PERFORMANCE.md#liquid)) is measured in the app with the History slice, which groups keystrokes.
 - A missing replica file is reported, not opened as a new Workspace, after its mockup (ADR-0249); purge of deleted content comes with the History slice, before sync (ADR-0250); the core refuses writes past its size caps (ADR-0251), which must also bound a Page's document as a whole: a drawing's caps leave its text and erased ink uncounted, and several Blocks add up.
 - Left from the Media Block (ADR-0305), approved 2026-11-17: a pasted link becomes a link in its line, as in Microsoft Loop, with inline marks: Liquid's link icon and the link text the clipboard carries, else the link's host, fetching nothing; hovering shows the address with Edit, which changes the title and address, and Copy link, and a click opens the default browser. Embeds come with the built-in browser (M3b); paste on Windows, Linux and Android needs a clipboard reader each, as macOS has.
@@ -80,7 +80,7 @@ The macOS Liquid app runs its agent sessions on a pinned T3 Code server through 
 - Sources as peer Explorer entries; Page templates create use-case compositions rather than new Page Types.
 - PowerBar for finding Workspace objects, creating Blocks and invoking permitted Workspace actions.
 - Content-first flow followed by explicit responsive Arrange mode. Mobile retains every Block; complex Views open focused surfaces. Safe compact OS widgets remain post-MVP.
-- Chart, Calculation, Whiteboard and Embed Blocks.
+- Chart, Calculation, Math, Whiteboard and Embed Blocks.
 - Synchronized multi-Page Views over one canonical Block. Duplicate creates a new Block; deleting the last View deletes the Block (a Table's last View on a Page asks first, ADR-0309), its Connections and owned Automations in one reversible Action, while independent dependent Automations are disabled for repair.
 - Connections/formulas for direct logic and Workspace Automations for when/if/then logic.
 - Allow-only Roles with default-denied unlisted access; explicit deny rules are post-MVP.

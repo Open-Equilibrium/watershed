@@ -201,6 +201,7 @@ Canonical terms. Use these exactly; do not introduce synonyms. Tool names are fi
 - **Whiteboard Block** — A Block whose Drawing lies on a canvas without edges, drawn on in place (ADR-0306).
 - **Drawing** — The strokes, shapes and text of a Whiteboard Block, or the ink on an annotated Media Block's pages, each an element that merges on its own (ADR-0306, ADR-0307).
 - **Attachment** — A file's bytes in a Workspace, kept in the encrypted replica in parts and named by the SHA-256 of its bytes, so a file added twice is kept once (ADR-0305).
+- **Math Block** — A Block that shows one LaTeX formula typeset and never computes it; `$…$` in a Text Block typesets one inside a sentence (ADR-0316).
 - **Calculation Block** — A Block of lines that each pair a label with a value or formula, laid out as labels left and values right, for reports in Excel's layout (ADR-0244).
 - **Section** — Consecutive Text Blocks up to `---`, a Block of another type or the Page's edge; Arrange mode places it as one tile, inside which its Text Blocks can be arranged in columns. It is layout only and owns no content, rights or Views (ADR-0235).
 - **Chat** — Liquid's one kind of conversation, as in WhatsApp: one-to-one or a group, whose participants are people or agents alike; a Block that Pages can show. A planned replacement for separate agent sessions and projects (ADR-0239, ADR-0241).
