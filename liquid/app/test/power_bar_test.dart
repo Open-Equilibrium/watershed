@@ -85,6 +85,26 @@ void main() {
     expect(kit.workspace.recent.value, [kit.page]);
   });
 
+  testWidgets('an opened Table leaves the three recent Pages shown', (
+    tester,
+  ) async {
+    await kit.show(tester, [TablePart(expenses)]);
+    final area = kit.workspace.open.value!.area;
+    for (final title in ['Two', 'Three']) {
+      final page = await kit.workspace.apply(
+        mutation(BridgeMutationKind.createPage, area: area, text: title),
+      );
+      kit.workspace.open.value = OpenPage(area, page.page!);
+      await tester.pumpAndSettle();
+    }
+    kit.workspace.openTable(kit.fake.tables.single.id);
+    await tester.pumpAndSettle();
+    await open(tester);
+    for (final title in ['Three', 'Two', 'Untitled']) {
+      expect(inBar(title), findsOneWidget, reason: title);
+    }
+  });
+
   testWidgets('a text hit opens its Page with the caret in that Block', (
     tester,
   ) async {

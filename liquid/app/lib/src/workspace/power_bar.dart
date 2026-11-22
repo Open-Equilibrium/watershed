@@ -332,16 +332,16 @@ class _PowerBarState extends State<PowerBar> {
       ];
     }
     return [
-      for (final page in _state.recent.value.take(3))
-        if (_areaOf(page) != null)
-          (
-            group: 'Recent',
-            icon: LucideIcons.file,
-            label: _titleOf(page),
-            detail: _nameOf(_areaOf(page)),
-            keys: null,
-            run: () => _openPage(page),
-          ),
+      for (final page
+          in _state.recent.value.where((page) => _areaOf(page) != null).take(3))
+        (
+          group: 'Recent',
+          icon: LucideIcons.file,
+          label: _titleOf(page),
+          detail: _nameOf(_areaOf(page)),
+          keys: null,
+          run: () => _openPage(page),
+        ),
       ..._actions(''),
     ];
   }
