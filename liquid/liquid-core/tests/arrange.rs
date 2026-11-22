@@ -210,6 +210,7 @@ fn a_split_section_keeps_the_width_and_a_join_keeps_the_upper_place() {
         [tile(0, 5), tile(0, 5), None],
         "the lower Section below, as wide"
     );
+    page.tile(&flight, tile(6, 6)).unwrap();
     page.edit(join).unwrap();
     let tiles: Vec<_> = page.reopened().iter().map(|view| view.tile).collect();
     assert_eq!(

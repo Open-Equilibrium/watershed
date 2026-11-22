@@ -387,8 +387,7 @@ impl<S: Store> Workspace<S> {
         table: &BlockId,
     ) -> Result<Written, Error> {
         let mut pages: Vec<PageId> = self
-            .table_views(table)
-            .unwrap_or_default()
+            .table_views(table)?
             .into_iter()
             .map(|(page, _)| page)
             .collect();
