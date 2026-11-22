@@ -583,3 +583,38 @@ fn a_conversation_is_absent_settled_or_has_its_newest_run_interrupted() {
         }
     );
 }
+
+#[test]
+fn a_run_that_was_never_published_does_not_count_as_interrupted() {
+    let workspace = empty_workspace("conversation-unpublished-run-state");
+    create_unpublished_productive_conversation_run(
+        &workspace,
+        "fresh",
+        "fresh",
+        "review-flow",
+        REGISTRY_HASH,
+        FLOW_HASH,
+    )
+    .expect("an unpublished first Run is staged");
+    assert_eq!(
+        crate::conversation_state(&workspace, "fresh").expect("the store reads"),
+        crate::ConversationState::Absent
+    );
+
+    create_flow_run(&workspace, "review", "review");
+    write_terminal_run(&workspace, "review", "review");
+    write_terminal_recovery_fixture(&workspace, "review", "review", "root");
+    create_unpublished_productive_conversation_run(
+        &workspace,
+        "review",
+        "review-2",
+        "review-flow",
+        REGISTRY_HASH,
+        FLOW_HASH,
+    )
+    .expect("an unpublished continuation is staged");
+    assert_eq!(
+        crate::conversation_state(&workspace, "review").expect("history reads"),
+        crate::ConversationState::Settled
+    );
+}

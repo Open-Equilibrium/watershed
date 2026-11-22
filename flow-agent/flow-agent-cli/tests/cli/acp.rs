@@ -293,9 +293,13 @@ fn a_message_sent_while_a_flow_works_steers_its_active_phase() {
         listener.local_addr().expect("endpoint address")
     );
     let (release_first, first_released) = mpsc::channel::<()>();
+    let (first_arrived, first_in_flight) = mpsc::channel::<()>();
     let endpoint = thread::spawn(move || {
         let (mut first, _) = listener.accept().expect("the first turn arrives");
         let first_body = read_request_body(&mut first);
+        first_arrived
+            .send(())
+            .expect("the test waits for the first turn");
         first_released
             .recv_timeout(Duration::from_secs(30))
             .expect("the test releases the first turn");
@@ -316,10 +320,9 @@ fn a_message_sent_while_a_flow_works_steers_its_active_phase() {
         "session/prompt",
         json!({"sessionId": session_id, "prompt": [{"type": "text", "text": "<t3_code_instructions>\nT3 rules\n</t3_code_instructions>\n\n<user_request>\nA note about colour\n</user_request>"}, {"type": "text", "text": "runtime instructions"}]}),
     );
-    acp.next(
-        |message| message["params"]["update"]["entries"][0]["status"] == "in_progress",
-        &mut seen,
-    );
+    first_in_flight
+        .recv_timeout(cli_child_watchdog())
+        .expect("the first turn reaches the endpoint");
     acp.notify("session/cancel", json!({"sessionId": session_id}));
     assert_eq!(
         acp.reply(first, &mut seen)["result"]["stopReason"],
@@ -350,6 +353,14 @@ fn a_message_sent_while_a_flow_works_steers_its_active_phase() {
         })
         .collect::<Vec<_>>();
     assert_eq!(replies, ["Colorful draft", "Colourful note"]);
+    let plan = seen
+        .iter()
+        .rfind(|message| message["params"]["update"]["sessionUpdate"] == "plan")
+        .expect("the Phases show as a plan");
+    assert_eq!(
+        plan["params"]["update"]["entries"],
+        json!([{"content": "Write", "priority": "medium", "status": "completed"}])
+    );
     assert_eq!(
         flow_agent_core::conversation_state(&workspace, &session_id).expect("the chat is stored"),
         flow_agent_core::ConversationState::Settled

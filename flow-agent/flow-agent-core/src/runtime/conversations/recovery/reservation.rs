@@ -251,14 +251,25 @@ pub fn conversation_state(
             suffixed_session_id(conversation_id, ordinal)
         };
         match runs.dir.symlink_metadata(&candidate) {
-            Ok(metadata) if metadata.is_dir() => newest = Some(candidate),
+            Ok(metadata) if metadata.is_dir() => match runs
+                .dir
+                .symlink_metadata(Path::new(&candidate).join(UNPUBLISHED_PRODUCTIVE_RUN_MARKER))
+            {
+                Ok(_) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                    newest = Some(candidate);
+                }
+                Err(source) => {
+                    return Err(path_io_error(&runs.path.join(&candidate), source));
+                }
+            },
             Ok(_) => {}
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => break,
             Err(source) => return Err(path_io_error(&runs.path.join(&candidate), source)),
         }
     }
     let Some(newest) = newest else {
-        return Ok(ConversationState::Settled);
+        return Ok(ConversationState::Absent);
     };
     let finished = with_conversation_history_index(
         workspace,
