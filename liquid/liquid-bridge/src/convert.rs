@@ -2,8 +2,8 @@ use meta_harness_core::{
     AgentEvent, Automation, ChatItem, Context, GitStatus, Group, ItemDetail, ItemKind, ItemStatus,
     Lineage, LineageRow, LocalServer, ModelChoice, Pace, PendingRequest, Provider,
     PullRequestCheck, PullRequestDetail, Question, Relation, Request, RunStatus, ScheduleKind,
-    Snapshot, Statistics, ThreadEvent, ThreadSummary, Turn, TurnStatus, Usage, UsageLimits,
-    visible, visible_lines, visible_name,
+    Snapshot, Statistics, StepStatus, ThreadEvent, ThreadSummary, Turn, TurnStatus, Usage,
+    UsageLimits, visible, visible_lines, visible_name,
 };
 
 use crate::api::details::{
@@ -13,7 +13,8 @@ use crate::api::details::{
 };
 use crate::api::events::{
     BridgeApproval, BridgeApprovalOption, BridgeChangeStatus, BridgeEvent, BridgeEventKind,
-    BridgeFileChange, BridgeItem, BridgeItemKind, BridgeQuestion, BridgeRequest, BridgeUsage,
+    BridgeFileChange, BridgeItem, BridgeItemKind, BridgeQuestion, BridgeRequest, BridgeStepStatus,
+    BridgeTaskStep, BridgeUsage,
 };
 use crate::api::git::{
     BridgeBranchPullRequest, BridgeGitStatus, BridgePullRequestCheck, BridgePullRequestDetail,
@@ -52,6 +53,7 @@ fn item_kind(kind: ItemKind) -> BridgeItemKind {
         ItemKind::FileChange => BridgeItemKind::FileChange,
         ItemKind::DynamicToolCall => BridgeItemKind::DynamicToolCall,
         ItemKind::Error => BridgeItemKind::Error,
+        ItemKind::TaskList => BridgeItemKind::TaskList,
     }
 }
 
@@ -63,8 +65,22 @@ fn item(
     duration_ms: Option<u64>,
 ) -> BridgeItem {
     let (tool, target) = match detail {
-        ItemDetail::None => (None, None),
+        ItemDetail::None | ItemDetail::Tasks { .. } => (None, None),
         ItemDetail::Tool { name, target } => (Some(visible_name(name)), Some(visible_name(target))),
+    };
+    let steps = match detail {
+        ItemDetail::Tasks { steps } => steps
+            .iter()
+            .map(|step| BridgeTaskStep {
+                text: visible_name(&step.text),
+                status: match step.status {
+                    StepStatus::Pending => BridgeStepStatus::Pending,
+                    StepStatus::Running => BridgeStepStatus::Running,
+                    StepStatus::Completed => BridgeStepStatus::Completed,
+                },
+            })
+            .collect(),
+        _ => Vec::new(),
     };
     BridgeItem {
         id: int(id.0),
@@ -74,6 +90,7 @@ fn item(
         ended: status.is_some(),
         failed: status == Some(ItemStatus::Failed),
         duration_ms: duration_ms.map(int),
+        steps,
     }
 }
 
@@ -207,6 +224,10 @@ impl From<ThreadEvent> for BridgeEvent {
                 )),
                 text: Some(delta),
                 ..with(BridgeEventKind::ContentDelta, None)
+            },
+            AgentEvent::ItemUpdated { item: id, detail } => BridgeEvent {
+                item: Some(item(id, ItemKind::TaskList, &detail, None, None)),
+                ..with(BridgeEventKind::ItemUpdated, None)
             },
             AgentEvent::ItemCompleted {
                 turn,

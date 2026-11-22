@@ -4,13 +4,14 @@ use meta_harness_core::{
     AgentEvent, ApprovalOption, BranchChanges, BranchPullRequest, ChangedFile, ChatItem, Context,
     GitStatus, Harness, ItemDetail, ItemId, ItemKind, ItemStatus, LineCount, Model, ModelChoice,
     ModelOption, ModelUsage, PendingRequest, Provider, PullRequestCheck, PullRequestDetail,
-    Question, Request, RequestId, Snapshot, Statistics, ThreadEvent, ThreadSummary, ToolCalls,
-    Turn, TurnFile, TurnId, TurnStatistics, TurnStatus, Usage,
+    Question, Request, RequestId, Snapshot, Statistics, StepStatus, TaskStep, ThreadEvent,
+    ThreadSummary, ToolCalls, Turn, TurnFile, TurnId, TurnStatistics, TurnStatus, Usage,
 };
 
 use crate::api::events::{
     BridgeApproval, BridgeApprovalOption, BridgeChangeStatus, BridgeEvent, BridgeEventKind,
-    BridgeFileChange, BridgeItem, BridgeItemKind, BridgeQuestion, BridgeRequest, BridgeUsage,
+    BridgeFileChange, BridgeItem, BridgeItemKind, BridgeQuestion, BridgeRequest, BridgeStepStatus,
+    BridgeTaskStep, BridgeUsage,
 };
 use crate::api::git::{BridgeBranchPullRequest, BridgeGitStatus, BridgePullRequestCheck};
 use crate::api::session::{BridgeModelChoice, BridgeModelOption, BridgeThreadSummary};
@@ -184,6 +185,61 @@ new file mode 100644
 }
 
 #[test]
+fn a_task_list_crosses_with_its_steps_and_each_change_of_them() {
+    let tasks = |statuses: [StepStatus; 2]| ItemDetail::Tasks {
+        steps: ["Explore", "Explore › scraper-1"]
+            .into_iter()
+            .zip(statuses)
+            .map(|(text, status)| TaskStep {
+                text: text.to_owned(),
+                status,
+            })
+            .collect(),
+    };
+    let shown = |statuses: [BridgeStepStatus; 2]| -> Vec<BridgeTaskStep> {
+        ["Explore", "Explore › scraper-1"]
+            .into_iter()
+            .zip(statuses)
+            .map(|(text, status)| BridgeTaskStep {
+                text: text.to_owned(),
+                status,
+            })
+            .collect()
+    };
+
+    let started = sequenced(
+        1,
+        AgentEvent::ItemStarted {
+            turn: TurnId(1),
+            item: ItemId(4),
+            kind: ItemKind::TaskList,
+            detail: tasks([StepStatus::Running, StepStatus::Pending]),
+        },
+    );
+    let updated = sequenced(
+        2,
+        AgentEvent::ItemUpdated {
+            item: ItemId(4),
+            detail: tasks([StepStatus::Completed, StepStatus::Running]),
+        },
+    );
+
+    let started = started.item.expect("the task list item");
+    assert_eq!(started.kind, BridgeItemKind::TaskList);
+    assert_eq!(
+        started.steps,
+        shown([BridgeStepStatus::Running, BridgeStepStatus::Pending])
+    );
+    assert_eq!(updated.kind, BridgeEventKind::ItemUpdated);
+    let updated = updated.item.expect("the updated item");
+    assert_eq!((updated.id, updated.kind), (4, BridgeItemKind::TaskList));
+    assert_eq!(
+        updated.steps,
+        shown([BridgeStepStatus::Completed, BridgeStepStatus::Running])
+    );
+}
+
+#[test]
 fn turn_and_item_events_cross_with_their_turn_item_and_text() {
     let turn = TurnId(2);
     let started = sequenced(
@@ -211,6 +267,7 @@ fn turn_and_item_events_cross_with_their_turn_item_and_text() {
                 ended: false,
                 failed: false,
                 duration_ms: None,
+                steps: Vec::new(),
             }),
             ..crate::convert::event(BridgeEventKind::ItemStarted, 1)
         }
@@ -254,6 +311,7 @@ fn turn_and_item_events_cross_with_their_turn_item_and_text() {
             ended: true,
             failed: true,
             duration_ms: Some(5),
+            steps: Vec::new(),
         })
     );
 

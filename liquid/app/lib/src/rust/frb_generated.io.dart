@@ -600,6 +600,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   BridgeStatistics dco_decode_bridge_statistics(dynamic raw);
 
   @protected
+  BridgeStepStatus dco_decode_bridge_step_status(dynamic raw);
+
+  @protected
   BridgeSubscription dco_decode_bridge_subscription(dynamic raw);
 
   @protected
@@ -607,6 +610,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   BridgeTable dco_decode_bridge_table(dynamic raw);
+
+  @protected
+  BridgeTaskStep dco_decode_bridge_task_step(dynamic raw);
 
   @protected
   BridgeTextStyle dco_decode_bridge_text_style(dynamic raw);
@@ -757,6 +763,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   List<BridgeTable> dco_decode_list_bridge_table(dynamic raw);
+
+  @protected
+  List<BridgeTaskStep> dco_decode_list_bridge_task_step(dynamic raw);
 
   @protected
   List<BridgeThreadSummary> dco_decode_list_bridge_thread_summary(dynamic raw);
@@ -1515,6 +1524,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   BridgeStatistics sse_decode_bridge_statistics(SseDeserializer deserializer);
 
   @protected
+  BridgeStepStatus sse_decode_bridge_step_status(SseDeserializer deserializer);
+
+  @protected
   BridgeSubscription sse_decode_bridge_subscription(
     SseDeserializer deserializer,
   );
@@ -1524,6 +1536,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   BridgeTable sse_decode_bridge_table(SseDeserializer deserializer);
+
+  @protected
+  BridgeTaskStep sse_decode_bridge_task_step(SseDeserializer deserializer);
 
   @protected
   BridgeTextStyle sse_decode_bridge_text_style(SseDeserializer deserializer);
@@ -1714,6 +1729,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   List<BridgeTable> sse_decode_list_bridge_table(SseDeserializer deserializer);
+
+  @protected
+  List<BridgeTaskStep> sse_decode_list_bridge_task_step(
+    SseDeserializer deserializer,
+  );
 
   @protected
   List<BridgeThreadSummary> sse_decode_list_bridge_thread_summary(
@@ -2707,6 +2727,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_bridge_step_status(
+    BridgeStepStatus self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_bridge_subscription(
     BridgeSubscription self,
     SseSerializer serializer,
@@ -2717,6 +2743,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_bridge_table(BridgeTable self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_bridge_task_step(
+    BridgeTaskStep self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_bridge_text_style(
@@ -2976,6 +3008,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_list_bridge_table(
     List<BridgeTable> self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_list_bridge_task_step(
+    List<BridgeTaskStep> self,
     SseSerializer serializer,
   );
 
