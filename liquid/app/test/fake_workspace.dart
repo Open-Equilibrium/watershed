@@ -1076,9 +1076,9 @@ class FakeWorkspace implements LiquidWorkspace {
         .toList();
     if (words.isEmpty) return const [];
     bool found(String text) {
-      final held = text
-          .toLowerCase()
-          .split(RegExp(r'[^\p{L}\p{N}]+', unicode: true));
+      final held = text.toLowerCase().split(
+        RegExp(r'[^\p{L}\p{N}]+', unicode: true),
+      );
       return words.every((word) => held.any((one) => one.startsWith(word)));
     }
 

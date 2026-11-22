@@ -23,6 +23,7 @@ import '../shortcuts/shortcut_store.dart';
 import '../theme/icons.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
+import '../workspace/power_bar.dart';
 import '../workspace/page_view.dart';
 import '../workspace/table_page.dart';
 import '../workspace/workspaces.dart';
@@ -327,9 +328,14 @@ class _AgentShellState extends State<AgentShell> {
       Command.newSession: _newSession,
       Command.dismissNotice: state.dismissNotice,
     },
-    if (widget.workspace != null) Command.newPage: _newPage,
+    if (widget.workspace != null) ...{
+      Command.newPage: _newPage,
+      Command.powerBar: () => _powerBar.value = !_powerBar.value,
+    },
     Command.settings: _toggleSettings,
   };
+
+  final _powerBar = ValueNotifier(false);
 
   Widget _menus(ShortcutSettings keys, Widget child) {
     if (defaultTargetPlatform != TargetPlatform.macOS) return child;
@@ -421,102 +427,129 @@ class _AgentShellState extends State<AgentShell> {
             focusNode: _focus,
             autofocus: true,
             skipTraversal: true,
-            child: Material(
-              color: ws.canvas,
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Sidebar(
-                    state: widget.state,
-                    info: widget.info,
-                    workspace: widget.workspace,
-                    workspaceProblem: widget.workspaceProblem,
-                    workspaces: widget.workspaces,
-                    agentProblem: widget.agentProblem,
-                    onSettings: _toggleSettings,
-                    onNewSession: _newSession,
-                    onShowSession: _showSession,
-                    onMove: widget.state == null
-                        ? null
-                        : (listed) => unawaited(
-                            moveSession(
-                              context,
-                              widget.state!,
-                              listed,
-                              nameOf: _hostName,
+            child: _withPowerBar(
+              Material(
+                color: ws.canvas,
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Sidebar(
+                      state: widget.state,
+                      info: widget.info,
+                      workspace: widget.workspace,
+                      workspaceProblem: widget.workspaceProblem,
+                      workspaces: widget.workspaces,
+                      agentProblem: widget.agentProblem,
+                      onSettings: _toggleSettings,
+                      onNewSession: _newSession,
+                      onShowSession: _showSession,
+                      onMove: widget.state == null
+                          ? null
+                          : (listed) => unawaited(
+                              moveSession(
+                                context,
+                                widget.state!,
+                                listed,
+                                nameOf: _hostName,
+                              ),
                             ),
-                          ),
-                  ),
-                  Expanded(
-                    child: ListenableBuilder(
-                      listenable: Listenable.merge([
-                        _settings,
-                        ?widget.workspace?.open,
-                      ]),
-                      builder: (context, agent) {
-                        if (_settings.value case final section?) {
-                          return SettingsPage(
-                            shortcuts: _shortcuts,
-                            section: section,
-                            onSection: (next) => _settings.value = next,
-                            appearance: widget.appearance,
-                            cardSettings: _cardSettings,
-                            onClose: _toggleSettings,
-                            saveFailure: _saveFailure,
-                            onDismissSaveFailure: () =>
-                                _saveFailure.value = null,
-                            writer: project == null
-                                ? null
-                                : WriterModelPane(project: project),
-                            agentHosts: widget.agentHosts == null
-                                ? null
-                                : AgentHostsPane(
-                                    hosts: widget.agentHosts!,
-                                    saveOutcome: (failure) => _saveOutcome(
-                                      widget.agentHosts!,
-                                      failure,
-                                    ),
-                                  ),
-                          );
-                        }
-                        final open = widget.workspace?.open.value;
-                        return IndexedStack(
-                          index: open == null ? 0 : 1,
-                          sizing: StackFit.expand,
-                          children: [
-                            agent ?? const SizedBox.shrink(),
-                            if (open?.table case final table?)
-                              TablePage(
-                                key: ValueKey(table),
-                                state: widget.workspace!,
-                                table: table,
-                              )
-                            else if (open != null)
-                              WorkspacePage(
-                                key: ValueKey(open.page),
-                                state: widget.workspace!,
-                                open: open,
-                              )
-                            else
-                              const SizedBox.shrink(),
-                          ],
-                        );
-                      },
-                      child: switch ((widget.state, widget.info)) {
-                        (final state?, final info?) => _agentSurface(
-                          context,
-                          state,
-                          info,
-                        ),
-                        _ => null,
-                      },
                     ),
-                  ),
-                ],
+                    Expanded(
+                      child: ListenableBuilder(
+                        listenable: Listenable.merge([
+                          _settings,
+                          ?widget.workspace?.open,
+                        ]),
+                        builder: (context, agent) {
+                          if (_settings.value case final section?) {
+                            return SettingsPage(
+                              shortcuts: _shortcuts,
+                              section: section,
+                              onSection: (next) => _settings.value = next,
+                              appearance: widget.appearance,
+                              cardSettings: _cardSettings,
+                              onClose: _toggleSettings,
+                              saveFailure: _saveFailure,
+                              onDismissSaveFailure: () =>
+                                  _saveFailure.value = null,
+                              writer: project == null
+                                  ? null
+                                  : WriterModelPane(project: project),
+                              agentHosts: widget.agentHosts == null
+                                  ? null
+                                  : AgentHostsPane(
+                                      hosts: widget.agentHosts!,
+                                      saveOutcome: (failure) => _saveOutcome(
+                                        widget.agentHosts!,
+                                        failure,
+                                      ),
+                                    ),
+                            );
+                          }
+                          final open = widget.workspace?.open.value;
+                          return IndexedStack(
+                            index: open == null ? 0 : 1,
+                            sizing: StackFit.expand,
+                            children: [
+                              agent ?? const SizedBox.shrink(),
+                              if (open?.table case final table?)
+                                TablePage(
+                                  key: ValueKey(table),
+                                  state: widget.workspace!,
+                                  table: table,
+                                )
+                              else if (open != null)
+                                WorkspacePage(
+                                  key: ValueKey(open.page),
+                                  state: widget.workspace!,
+                                  open: open,
+                                )
+                              else
+                                const SizedBox.shrink(),
+                            ],
+                          );
+                        },
+                        child: switch ((widget.state, widget.info)) {
+                          (final state?, final info?) => _agentSurface(
+                            context,
+                            state,
+                            info,
+                          ),
+                          _ => null,
+                        },
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
           ),
         ),
+      ),
+    );
+  }
+
+  Widget _withPowerBar(Widget child) {
+    final workspace = widget.workspace;
+    if (workspace == null) return child;
+    return ValueListenableBuilder(
+      valueListenable: _powerBar,
+      builder: (context, open, _) => Stack(
+        children: [
+          child,
+          if (open)
+            Positioned.fill(
+              child: PowerBar(
+                state: workspace,
+                onClose: () {
+                  _powerBar.value = false;
+                  _focus.requestFocus();
+                },
+                onNewPage: _newPage,
+                onSettings: _toggleSettings,
+              ),
+            ),
+        ],
       ),
     );
   }

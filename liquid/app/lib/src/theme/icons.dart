@@ -42,6 +42,7 @@ abstract final class LucideIcons {
   static const layoutList = IconData(0xe1d9, fontFamily: _family);
   static const pencil = IconData(0xe1f9, fontFamily: _family);
   static const layoutGrid = IconData(0xe0ff, fontFamily: _family);
+  static const filePlus = IconData(0xe0c9, fontFamily: _family);
   static const clipboardCopy = IconData(0xe225, fontFamily: _family);
   static const text = IconData(0xe185, fontFamily: _family);
   static const hash = IconData(0xe0ef, fontFamily: _family);

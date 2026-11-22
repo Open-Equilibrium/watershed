@@ -89,6 +89,9 @@ class _WorkspacePageState extends State<WorkspacePage> implements EditorSource {
     _tree.addListener(_titleChanged);
     _first.addListener(_typedFirst);
     _views.ready.addListener(_readied);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) widget.state.currentPage.value = _views;
+    });
     widget.state.finishing.add(_typedFirst);
     widget.state.finishing.add(_title.typed);
     if (widget.open.fresh) {
@@ -105,6 +108,9 @@ class _WorkspacePageState extends State<WorkspacePage> implements EditorSource {
       editor.first(this);
     }
     editor.left(this);
+    if (widget.state.currentPage.value == _views) {
+      widget.state.currentPage.value = null;
+    }
     widget.state.finishing.remove(_typedFirst);
     widget.state.finishing.remove(_title.typed);
     _tree.removeListener(_titleChanged);

@@ -142,7 +142,10 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
   bool get focused => _focus.hasFocus;
 
   void _focusChanged() {
-    if (_focus.hasFocus) return;
+    if (_focus.hasFocus) {
+      widget.views.lastFocused = widget.view.id;
+      return;
+    }
     _closeMenu();
     if (_adding && _added != null) _finish(_text.text);
   }

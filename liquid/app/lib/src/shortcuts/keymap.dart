@@ -272,6 +272,12 @@ enum Command {
     Keys(LogicalKeyboardKey.keyN, meta: true, shift: true),
   ),
   settings('Settings…', Area.app, Keys(LogicalKeyboardKey.comma, meta: true)),
+  powerBar(
+    'PowerBar',
+    Area.app,
+    Keys(LogicalKeyboardKey.keyK, meta: true),
+    liquid: true,
+  ),
   chat(
     'Chat',
     Area.app,

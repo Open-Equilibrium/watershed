@@ -8,6 +8,7 @@ import '../settings_file.dart';
 import '../rust/api/drawing.dart';
 import '../rust/api/workspace.dart';
 import 'follow.dart';
+import 'page_views.dart';
 
 const window = 500;
 
@@ -198,6 +199,40 @@ class WorkspaceState {
 
   final open = ValueNotifier<OpenPage?>(null);
 
+  final currentPage = ValueNotifier<PageViews?>(null);
+
+  final recent = ValueNotifier<List<String>>(const []);
+
+  static const _recentKept = 8;
+
+  Future<void> _loadRecent() async {
+    try {
+      final kept = await workspace.remembered(key: 'recent');
+      if (kept != null && kept.isNotEmpty) recent.value = kept.split(',');
+    } on Object {
+      return;
+    }
+    open.addListener(_opened);
+    _opened();
+  }
+
+  void _opened() {
+    final page = open.value?.table ?? open.value?.page;
+    if (page == null || page.isEmpty || recent.value.firstOrNull == page) {
+      return;
+    }
+    recent.value = [
+      page,
+      for (final kept in recent.value)
+        if (kept != page) kept,
+    ].take(_recentKept).toList();
+    unawaited(
+      workspace
+          .remember(key: 'recent', value: recent.value.join(','))
+          .then((_) {}, onError: (Object _) {}),
+    );
+  }
+
   final problem = ValueNotifier<String?>(null);
 
   String? _changeFailed;
@@ -273,6 +308,7 @@ class WorkspaceState {
 
   Future<void> start({bool show = true}) async {
     await _loadLayout();
+    await _loadRecent();
     final areas = _Reread(_readAreas);
     _listen(const BridgeResource(kind: BridgeResourceKind.areas), areas);
     final tables = _Reread(_readTables);
