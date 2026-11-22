@@ -240,6 +240,7 @@ struct Values<'w, S: Store> {
     columns: HashSet<(BlockId, FieldId)>,
     read_columns: HashMap<(BlockId, FieldId), Rc<[Value]>>,
     tables: HashMap<BlockId, Option<Rc<Snapshot>>>,
+    known: HashMap<RowId, Vec<(FieldId, Cell)>>,
     depth: usize,
     cuts: usize,
     cut: HashMap<Key, usize>,
@@ -274,6 +275,7 @@ impl<'w, S: Store> Values<'w, S> {
             columns: HashSet::new(),
             read_columns: HashMap::new(),
             tables: HashMap::new(),
+            known: HashMap::new(),
             depth: 0,
             cuts: 0,
             cut: HashMap::new(),
@@ -421,6 +423,12 @@ impl<'w, S: Store> Values<'w, S> {
     }
 
     fn field_value(&mut self, table: &BlockId, row: &RowId, field: &Field) -> Value {
+        if field.kind != FieldKind::Formula
+            && let Some(cells) = self.known.get(row)
+        {
+            let cell = cells.iter().find(|(id, _)| *id == field.id);
+            return value_of(cell.map(|(_, cell)| cell), field);
+        }
         if field.kind != FieldKind::Formula {
             let Some(snapshot) = self.snapshot(table) else {
                 return MISSING;
@@ -521,6 +529,10 @@ pub(crate) fn fill<S: Store>(
     }
     let mut values = Values::new(workspace);
     values.fields.insert(table.clone(), database.fields);
+    values.known = rows
+        .iter()
+        .map(|row| (row.id.clone(), row.cells.clone()))
+        .collect();
     for row in rows {
         row.computed = formulas
             .iter()

@@ -33,7 +33,8 @@ pub use drawing::{
     MAX_POINTS, Pen, Shape,
 };
 pub use formula::{
-    Failure, Formula, MAX_FORMULA, MAX_NESTING, Operand, Reference, Resolve, Syntax, Value,
+    Failure, Formula, MAX_FORMULA, MAX_NESTING, MAX_TEXT, Operand, Reference, Resolve, Syntax,
+    Value,
 };
 pub use history::{Action, Document, Operation, Permission};
 pub use id::{

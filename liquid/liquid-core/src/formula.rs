@@ -5,6 +5,7 @@ use std::rc::Rc;
 
 pub const MAX_FORMULA: usize = 8_192;
 pub const MAX_NESTING: usize = 64;
+pub const MAX_TEXT: usize = 32_767;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Failure {
@@ -692,8 +693,14 @@ impl Eval<'_> {
             }
             "CONCAT" => {
                 let mut joined = String::new();
+                let mut length = 0;
                 for (value, _) in each(&self.operands(args)) {
-                    joined.push_str(&text(value)?);
+                    let part = text(value)?;
+                    length += part.chars().count();
+                    if length > MAX_TEXT {
+                        return Err(Failure::Value);
+                    }
+                    joined.push_str(&part);
                 }
                 Value::Text(joined)
             }
@@ -821,6 +828,9 @@ fn apply(op: Op, left: &Value, right: &Value) -> Value {
         }),
         Op::Pow => arithmetic(power),
         Op::Concat => match (text(left), text(right)) {
+            (Ok(a), Ok(b)) if a.chars().count() + b.chars().count() > MAX_TEXT => {
+                Value::Error(Failure::Value)
+            }
             (Ok(a), Ok(b)) => Value::Text(a + &b),
             (Err(failure), _) | (_, Err(failure)) => Value::Error(failure),
         },

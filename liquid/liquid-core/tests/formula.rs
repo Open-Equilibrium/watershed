@@ -2,11 +2,14 @@
 
 use std::collections::HashMap;
 
-use liquid_core::{Failure, Formula, MAX_FORMULA, MAX_NESTING, Operand, Reference, Resolve, Value};
+use liquid_core::{
+    Failure, Formula, MAX_FORMULA, MAX_NESTING, MAX_TEXT, Operand, Reference, Resolve, Value,
+};
 
 const AMOUNT: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
 const CATEGORY: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.cccccccccccccccccccccccccccccccc";
 const LEFT: &str = "dddddddddddddddddddddddddddddddd";
+const LONG: &str = "ffffffffffffffffffffffffffffffff";
 
 struct Sheet(HashMap<String, Operand>);
 
@@ -24,6 +27,10 @@ impl Sheet {
                 Operand::Range(vec![t("Rent"), t("Food"), t("Food"), t("rent"), t("Fun")].into()),
             ),
             (LEFT.into(), Operand::Value(n(715.5))),
+            (
+                LONG.into(),
+                Operand::Value(t(&"x".repeat(MAX_TEXT / 2 + 1))),
+            ),
         ]))
     }
 }
@@ -38,7 +45,7 @@ impl Resolve for Sheet {
 }
 
 fn expand(source: &str) -> String {
-    [("$A", AMOUNT), ("$C", CATEGORY), ("$L", LEFT)]
+    [("$A", AMOUNT), ("$C", CATEGORY), ("$L", LEFT), ("$X", LONG)]
         .iter()
         .fold(source.to_string(), |s, (key, id)| {
             s.replace(key, &format!("{{{id}}}"))
@@ -129,6 +136,9 @@ fn excel_functions_read_references_and_ranges() {
             "TRUETRUEFALSETRUE",
         ),
         ("ROUND(1, 0, 0)", "#VALUE!"),
+        ("$X & $X", "#VALUE!"),
+        ("CONCAT($X, $X)", "#VALUE!"),
+        ("LEN($X & \"x\")", "16385"),
     ] {
         assert_eq!(shown(source), expected, "{source}");
     }
