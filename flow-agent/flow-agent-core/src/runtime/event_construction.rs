@@ -267,20 +267,22 @@ impl RuntimeEventBuilder {
         })?;
         let event = constructed.event();
         let event_bytes = constructed.canonical_jsonl();
-        let context_manifest = if event.event_type == EventType::MessageCompleted {
-            let (manifest, objects) = self.pending_context_manifest.take().ok_or_else(|| {
-                RuntimeError::Protocol(
-                    "message.completed has no compiled context manifest".to_owned(),
-                )
-            })?;
-            Some(ContextManifestCheckpoint {
-                manifest,
-                objects,
-                ordinal: self.context_manifests.record_count.saturating_add(1),
-            })
-        } else {
-            None
-        };
+        let context_manifest =
+            if crate::runtime::context_persistence::requires_context_manifest(event) {
+                let (manifest, objects) =
+                    self.pending_context_manifest.take().ok_or_else(|| {
+                        RuntimeError::Protocol(
+                            "message.completed has no compiled context manifest".to_owned(),
+                        )
+                    })?;
+                Some(ContextManifestCheckpoint {
+                    manifest,
+                    objects,
+                    ordinal: self.context_manifests.record_count.saturating_add(1),
+                })
+            } else {
+                None
+            };
         if let Some(validation) = self.validation.as_mut() {
             validation.validate_constructed_event(
                 Path::new("runtime.jsonl"),

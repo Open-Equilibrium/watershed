@@ -9,7 +9,9 @@ use super::{
 };
 use crate::runtime::{
     context::ContextManifestCheckpoint,
-    context_persistence::{ContextManifestPairingError, validate_context_manifest_pairing},
+    context_persistence::{
+        ContextManifestPairingError, requires_context_manifest, validate_context_manifest_pairing,
+    },
     event_construction::ConstructedRuntimeEvent,
     event_writer::RuntimeEventSink,
     fs_guards::{AnchoredFile, ensure_anchored_non_hardlinked_file},
@@ -22,7 +24,7 @@ use crate::runtime::{
     },
     validate::SessionAppendValidationState,
 };
-use proto::{EventEnvelope, EventType};
+use proto::EventEnvelope;
 use std::path::{Path, PathBuf};
 
 pub(crate) struct ConversationEventWriter {
@@ -357,7 +359,7 @@ impl RuntimeEventSink for ConversationEventWriter {
                     ));
                 }
                 if let Err(error) =
-                    validate_context_manifest_pairing(&event.event_type, context_manifest.is_some())
+                    validate_context_manifest_pairing(event, context_manifest.is_some())
                 {
                     return Err(protocol(match error {
                         ContextManifestPairingError::Missing => {
@@ -391,7 +393,7 @@ impl RuntimeEventSink for ConversationEventWriter {
                     ));
                 }
                 if let Err(error) =
-                    validate_context_manifest_pairing(&event.event_type, context_manifest.is_some())
+                    validate_context_manifest_pairing(event, context_manifest.is_some())
                 {
                     return Err(protocol(match error {
                         ContextManifestPairingError::Missing => {
@@ -402,7 +404,7 @@ impl RuntimeEventSink for ConversationEventWriter {
                         }
                     }));
                 }
-                if event.event_type != EventType::MessageCompleted {
+                if !requires_context_manifest(event) {
                     return Err(protocol(
                         "productive recovery context prefix requires message.completed",
                     ));

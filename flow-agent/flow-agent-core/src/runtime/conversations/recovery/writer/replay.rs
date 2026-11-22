@@ -333,6 +333,47 @@ impl ProductiveRecovery for ProductiveRecoveryWriter {
         })
     }
 
+    fn steering_boundary(
+        &mut self,
+        phase_execution_id: &str,
+        before_attempt_id: &str,
+        live: &mut dyn FnMut() -> Result<Option<String>, RuntimeError>,
+    ) -> Result<Option<String>, RuntimeError> {
+        self.ensure_usable()?;
+        if let Some(record) = self.next_replay_record() {
+            let ProductiveRecoveryRecord::Steering {
+                phase_execution_id: recorded_phase,
+                before_attempt_id: recorded_attempt,
+                message_object,
+                ..
+            } = record
+            else {
+                return Ok(None);
+            };
+            if recorded_phase != phase_execution_id || recorded_attempt != before_attempt_id {
+                return Ok(None);
+            }
+            let bytes = self.run_objects.read(&message_object)?;
+            let message = serde_json::from_slice::<String>(&bytes)
+                .map_err(|_| protocol("productive recovery steering message is not text"))?;
+            self.consume_replay_record();
+            return Ok(Some(message));
+        }
+        let Some(message) = live()? else {
+            return Ok(None);
+        };
+        self.ensure_live_append()?;
+        self.ensure_completed_attempts_consumed()?;
+        let message_object = self.persist_value(&serde_json::Value::String(message.clone()))?;
+        self.append_record(&ProductiveRecoveryRecord::Steering {
+            schema: PRODUCTIVE_RECOVERY_SCHEMA_V0.to_owned(),
+            phase_execution_id: phase_execution_id.to_owned(),
+            before_attempt_id: before_attempt_id.to_owned(),
+            message_object,
+        })?;
+        Ok(Some(message))
+    }
+
     fn flow_boundary(
         &mut self,
         flow_execution_id: &str,

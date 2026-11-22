@@ -720,3 +720,35 @@ fn productive_recovery_truncates_only_an_uncommitted_tail_and_rejects_divergence
         .expect_err("deterministic divergence is rejected");
     assert!(error.to_string().contains("diverged"));
 }
+
+#[test]
+fn a_recorded_steering_message_replays_only_at_its_boundary() {
+    let workspace = empty_workspace("conversation-recovery-steering");
+    let mut recovery =
+        standard_review_recovery_writer(&workspace, None, &ContextHistory::default());
+    let recorded = recovery
+        .steering_boundary("phase-000001", "provider-000002", &mut || {
+            Ok(Some("Use British spelling".to_owned()))
+        })
+        .expect("the steering boundary commits");
+    assert_eq!(recorded.as_deref(), Some("Use British spelling"));
+    drop(recovery);
+
+    let mut resumed = open_recovery_snapshot(&workspace);
+    let mut live = || -> Result<Option<String>, crate::runtime::types::RuntimeError> {
+        panic!("replay never takes a live message")
+    };
+    assert_eq!(
+        resumed
+            .steering_boundary("phase-000001", "provider-000001", &mut live)
+            .expect("an earlier boundary replays"),
+        None
+    );
+    assert_eq!(
+        resumed
+            .steering_boundary("phase-000001", "provider-000002", &mut live)
+            .expect("the recorded boundary replays")
+            .as_deref(),
+        Some("Use British spelling")
+    );
+}

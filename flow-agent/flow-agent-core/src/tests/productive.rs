@@ -7,5 +7,6 @@ mod platform;
 mod provider_result;
 mod provider_turn;
 mod recovery;
+mod steering;
 mod support;
 mod tool;

@@ -310,6 +310,15 @@ pub(crate) trait ProductiveRecovery {
         Ok(())
     }
 
+    fn steering_boundary(
+        &mut self,
+        _phase_execution_id: &str,
+        _before_attempt_id: &str,
+        live: &mut dyn FnMut() -> Result<Option<String>, RuntimeError>,
+    ) -> Result<Option<String>, RuntimeError> {
+        live()
+    }
+
     fn flow_boundary(
         &mut self,
         _flow_execution_id: &str,
