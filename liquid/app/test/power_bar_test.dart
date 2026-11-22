@@ -256,7 +256,7 @@ void main() {
     tester,
   ) async {
     await kit.show(tester, [
-      const TextPart('Plan'),
+      TablePart(expenses),
     ], shortcuts: ShortcutController.memory(ShortcutSettings.liquidKey()));
     expect(find.text('⇪K'), findsOneWidget, reason: 'the hint follows keys');
     await tester.sendKeyDownEvent(liquidKey, platform: 'macos');
@@ -278,5 +278,12 @@ void main() {
     await tester.tap(find.text('Search or run a command'));
     await tester.pumpAndSettle();
     expect(bar(), findsOneWidget);
+    await type(tester, '/exist');
+    await enter(tester);
+    expect(find.byType(Dialog), findsOneWidget);
+    await tester.sendKeyDownEvent(liquidKey, platform: 'macos');
+    await tester.sendKeyUpEvent(liquidKey, platform: 'macos');
+    await tester.pumpAndSettle();
+    expect(bar(), findsNothing, reason: 'a dialog keeps the keys');
   });
 }

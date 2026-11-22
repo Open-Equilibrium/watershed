@@ -356,7 +356,9 @@ class _AgentShellState extends State<AgentShell> {
       _liquidAlone = Timer(revealDelay, () {});
     } else if (event is KeyUpEvent && (_liquidAlone?.isActive ?? false)) {
       _liquidAlone?.cancel();
-      _powerBar.value = !_powerBar.value;
+      if (ModalRoute.of(context)?.isCurrent ?? true) {
+        _powerBar.value = !_powerBar.value;
+      }
     }
     return false;
   }
