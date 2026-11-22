@@ -305,6 +305,7 @@ class FakeWorkspace implements LiquidWorkspace {
           BridgeMutationKind.setTabSort ||
           BridgeMutationKind.setTabFilter ||
           BridgeMutationKind.setTabFolded ||
+          BridgeMutationKind.setTabTotal ||
           BridgeMutationKind.moveTab ||
           BridgeMutationKind.removeTab:
         final page = views[mutation.page]!;
@@ -359,6 +360,14 @@ class FakeWorkspace implements LiquidWorkspace {
                 : null,
             folded: mutation.kind == BridgeMutationKind.setTabFolded
                 ? mutation.tabs.first.folded
+                : null,
+            totals: mutation.kind == BridgeMutationKind.setTabTotal
+                ? [
+                    for (final total in tab.totals)
+                      if (total.field != mutation.field) total,
+                    if (mutation.total case final total?)
+                      BridgeFieldTotal(field: mutation.field!, total: total),
+                  ]
                 : null,
           );
         }
@@ -1038,6 +1047,34 @@ class FakeWorkspace implements LiquidWorkspace {
     return answer;
   }
 
+  BridgeComputed _total(List<BridgeRow> rows, BridgeFieldTotal total) {
+    final cells = [
+      for (final row in rows)
+        row.cells.where((cell) => cell.field == total.field).firstOrNull?.value,
+    ];
+    final numbers = [
+      for (final cell in cells)
+        if (cell?.kind == BridgeCellKind.number) cell!.number,
+    ];
+    final filled = cells.where((cell) => cell != null).length;
+    final number = switch (total.total) {
+      BridgeTotal.count => rows.length.toDouble(),
+      BridgeTotal.empty => (rows.length - filled).toDouble(),
+      BridgeTotal.filled => filled.toDouble(),
+      BridgeTotal.sum => numbers.fold(0.0, (sum, n) => sum + n),
+      BridgeTotal.average =>
+        numbers.fold(0.0, (sum, n) => sum + n) / numbers.length,
+      BridgeTotal.min => numbers.reduce((a, b) => a < b ? a : b),
+      BridgeTotal.max => numbers.reduce((a, b) => a > b ? a : b),
+    };
+    return BridgeComputed(
+      field: total.field,
+      value: '$number',
+      kind: BridgeValueKind.number,
+      number: number,
+    );
+  }
+
   BridgeAnswer _answer(BridgeQuery query) {
     List<T> window<T>(List<T> all) =>
         all.skip(query.start).take(query.limit).toList();
@@ -1060,6 +1097,7 @@ class FakeWorkspace implements LiquidWorkspace {
       List<BridgeShown> shown = const [],
       String? icon,
       List<BridgeLine> lines = const [],
+      List<BridgeComputed> totals = const [],
     }) => BridgeAnswer(
       areas: areas,
       pages: pages,
@@ -1079,6 +1117,7 @@ class FakeWorkspace implements LiquidWorkspace {
       shown: shown,
       icon: icon,
       lines: lines,
+      totals: totals,
     );
     final code = _isCode(query.block);
     return switch (query.kind) {
@@ -1133,7 +1172,13 @@ class FakeWorkspace implements LiquidWorkspace {
       ),
       BridgeQueryKind.rows => () {
         final shown = _shownRows(query);
-        return answer(count: shown.length, rows: window(shown));
+        return answer(
+          count: shown.length,
+          rows: window(shown),
+          totals: [
+            for (final total in query.totals) _total(shown, total),
+          ],
+        );
       }(),
       BridgeQueryKind.groups => answer(groups: _groups(query)),
       BridgeQueryKind.search => answer(hits: _search(query)),
@@ -1238,6 +1283,7 @@ class FakeWorkspace implements LiquidWorkspace {
         sort: query.sort,
         filter: query.filter,
         search: query.search,
+        totals: const [],
       ),
     );
     BridgeCell? held(BridgeRow row) =>
@@ -1265,6 +1311,9 @@ class FakeWorkspace implements LiquidWorkspace {
             value: value,
             count: within(value).length,
             rows: within(value).take(query.limit).toList(),
+            totals: [
+              for (final total in query.totals) _total(within(value), total),
+            ],
           ),
     ];
   }
@@ -1494,6 +1543,7 @@ BridgeTab tabOf(
   sort: sort,
   filter: filter,
   folded: const [],
+  totals: const [],
 );
 
 BridgeTab withTabId(BridgeTab tab, String id) => changedTab(tab, id: id);
@@ -1508,6 +1558,7 @@ BridgeTab changedTab(
   (BridgeSort?,)? sort,
   (BridgeFilter?,)? filter,
   List<BridgeCell>? folded,
+  List<BridgeFieldTotal>? totals,
 }) => BridgeTab(
   id: id ?? tab.id,
   name: name ?? tab.name,
@@ -1517,4 +1568,5 @@ BridgeTab changedTab(
   sort: sort == null ? tab.sort : sort.$1,
   filter: filter == null ? tab.filter : filter.$1,
   folded: folded ?? tab.folded,
+  totals: totals ?? tab.totals,
 );

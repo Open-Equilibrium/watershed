@@ -45,6 +45,7 @@ BridgeMutation mutation(
   BridgeDrawingEdit? drawing,
   String? line,
   BridgeLineSetup? lineSetup,
+  BridgeTotal? total,
 }) => BridgeMutation(
   kind: kind,
   area: area,
@@ -77,6 +78,7 @@ BridgeMutation mutation(
   drawing: drawing,
   line: line,
   lineSetup: lineSetup,
+  total: total,
 );
 
 BridgeQuery query(
@@ -91,6 +93,7 @@ BridgeQuery query(
   BridgeFilter? filter,
   BridgeFilter? within,
   String? search,
+  List<BridgeFieldTotal> totals = const [],
 }) => BridgeQuery(
   kind: kind,
   area: area,
@@ -103,6 +106,7 @@ BridgeQuery query(
   filter: filter,
   within: within,
   search: search,
+  totals: totals,
 );
 
 typedef CopiedView = ({

@@ -4,6 +4,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
+import '../rust/api/calculation.dart';
 import '../rust/api/database.dart';
 import '../rust/api/workspace.dart';
 import '../theme/icons.dart';
@@ -26,6 +27,7 @@ import 'table_groups.dart';
 import 'table_selection.dart';
 import 'table_tabs.dart';
 import 'table_view_parts.dart';
+import 'total_menu.dart';
 import 'follow.dart';
 import 'page_views.dart';
 import 'paste.dart';
@@ -92,6 +94,7 @@ class _TableBlockState extends State<TableBlock> implements CellDrop {
         ),
       );
       if (start == 0) {
+        await _readTotals(filter, search);
         _allRows = filter == null && search == null
             ? answer.count
             : (await _state.read(
@@ -104,6 +107,110 @@ class _TableBlockState extends State<TableBlock> implements CellDrop {
     kept: 5,
   );
   GroupLines? _lines;
+
+  Map<String, BridgeComputed> _totals = const {};
+  final _totalMenus = <String, OverlayPortalController>{};
+  var _footerHovered = false;
+
+  Future<void> _readTotals(BridgeFilter? filter, String? search) async {
+    final totals = _tab.totals;
+    final answer = totals.isEmpty
+        ? null
+        : await _state.read(
+            query(
+              BridgeQueryKind.rows,
+              block: _block,
+              limit: 0,
+              filter: filter,
+              search: search,
+              totals: totals,
+            ),
+          );
+    _totals = {
+      for (final total in answer?.totals ?? const []) total.field: total,
+    };
+  }
+
+  Future<void> _totalsChanged() async {
+    final filter = widget.fullPage ? null : _tab.filter;
+    try {
+      await _readTotals(filter, _search.isEmpty ? null : _search);
+    } on Object catch (error) {
+      _report(error);
+    }
+    if (mounted) setState(() {});
+  }
+
+  void _setTotal(BridgeField field, BridgeTotal? total) => _setQuery(
+    mutation(
+      BridgeMutationKind.setTabTotal,
+      page: _page,
+      view: widget.view.id,
+      tab: _tab.id,
+      field: field.id,
+      total: total,
+    ),
+  );
+
+  Widget _totalCell(BridgeField field, NumberFormat numbers) {
+    final ws = context.ws;
+    final set = _tab.totals
+        .where((total) => total.field == field.id)
+        .firstOrNull;
+    final value = _totals[field.id];
+    final menu = _totalMenus.putIfAbsent(field.id, OverlayPortalController.new);
+    final numeric =
+        field.kind == BridgeFieldKind.number ||
+        field.kind == BridgeFieldKind.formula;
+    final faint = TextStyle(fontSize: WsMetrics.fsSmall, color: ws.textFaint);
+    return AnchoredMenu(
+      controller: menu,
+      onTapOutside: (_) => menu.hide(),
+      menu: (_) => TotalMenu(
+        numeric: numeric,
+        chosen: set?.total,
+        onPick: (total) {
+          menu.hide();
+          _setTotal(field, total);
+        },
+      ),
+      child: GestureDetector(
+        key: ValueKey('total ${field.id}'),
+        behavior: HitTestBehavior.opaque,
+        onTap: () => setState(menu.toggle),
+        child: Align(
+          alignment: Alignment.centerRight,
+          child: set == null
+              ? Opacity(
+                  opacity: _footerHovered || touchFirst ? 1 : 0,
+                  child: Text('Calculate', style: faint),
+                )
+              : Text.rich(
+                  TextSpan(
+                    children: [
+                      TextSpan(text: '${totalName(set.total)} ', style: faint),
+                      TextSpan(
+                        text: switch (value) {
+                          null => '',
+                          BridgeComputed(kind: BridgeValueKind.number) =>
+                            numberText(numbers, value.number),
+                          _ => value.value,
+                        },
+                        style: TextStyle(
+                          fontSize: WsMetrics.fsCompact,
+                          color: ws.text,
+                          fontFeatures: const [FontFeature.tabularFigures()],
+                        ),
+                      ),
+                    ],
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+        ),
+      ),
+    );
+  }
 
   int _revision = 0;
 
@@ -262,6 +369,7 @@ class _TableBlockState extends State<TableBlock> implements CellDrop {
         ),
       )).groups;
       final tab = _tab;
+      await _readTotals(filter, search);
       lines = _lines = GroupLines(groups, (value) => folds(tab, value));
       _allRows = filter == null && search == null
           ? lines.total
@@ -581,7 +689,9 @@ class _TableBlockState extends State<TableBlock> implements CellDrop {
         widget.views.pending(widget.view.id) == 0) {
       _name.show(widget.view.title);
     }
-    if (sameSetup(_tabIn(old.view), _tab)) return;
+    final before = _tabIn(old.view);
+    if (!sameTotals(before.totals, _tab.totals)) unawaited(_totalsChanged());
+    if (sameSetup(before, _tab)) return;
     _tabChanged();
   }
 
@@ -1591,10 +1701,18 @@ class _TableBlockState extends State<TableBlock> implements CellDrop {
                                   constraints.maxWidth,
                                   NumberFormat.decimalPattern(numbers),
                                   shownDays(days),
+                                  footer: count > 0 || filter != null,
+                                  counted: _rowCount(
+                                    numberFormat,
+                                    _lines?.total ?? count,
+                                    filter,
+                                  ),
                                 ),
                               ),
-                            _NewRow(onTap: () => unawaited(_addRow())),
-                            if (count > 0 || filter != null)
+                            if (database.fields.isEmpty)
+                              _NewRow(onTap: () => unawaited(_addRow())),
+                            if (database.fields.isEmpty &&
+                                (count > 0 || filter != null))
                               Container(
                                 height: _footerHeight,
                                 color: ws.subtle,
@@ -1643,8 +1761,10 @@ class _TableBlockState extends State<TableBlock> implements CellDrop {
     List<BridgeField> fields,
     double width,
     NumberFormat numbers,
-    DateFormat days,
-  ) {
+    DateFormat days, {
+    required bool footer,
+    required String counted,
+  }) {
     final ws = context.ws;
     final rest = [
       for (final field in fields.skip(1)) _width(field.kind),
@@ -1962,6 +2082,51 @@ class _TableBlockState extends State<TableBlock> implements CellDrop {
                 },
               ),
             ),
+            ListenableBuilder(
+              listenable: _sideways,
+              builder: (context, child) => Padding(
+                padding: EdgeInsets.only(
+                  left: _sideways.hasClients ? _sideways.offset : 0,
+                ),
+                child: child,
+              ),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: SizedBox(
+                  width: width,
+                  child: _NewRow(onTap: () => unawaited(_addRow())),
+                ),
+              ),
+            ),
+            if (footer)
+              MouseRegion(
+                onEnter: (_) => setState(() => _footerHovered = true),
+                onExit: (_) => setState(() => _footerHovered = false),
+                child: DecoratedBox(
+                  position: DecorationPosition.foreground,
+                  decoration: BoxDecoration(
+                    border: Border(top: BorderSide(color: ws.border)),
+                  ),
+                  child: line(
+                    height: _footerHeight,
+                    color: ws.subtle,
+                    cell: (index) => index == 0
+                        ? Align(
+                            alignment: Alignment.centerLeft,
+                            child: Text(
+                              counted,
+                              style: TextStyle(
+                                fontSize: WsMetrics.fsCompact,
+                                color: ws.textFaint,
+                              ),
+                            ),
+                          )
+                        : index == fields.length
+                        ? const SizedBox.shrink()
+                        : _totalCell(fields[index], numbers),
+                  ),
+                ),
+              ),
           ],
         ),
       ),
