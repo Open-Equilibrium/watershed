@@ -85,9 +85,7 @@ void main() {
     await trip(tester);
     final plan = tester.getRect(text('Plan'));
     final ideas = tester.getRect(text('Ideas'));
-    final board = tester.getRect(
-      find.byKey(ValueKey('tile ${views()[2].id}')),
-    );
+    final board = tester.getRect(find.byKey(ValueKey('tile ${views()[2].id}')));
     expect(board.left, greaterThan(plan.right));
     expect(board.top, lessThan(plan.bottom));
     expect(ideas.left, closeTo(plan.left, 1));
@@ -122,11 +120,10 @@ void main() {
     expect(placed(tiles().last), (4, 8));
     await press(tester, LogicalKeyboardKey.arrowUp);
     final moved = kit.applied(BridgeMutationKind.moveViews).single;
-    expect((moved.view, moved.lastView, moved.after), (
-      board.id,
-      board.id,
-      null,
-    ));
+    expect(
+      (moved.view, moved.lastView, moved.after),
+      (board.id, board.id, null),
+    );
     expect(views().first.id, board.id);
   });
 
@@ -170,12 +167,44 @@ void main() {
     await arrange(tester);
     await tap(tester, find.byKey(const Key('preview Narrow')));
     final page = tester.getRect(find.byKey(const Key('arranged page')));
-    final board = tester.getRect(
-      find.byKey(ValueKey('tile ${views()[2].id}')),
-    );
+    final board = tester.getRect(find.byKey(ValueKey('tile ${views()[2].id}')));
     final plan = tester.getRect(find.byKey(ValueKey('tile ${views()[0].id}')));
     expect(board.width, closeTo(page.width, 1));
     expect(plan.width, closeTo((page.width - 16) / 2, 1));
+  });
+
+  testWidgets('a sideways drag moves the column and keeps the order', (
+    tester,
+  ) async {
+    await trip(tester);
+    await arrange(tester);
+    final plan = views()[0];
+    final page = tester.getRect(find.byKey(const Key('arranged page')));
+    final column = (page.width + 16) / 12;
+    await tester.drag(find.byKey(Key('move ${plan.id}')), Offset(column, 0));
+    await tester.pumpAndSettle();
+    expect(placed(tiles().last), (1, 5));
+    expect(kit.applied(BridgeMutationKind.moveViews), isEmpty);
+  });
+
+  testWidgets('Narrow preview leaves the Desktop columns as they are', (
+    tester,
+  ) async {
+    await trip(tester);
+    await arrange(tester);
+    await tap(tester, find.byKey(const Key('preview Narrow')));
+    final board = views()[2];
+    final before = tiles().length;
+    await tester.drag(
+      find.byKey(Key('resize ${board.id}')),
+      const Offset(-120, 0),
+    );
+    await tester.drag(
+      find.byKey(Key('move ${board.id}')),
+      const Offset(-40, 0),
+    );
+    await tester.pumpAndSettle();
+    expect(tiles(), hasLength(before));
   });
 
   testWidgets('measured heights stay on the device', (tester) async {

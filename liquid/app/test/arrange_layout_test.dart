@@ -32,18 +32,14 @@ void main() {
       view('notes', text),
       view('ideas', text, boundary: true),
     ]);
-    expect([for (final tile in tiles) tile.views.map((v) => v.id).join('+')], [
-      'plan+flight',
-      'photo',
-      'notes',
-      'ideas',
-    ]);
-    expect([for (final tile in tiles) (tile.column, tile.span)], [
-      (0, 5),
-      (5, 7),
-      (0, 12),
-      (0, 12),
-    ]);
+    expect(
+      [for (final tile in tiles) tile.views.map((v) => v.id).join('+')],
+      ['plan+flight', 'photo', 'notes', 'ideas'],
+    );
+    expect(
+      [for (final tile in tiles) (tile.column, tile.span)],
+      [(0, 5), (5, 7), (0, 12), (0, 12)],
+    );
     expect(arranged(tiles), isTrue);
     expect(arranged(tilesOf([view('notes', text)])), isFalse);
   });
@@ -70,26 +66,28 @@ void main() {
     ]);
   });
 
-  test('a narrow window makes tiles under half the grid half, the rest full',
-      () {
-    final tiles = tilesOf([
-      view('note', board, tile: tile(8, 4)),
-      view('table', board, tile: tile(0, 7)),
-      view('chart', board, tile: tile(7, 5)),
-      view('left', board, tile: tile(0, 5)),
-    ]);
-    final placed = place(
-      tiles,
-      width: 600,
-      gap: 0,
-      narrow: true,
-      heightOf: (_) => 100,
-    );
-    expect(placed, [
-      const Rect.fromLTWH(0, 0, 300, 100),
-      const Rect.fromLTWH(0, 100, 600, 100),
-      const Rect.fromLTWH(0, 200, 300, 100),
-      const Rect.fromLTWH(300, 200, 300, 100),
-    ]);
-  });
+  test(
+    'a narrow window makes tiles under half the grid half, the rest full',
+    () {
+      final tiles = tilesOf([
+        view('note', board, tile: tile(8, 4)),
+        view('table', board, tile: tile(0, 7)),
+        view('chart', board, tile: tile(7, 5)),
+        view('left', board, tile: tile(0, 5)),
+      ]);
+      final placed = place(
+        tiles,
+        width: 600,
+        gap: 0,
+        narrow: true,
+        heightOf: (_) => 100,
+      );
+      expect(placed, [
+        const Rect.fromLTWH(0, 0, 300, 100),
+        const Rect.fromLTWH(0, 100, 600, 100),
+        const Rect.fromLTWH(0, 200, 300, 100),
+        const Rect.fromLTWH(300, 200, 300, 100),
+      ]);
+    },
+  );
 }

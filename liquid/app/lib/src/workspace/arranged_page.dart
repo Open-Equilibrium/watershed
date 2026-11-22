@@ -40,6 +40,8 @@ class ArrangedPage extends StatefulWidget {
 
 typedef _Drag = ({String lead, bool resize, Offset by});
 
+const _reorderBy = 24.0;
+
 class _ArrangedPageState extends State<ArrangedPage> {
   List<BridgeView> _all = const [];
   final _heights = <String, double>{};
@@ -47,6 +49,7 @@ class _ArrangedPageState extends State<ArrangedPage> {
   String? _selected;
   String? _entered;
   _Drag? _drag;
+  bool _narrow = false;
   Offset? _dragFrom;
   int _reads = 0;
   final _keys = FocusNode(debugLabel: 'Arrange mode');
@@ -296,6 +299,10 @@ class _ArrangedPageState extends State<ArrangedPage> {
     final tile = tiles[index];
     final rect = rects[index];
     final columns = inner ? _enteredSpan : gridColumns;
+    if (_narrow) {
+      if (!drag.resize && !inner) _reorder(tiles, rects, index, drag);
+      return;
+    }
     if (drag.resize) {
       final span = ((rect.width + drag.by.dx + tileGap) / step).round();
       _setTile(tile, tile.column, span.clamp(1, columns), inner: inner);
@@ -303,8 +310,12 @@ class _ArrangedPageState extends State<ArrangedPage> {
     }
     final column = ((rect.left + drag.by.dx) / step).round();
     _setTile(tile, column, _spanOf(tile, inner: inner), inner: inner);
-    if (inner) return;
-    final top = rect.top + drag.by.dy;
+    if (!inner) _reorder(tiles, rects, index, drag);
+  }
+
+  void _reorder(List<TileSpec> tiles, List<Rect> rects, int index, _Drag drag) {
+    if (drag.by.dy.abs() < _reorderBy) return;
+    final top = rects[index].top + drag.by.dy;
     int? after;
     for (final (at, shown) in rects.indexed) {
       if (at != index && shown.top <= top) after = at;
@@ -429,7 +440,7 @@ class _ArrangedPageState extends State<ArrangedPage> {
           ),
         ),
         Positioned(
-          top: -10,
+          top: -6,
           left: width / 2 - 20,
           child: handle(
             Key('move $key'),
@@ -574,6 +585,7 @@ class _ArrangedPageState extends State<ArrangedPage> {
         final preview = arranging && _views.narrowPreview.value;
         if (preview) width = math.min(width, narrowWidth - 160);
         final narrow = preview || width < narrowWidth;
+        _narrow = narrow;
         final tiles = tilesOf(_all);
         final rects = place(
           tiles,
