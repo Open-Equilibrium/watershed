@@ -100,8 +100,8 @@ pub use session_reading::{
     SessionEventReader, replay_conversation_run, replay_conversation_run_streaming,
 };
 pub use steering::{
-    MAX_STEERING_MESSAGE_BYTES, drain_productive_steering, request_productive_pause,
-    steer_productive_run,
+    MAX_PENDING_STEERING_MESSAGES, MAX_STEERING_MESSAGE_BYTES, drain_productive_steering,
+    request_productive_pause, steer_productive_run,
 };
 pub use types::{EmitMode, RunOutput, RuntimeError, render_human_failure_status};
 pub use validate::validate_protocol_jsonl_text;

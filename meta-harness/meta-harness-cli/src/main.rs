@@ -191,6 +191,7 @@ fn answers_as_flow_agent(flow: &Path) -> bool {
     use std::io::Read;
     use std::process::{Command, Stdio};
     use std::time::{Duration, Instant};
+    const PROBE_OUTPUT_BYTES: u64 = 64 * 1024;
     let Ok(mut child) = Command::new(flow)
         .args(["acp", "--help"])
         .stdin(Stdio::null())
@@ -201,15 +202,28 @@ fn answers_as_flow_agent(flow: &Path) -> bool {
         return false;
     };
     let deadline = Instant::now() + Duration::from_secs(5);
+    let stdout = child.stdout.take();
+    let (sender, usage) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let mut text = Vec::new();
+        let read = stdout.is_some_and(|stdout| {
+            stdout
+                .take(PROBE_OUTPUT_BYTES)
+                .read_to_end(&mut text)
+                .is_ok()
+        });
+        let _ = sender.send(read.then_some(text));
+    });
+    let usage = usage
+        .recv_timeout(deadline.saturating_duration_since(Instant::now()))
+        .ok()
+        .flatten();
     loop {
         match child.try_wait() {
             Ok(Some(status)) => {
-                let mut usage = String::new();
-                let read = child
-                    .stdout
-                    .take()
-                    .is_some_and(|mut stdout| stdout.read_to_string(&mut usage).is_ok());
-                return status.success() && read && usage.contains("flow acp");
+                return status.success()
+                    && usage
+                        .is_some_and(|usage| String::from_utf8_lossy(&usage).contains("flow acp"));
             }
             Ok(None) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(20)),
             _ => {
@@ -391,14 +405,18 @@ mod tests {
         executable(&checker, "#!/bin/sh\necho 'Flow, a static type checker'\n");
         let hanging = dir.join("hanging");
         executable(&hanging, "#!/bin/sh\nexec sleep 60\n");
+        let holding = dir.join("holding");
+        executable(&holding, "#!/bin/sh\nsleep 60 &\necho '  flow acp'\n");
         let bin = dir.join("bin");
         let flow = executable(&bin, "#!/bin/sh\necho '  flow acp'\n");
 
         assert!(flow_agent(None).is_none());
         assert!(flow_agent(Some(empty.clone().into_os_string())).is_none());
         assert!(flow_agent(Some("bin".into())).is_none());
-        let path = std::env::join_paths([&empty, &checker, &hanging, &bin]).unwrap();
+        let path = std::env::join_paths([&empty, &checker, &hanging, &holding, &bin]).unwrap();
+        let started = std::time::Instant::now();
         let agent = flow_agent(Some(path)).expect("flow on the PATH is found");
+        assert!(started.elapsed() < std::time::Duration::from_secs(15));
         assert_eq!(agent.id, "flow-agent");
         assert_eq!(agent.command, flow);
         assert_eq!(agent.args, ["acp"]);

@@ -365,6 +365,11 @@ fn a_message_sent_while_a_flow_works_steers_its_active_phase() {
     first_in_flight
         .recv_timeout(cli_child_watchdog())
         .expect("the first turn reaches the endpoint");
+    let switched = acp.send(
+        "session/set_config_option",
+        json!({"sessionId": session_id, "configId": "flow", "value": "note"}),
+    );
+    assert_eq!(acp.reply(switched, &mut seen)["error"]["code"], -32602);
     acp.notify("session/cancel", json!({"sessionId": session_id}));
     assert_eq!(
         acp.reply(first, &mut seen)["result"]["stopReason"],

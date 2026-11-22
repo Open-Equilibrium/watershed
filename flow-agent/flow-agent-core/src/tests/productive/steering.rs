@@ -215,3 +215,21 @@ fn a_stop_after_a_queued_message_pauses_until_the_next_message() {
     waiter.join().unwrap();
     crate::settle_productive_operation();
 }
+
+#[test]
+fn the_steering_queue_holds_a_bounded_number_of_messages() {
+    const CHILD_ENV: &str = "WATERSHED_STEERING_QUEUE_BOUND_CHILD";
+    if run_isolated_test(CHILD_ENV) {
+        return;
+    }
+    for index in 0..crate::MAX_PENDING_STEERING_MESSAGES {
+        crate::steer_productive_run(format!("message {index}")).expect("the queue has room");
+    }
+    crate::request_productive_pause();
+
+    assert!(crate::steer_productive_run("one more".to_owned()).is_err());
+    let waiting = crate::drain_productive_steering();
+    assert_eq!(waiting.len(), crate::MAX_PENDING_STEERING_MESSAGES);
+    assert_eq!(waiting.last().map(String::as_str), Some("message 15"));
+    crate::steer_productive_run("room again".to_owned()).expect("draining frees the queue");
+}

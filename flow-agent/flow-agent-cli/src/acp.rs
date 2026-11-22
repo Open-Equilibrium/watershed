@@ -7,7 +7,7 @@ use std::{
     io::{self, BufRead, Read, Write},
     path::PathBuf,
     process::ExitCode,
-    sync::mpsc::{self, Sender},
+    sync::mpsc::{self, SyncSender},
     thread,
 };
 
@@ -20,6 +20,7 @@ const MAX_FLOW_CHOICES: usize = 64;
 const SESSION_PREFIX: &str = "chat-";
 const SESSION_RANDOM_BYTES: usize = 16;
 pub(crate) const MAX_ACP_LINE_BYTES: usize = 8 * flow_agent_core::MAX_STEERING_MESSAGE_BYTES;
+const INPUT_CAPACITY: usize = 64;
 const PARSE_ERROR: i64 = -32700;
 const METHOD_NOT_FOUND: i64 = -32601;
 const INVALID_PARAMS: i64 = -32602;
@@ -42,7 +43,7 @@ struct Session {
 
 struct Agent<W: Write> {
     out: W,
-    sender: Sender<Input>,
+    sender: SyncSender<Input>,
     session: Option<Session>,
     prompt: Option<Value>,
     running: bool,
@@ -51,7 +52,7 @@ struct Agent<W: Write> {
 }
 
 pub(crate) fn acp_command() -> Result<ExitCode, RuntimeError> {
-    let (sender, receiver) = mpsc::channel();
+    let (sender, receiver) = mpsc::sync_channel(INPUT_CAPACITY);
     let reader = sender.clone();
     thread::Builder::new()
         .name("flow-acp-input".to_owned())
@@ -77,7 +78,7 @@ pub(crate) fn acp_command() -> Result<ExitCode, RuntimeError> {
     Ok(ExitCode::SUCCESS)
 }
 
-fn read_messages(mut input: impl BufRead, sender: &Sender<Input>) {
+fn read_messages(mut input: impl BufRead, sender: &SyncSender<Input>) {
     loop {
         let mut line = Vec::new();
         match (&mut input)
@@ -148,7 +149,7 @@ impl<W: Write> Agent<W> {
     fn message(&mut self, message: Value) -> Result<(), RuntimeError> {
         let params = message.get("params").cloned().unwrap_or(Value::Null);
         let Some(id) = message.get("id").cloned() else {
-            if message["method"] == "session/cancel" {
+            if message["method"] == "session/cancel" && self.session_for(&params).is_ok() {
                 self.cancel()?;
             }
             return Ok(());
@@ -211,10 +212,16 @@ impl<W: Write> Agent<W> {
     }
 
     fn set_flow(&mut self, params: &Value) -> Result<Value, (i64, String)> {
-        let session = self.session_for(params)?;
         if params["configId"] != FLOW_OPTION {
             return Err((INVALID_PARAMS, "configId is unknown".to_owned()));
         }
+        if self.running {
+            return Err((
+                INVALID_PARAMS,
+                "the Flow is fixed once the chat has started".to_owned(),
+            ));
+        }
+        let session = self.session_for(params)?;
         let value = params["value"].as_str().unwrap_or_default();
         if !session.flows.iter().any(|flow| flow.id == value) {
             return Err((INVALID_PARAMS, format!("Flow {value} is not installed")));
@@ -414,7 +421,7 @@ fn run(
     flow: Option<String>,
     state: ConversationState,
     text: String,
-    sender: &Sender<Input>,
+    sender: &SyncSender<Input>,
 ) -> Result<RunOutput, RuntimeError> {
     let operation = InterruptCoordinator::new().operation();
     let mut forwarder = EventForwarder {
@@ -470,7 +477,7 @@ fn run(
 }
 
 struct EventForwarder {
-    sender: Sender<Input>,
+    sender: SyncSender<Input>,
     line: Vec<u8>,
 }
 

@@ -5,6 +5,7 @@ use std::{
 };
 
 pub const MAX_STEERING_MESSAGE_BYTES: usize = MAX_FLOW_RUN_INPUT_BYTES;
+pub const MAX_PENDING_STEERING_MESSAGES: usize = 16;
 
 static STEERING: Steering = Steering::new();
 
@@ -54,6 +55,11 @@ pub fn steer_productive_run(message: String) -> Result<(), RuntimeError> {
         )));
     }
     let mut state = STEERING.lock();
+    if state.messages.len() >= MAX_PENDING_STEERING_MESSAGES {
+        return Err(RuntimeError::Protocol(format!(
+            "at most {MAX_PENDING_STEERING_MESSAGES} steering messages may wait"
+        )));
+    }
     state.pause = false;
     state.messages.push_back(message);
     drop(state);
