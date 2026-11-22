@@ -131,6 +131,7 @@ fn main() {
         page: budget.clone(),
         after: None,
         name: "Expenses".into(),
+        layout: liquid_core::Layout::Table,
     };
     let Some(Created::Block { block, .. }) = workspace
         .apply(request(add))
@@ -217,6 +218,7 @@ fn main() {
             field: fields[3].clone(),
             matches: Match::Is(Cell::Checkbox(true)),
         }),
+        within: None,
         start: 0,
         limit: 100,
         search: None,
@@ -229,6 +231,21 @@ fn main() {
         "a window of {} of its {} paid rows, sorted by amount: {:.2} ms",
         window.rows.len(),
         window.count,
+        start.elapsed().as_secs_f64() * 1e3
+    );
+    let first_cards = RowQuery {
+        filter: None,
+        limit: 50,
+        ..query
+    };
+    let start = Instant::now();
+    let groups = workspace
+        .groups(&block, &first_cards, &fields[3])
+        .expect("the Database groups its rows");
+    println!(
+        "{} groups with their first {} rows each, sorted by amount: {:.2} ms",
+        groups.len(),
+        first_cards.limit,
         start.elapsed().as_secs_f64() * 1e3
     );
 }

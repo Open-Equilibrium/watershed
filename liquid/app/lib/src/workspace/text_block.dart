@@ -209,14 +209,14 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
           after: after,
           block: existing.table,
           text: existing.title,
-          sort: existing.sort,
-          filter: existing.filter,
+          tabs: existing.tabs,
         ),
         null => mutation(
           BridgeMutationKind.addDatabaseBlock,
           page: _page,
           after: after,
           text: '',
+          layout: choice.layout,
         ),
       }, const []);
     } on Object {
@@ -630,6 +630,11 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
     }
     if (pasted.code case final code?) return _pasteCode(code, pasted.language);
     final text = pasted.text;
+    if (_state.copiedView case final copied?
+        when copied.text == text && copied.change == pasted.change) {
+      if (await _pasteView(copied) || !mounted) return;
+      _state.copiedView = null;
+    }
     final selection = _text.selection;
     if (text == null ||
         text.isEmpty ||
@@ -641,6 +646,27 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
     _text.value = value.copyWith(
       selection: TextSelection.collapsed(offset: selection.start + text.length),
     );
+  }
+
+  Future<bool> _pasteView(CopiedView copied) async {
+    final views = widget.views;
+    try {
+      final added = await views.write(
+        mutation(
+          BridgeMutationKind.duplicateTable,
+          page: _page,
+          after: widget.view.id,
+          block: copied.table,
+          text: '${copied.text} (copy)',
+          tabs: copied.tabs,
+        ),
+        const [],
+      );
+      views.pastedCopy.value = (view: added.view!, copied: copied);
+      return true;
+    } on Object {
+      return false;
+    }
   }
 
   Future<void> _pasteCode(String code, String language) async {

@@ -152,6 +152,7 @@ String? filterLabel(
     BridgeMatch.empty => '$name is empty',
     BridgeMatch.notEmpty => '$name is not empty',
     BridgeMatch.contains => '$name contains ${value?.text ?? ''}',
+    BridgeMatch.between => '$name from ${value?.text ?? ''} to ${filter.until}',
     BridgeMatch.is_ => switch (value?.kind) {
       BridgeCellKind.number => '$name is ${numberText(numbers, value!.number)}',
       BridgeCellKind.checkbox =>
@@ -321,6 +322,76 @@ Widget _list(int count, IndexedWidgetBuilder item) => Flexible(
   ),
 );
 
+typedef Choice = ({
+  IconData icon,
+  String label,
+  bool checked,
+  VoidCallback onTap,
+});
+
+typedef Choices = ({String? label, List<Choice> choices});
+
+class ChoiceMenu extends StatelessWidget {
+  const ChoiceMenu({
+    super.key,
+    this.title,
+    required this.sections,
+    this.hint,
+    required this.onClose,
+  });
+
+  final String? title;
+  final List<Choices> sections;
+  final String? hint;
+  final VoidCallback onClose;
+
+  @override
+  Widget build(BuildContext context) {
+    final ws = context.ws;
+    Widget faint(String text) => Padding(
+      padding: const EdgeInsets.symmetric(
+        horizontal: WsMetrics.space3,
+        vertical: WsMetrics.space1,
+      ),
+      child: Text(
+        text,
+        style: TextStyle(fontSize: WsMetrics.fsSmall, color: ws.textFaint),
+      ),
+    );
+    final divider = Divider(height: 9, thickness: 1, color: ws.border);
+    return _Panel(
+      onEscape: onClose,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          ?switch (title) {
+            final title? => faint(title),
+            null => null,
+          },
+          for (final (index, section) in sections.indexed) ...[
+            if (section.label case final label?)
+              faint(label)
+            else if (index > 0)
+              divider,
+            for (final choice in section.choices)
+              _Item(
+                icon: choice.icon,
+                label: choice.label,
+                checked: choice.checked,
+                onTap: () {
+                  onClose();
+                  choice.onTap();
+                },
+              ),
+          ],
+          if (hint case final hint?) ...[divider, faint(hint)],
+        ],
+      ),
+    );
+  }
+}
+
 class SortMenu extends StatelessWidget {
   const SortMenu({
     super.key,
@@ -449,6 +520,7 @@ class _FilterMenuState extends State<FilterMenu> {
     BridgeMatch.is_ => 'is',
     BridgeMatch.empty => 'is empty',
     BridgeMatch.notEmpty => 'is not empty',
+    BridgeMatch.between => 'is between',
   };
 
   bool get _types =>

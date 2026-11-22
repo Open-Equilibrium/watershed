@@ -295,6 +295,7 @@ fn a_file_cell_holds_files_of_finished_attachments() {
             page: page.clone(),
             after: Some(intro),
             name: "Bookings".into(),
+            layout: liquid_core::Layout::Table,
         },
     )
     .unwrap() else {
@@ -342,6 +343,7 @@ fn a_file_cell_holds_files_of_finished_attachments() {
             field: files.clone(),
             matches: Match::NotEmpty,
         }),
+        within: None,
         start: 0,
         limit: 10,
         search: None,
@@ -376,6 +378,13 @@ fn a_file_cell_holds_files_of_finished_attachments() {
     assert_eq!(
         apply(&mut workspace, set(Cell::Text("Invoice.pdf".into()))),
         Err(Error::WrongKind)
+    );
+    workspace.close_page(&page);
+    let kept = workspace.rows(&block, &all).unwrap().rows;
+    assert_eq!(
+        kept[0].cell(&files),
+        Some(&Cell::Files(read.clone())),
+        "a refused write leaves the files as they were"
     );
     apply(&mut workspace, set(Cell::Files(Vec::new()))).unwrap();
     let rows = workspace.rows(&block, &all).unwrap();

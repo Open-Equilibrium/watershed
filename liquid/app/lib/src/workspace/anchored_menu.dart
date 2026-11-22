@@ -14,9 +14,15 @@ class AnchoredMenu extends StatefulWidget {
     this.gap = WsMetrics.space1,
     this.onTapOutside,
     this.end = false,
+    this.beside,
+    this.group,
   });
 
+  final Object? group;
+
   final bool end;
+
+  final double? beside;
 
   final OverlayPortalController? controller;
 
@@ -55,7 +61,31 @@ class _AnchoredMenuState extends State<AnchoredMenu> {
         final up = wanted != null && wanted > below && above > below;
         Widget shown = TextFieldTapRegion(child: menu(context));
         if (tapped != null) {
-          shown = TapRegion(groupId: _menu, onTapOutside: tapped, child: shown);
+          shown = TapRegion(
+            groupId: widget.group ?? _menu,
+            onTapOutside: tapped,
+            child: shown,
+          );
+        }
+        if (widget.beside case final width?) {
+          final right = anchor.right + gap + width <= window.width;
+          final tallest = window.height - 2 * WsMetrics.space1;
+          return Positioned(
+            left: right
+                ? anchor.right + gap
+                : math.max(0, anchor.left - gap - width),
+            top: math.max(
+              WsMetrics.space1,
+              math.min(
+                anchor.top,
+                window.height - math.min(height ?? 0, tallest) - gap,
+              ),
+            ),
+            child: ConstrainedBox(
+              constraints: BoxConstraints(maxHeight: tallest),
+              child: shown,
+            ),
+          );
         }
         return Positioned(
           left: widget.end ? null : anchor.left,
@@ -72,7 +102,9 @@ class _AnchoredMenuState extends State<AnchoredMenu> {
           ),
         );
       },
-      child: tapped == null ? child : TapRegion(groupId: _menu, child: child),
+      child: tapped == null
+          ? child
+          : TapRegion(groupId: widget.group ?? _menu, child: child),
     );
   }
 }

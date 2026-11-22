@@ -162,6 +162,7 @@ class FakeWorkspace implements LiquidWorkspace {
             title: shown.title,
             boundary: false,
             kind: shown.kind,
+            tabs: shown.tabs,
           );
           created = _block(
             mutation.page!,
@@ -220,6 +221,7 @@ class FakeWorkspace implements LiquidWorkspace {
             title: shown.title,
             boundary: shown.boundary,
             kind: to,
+            tabs: shown.tabs,
           );
         }
         languages.remove(mutation.block);
@@ -252,27 +254,85 @@ class FakeWorkspace implements LiquidWorkspace {
           title: shown.title,
           boundary: mutation.boundary,
           kind: shown.kind,
+          tabs: shown.tabs,
         );
         _viewsChanged(mutation.page);
         return BridgeApplied(elements: const [], action: _id());
-      case BridgeMutationKind.setViewSort || BridgeMutationKind.setViewFilter:
+      case BridgeMutationKind.addTab ||
+          BridgeMutationKind.renameTab ||
+          BridgeMutationKind.setTabLayout ||
+          BridgeMutationKind.setTabGroup ||
+          BridgeMutationKind.setTabDate ||
+          BridgeMutationKind.setTabSort ||
+          BridgeMutationKind.setTabFilter ||
+          BridgeMutationKind.setTabFolded ||
+          BridgeMutationKind.moveTab ||
+          BridgeMutationKind.removeTab:
         final page = views[mutation.page]!;
         final at = page.indexWhere((view) => view.id == mutation.view);
+        if (at < 0) throw 'not found';
         final shown = page[at];
-        final sorts = mutation.kind == BridgeMutationKind.setViewSort;
+        final tabs = [...shown.tabs];
+        final index = tabs.indexWhere((tab) => tab.id == mutation.tab);
+        String? created;
+        if (mutation.kind == BridgeMutationKind.addTab) {
+          final tab = withTabId(mutation.tabs.first, created = _id());
+          tabs.insert(
+            mutation.after == null
+                ? 0
+                : tabs.indexWhere((tab) => tab.id == mutation.after) + 1,
+            tab,
+          );
+        } else if (index < 0) {
+          throw 'not found';
+        } else if (mutation.kind == BridgeMutationKind.removeTab) {
+          if (tabs.length == 1) throw 'not allowed';
+          tabs.removeAt(index);
+        } else if (mutation.kind == BridgeMutationKind.moveTab) {
+          final moved = tabs.removeAt(index);
+          tabs.insert(
+            mutation.after == null
+                ? 0
+                : tabs.indexWhere((tab) => tab.id == mutation.after) + 1,
+            moved,
+          );
+        } else {
+          final tab = tabs[index];
+          tabs[index] = changedTab(
+            tab,
+            name: mutation.kind == BridgeMutationKind.renameTab
+                ? mutation.text
+                : null,
+            layout: mutation.kind == BridgeMutationKind.setTabLayout
+                ? mutation.layout
+                : null,
+            group: mutation.kind == BridgeMutationKind.setTabGroup
+                ? (mutation.field,)
+                : null,
+            date: mutation.kind == BridgeMutationKind.setTabDate
+                ? (mutation.field,)
+                : null,
+            sort: mutation.kind == BridgeMutationKind.setTabSort
+                ? (mutation.sort,)
+                : null,
+            filter: mutation.kind == BridgeMutationKind.setTabFilter
+                ? (mutation.filter,)
+                : null,
+            folded: mutation.kind == BridgeMutationKind.setTabFolded
+                ? mutation.tabs.first.folded
+                : null,
+          );
+        }
         page[at] = BridgeView(
           id: shown.id,
           block: shown.block,
           title: shown.title,
           boundary: shown.boundary,
           kind: shown.kind,
-          sort: sorts ? mutation.sort : shown.sort,
-          filter: sorts ? shown.filter : mutation.filter,
+          tabs: tabs,
         );
-        _changed(
-          BridgeResource(kind: BridgeResourceKind.views, page: mutation.page),
-        );
-        return BridgeApplied(elements: const [], action: _id());
+        _viewsChanged(mutation.page);
+        return BridgeApplied(elements: const [], action: _id(), tab: created);
       case BridgeMutationKind.removeView:
         views[mutation.page]!.removeWhere((view) => view.id == mutation.view);
         _viewsChanged(mutation.page);
@@ -294,6 +354,21 @@ class FakeWorkspace implements LiquidWorkspace {
         );
         _changed(_tableResource(mutation.block));
         return BridgeApplied(elements: const [], action: _id(), row: row.id);
+      case BridgeMutationKind.moveRow:
+        final table = rows[mutation.block]!;
+        final at = table.indexWhere((row) => row.id == mutation.row);
+        if (at < 0) throw 'not found';
+        final moved = table.removeAt(at);
+        table.insert(
+          mutation.last
+              ? table.length
+              : mutation.after == null
+              ? 0
+              : table.indexWhere((row) => row.id == mutation.after) + 1,
+          moved,
+        );
+        _changed(_tableResource(mutation.block));
+        return BridgeApplied(elements: const [], action: _id());
       case BridgeMutationKind.removeRow:
         final table = rows[mutation.block]!;
         final at = table.indexWhere((row) => row.id == mutation.row);
@@ -488,7 +563,41 @@ class FakeWorkspace implements LiquidWorkspace {
         _changed(_blockResource(mutation));
         return BridgeApplied(elements: ids, action: _id());
       case BridgeMutationKind.addDatabaseBlock:
-        final view = _newView(BridgeBlockKind.database, title: mutation.text!);
+        final layout = mutation.layout;
+        final extra = switch (layout) {
+          BridgeLayout.table => null,
+          BridgeLayout.board => BridgeField(
+            id: _id(),
+            name: 'Status',
+            kind: BridgeFieldKind.select,
+            options: [
+              for (final (color, name) in [
+                'Not started',
+                'In progress',
+                'Done',
+              ].indexed)
+                BridgeOption(id: _id(), name: name, color: color),
+            ],
+          ),
+          BridgeLayout.calendar => BridgeField(
+            id: _id(),
+            name: 'Date',
+            kind: BridgeFieldKind.date,
+            options: const [],
+          ),
+        };
+        final view = _newView(
+          BridgeBlockKind.database,
+          title: mutation.text!,
+          tabs: [
+            tabOf(
+              layout,
+              id: _id(),
+              group: layout == BridgeLayout.board ? extra?.id : null,
+              date: layout == BridgeLayout.calendar ? extra?.id : null,
+            ),
+          ],
+        );
         _newTable(view.block, _areaOf(mutation.page!), mutation.text!);
         databases[view.block] = BridgeDatabase(
           name: mutation.text!,
@@ -499,9 +608,24 @@ class FakeWorkspace implements LiquidWorkspace {
               kind: BridgeFieldKind.text,
               options: const [],
             ),
+            ?extra,
           ],
         );
         rows[view.block] = [];
+        return _placeView(mutation, view);
+      case BridgeMutationKind.duplicateTable:
+        final source = databases[mutation.block] ?? (throw 'not found');
+        final view = _newView(
+          BridgeBlockKind.database,
+          title: mutation.text!,
+          tabs: [for (final tab in mutation.tabs) withTabId(tab, _id())],
+        );
+        _newTable(view.block, _areaOf(mutation.page!), mutation.text!);
+        databases[view.block] = BridgeDatabase(
+          name: mutation.text!,
+          fields: source.fields,
+        );
+        rows[view.block] = [...rows[mutation.block]!];
         return _placeView(mutation, view);
       case BridgeMutationKind.createTable:
         final table = _id();
@@ -531,8 +655,9 @@ class FakeWorkspace implements LiquidWorkspace {
             title: mutation.text!,
             boundary: false,
             kind: BridgeBlockKind.database,
-            sort: mutation.sort,
-            filter: mutation.filter,
+            tabs: mutation.tabs.isEmpty
+                ? [tabOf(BridgeLayout.table, id: _id())]
+                : [for (final tab in mutation.tabs) withTabId(tab, _id())],
           ),
         );
       case BridgeMutationKind.renameView:
@@ -545,8 +670,7 @@ class FakeWorkspace implements LiquidWorkspace {
           title: mutation.text!,
           boundary: shown.boundary,
           kind: shown.kind,
-          sort: shown.sort,
-          filter: shown.filter,
+          tabs: shown.tabs,
         );
         _viewsChanged(mutation.page);
         if (shown.kind == BridgeBlockKind.database &&
@@ -607,8 +731,7 @@ class FakeWorkspace implements LiquidWorkspace {
             page: page,
             view: view.id,
             title: view.title,
-            sort: view.sort,
-            filter: view.filter,
+            tabs: view.tabs,
           ),
   ];
 
@@ -619,13 +742,29 @@ class FakeWorkspace implements LiquidWorkspace {
     BridgeBlockKind kind, {
     bool boundary = false,
     String title = '',
+    List<BridgeTab> tabs = const [],
   }) => BridgeView(
     id: _id(),
     block: _id(),
     title: title,
     boundary: boundary,
     kind: kind,
+    tabs: tabs,
   );
+
+  final device = <String, String>{};
+
+  @override
+  Future<String?> remembered({required String key}) async => device[key];
+
+  @override
+  Future<void> remember({required String key, String? value}) async {
+    if (value == null) {
+      device.remove(key);
+    } else {
+      device[key] = value;
+    }
+  }
 
   BridgeApplied _placeView(BridgeMutation mutation, BridgeView view) {
     final page = views.putIfAbsent(mutation.page!, () => []);
@@ -751,6 +890,7 @@ class FakeWorkspace implements LiquidWorkspace {
       BridgeDrawing? drawing,
       BridgeDatabase? database,
       List<BridgeRow> rows = const [],
+      List<BridgeGroup> groups = const [],
       List<BridgeTable> tables = const [],
       List<BridgeShown> shown = const [],
       String? icon,
@@ -766,6 +906,7 @@ class FakeWorkspace implements LiquidWorkspace {
       drawing: drawing,
       database: database,
       rows: rows,
+      groups: groups,
       tables: tables,
       shown: shown,
       icon: icon,
@@ -819,6 +960,7 @@ class FakeWorkspace implements LiquidWorkspace {
         final shown = _shownRows(query);
         return answer(count: shown.length, rows: window(shown));
       }(),
+      BridgeQueryKind.groups => answer(groups: _groups(query)),
       BridgeQueryKind.workspace => answer(text: name, icon: icon),
       BridgeQueryKind.tables => answer(
         count: tables.length,
@@ -831,29 +973,82 @@ class FakeWorkspace implements LiquidWorkspace {
     };
   }
 
-  BridgeView _decoded(BridgeView view) {
-    final filter = view.filter;
-    final value = filter?.value;
-    if (filter == null || value == null) return view;
-    return BridgeView(
-      id: view.id,
-      block: view.block,
-      title: view.title,
-      boundary: view.boundary,
-      kind: view.kind,
-      sort: view.sort,
-      filter: BridgeFilter(
-        field: filter.field,
-        matches: filter.matches,
-        value: BridgeCell(
-          kind: value.kind,
-          text: value.text,
-          number: value.number,
-          checked: value.checked,
-          files: [...value.files],
+  BridgeView _decoded(BridgeView view) => BridgeView(
+    id: view.id,
+    block: view.block,
+    title: view.title,
+    boundary: view.boundary,
+    kind: view.kind,
+    tabs: [
+      for (final tab in view.tabs)
+        changedTab(
+          tab,
+          filter: switch (tab.filter) {
+            final filter? => (
+              BridgeFilter(
+                field: filter.field,
+                matches: filter.matches,
+                value: switch (filter.value) {
+                  final value? => BridgeCell(
+                    kind: value.kind,
+                    text: value.text,
+                    number: value.number,
+                    checked: value.checked,
+                    files: [...value.files],
+                  ),
+                  null => null,
+                },
+                until: filter.until,
+              ),
+            ),
+            null => null,
+          },
         ),
+    ],
+  );
+
+  List<BridgeGroup> _groups(BridgeQuery query) {
+    final field = databases[query.block]!.fields.firstWhere(
+      (field) => field.id == query.field,
+    );
+    final shown = _shownRows(
+      BridgeQuery(
+        kind: BridgeQueryKind.rows,
+        block: query.block,
+        start: 0,
+        limit: 0,
+        sort: query.sort,
+        filter: query.filter,
+        search: query.search,
       ),
     );
+    BridgeCell? held(BridgeRow row) =>
+        row.cells.where((cell) => cell.field == field.id).firstOrNull?.value;
+    final values = field.kind == BridgeFieldKind.checkbox
+        ? [checkboxCell(false), checkboxCell(true)]
+        : [
+            emptyCell,
+            for (final option in field.options) selectCell(option.id),
+          ];
+    List<BridgeRow> within(BridgeCell value) => [
+      for (final row in shown)
+        if (switch (value.kind) {
+          BridgeCellKind.checkbox =>
+            (held(row)?.checked ?? false) == value.checked,
+          BridgeCellKind.empty => held(row) == null,
+          _ => held(row)?.text == value.text,
+        })
+          row,
+    ];
+    return [
+      for (final value in values)
+        if (value.kind != BridgeCellKind.empty || within(value).isNotEmpty)
+          BridgeGroup(
+            value: value,
+            count: within(value).length,
+            rows: within(value).take(query.limit).toList(),
+          ),
+    ];
   }
 
   List<BridgeRow> _shownRows(BridgeQuery query) {
@@ -863,6 +1058,10 @@ class FakeWorkspace implements LiquidWorkspace {
       final cell = cellOf(row, filter.field);
       final value = filter.value;
       return switch (filter.matches) {
+        BridgeMatch.between =>
+          cell?.text != null &&
+              cell!.text!.compareTo(value!.text!) >= 0 &&
+              cell.text!.compareTo(filter.until!) <= 0,
         BridgeMatch.empty => cell == null,
         BridgeMatch.notEmpty => cell != null,
         BridgeMatch.contains =>
@@ -896,6 +1095,7 @@ class FakeWorkspace implements LiquidWorkspace {
     final shown = [
       for (final row in rows[query.block] ?? const <BridgeRow>[])
         if ((query.filter == null || passes(row, query.filter!)) &&
+            (query.within == null || passes(row, query.within!)) &&
             (search.isEmpty || found(row)))
           row,
     ];
@@ -1030,3 +1230,73 @@ BridgeElement changed(BridgeElement element, BridgeElementChange change) =>
       corners: element.corners,
       text: change.text ?? element.text,
     );
+
+const emptyCell = BridgeCell(
+  kind: BridgeCellKind.empty,
+  number: 0,
+  checked: false,
+  files: [],
+);
+
+BridgeCell checkboxCell(bool checked) => BridgeCell(
+  kind: BridgeCellKind.checkbox,
+  number: 0,
+  checked: checked,
+  files: const [],
+);
+
+BridgeCell selectCell(String option) => BridgeCell(
+  kind: BridgeCellKind.select,
+  text: option,
+  number: 0,
+  checked: false,
+  files: const [],
+);
+
+BridgeTab tabOf(
+  BridgeLayout layout, {
+  String id = '',
+  String? name,
+  String? group,
+  String? date,
+  BridgeSort? sort,
+  BridgeFilter? filter,
+}) => BridgeTab(
+  id: id,
+  name:
+      name ??
+      switch (layout) {
+        BridgeLayout.table => 'Table',
+        BridgeLayout.board => 'Board',
+        BridgeLayout.calendar => 'Calendar',
+      },
+  layout: layout,
+  group: group,
+  date: date,
+  sort: sort,
+  filter: filter,
+  folded: const [],
+);
+
+BridgeTab withTabId(BridgeTab tab, String id) => changedTab(tab, id: id);
+
+BridgeTab changedTab(
+  BridgeTab tab, {
+  String? id,
+  String? name,
+  BridgeLayout? layout,
+  (String?,)? group,
+  (String?,)? date,
+  (BridgeSort?,)? sort,
+  (BridgeFilter?,)? filter,
+  List<BridgeCell>? folded,
+}) => BridgeTab(
+  id: id ?? tab.id,
+  name: name ?? tab.name,
+  layout: layout ?? tab.layout,
+  group: group == null ? tab.group : group.$1,
+  date: date == null ? tab.date : date.$1,
+  sort: sort == null ? tab.sort : sort.$1,
+  filter: filter == null ? tab.filter : filter.$1,
+  folded: folded ?? tab.folded,
+);

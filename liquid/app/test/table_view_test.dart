@@ -46,9 +46,7 @@ void main() {
   ];
 
   ScrollController sidewaysOf(WidgetTester tester) => tester
-      .widget<SingleChildScrollView>(
-        kit.inTable(find.byType(SingleChildScrollView)),
-      )
+      .widget<SingleChildScrollView>(find.byKey(const Key('table columns')))
       .controller!;
 
   Future<void> openPanel(WidgetTester tester) async {
@@ -134,8 +132,8 @@ void main() {
       expect(rows.every((query) => query.start == 0), isTrue);
       expect(
         tester.getSize(find.byType(TableBlock)).height,
-        lessThan(32 + 40 + 11 * 34 + 2 * 40),
-        reason: 'a title, the Sort and Filter line, and about ten rows',
+        lessThan(32 + 34 + 40 + 11 * 34 + 2 * 40),
+        reason: 'a title, the tabs, the setup line, and about ten rows',
       );
 
       await tester.scrollUntilVisible(

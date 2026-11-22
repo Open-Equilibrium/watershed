@@ -59,14 +59,17 @@ void main() {
     await kit.show(tester, [TablePart(rows)]);
     final amount = kit.inTable(find.text('Amount'));
     await tap(tester, amount);
-    expect(view().sort, const BridgeSort(field: 'amount', descending: false));
+    expect(
+      view().tabs.first.sort,
+      const BridgeSort(field: 'amount', descending: false),
+    );
     expect(names(tester), ['Groceries', 'Electricity', 'Rent']);
     expect(find.byKey(const Key('column sorted')), findsOneWidget);
     await tap(tester, amount);
-    expect(view().sort?.descending, isTrue);
+    expect(view().tabs.first.sort?.descending, isTrue);
     expect(names(tester), ['Rent', 'Electricity', 'Groceries']);
     await tap(tester, amount);
-    expect(view().sort, isNull);
+    expect(view().tabs.first.sort, isNull);
     expect(find.byKey(const Key('column sorted')), findsNothing);
   });
 
@@ -80,10 +83,10 @@ void main() {
     await tester.pumpAndSettle();
     expect(names(tester), ['Electricity', 'Rent']);
     expect(kit.inTable(find.text('2 of 3 rows')), findsOneWidget);
-    expect(view().filter, isNull);
+    expect(view().tabs.first.filter, isNull);
     expect(
       kit.fake.applied.where(
-        (applied) => applied.kind == BridgeMutationKind.setViewFilter,
+        (applied) => applied.kind == BridgeMutationKind.setTabFilter,
       ),
       isEmpty,
     );

@@ -8,8 +8,8 @@ import 'media.dart';
 
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `of`, `of`, `of`, `of`, `of`, `of`, `row_query`, `to_core`, `to_core`
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
+// These functions are ignored because they are not marked as `pub`: `filter`, `of`, `of`, `of`, `of`, `of`, `of`, `of`, `of`, `sort`, `to_core`, `to_core`, `to_core`, `to_core`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
 
 class BridgeCell {
   final BridgeCellKind kind;
@@ -118,11 +118,18 @@ class BridgeFilter {
   final String field;
   final BridgeMatch matches;
   final BridgeCell? value;
+  final String? until;
 
-  const BridgeFilter({required this.field, required this.matches, this.value});
+  const BridgeFilter({
+    required this.field,
+    required this.matches,
+    this.value,
+    this.until,
+  });
 
   @override
-  int get hashCode => field.hashCode ^ matches.hashCode ^ value.hashCode;
+  int get hashCode =>
+      field.hashCode ^ matches.hashCode ^ value.hashCode ^ until.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -131,10 +138,37 @@ class BridgeFilter {
           runtimeType == other.runtimeType &&
           field == other.field &&
           matches == other.matches &&
-          value == other.value;
+          value == other.value &&
+          until == other.until;
 }
 
-enum BridgeMatch { empty, notEmpty, is_, contains }
+class BridgeGroup {
+  final BridgeCell value;
+  final PlatformInt64 count;
+  final List<BridgeRow> rows;
+
+  const BridgeGroup({
+    required this.value,
+    required this.count,
+    required this.rows,
+  });
+
+  @override
+  int get hashCode => value.hashCode ^ count.hashCode ^ rows.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeGroup &&
+          runtimeType == other.runtimeType &&
+          value == other.value &&
+          count == other.count &&
+          rows == other.rows;
+}
+
+enum BridgeLayout { table, board, calendar }
+
+enum BridgeMatch { empty, notEmpty, is_, contains, between }
 
 class BridgeOption {
   final String id;
@@ -194,4 +228,51 @@ class BridgeSort {
           runtimeType == other.runtimeType &&
           field == other.field &&
           descending == other.descending;
+}
+
+class BridgeTab {
+  final String id;
+  final String name;
+  final BridgeLayout layout;
+  final String? group;
+  final String? date;
+  final BridgeSort? sort;
+  final BridgeFilter? filter;
+  final List<BridgeCell> folded;
+
+  const BridgeTab({
+    required this.id,
+    required this.name,
+    required this.layout,
+    this.group,
+    this.date,
+    this.sort,
+    this.filter,
+    required this.folded,
+  });
+
+  @override
+  int get hashCode =>
+      id.hashCode ^
+      name.hashCode ^
+      layout.hashCode ^
+      group.hashCode ^
+      date.hashCode ^
+      sort.hashCode ^
+      filter.hashCode ^
+      folded.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeTab &&
+          runtimeType == other.runtimeType &&
+          id == other.id &&
+          name == other.name &&
+          layout == other.layout &&
+          group == other.group &&
+          date == other.date &&
+          sort == other.sort &&
+          filter == other.filter &&
+          folded == other.folded;
 }

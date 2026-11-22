@@ -57,6 +57,8 @@ ids! {
     RowId,
     OptionId,
     ElementId,
+    #[derive(Default)]
+    TabId,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]

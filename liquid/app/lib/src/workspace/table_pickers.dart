@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:intl/intl.dart';
 
 import '../controls.dart';
 import '../rust/api/database.dart';
@@ -7,19 +6,11 @@ import '../rust/api/workspace.dart';
 import '../theme/icons.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
-import 'cell_pickers.dart' show shownDays;
 import 'explorer.dart' show untitled;
-import 'table_query.dart' show filterLabel;
+import 'table_tabs.dart';
 import 'workspace_state.dart';
 
-typedef ExistingView = ({
-  String table,
-  String title,
-  BridgeSort? sort,
-  BridgeFilter? filter,
-});
-
-typedef _Setup = ({BridgeSort? sort, BridgeFilter? filter});
+typedef ExistingView = ({String table, String title, List<BridgeTab> tabs});
 
 String _named(String name) => name.isEmpty ? untitled : name;
 
@@ -40,60 +31,29 @@ Future<ExistingView?> pickExistingTable(
   final shown = (await state.read(
     query(BridgeQueryKind.tableViews, block: table.id),
   )).shown;
-  final plain = (table: table.id, title: table.name, sort: null, filter: null);
-  final setups = [
-    for (final view in shown)
-      if (view.sort != null || view.filter != null) view,
-  ];
-  if (setups.isEmpty) return plain;
-  final fields =
-      (await state.read(query(BridgeQueryKind.database, block: table.id)))
-          .database
-          ?.fields ??
-      const <BridgeField>[];
   if (!context.mounted) return null;
   final pages = {
     for (final area in state.areas.value)
       for (final page in state.pages(area.id).value) page.id: page.title,
   };
-  final locale = Localizations.localeOf(context).toString();
-  final setup = await showDialog<_Setup>(
+  final tabs = await showDialog<List<BridgeTab>>(
     context: context,
     builder: (_) => _AddView(
       name: table.name,
       views: [
-        for (final view in setups)
+        for (final view in shown)
           (
-            title: view.title,
-            page: _named(pages[view.page] ?? ''),
-            setup: _describe(view, fields, locale),
-            chosen: (sort: view.sort, filter: view.filter),
+            title: '${_named(pages[view.page] ?? '')} › ${_named(view.title)}',
+            detail: view.tabs.length == 1
+                ? '1 tab'
+                : '${view.tabs.length} tabs',
+            tabs: view.tabs,
           ),
       ],
     ),
   );
-  if (setup == null) return null;
-  return (
-    table: table.id,
-    title: table.name,
-    sort: setup.sort,
-    filter: setup.filter,
-  );
-}
-
-String _describe(BridgeShown view, List<BridgeField> fields, String locale) {
-  final numbers = NumberFormat.decimalPattern(
-    NumberFormat.localeExists(locale) ? locale : 'en',
-  );
-  final days = shownDays(DateFormat.localeExists(locale) ? locale : 'en');
-  return [
-    if (view.sort case final sort?)
-      if (fields.where((field) => field.id == sort.field).firstOrNull
-          case final field?)
-        '${field.name}, ${sort.descending ? 'descending' : 'ascending'}',
-    if (view.filter case final filter?)
-      ?filterLabel(filter, fields, numbers, days),
-  ].join(' · ');
+  if (tabs == null) return null;
+  return (table: table.id, title: table.name, tabs: tabs);
 }
 
 class _ChooseTable extends StatelessWidget {
@@ -140,7 +100,7 @@ class _ChooseTable extends StatelessWidget {
   }
 }
 
-typedef _Offered = ({String title, String page, String setup, _Setup chosen});
+typedef _Offered = ({String title, String detail, List<BridgeTab> tabs});
 
 class _AddView extends StatefulWidget {
   const _AddView({required this.name, required this.views});
@@ -154,11 +114,12 @@ class _AddView extends StatefulWidget {
 
 class _AddViewState extends State<_AddView> {
   int? _copied;
+  var _layout = BridgeLayout.table;
 
   @override
   Widget build(BuildContext context) {
     final ws = context.ws;
-    Widget option(int? index, String label, {String? detail, String? page}) {
+    Widget option(int? index, Widget child) {
       final on = _copied == index;
       return InkWell(
         key: Key('setup ${index ?? 'none'}'),
@@ -182,56 +143,69 @@ class _AddViewState extends State<_AddView> {
                 color: on ? ws.accent : ws.textFaint,
               ),
               const SizedBox(width: WsMetrics.space3),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      label,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        fontSize: WsMetrics.fsCompact,
-                        color: ws.text,
-                      ),
-                    ),
-                    if (detail != null)
-                      Text(
-                        detail,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          fontSize: WsMetrics.fsSmall,
-                          color: ws.textFaint,
-                        ),
-                      ),
-                  ],
-                ),
-              ),
-              if (page != null) ...[
-                const SizedBox(width: WsMetrics.space3),
-                Text(
-                  page,
-                  style: TextStyle(
-                    fontSize: WsMetrics.fsSmall,
-                    color: ws.textFaint,
-                  ),
-                ),
-              ],
+              Expanded(child: child),
             ],
           ),
         ),
       );
     }
 
+    Text text(String text, {bool faint = false}) => Text(
+      text,
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+      style: TextStyle(
+        fontSize: faint ? WsMetrics.fsSmall : WsMetrics.fsCompact,
+        color: faint ? ws.textFaint : ws.text,
+      ),
+    );
+
+    final layoutChoice = Row(
+      children: [
+        for (final (layout, icon, name) in layouts)
+          Padding(
+            padding: const EdgeInsets.only(right: WsMetrics.space1),
+            child: InkWell(
+              key: Key('layout $name'),
+              borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
+              onTap: () => setState(() {
+                _copied = null;
+                _layout = layout;
+              }),
+              child: Container(
+                height: 26,
+                padding: const EdgeInsets.symmetric(
+                  horizontal: WsMetrics.space2,
+                ),
+                decoration: BoxDecoration(
+                  color: _layout == layout ? ws.surface : null,
+                  border: Border.all(
+                    color: _layout == layout ? ws.borderStrong : ws.border,
+                  ),
+                  borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(icon, size: 13, color: ws.textMuted),
+                    const SizedBox(width: WsMetrics.space1),
+                    text(name),
+                  ],
+                ),
+              ),
+            ),
+          ),
+      ],
+    );
+
     return ActionDialog(
       title: 'Add a View of “${_named(widget.name)}”',
       actions: [
         PrimaryButton(
           label: 'Add View',
-          onPressed: () => Navigator.of(context).pop<_Setup>(switch (_copied) {
-            final index? => widget.views[index].chosen,
-            null => (sort: null, filter: null),
+          onPressed: () => Navigator.of(context).pop(switch (_copied) {
+            final index? => widget.views[index].tabs,
+            null => [tabOfLayout(_layout)],
           }),
         ),
       ],
@@ -245,28 +219,42 @@ class _AddViewState extends State<_AddView> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              option(null, 'Start with no sort or filter'),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(
-                  WsMetrics.space2,
-                  WsMetrics.space2,
-                  WsMetrics.space2,
-                  WsMetrics.space1,
-                ),
-                child: Text(
-                  'Or copy the setup of',
-                  style: TextStyle(
-                    fontSize: WsMetrics.fsSmall,
-                    color: ws.textFaint,
+              option(
+                null,
+                Padding(
+                  padding: const EdgeInsets.symmetric(
+                    vertical: WsMetrics.space1,
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      text('Start with one tab'),
+                      const SizedBox(height: WsMetrics.space2),
+                      layoutChoice,
+                    ],
                   ),
                 ),
               ),
+              if (widget.views.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(
+                    WsMetrics.space2,
+                    WsMetrics.space2,
+                    WsMetrics.space2,
+                    WsMetrics.space1,
+                  ),
+                  child: text('Or copy the tabs of', faint: true),
+                ),
               for (final (index, view) in widget.views.indexed)
                 option(
                   index,
-                  _named(view.title),
-                  detail: view.setup,
-                  page: view.page,
+                  Row(
+                    children: [
+                      Expanded(child: text(view.title)),
+                      const SizedBox(width: WsMetrics.space3),
+                      text(view.detail, faint: true),
+                    ],
+                  ),
                 ),
             ],
           ),

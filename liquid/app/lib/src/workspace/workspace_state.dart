@@ -32,6 +32,9 @@ BridgeMutation mutation(
   BridgeCell? cell,
   BridgeSort? sort,
   BridgeFilter? filter,
+  String? tab,
+  BridgeLayout layout = BridgeLayout.table,
+  List<BridgeTab> tabs = const [],
   String? mediaType,
   String? attachment,
   BridgeDrawingStyle? drawingStyle,
@@ -57,6 +60,9 @@ BridgeMutation mutation(
   cell: cell,
   sort: sort,
   filter: filter,
+  tab: tab,
+  layout: layout,
+  tabs: tabs,
   mediaType: mediaType,
   attachment: attachment,
   drawingStyle: drawingStyle,
@@ -70,8 +76,10 @@ BridgeQuery query(
   String? block,
   int start = 0,
   int limit = window,
+  String? field,
   BridgeSort? sort,
   BridgeFilter? filter,
+  BridgeFilter? within,
   String? search,
 }) => BridgeQuery(
   kind: kind,
@@ -80,10 +88,20 @@ BridgeQuery query(
   block: block,
   start: start,
   limit: limit,
+  field: field,
   sort: sort,
   filter: filter,
+  within: within,
   search: search,
 );
+
+typedef CopiedView = ({
+  String text,
+  int? change,
+  String table,
+  String title,
+  List<BridgeTab> tabs,
+});
 
 class EditChain {
   Object? refused;
@@ -131,6 +149,8 @@ class _Reread {
 }
 
 class WorkspaceState {
+  CopiedView? copiedView;
+
   WorkspaceState(this.workspace, {this.layout});
 
   final LiquidWorkspace workspace;

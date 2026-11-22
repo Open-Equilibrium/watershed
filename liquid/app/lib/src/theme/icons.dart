@@ -38,6 +38,10 @@ abstract final class LucideIcons {
   static const ellipsis = IconData(0xe0b6, fontFamily: _family);
   static const file = IconData(0xe0c0, fontFamily: _family);
   static const table = IconData(0xe17d, fontFamily: _family);
+  static const kanban = IconData(0xe4dc, fontFamily: _family);
+  static const layoutList = IconData(0xe1d9, fontFamily: _family);
+  static const pencil = IconData(0xe1f9, fontFamily: _family);
+  static const clipboardCopy = IconData(0xe225, fontFamily: _family);
   static const text = IconData(0xe185, fontFamily: _family);
   static const hash = IconData(0xe0ef, fontFamily: _family);
   static const circleChevronDown = IconData(0xe4dd, fontFamily: _family);

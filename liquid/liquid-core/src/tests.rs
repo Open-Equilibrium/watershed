@@ -151,6 +151,14 @@ impl Store for Flaky {
     fn part(&mut self, attachment: &AttachmentId, index: u64) -> Result<Option<Vec<u8>>, Error> {
         self.inner.part(attachment, index)
     }
+
+    fn remembered(&mut self, key: &str) -> Result<Option<String>, Error> {
+        self.inner.remembered(key)
+    }
+
+    fn remember(&mut self, key: &str, value: Option<&str>, most: usize) -> Result<(), Error> {
+        self.inner.remember(key, value, most)
+    }
 }
 
 #[test]

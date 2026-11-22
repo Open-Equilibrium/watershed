@@ -1,7 +1,8 @@
 use serde::{Deserialize, Deserializer, Serialize};
 
 use crate::{
-    ActionId, AreaId, AttachmentId, BlockId, FieldId, OptionId, PageId, PersonId, RowId, ViewId,
+    ActionId, AreaId, AttachmentId, BlockId, FieldId, Layout, OptionId, PageId, PersonId, RowId,
+    TabId, TabSetup, ViewId,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -94,6 +95,14 @@ impl<T> Place<T> {
             Self::Last => Place::Last,
         }
     }
+
+    pub(crate) fn map<U>(self, change: impl FnOnce(T) -> U) -> Place<U> {
+        match self {
+            Self::First => Place::First,
+            Self::After(after) => Place::After(change(after)),
+            Self::Last => Place::Last,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -132,15 +141,68 @@ pub enum Mutation {
         page: PageId,
         view: ViewId,
     },
-    SetViewSort {
+    AddTab {
         page: PageId,
         view: ViewId,
+        after: Option<TabId>,
+        setup: Box<TabSetup>,
+    },
+    RenameTab {
+        page: PageId,
+        view: ViewId,
+        tab: TabId,
+        name: String,
+    },
+    SetTabLayout {
+        page: PageId,
+        view: ViewId,
+        tab: TabId,
+        layout: Layout,
+    },
+    SetTabGroup {
+        page: PageId,
+        view: ViewId,
+        tab: TabId,
+        group: Option<FieldId>,
+    },
+    SetTabDate {
+        page: PageId,
+        view: ViewId,
+        tab: TabId,
+        date: Option<FieldId>,
+    },
+    #[serde(alias = "SetViewSort")]
+    SetTabSort {
+        page: PageId,
+        view: ViewId,
+        #[serde(default)]
+        tab: TabId,
         sort: Option<crate::Sort>,
     },
-    SetViewFilter {
+    #[serde(alias = "SetViewFilter")]
+    SetTabFilter {
         page: PageId,
         view: ViewId,
+        #[serde(default)]
+        tab: TabId,
         filter: Option<crate::Filter>,
+    },
+    SetTabFolded {
+        page: PageId,
+        view: ViewId,
+        tab: TabId,
+        folded: Vec<Cell>,
+    },
+    MoveTab {
+        page: PageId,
+        view: ViewId,
+        tab: TabId,
+        after: Option<TabId>,
+    },
+    RemoveTab {
+        page: PageId,
+        view: ViewId,
+        tab: TabId,
     },
     SplitTextBlock {
         page: PageId,
@@ -205,6 +267,15 @@ pub enum Mutation {
         page: PageId,
         after: Option<ViewId>,
         name: String,
+        #[serde(default)]
+        layout: Layout,
+    },
+    DuplicateTable {
+        page: PageId,
+        after: Option<ViewId>,
+        table: BlockId,
+        name: String,
+        tabs: Vec<TabSetup>,
     },
     CreateTable {
         area: AreaId,
@@ -215,8 +286,8 @@ pub enum Mutation {
         after: Option<ViewId>,
         table: BlockId,
         title: String,
-        sort: Option<crate::Sort>,
-        filter: Option<crate::Filter>,
+        #[serde(default)]
+        tabs: Vec<TabSetup>,
     },
     RenameView {
         page: PageId,
@@ -261,6 +332,11 @@ pub enum Mutation {
         block: BlockId,
         row: RowId,
     },
+    MoveRow {
+        block: BlockId,
+        row: RowId,
+        place: Place<RowId>,
+    },
     SetCell {
         block: BlockId,
         row: RowId,
@@ -285,6 +361,7 @@ pub enum Created {
     Field(FieldId),
     Row(RowId),
     Option(OptionId),
+    Tab(TabId),
     Elements(Vec<crate::ElementId>),
 }
 

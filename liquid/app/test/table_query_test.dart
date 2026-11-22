@@ -57,14 +57,17 @@ void main() {
     await kit.show(tester, [TablePart(rows)]);
     await tap(tester, find.byKey(const Key('table sort')));
     await tap(tester, menuText('Amount'));
-    expect(view().sort, const BridgeSort(field: 'amount', descending: false));
+    expect(
+      view().tabs.first.sort,
+      const BridgeSort(field: 'amount', descending: false),
+    );
     expect(names(tester), ['Groceries', 'Electricity', 'Rent']);
     await tap(tester, menuText('Descending'));
-    expect(view().sort?.descending, isTrue);
+    expect(view().tabs.first.sort?.descending, isTrue);
     expect(names(tester), ['Rent', 'Electricity', 'Groceries']);
     expect(shows('table sort', 'Amount, descending'), findsOneWidget);
     await tap(tester, menuText('Remove the sort'));
-    expect(view().sort, isNull);
+    expect(view().tabs.first.sort, isNull);
     expect(shows('table sort', 'Sort'), findsOneWidget);
   });
 
@@ -74,14 +77,14 @@ void main() {
     await tap(tester, find.byKey(const Key('filter field')));
     await tap(tester, menuText('Category'));
     await tap(tester, menuText('Home'));
-    expect(view().filter?.field, 'category');
-    expect(view().filter?.matches, BridgeMatch.is_);
-    expect(view().filter?.value?.text, 'home');
+    expect(view().tabs.first.filter?.field, 'category');
+    expect(view().tabs.first.filter?.matches, BridgeMatch.is_);
+    expect(view().tabs.first.filter?.value?.text, 'home');
     expect(names(tester), ['Electricity', 'Rent']);
     expect(find.text('2 of 3 rows'), findsOneWidget);
     expect(find.text('Category is Home'), findsOneWidget);
     await tap(tester, menuText('Remove the filter'));
-    expect(view().filter, isNull);
+    expect(view().tabs.first.filter, isNull);
     expect(find.text('3 rows'), findsOneWidget);
   });
 
@@ -91,7 +94,7 @@ void main() {
     await tester.enterText(find.byKey(const Key('filter value')), 'ren');
     await tester.testTextInput.receiveAction(TextInputAction.done);
     await tester.pumpAndSettle();
-    expect(view().filter?.matches, BridgeMatch.contains);
+    expect(view().tabs.first.filter?.matches, BridgeMatch.contains);
     expect(names(tester), ['Rent']);
     expect(find.text('Name contains ren'), findsOneWidget);
   });
@@ -104,7 +107,7 @@ void main() {
     await tester.enterText(find.byKey(const Key('filter value')), 'abc');
     await tester.testTextInput.receiveAction(TextInputAction.done);
     await tester.pumpAndSettle();
-    expect(view().filter, isNull);
+    expect(view().tabs.first.filter, isNull);
     await tester.enterText(find.byKey(const Key('filter value')), '96');
     await tester.testTextInput.receiveAction(TextInputAction.done);
     await tester.pumpAndSettle();
@@ -120,7 +123,7 @@ void main() {
     await tap(tester, menuText('Amount'));
     await tap(tester, find.byKey(const Key('filter match')));
     await tap(tester, menuText('is empty'));
-    expect(view().filter?.matches, BridgeMatch.empty);
+    expect(view().tabs.first.filter?.matches, BridgeMatch.empty);
     expect(find.text('Row 4'), findsOneWidget);
     expect(find.text('1 of 4 rows'), findsOneWidget);
   });
@@ -129,9 +132,10 @@ void main() {
     await kit.show(tester, [TablePart(rows)]);
     await kit.workspace.apply(
       mutation(
-        BridgeMutationKind.setViewSort,
+        BridgeMutationKind.setTabSort,
         page: kit.page,
         view: view().id,
+        tab: view().tabs.first.id,
         sort: const BridgeSort(field: 'amount', descending: true),
       ),
     );
@@ -144,9 +148,10 @@ void main() {
     await kit.show(tester, [TablePart(rows)]);
     await kit.workspace.apply(
       mutation(
-        BridgeMutationKind.setViewSort,
+        BridgeMutationKind.setTabSort,
         page: kit.page,
         view: view().id,
+        tab: view().tabs.first.id,
         sort: const BridgeSort(field: 'amount', descending: true),
       ),
     );
@@ -233,11 +238,11 @@ void main() {
     await tester.enterText(find.byKey(const Key('filter value')), 'ren');
     await tester.testTextInput.receiveAction(TextInputAction.done);
     await tester.pumpAndSettle();
-    expect(view().filter, isNotNull);
+    expect(view().tabs.first.filter, isNotNull);
     await tester.enterText(find.byKey(const Key('filter value')), '');
     await tester.testTextInput.receiveAction(TextInputAction.done);
     await tester.pumpAndSettle();
-    expect(view().filter, isNull);
+    expect(view().tabs.first.filter, isNull);
   });
 
   testWidgets('deleting a field counts every row, not those shown', (
@@ -259,13 +264,13 @@ void main() {
     await tap(tester, find.byKey(const Key('table filter')));
     await tap(tester, find.byKey(const Key('filter match')));
     await tap(tester, menuText('is empty'));
-    final saved = view().filter;
+    final saved = view().tabs.first.filter;
     expect(saved?.matches, BridgeMatch.empty);
     await tap(tester, find.byKey(const Key('filter match')));
     await tap(tester, menuText('contains'));
     await tester.tapAt(Offset.zero);
     await tester.pumpAndSettle();
-    expect(view().filter?.matches, BridgeMatch.empty);
+    expect(view().tabs.first.filter?.matches, BridgeMatch.empty);
   });
 
   testWidgets('esc closes the menu after its value field went', (tester) async {

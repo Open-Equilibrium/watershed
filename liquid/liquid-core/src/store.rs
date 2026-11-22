@@ -33,6 +33,8 @@ pub trait Store {
     fn discard_upload(&mut self, upload: &str) -> Result<(), Error>;
     fn attachment_size(&mut self, attachment: &AttachmentId) -> Result<Option<u64>, Error>;
     fn part(&mut self, attachment: &AttachmentId, index: u64) -> Result<Option<Vec<u8>>, Error>;
+    fn remembered(&mut self, key: &str) -> Result<Option<String>, Error>;
+    fn remember(&mut self, key: &str, value: Option<&str>, most: usize) -> Result<(), Error>;
 }
 
 #[derive(Default)]
@@ -41,6 +43,7 @@ pub struct MemoryStore {
     actions: Vec<Action>,
     uploads: HashMap<String, Vec<Vec<u8>>>,
     attachments: HashMap<AttachmentId, (u64, Vec<Vec<u8>>)>,
+    device: Vec<(String, String)>,
 }
 
 impl Store for MemoryStore {
@@ -126,5 +129,25 @@ impl Store for MemoryStore {
             .attachments
             .get(attachment)
             .and_then(|(_, parts)| parts.get(usize::try_from(index).ok()?).cloned()))
+    }
+
+    fn remembered(&mut self, key: &str) -> Result<Option<String>, Error> {
+        Ok(self
+            .device
+            .iter()
+            .find(|(kept, _)| kept == key)
+            .map(|(_, value)| value.clone()))
+    }
+
+    fn remember(&mut self, key: &str, value: Option<&str>, most: usize) -> Result<(), Error> {
+        self.device.retain(|(kept, _)| kept != key);
+        if let Some(value) = value {
+            let over = (self.device.len() + 1).saturating_sub(most);
+            self.device.drain(..over.min(self.device.len()));
+            if most > 0 {
+                self.device.push((key.to_string(), value.to_string()));
+            }
+        }
+        Ok(())
     }
 }

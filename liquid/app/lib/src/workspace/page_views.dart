@@ -61,6 +61,8 @@ class PageViews extends ChangeNotifier {
 
   final caret = ValueNotifier<Caret?>(null);
 
+  final pastedCopy = ValueNotifier<({String view, CopiedView copied})?>(null);
+
   final naming = <String, (String, bool) Function()>{};
 
   final _boards = <String, (BoardController, int)>{};
@@ -235,6 +237,7 @@ class PageViews extends ChangeNotifier {
     unawaited(_followed?.cancel());
     _views.dispose();
     caret.dispose();
+    pastedCopy.dispose();
     styles.dispose();
     uploads.dispose();
     for (final (board, _) in _boards.values) {

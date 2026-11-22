@@ -2,10 +2,8 @@ use std::collections::HashMap;
 
 use automerge::AutoCommit;
 
-use crate::model::{
-    self, BLOCK, BLOCKS, BOUNDARY, KIND, ROW_FILTER, ROW_SORT, TABLE, TITLE, VIEWS,
-};
-use crate::{BlockId, BlockKind, Error, Filter, Place, Sort, View, ViewId};
+use crate::model::{self, BLOCK, BLOCKS, BOUNDARY, KIND, TABLE, TITLE, VIEWS};
+use crate::{BlockId, BlockKind, Error, Place, Tab, View, ViewId};
 
 struct Placed {
     sort: String,
@@ -28,8 +26,14 @@ impl Order {
         let placed = model::sorted(doc, VIEWS)
             .into_iter()
             .filter_map(|entry| {
+                let mut tabs = Vec::new();
                 let (block, kind) = match entry.get(TABLE) {
-                    Some(table) => (table, BlockKind::Database),
+                    Some(table) => {
+                        if let Some(view) = model::live(doc, VIEWS, &entry.id) {
+                            tabs = crate::tab::read(doc, &view, &entry.id);
+                        }
+                        (table, BlockKind::Database)
+                    }
                     None => entry
                         .get(BLOCK)
                         .and_then(|block| Some((block, *blocks.get(block)?)))?,
@@ -42,8 +46,7 @@ impl Order {
                         title: entry.get(TITLE).unwrap_or_default().to_string(),
                         boundary: entry.get(BOUNDARY) == Some("true"),
                         kind,
-                        sort: stored(entry.get(ROW_SORT)),
-                        filter: stored(entry.get(ROW_FILTER)),
+                        tabs,
                     },
                 })
             })
@@ -103,21 +106,15 @@ impl Order {
         }
     }
 
-    pub(crate) fn set_sort(&mut self, view: &ViewId, sort: Option<Sort>) {
-        if let Some(index) = self.position(view) {
-            self.placed[index].view.sort = sort;
-        }
-    }
-
     pub(crate) fn set_title(&mut self, view: &ViewId, title: &str) {
         if let Some(index) = self.position(view) {
             self.placed[index].view.title = title.to_string();
         }
     }
 
-    pub(crate) fn set_filter(&mut self, view: &ViewId, filter: Option<Filter>) {
+    pub(crate) fn set_tabs(&mut self, view: &ViewId, tabs: Vec<Tab>) {
         if let Some(index) = self.position(view) {
-            self.placed[index].view.filter = filter;
+            self.placed[index].view.tabs = tabs;
         }
     }
 
@@ -147,10 +144,6 @@ impl Order {
             .iter()
             .position(|placed| &placed.view.id == view)
     }
-}
-
-fn stored<T: serde::de::DeserializeOwned>(json: Option<&str>) -> Option<T> {
-    serde_json::from_str(json?).ok()
 }
 
 #[cfg(test)]

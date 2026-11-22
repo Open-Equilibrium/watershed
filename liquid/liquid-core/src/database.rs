@@ -62,6 +62,7 @@ pub const MAX_FILTER_TEXT: usize = 1_000;
 pub struct RowQuery {
     pub sort: Option<Sort>,
     pub filter: Option<Filter>,
+    pub within: Option<Filter>,
     pub start: usize,
     pub limit: usize,
     pub search: Option<String>,
@@ -85,6 +86,14 @@ pub enum Match {
     NotEmpty,
     Is(Cell),
     Contains(String),
+    Between(String, String),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Group {
+    pub value: Cell,
+    pub count: usize,
+    pub rows: Vec<Row>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -137,6 +146,29 @@ impl Index {
             .partition_point(|row| (&row.sort, &row.id) < (&sort, &id));
         let cells = HashMap::new();
         self.rows.insert(index, Indexed { sort, id, cells });
+    }
+
+    fn move_to(&mut self, row: &RowId, place: Place<&RowId>) -> Result<String, Error> {
+        let at = self.position(row).ok_or(Error::NotFound)?;
+        let moved = self.rows.remove(at);
+        let sort = match self.key_at(place) {
+            Ok(sort) => sort,
+            Err(error) => {
+                self.rows.insert(at, moved);
+                return Err(error);
+            }
+        };
+        let index = self
+            .rows
+            .partition_point(|row| (&row.sort, &row.id) < (&sort, &moved.id));
+        self.rows.insert(
+            index,
+            Indexed {
+                sort: sort.clone(),
+                ..moved
+            },
+        );
+        Ok(sort)
     }
 
     fn remove(&mut self, row: &RowId) {
@@ -219,12 +251,7 @@ fn add_field_to(
     if siblings.len() >= MAX_FIELDS {
         return Err(Error::TooMany);
     }
-    let place = match place {
-        Place::First => Place::First,
-        Place::After(after) => Place::After(after.as_str()),
-        Place::Last => Place::Last,
-    };
-    let sort = model::sort_at(&siblings, place)?;
+    let sort = model::sort_at(&siblings, place.map(|after| after.as_str()))?;
     let entry = model::insert_in(
         doc,
         fields,
@@ -253,6 +280,14 @@ fn field(doc: &AutoCommit, block: &BlockId, field: &FieldId) -> Result<(ObjId, F
     let entry = model::live_in(doc, &fields, field.as_str()).ok_or(Error::NotFound)?;
     let kind = kind(model::string(doc, &entry, KIND).as_deref()).ok_or(Error::NotFound)?;
     Ok((entry, kind))
+}
+
+pub(crate) fn field_kind(
+    doc: &AutoCommit,
+    block: &BlockId,
+    field_id: &FieldId,
+) -> Result<FieldKind, Error> {
+    Ok(field(doc, block, field_id)?.1)
 }
 
 pub(crate) fn rename_field(
@@ -322,6 +357,18 @@ fn row(doc: &AutoCommit, block: &BlockId, row: &RowId) -> Result<ObjId, Error> {
     model::live_in(doc, &rows, row.as_str()).ok_or(Error::NotFound)
 }
 
+pub(crate) fn move_row(
+    doc: &mut AutoCommit,
+    index: &mut Index,
+    block: &BlockId,
+    row_id: &RowId,
+    place: Place<&RowId>,
+) -> Result<(), Error> {
+    let entry = row(doc, block, row_id)?;
+    let sort = index.move_to(row_id, place)?;
+    Ok(doc.put(&entry, SORT, sort)?)
+}
+
 pub(crate) fn remove_row(
     doc: &mut AutoCommit,
     index: &mut Index,
@@ -344,47 +391,102 @@ pub(crate) fn set_cell(
 ) -> Result<(), Error> {
     let (field_entry, kind) = field(doc, block, field_id)?;
     let cells = map(doc, &row(doc, block, row_id)?, CELLS)?;
-    let scalar = match (kind, value) {
+    match (kind, value) {
         (FieldKind::File, Cell::Files(files)) if files.len() > MAX_FILES => {
             return Err(Error::TooMany);
         }
-        (FieldKind::File, Cell::Files(files)) if !files.is_empty() => {
-            let list = doc.put_object(&cells, field_id.as_str(), ObjType::List)?;
+        (_, Cell::Empty)
+        | (FieldKind::File, Cell::Files(_))
+        | (FieldKind::Text, Cell::Text(_))
+        | (FieldKind::Checkbox, Cell::Checkbox(_)) => {}
+        (FieldKind::Number, Cell::Number(number)) if number.is_finite() => {}
+        (FieldKind::Date, Cell::Date(date)) if valid_date(date) => {}
+        (FieldKind::Select, Cell::Select(option)) => {
+            let options = map(doc, &field_entry, OPTIONS)?;
+            model::live_in(doc, &options, option.as_str()).ok_or(Error::NotFound)?;
+        }
+        _ => return Err(Error::WrongKind),
+    }
+    let stored = match value {
+        Cell::Number(number) => Cell::Number(*number + 0.0),
+        Cell::Files(files) if files.is_empty() => Cell::Empty,
+        value => value.clone(),
+    };
+    put_cell(doc, &cells, field_id.as_str(), &stored)?;
+    index.set(row_id, field_id, &stored);
+    Ok(())
+}
+
+fn put_cell(doc: &mut AutoCommit, cells: &ObjId, field: &str, value: &Cell) -> Result<(), Error> {
+    let scalar = match value {
+        Cell::Empty => {
+            if doc.get(cells, field)?.is_some() {
+                doc.delete(cells, field)?;
+            }
+            return Ok(());
+        }
+        Cell::Files(files) => {
+            let list = doc.put_object(cells, field, ObjType::List)?;
             for (at, file) in files.iter().enumerate() {
                 let entry = doc.insert_object(&list, at, ObjType::Map)?;
                 model::put_file(doc, &entry, file)?;
             }
-            index.set(row_id, field_id, value);
             return Ok(());
         }
-        (_, Cell::Empty) | (FieldKind::File, Cell::Files(_)) => {
-            if doc.get(&cells, field_id.as_str())?.is_some() {
-                doc.delete(&cells, field_id.as_str())?;
-            }
-            index.set(row_id, field_id, &Cell::Empty);
-            return Ok(());
-        }
-        (FieldKind::Text, Cell::Text(text)) => ScalarValue::Str(text.as_str().into()),
-        (FieldKind::Number, Cell::Number(number)) if number.is_finite() => {
-            ScalarValue::F64(*number + 0.0)
-        }
-        (FieldKind::Date, Cell::Date(date)) if valid_date(date) => {
-            ScalarValue::Str(date.as_str().into())
-        }
-        (FieldKind::Checkbox, Cell::Checkbox(ticked)) => ScalarValue::Boolean(*ticked),
-        (FieldKind::Select, Cell::Select(option)) => {
-            let options = map(doc, &field_entry, OPTIONS)?;
-            model::live_in(doc, &options, option.as_str()).ok_or(Error::NotFound)?;
-            ScalarValue::Str(option.as_str().into())
-        }
-        _ => return Err(Error::WrongKind),
+        Cell::Text(text) | Cell::Date(text) => ScalarValue::Str(text.as_str().into()),
+        Cell::Number(number) => ScalarValue::F64(*number),
+        Cell::Checkbox(ticked) => ScalarValue::Boolean(*ticked),
+        Cell::Select(option) => ScalarValue::Str(option.as_str().into()),
     };
-    let stored = match (&scalar, value) {
-        (ScalarValue::F64(number), Cell::Number(_)) => Cell::Number(*number),
-        _ => value.clone(),
-    };
-    doc.put(&cells, field_id.as_str(), scalar)?;
-    index.set(row_id, field_id, &stored);
+    doc.put(cells, field, scalar)?;
+    Ok(())
+}
+
+pub(crate) fn copy(
+    from: &AutoCommit,
+    from_block: &BlockId,
+    to: &mut AutoCommit,
+    to_block: &BlockId,
+) -> Result<(), Error> {
+    let source = entry(from, from_block)?;
+    let copied = model::insert(to, BLOCKS, to_block.as_str(), &[(KIND, DATABASE)])?;
+    let fields = to.put_object(&copied, FIELDS, ObjType::Map)?;
+    let rows = to.put_object(&copied, ROWS, ObjType::Map)?;
+    let mut kinds = HashMap::new();
+    for field in model::sorted_in(from, &map(from, &source, FIELDS)?) {
+        let Some(kind) = kind(field.get(KIND)) else {
+            continue;
+        };
+        let text = |key| field.get(key).unwrap_or_default();
+        let entry = model::insert_in(
+            to,
+            &fields,
+            &field.id,
+            &[(NAME, text(NAME)), (KIND, text(KIND)), (SORT, text(SORT))],
+        )?;
+        let options = to.put_object(&entry, OPTIONS, ObjType::Map)?;
+        let source_options = fields_entry(from, &source, &field.id)
+            .and_then(|entry| model::child(from, &entry, OPTIONS));
+        for option in source_options.map_or_else(Vec::new, |o| model::sorted_in(from, &o)) {
+            let text = |key| option.get(key).unwrap_or_default();
+            model::insert_in(
+                to,
+                &options,
+                &option.id,
+                &[(NAME, text(NAME)), (COLOR, text(COLOR)), (SORT, text(SORT))],
+            )?;
+        }
+        kinds.insert(field.id.clone(), kind);
+    }
+    let source_rows = map(from, &source, ROWS)?;
+    for row in model::sorted_in(from, &source_rows) {
+        let sort = row.get(SORT).unwrap_or_default();
+        let entry = model::insert_in(to, &rows, &row.id, &[(SORT, sort)])?;
+        let cells_map = to.put_object(&entry, CELLS, ObjType::Map)?;
+        for (field, cell) in cells(from, &source_rows, &row.id, &kinds) {
+            put_cell(to, &cells_map, &field, &cell)?;
+        }
+    }
     Ok(())
 }
 
@@ -468,33 +570,111 @@ pub(crate) fn rows(
 ) -> Result<Rows, Error> {
     let database = read(doc, block)?.ok_or(Error::NotFound)?;
     let live: Vec<&FieldId> = database.fields.iter().map(|field| &field.id).collect();
-    let cell = |row, field| cell(&live, row, field);
-    let applies = |field: &FieldId| live.contains(&field);
-    let filter = query
-        .filter
-        .as_ref()
-        .filter(|filter| applies(&filter.field));
-    let sort = query.sort.as_ref().filter(|sort| applies(&sort.field));
-    let search = query
-        .search
-        .as_deref()
-        .map(str::to_lowercase)
-        .filter(|search| !search.is_empty());
-    if filter.is_none() && sort.is_none() && search.is_none() {
+    let plain = [&query.filter, &query.within].iter().all(|f| f.is_none())
+        && query.sort.is_none()
+        && query.search.as_deref().is_none_or(str::is_empty);
+    if plain {
         let window = index.rows.iter().skip(query.start).take(query.limit);
         return Ok(Rows {
             count: index.rows.len(),
             rows: window.map(|row| shown(&live, row)).collect(),
         });
     }
-    let mut rows: Vec<&Indexed> = match filter {
-        Some(filter) => index
-            .rows
-            .iter()
-            .filter(|row| matches(cell(row, &filter.field), &filter.matches))
+    let rows = matching(&database, &live, index, query, true);
+    Ok(Rows {
+        count: rows.len(),
+        rows: rows
+            .into_iter()
+            .skip(query.start)
+            .take(query.limit)
+            .map(|row| shown(&live, row))
             .collect(),
-        None => index.rows.iter().collect(),
+    })
+}
+
+pub(crate) fn groups(
+    doc: &AutoCommit,
+    index: &Index,
+    block: &BlockId,
+    query: &RowQuery,
+    field: &FieldId,
+) -> Result<Vec<Group>, Error> {
+    let database = read(doc, block)?.ok_or(Error::NotFound)?;
+    let grouped = database
+        .fields
+        .iter()
+        .find(|live| &live.id == field)
+        .ok_or(Error::NotFound)?;
+    let values: Vec<Cell> = match grouped.kind {
+        FieldKind::Select => std::iter::once(Cell::Empty)
+            .chain(grouped.options.iter().map(|o| Cell::Select(o.id.clone())))
+            .collect(),
+        FieldKind::Checkbox => vec![Cell::Checkbox(false), Cell::Checkbox(true)],
+        _ => return Err(Error::WrongKind),
     };
+    let positions: HashMap<&str, usize> = grouped
+        .options
+        .iter()
+        .enumerate()
+        .map(|(at, option)| (option.id.as_str(), at + 1))
+        .collect();
+    let live: Vec<&FieldId> = database.fields.iter().map(|field| &field.id).collect();
+    let mut counts = vec![0; values.len()];
+    let mut rows: Vec<Vec<Row>> = vec![Vec::new(); values.len()];
+    for row in matching(&database, &live, index, query, query.limit > 0) {
+        let at = match cell(&live, row, field) {
+            Some(Cell::Select(option)) => positions.get(option.as_str()).copied(),
+            Some(Cell::Checkbox(true)) => Some(1),
+            _ => Some(0),
+        };
+        if let Some(at) = at {
+            if counts[at] >= query.start && rows[at].len() < query.limit {
+                rows[at].push(shown(&live, row));
+            }
+            counts[at] += 1;
+        }
+    }
+    Ok(values
+        .into_iter()
+        .zip(counts)
+        .zip(rows)
+        .filter(|((value, count), _)| *value != Cell::Empty || *count > 0)
+        .map(|((value, count), rows)| Group { value, count, rows })
+        .collect())
+}
+
+fn matching<'a>(
+    database: &Database,
+    live: &[&FieldId],
+    index: &'a Index,
+    query: &RowQuery,
+    sorted: bool,
+) -> Vec<&'a Indexed> {
+    let cell = |row, field| cell(live, row, field);
+    let applies = |field: &FieldId| live.contains(&field);
+    let filters: Vec<&Filter> = [&query.filter, &query.within]
+        .into_iter()
+        .flatten()
+        .filter(|filter| applies(&filter.field))
+        .collect();
+    let sort = query
+        .sort
+        .as_ref()
+        .filter(|sort| sorted && applies(&sort.field));
+    let search = query
+        .search
+        .as_deref()
+        .map(str::to_lowercase)
+        .filter(|search| !search.is_empty());
+    let mut rows: Vec<&Indexed> = index
+        .rows
+        .iter()
+        .filter(|row| {
+            filters
+                .iter()
+                .all(|filter| matches(cell(row, &filter.field), &filter.matches))
+        })
+        .collect();
     if let Some(search) = search {
         let options: HashMap<&str, String> = database
             .fields
@@ -535,14 +715,7 @@ pub(crate) fn rows(
             }
         });
     }
-    let count = rows.len();
-    let rows = rows
-        .into_iter()
-        .skip(query.start)
-        .take(query.limit)
-        .map(|row| shown(&live, row))
-        .collect();
-    Ok(Rows { count, rows })
+    rows
 }
 
 pub(crate) fn check_sort(doc: &AutoCommit, block: &BlockId, sort: &Sort) -> Result<(), Error> {
@@ -567,6 +740,7 @@ pub(crate) fn check_filter(
         (FieldKind::Text, Match::Contains(_) | Match::Is(Cell::Text(_))) => Ok(()),
         (FieldKind::Number, Match::Is(Cell::Number(number))) if number.is_finite() => Ok(()),
         (FieldKind::Date, Match::Is(Cell::Date(date))) if valid_date(date) => Ok(()),
+        (FieldKind::Date, Match::Between(from, to)) if valid_date(from) && valid_date(to) => Ok(()),
         (FieldKind::Checkbox, Match::Is(Cell::Checkbox(_))) => Ok(()),
         (FieldKind::Select, Match::Is(Cell::Select(option))) => {
             let options = map(doc, &entry, OPTIONS)?;
@@ -648,6 +822,8 @@ fn matches(cell: Option<&Cell>, matches: &Match) -> bool {
             text.to_lowercase().contains(&part.to_lowercase())
         }
         (Match::Contains(_), _) => false,
+        (Match::Between(from, to), Some(Cell::Date(date))) => from <= date && date <= to,
+        (Match::Between(..), _) => false,
     }
 }
 

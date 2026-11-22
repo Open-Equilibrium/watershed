@@ -35,6 +35,13 @@ const ATTACHMENTS: &str = "
     );
 ";
 
+const DEVICE: &str = "
+    CREATE TABLE IF NOT EXISTS device (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+    );
+";
+
 pub struct Sqlite {
     connection: Connection,
 }
@@ -94,7 +101,7 @@ impl Sqlite {
         };
         connection
             .execute_batch(&format!(
-                "BEGIN; {create} PRAGMA user_version = {VERSION}; \
+                "BEGIN; {create} {DEVICE} PRAGMA user_version = {VERSION}; \
                  DELETE FROM parts WHERE upload NOT IN (SELECT upload FROM attachments); COMMIT;"
             ))
             .map_err(failed)?;
@@ -260,6 +267,41 @@ impl Store for Sqlite {
                     .optional()
             })
             .map_err(failed)
+    }
+
+    fn remembered(&mut self, key: &str) -> Result<Option<String>, Error> {
+        self.connection
+            .query_row("SELECT value FROM device WHERE key = ?1", [key], |row| {
+                row.get(0)
+            })
+            .optional()
+            .map_err(failed)
+    }
+
+    fn remember(&mut self, key: &str, value: Option<&str>, most: usize) -> Result<(), Error> {
+        let most = i64::try_from(most).map_err(failed)?;
+        let transaction = self.connection.transaction().map_err(failed)?;
+        transaction
+            .execute("DELETE FROM device WHERE key = ?1", [key])
+            .map_err(failed)?;
+        if let Some(value) = value {
+            transaction
+                .execute(
+                    "DELETE FROM device WHERE rowid IN (SELECT rowid FROM device \
+                     ORDER BY rowid LIMIT max(0, (SELECT COUNT(*) FROM device) - ?1 + 1))",
+                    [most],
+                )
+                .map_err(failed)?;
+            if most > 0 {
+                transaction
+                    .execute(
+                        "INSERT INTO device (key, value) VALUES (?1, ?2)",
+                        [key, value],
+                    )
+                    .map_err(failed)?;
+            }
+        }
+        transaction.commit().map_err(failed)
     }
 }
 

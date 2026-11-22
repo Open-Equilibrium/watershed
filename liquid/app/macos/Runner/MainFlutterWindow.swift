@@ -72,6 +72,19 @@ private func readClipboard(_ call: FlutterMethodCall, result: @escaping FlutterR
   guard call.method == "read" else { return result(FlutterMethodNotImplemented) }
   let board = NSPasteboard.general
   var read: [String: Any] = [:]
+  for _ in 0..<3 {
+    let change = board.changeCount
+    read = clipboardFlavors(board)
+    if board.changeCount == change {
+      read["change"] = change
+      break
+    }
+  }
+  result(read)
+}
+
+private func clipboardFlavors(_ board: NSPasteboard) -> [String: Any] {
+  var read: [String: Any] = [:]
   let urls =
     board.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true])
     as? [URL] ?? []
@@ -86,7 +99,7 @@ private func readClipboard(_ call: FlutterMethodCall, result: @escaping FlutterR
   read["vscode"] = board.string(forType: NSPasteboard.PasteboardType("vscode-editor-data"))
   read["html"] = board.string(forType: .html)
   read["text"] = board.string(forType: .string)
-  result(read)
+  return read
 }
 
 private var pdfDocuments: [Int: (document: PDFDocument, queue: DispatchQueue)] = [:]
