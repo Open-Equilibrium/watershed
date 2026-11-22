@@ -251,7 +251,7 @@ impl<S: Store> Workspace<S> {
             && self.store.remembered(key)?.is_none()
             && self.store.device_values()? >= MAX_DEVICE_VALUES
         {
-            return Err(Error::TooMany);
+            self.store.forget_oldest()?;
         }
         self.store.remember(key, value)
     }

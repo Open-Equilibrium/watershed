@@ -50,6 +50,7 @@ class _CalendarLayoutState extends State<CalendarLayout> {
   Map<String, List<BridgeRow>> _days = const {};
   List<BridgeRow> _undated = const [];
   int _undatedCount = 0;
+  ({int shown, int count}) _dated = (shown: 0, count: 0);
   int _reads = 0;
   String? _open;
   final _popover = Object();
@@ -131,6 +132,7 @@ class _CalendarLayoutState extends State<CalendarLayout> {
         _days = days;
         _undated = undated.rows;
         _undatedCount = undated.count;
+        _dated = (shown: dated.rows.length, count: dated.count);
       });
     } on Object {
       return;
@@ -286,7 +288,9 @@ class _CalendarLayoutState extends State<CalendarLayout> {
       child: Padding(
         padding: const EdgeInsets.only(top: 2, left: WsMetrics.space1),
         child: Text(
-          '+$more more',
+          '+${widget.data.numbers.format(more)} more',
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
           style: TextStyle(fontSize: WsMetrics.fsSmall, color: ws.textMuted),
         ),
       ),
@@ -467,12 +471,23 @@ class _CalendarLayoutState extends State<CalendarLayout> {
                 ),
               ),
             ),
-            if (_undatedCount > 0)
+            if (_undatedCount > 0 || _dated.count > _dated.shown)
               Padding(
                 padding: const EdgeInsets.only(top: WsMetrics.space2),
-                child: Align(
-                  alignment: Alignment.centerLeft,
-                  child: _withPopover(_undated, noDate),
+                child: Row(
+                  children: [
+                    if (_undatedCount > 0) _withPopover(_undated, noDate),
+                    const Spacer(),
+                    if (_dated.count > _dated.shown)
+                      Text(
+                        '${widget.data.numbers.format(_dated.shown)} of '
+                        '${widget.data.numbers.format(_dated.count)} rows shown',
+                        style: TextStyle(
+                          fontSize: WsMetrics.fsCompact,
+                          color: ws.textFaint,
+                        ),
+                      ),
+                  ],
                 ),
               ),
           ],

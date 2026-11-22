@@ -572,7 +572,7 @@ fn a_tab_folds_groups_for_everyone_by_their_value() {
 }
 
 #[test]
-fn a_device_value_stays_out_of_history_and_within_its_bounds() {
+fn a_device_value_stays_out_of_history_and_the_oldest_makes_room() {
     let mut home = Home::new();
     let before = home.workspace.history(None, 100).unwrap().len();
     home.workspace.remember("tab/v", Some("t")).unwrap();
@@ -596,9 +596,19 @@ fn a_device_value_stays_out_of_history_and_within_its_bounds() {
     for at in 0..MAX_DEVICE_VALUES {
         home.workspace.remember(&at.to_string(), Some("t")).unwrap();
     }
-    assert_eq!(
-        home.workspace.remember("one more", Some("t")),
-        Err(Error::TooMany)
-    );
     home.workspace.remember("0", Some("u")).unwrap();
+    home.workspace.remember("one more", Some("t")).unwrap();
+    assert_eq!(
+        home.workspace.remembered("1").unwrap(),
+        None,
+        "the oldest goes"
+    );
+    assert_eq!(
+        home.workspace.remembered("0").unwrap().as_deref(),
+        Some("u")
+    );
+    assert_eq!(
+        home.workspace.remembered("one more").unwrap().as_deref(),
+        Some("t")
+    );
 }

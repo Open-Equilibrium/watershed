@@ -163,6 +163,10 @@ impl Store for Flaky {
     fn device_values(&mut self) -> Result<usize, Error> {
         self.inner.device_values()
     }
+
+    fn forget_oldest(&mut self) -> Result<(), Error> {
+        self.inner.forget_oldest()
+    }
 }
 
 #[test]

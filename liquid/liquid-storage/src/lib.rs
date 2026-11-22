@@ -280,11 +280,15 @@ impl Store for Sqlite {
 
     fn remember(&mut self, key: &str, value: Option<&str>) -> Result<(), Error> {
         match value {
-            Some(value) => self.connection.execute(
-                "INSERT INTO device (key, value) VALUES (?1, ?2) \
-                 ON CONFLICT (key) DO UPDATE SET value = excluded.value",
-                [key, value],
-            ),
+            Some(value) => self
+                .connection
+                .execute("DELETE FROM device WHERE key = ?1", [key])
+                .and_then(|_| {
+                    self.connection.execute(
+                        "INSERT INTO device (key, value) VALUES (?1, ?2)",
+                        [key, value],
+                    )
+                }),
             None => self
                 .connection
                 .execute("DELETE FROM device WHERE key = ?1", [key]),
@@ -299,6 +303,16 @@ impl Store for Sqlite {
             .query_row("SELECT COUNT(*) FROM device", [], |row| row.get(0))
             .map_err(failed)?;
         usize::try_from(count).map_err(failed)
+    }
+
+    fn forget_oldest(&mut self) -> Result<(), Error> {
+        self.connection
+            .execute(
+                "DELETE FROM device WHERE rowid = (SELECT MIN(rowid) FROM device)",
+                [],
+            )
+            .map(|_| ())
+            .map_err(failed)
     }
 }
 

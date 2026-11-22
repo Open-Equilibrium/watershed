@@ -36,6 +36,7 @@ pub trait Store {
     fn remembered(&mut self, key: &str) -> Result<Option<String>, Error>;
     fn remember(&mut self, key: &str, value: Option<&str>) -> Result<(), Error>;
     fn device_values(&mut self) -> Result<usize, Error>;
+    fn forget_oldest(&mut self) -> Result<(), Error>;
 }
 
 #[derive(Default)]
@@ -44,7 +45,7 @@ pub struct MemoryStore {
     actions: Vec<Action>,
     uploads: HashMap<String, Vec<Vec<u8>>>,
     attachments: HashMap<AttachmentId, (u64, Vec<Vec<u8>>)>,
-    device: HashMap<String, String>,
+    device: Vec<(String, String)>,
 }
 
 impl Store for MemoryStore {
@@ -133,18 +134,29 @@ impl Store for MemoryStore {
     }
 
     fn remembered(&mut self, key: &str) -> Result<Option<String>, Error> {
-        Ok(self.device.get(key).cloned())
+        Ok(self
+            .device
+            .iter()
+            .find(|(kept, _)| kept == key)
+            .map(|(_, value)| value.clone()))
     }
 
     fn remember(&mut self, key: &str, value: Option<&str>) -> Result<(), Error> {
-        match value {
-            Some(value) => self.device.insert(key.to_string(), value.to_string()),
-            None => self.device.remove(key),
-        };
+        self.device.retain(|(kept, _)| kept != key);
+        if let Some(value) = value {
+            self.device.push((key.to_string(), value.to_string()));
+        }
         Ok(())
     }
 
     fn device_values(&mut self) -> Result<usize, Error> {
         Ok(self.device.len())
+    }
+
+    fn forget_oldest(&mut self) -> Result<(), Error> {
+        if !self.device.is_empty() {
+            self.device.remove(0);
+        }
+        Ok(())
     }
 }

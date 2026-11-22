@@ -286,4 +286,9 @@ fn a_device_value_is_there_after_a_reopen() {
     assert_eq!(store.remembered("tab/v").unwrap().as_deref(), Some("t"));
     assert_eq!(store.remembered("gone").unwrap(), None);
     assert_eq!(store.device_values().unwrap(), 1);
+    store.remember("later", Some("u")).unwrap();
+    store.remember("tab/v", Some("t2")).unwrap();
+    store.forget_oldest().unwrap();
+    assert_eq!(store.remembered("later").unwrap(), None);
+    assert_eq!(store.remembered("tab/v").unwrap().as_deref(), Some("t2"));
 }

@@ -113,6 +113,14 @@ void main() {
     await mouse.removePointer();
   });
 
+  testWidgets('a month with more rows than it reads says so', (tester) async {
+    await calendar(tester, [
+      for (var number = 1; number <= 1001; number++)
+        expenseRow('r$number', 'Item $number', day(0, 12), 'food', 1, false),
+    ]);
+    expect(find.text('1,000 of 1,001 rows shown'), findsOneWidget);
+  });
+
   testWidgets('No date lists the rows without one', (tester) async {
     await calendar(tester, [
       expenseRow('r1', 'Groceries', day(0, 3), 'food', 84.2, true),
