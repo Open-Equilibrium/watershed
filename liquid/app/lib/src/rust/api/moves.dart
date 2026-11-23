@@ -11,7 +11,7 @@ import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 import 'thread.dart';
 
 // These functions are ignored because they are not marked as `pub`: `arrival_of`, `config_change`, `differences`, `host_project`, `landing_of`, `move_check_of`, `move_in_failure`, `move_in`, `moving_of`, `unchanged`
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
 
 // Rust type: RustOpaqueMoi<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<BridgeConfigChanges>>
 abstract class BridgeConfigChanges implements RustOpaqueInterface {
@@ -21,6 +21,37 @@ abstract class BridgeConfigChanges implements RustOpaqueInterface {
 // Rust type: RustOpaqueMoi<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<BridgeMovePackage>>
 abstract class BridgeMovePackage implements RustOpaqueInterface {
   Future<String> transfer();
+}
+
+class BridgeAgentMove {
+  final String name;
+  final PlatformInt64 memoryBytes;
+  final PlatformInt64 routines;
+  final PlatformInt64 earlier;
+
+  const BridgeAgentMove({
+    required this.name,
+    required this.memoryBytes,
+    required this.routines,
+    required this.earlier,
+  });
+
+  @override
+  int get hashCode =>
+      name.hashCode ^
+      memoryBytes.hashCode ^
+      routines.hashCode ^
+      earlier.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeAgentMove &&
+          runtimeType == other.runtimeType &&
+          name == other.name &&
+          memoryBytes == other.memoryBytes &&
+          routines == other.routines &&
+          earlier == other.earlier;
 }
 
 class BridgeArrival {
@@ -129,6 +160,7 @@ class BridgeMoveCheck {
   final String? blocked;
   final bool moved;
   final BridgeMoving? moving;
+  final BridgeAgentMove? agent;
 
   const BridgeMoveCheck({
     required this.title,
@@ -142,6 +174,7 @@ class BridgeMoveCheck {
     this.blocked,
     required this.moved,
     this.moving,
+    this.agent,
   });
 
   @override
@@ -156,7 +189,8 @@ class BridgeMoveCheck {
       remoteUrl.hashCode ^
       blocked.hashCode ^
       moved.hashCode ^
-      moving.hashCode;
+      moving.hashCode ^
+      agent.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -173,7 +207,8 @@ class BridgeMoveCheck {
           remoteUrl == other.remoteUrl &&
           blocked == other.blocked &&
           moved == other.moved &&
-          moving == other.moving;
+          moving == other.moving &&
+          agent == other.agent;
 }
 
 class BridgeMoveIn {

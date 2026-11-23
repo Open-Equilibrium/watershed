@@ -142,6 +142,7 @@ impl Thread {
                 transcript,
                 transcript_capped,
                 queued: Vec::new(),
+                agent: None,
             })
         }
         .await

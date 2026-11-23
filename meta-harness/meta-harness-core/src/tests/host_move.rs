@@ -215,6 +215,7 @@ fn a_handoff_over_the_budget_is_refused_with_its_size_in_bytes() {
         transcript_capped: false,
         queued: Vec::new(),
         transfer: "tr-budget".to_owned(),
+        agent: None,
     };
     assert_eq!(
         host_move::within_budget(&package),

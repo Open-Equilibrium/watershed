@@ -23,6 +23,13 @@ impl Session {
         let state = host_move::state(&self.shared.store.db(), thread.id())?;
         let mut check = host_move::check(&facts, state);
         check.moving = host_move::open_move(&self.shared.store.db(), thread.id())?;
+        check.agent = super::agents::move_facts(&self.shared, thread).await?;
+        if check.blocked.is_none() {
+            check.blocked = check
+                .agent
+                .as_ref()
+                .and_then(|agent| crate::agents::too_large(agent.memory_bytes));
+        }
         to(check)
     }
 
@@ -62,9 +69,13 @@ impl Session {
     ) -> Result<Value, String> {
         let shared = self.shared.clone();
         let project = project.clone();
-        let root = root.to_owned();
+        let carried = package.agent.clone();
+        let landing = root.to_owned();
         let thread =
-            detached(async move { arrive(&shared, &project, &root, package).await }).await?;
+            detached(async move { arrive(&shared, &project, &landing, package).await }).await?;
+        if let Some(carry) = carried {
+            super::agents::adopt(&self.shared, root, &thread, *carry).await?;
+        }
         let id = thread.id().to_owned();
         self.keep(thread).await;
         to(id)
@@ -248,6 +259,7 @@ async fn depart_once(
         .move_out(movable, departure, commit, message, saving)
         .await?;
     package.queued = host_move::queued(&store.db(), transfer)?;
+    package.agent = super::agents::carry(shared, thread).await?.map(Box::new);
     let text = serde_json::to_string(&package).map_err(|e| e.to_string())?;
     host_move::hand(&store.db(), transfer, &text, now_ms())?;
     Ok(package)
@@ -276,6 +288,7 @@ async fn finish_move(
                 }
             }
             if seal_to.is_some() {
+                super::agents::moved_away(shared, thread).await?;
                 pause(shared, thread).await;
             }
             Ok(())
@@ -418,6 +431,9 @@ async fn arrive(
             None => crate::t3::fresh_id("thread"),
         };
         host_move::within_budget(&package)?;
+        if let Some(carry) = &package.agent {
+            super::agents::arrival_free(shared, carry, &thread_id)?;
+        }
         let sealed = host_move::sealed_threads(&shared.store.db())?;
         let thread = project
             .move_in(&package, &thread_id, &sealed, || {

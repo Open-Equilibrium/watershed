@@ -178,6 +178,60 @@ Future<void> openLocalActions(WidgetTester tester) async {
 }
 
 void main() {
+  testWidgets(
+    "an agent's row moves it, and the dialog names what moves with it",
+    (tester) async {
+      await tester.binding.setSurfaceSize(const Size(1400, 900));
+      final source = FakeProject(session: FakeSession(id: 'local'))
+        ..threadList = [threadOf('local', title: 'news-bot')]
+        ..agentList = [
+          agentOf('news-bot', thread: 'local', threads: ['local', 'older']),
+        ]
+        ..moveCheckAnswer = moveCheckOf(
+          agent: const BridgeAgentMove(
+            name: 'news-bot',
+            memoryBytes: 3000,
+            routines: 1,
+            earlier: 1,
+          ),
+        );
+      final state = SessionState(source);
+      await state.loadStart();
+      state.openProject = (address, root) async => state.projectOf(address)!;
+      await state.addHost(studio, FakeProject()..hostName = 'studio');
+      await tester.pumpWidget(
+        LiquidApp(launch: ValueNotifier(Launch.session(state, info))),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(
+        find.descendant(
+          of: find.byKey(const Key('agent-agent-news-bot')),
+          matching: find.byTooltip('More actions'),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Move to host…'));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.text('Move agent “news-bot” to another host'),
+        findsOneWidget,
+      );
+      expect(
+        find.text('Memory folder, 3 KB, is copied (at most 100 MiB)'),
+        findsOneWidget,
+      );
+      expect(
+        find.text(
+          '1 routine is made again there; a webhook routine gets a new URL',
+        ),
+        findsOneWidget,
+      );
+      expect(find.textContaining('1 earlier thread stay'), findsOneWidget);
+    },
+  );
+
   testWidgets('a move that fits offers Move with nothing to fix', (
     tester,
   ) async {

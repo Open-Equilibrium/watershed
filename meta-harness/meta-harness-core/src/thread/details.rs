@@ -328,6 +328,7 @@ impl Thread {
     pub(crate) async fn save_routine(&self, copy: &Value, existing: bool) -> Result<Value, String> {
         let mut task = copy.clone();
         task["threadId"] = json!(self.id);
+        task["projectId"] = self.state().projection.thread["projectId"].clone();
         task["threadMode"] = json!("continue");
         if existing {
             task["requireExisting"] = json!(true);

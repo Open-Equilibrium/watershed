@@ -813,8 +813,10 @@ BridgeMoveCheck moveCheckOf({
   String? remoteUrl = 'git@github.com:acme/api.git',
   bool moved = false,
   BridgeMoving? moving,
+  BridgeAgentMove? agent,
 }) => BridgeMoveCheck(
   moving: moving,
+  agent: agent,
   title: 'Fix the flaky port test',
   movable: true,
   harness: 'Codex',
@@ -863,6 +865,7 @@ BridgeMoveCheck moveCheckWith(
   blocked: check.blocked,
   moved: moved,
   moving: moving,
+  agent: check.agent,
 );
 
 class FakeCarriedMove implements CarriedMove {

@@ -220,7 +220,11 @@ class Sidebar extends StatelessWidget {
                           },
                         ),
                       if (state case final state?)
-                        AgentsSection(state: state, onShow: onShowSession),
+                        AgentsSection(
+                          state: state,
+                          onShow: onShowSession,
+                          onMove: onMove,
+                        ),
                       const SidebarHeading('Threads'),
                       if ((state, info) case (final state?, final info?)) ...[
                         _ProjectRow(

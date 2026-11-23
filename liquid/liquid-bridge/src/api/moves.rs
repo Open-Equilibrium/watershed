@@ -23,6 +23,15 @@ pub struct BridgeMoveCheck {
     pub blocked: Option<String>,
     pub moved: bool,
     pub moving: Option<BridgeMoving>,
+    pub agent: Option<BridgeAgentMove>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BridgeAgentMove {
+    pub name: String,
+    pub memory_bytes: i64,
+    pub routines: i64,
+    pub earlier: i64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -339,6 +348,12 @@ pub(crate) fn move_check_of(check: MoveCheck) -> BridgeMoveCheck {
         blocked: check.blocked,
         moved: check.moved,
         moving: check.moving.map(moving_of),
+        agent: check.agent.map(|agent| BridgeAgentMove {
+            name: meta_harness_core::visible_name(&agent.name),
+            memory_bytes: i64::try_from(agent.memory_bytes).unwrap_or(i64::MAX),
+            routines: i64::from(agent.routines),
+            earlier: i64::from(agent.earlier),
+        }),
     }
 }
 

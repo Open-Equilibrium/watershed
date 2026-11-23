@@ -2593,6 +2593,118 @@ async fn a_session_moves_to_another_host_with_its_branch_and_its_source_is_seale
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn an_agent_moves_to_another_host_with_its_memory_and_routines() {
+    let dir = tempdir::Dir::new();
+    let (origin, url) = shared_remote(dir.path());
+    let repo_a = clone_project(dir.path(), &origin, &url, "a");
+    let repo_b = clone_project(dir.path(), &origin, &url, "b");
+    let (service_a, host_a) = start_codex(&dir.path().join("host-a")).await;
+    let (service_b, host_b) = start_codex(&dir.path().join("host-b")).await;
+    let created = host_a
+        .agent_create(NewAgent {
+            name: Some("news-bot".to_owned()),
+            root: repo_a.to_string_lossy().into_owned(),
+            model: codex_start("").model,
+            permissions: Permissions::FullAccess,
+            instructions: "Keep the news page current.".to_owned(),
+            request: None,
+        })
+        .await
+        .unwrap();
+    let project_a = host_a.project(&repo_a).await.unwrap();
+    let project_b = host_b.project(&repo_b).await.unwrap();
+    let thread = project_a.open(&created.thread).await.unwrap();
+    wait(&thread, completed(1)).await;
+    std::fs::create_dir_all(created.memory.join("days")).unwrap();
+    std::fs::write(created.memory.join("days/monday.md"), "Saw 4 items.\n").unwrap();
+    host_a
+        .agent_routine_add(
+            "news-bot",
+            NewRoutine {
+                title: "Morning".to_owned(),
+                prompt: "Check the feeds.".to_owned(),
+                schedule: Schedule {
+                    kind: ScheduleKind::Interval,
+                    every_ms: Some(3_600_000),
+                    time_of_day: None,
+                    weekdays: Vec::new(),
+                    run_at: None,
+                },
+            },
+        )
+        .await
+        .unwrap();
+
+    let check = thread.move_check().await.unwrap();
+    let facts = check.agent.expect("the check names the agent");
+    assert_eq!(
+        (facts.name.as_str(), facts.routines, facts.earlier),
+        ("news-bot", 1, 0)
+    );
+    assert!(facts.memory_bytes > 0);
+    assert_eq!(check.blocked, None);
+    let package = thread
+        .move_out(
+            &transfer(),
+            "host-b",
+            "studio",
+            "environment-target",
+            true,
+            None,
+        )
+        .await
+        .unwrap();
+    assert!(package.agent.is_some(), "the package carries the agent");
+    let moved = project_b.move_in(package.clone()).await.unwrap();
+
+    let arrived = host_b.agents().await.unwrap();
+    assert_eq!(arrived.len(), 1);
+    assert_eq!(
+        (arrived[0].name.as_str(), arrived[0].thread.as_str()),
+        ("news-bot", moved.id())
+    );
+    assert_eq!(
+        std::fs::read_to_string(arrived[0].memory.join("days/monday.md")).unwrap(),
+        "Saw 4 items.\n"
+    );
+    assert!(
+        host_b
+            .agent_instructions("news-bot")
+            .await
+            .unwrap()
+            .contains("Keep the news page current.")
+    );
+    let routines = host_b.agent_routines("news-bot").await.unwrap();
+    assert_eq!(
+        routines
+            .iter()
+            .map(|r| r.title.as_str())
+            .collect::<Vec<_>>(),
+        ["Morning"]
+    );
+    assert!(host_b.agent_changes("news-bot").await.unwrap().is_empty());
+
+    let record = moved.move_record().await.unwrap().unwrap();
+    thread
+        .move_finish(
+            &package.transfer,
+            MoveFinish::Seal {
+                to_host: record.to_host,
+            },
+        )
+        .await
+        .unwrap();
+    assert!(host_a.agents().await.unwrap().is_empty(), "the agent left");
+    assert!(thread.automations().await.unwrap().current().is_empty());
+    assert!(
+        created.memory.is_dir(),
+        "the old host keeps its copy of the memory"
+    );
+    service_a.stop().await;
+    service_b.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn a_move_the_new_host_refuses_leaves_the_session_on_its_host() {
     let dir = tempdir::Dir::new();
     let (origin, url) = shared_remote(dir.path());

@@ -464,3 +464,46 @@ fn a_change_log_of_the_first_release_learns_to_hold_changes() {
     agents::mark_applied(&store.db(), held.id).unwrap();
     assert!(!agents::changes(&store.db(), &agent.id).unwrap()[0].held);
 }
+
+#[test]
+fn a_moving_agent_carries_its_memory_files_and_refuses_unsafe_paths() {
+    let home = Dir::new();
+    let store = Store::open(&home.join("meta-harness.sqlite")).unwrap();
+    let agent = agents::create(&store.db(), &home, &new_agent("news-bot"), "thread-1").unwrap();
+    std::fs::create_dir_all(agent.memory.join("days")).unwrap();
+    let bytes: Vec<u8> = (0..=255).collect();
+    std::fs::write(agent.memory.join("days/raw.bin"), &bytes).unwrap();
+
+    let carry = agents::pack(&agent, Vec::new()).unwrap();
+    assert_eq!(
+        carry
+            .files
+            .iter()
+            .map(|file| file.path.as_str())
+            .collect::<Vec<_>>(),
+        ["days/raw.bin", "instructions.md"]
+    );
+    let target = home.join("arrived");
+    agents::unpack(&target, &carry.files).unwrap();
+    assert_eq!(std::fs::read(target.join("days/raw.bin")).unwrap(), bytes);
+    #[cfg(unix)]
+    assert_eq!(mode(&target.join("days/raw.bin")), 0o600);
+
+    for unsafe_path in ["../escape.md", "/etc/passwd", ""] {
+        let file = agents::CarriedFile {
+            path: unsafe_path.to_owned(),
+            bytes: String::new(),
+        };
+        assert!(
+            agents::unpack(&target, &[file]).is_err(),
+            "{unsafe_path:?} is refused"
+        );
+    }
+    assert!(!home.join("escape.md").exists());
+    assert!(agents::too_large(agents::MAX_MEMORY_BYTES).is_none());
+    assert!(
+        agents::too_large(agents::MAX_MEMORY_BYTES + 1)
+            .unwrap()
+            .contains("at most 100 MiB")
+    );
+}

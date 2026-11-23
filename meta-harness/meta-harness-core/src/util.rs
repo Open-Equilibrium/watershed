@@ -17,6 +17,22 @@ pub(crate) fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 
+pub(crate) fn base64url_encode(bytes: &[u8]) -> String {
+    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+    let mut text = String::with_capacity(bytes.len().div_ceil(3) * 4);
+    for chunk in bytes.chunks(3) {
+        let bits = chunk.iter().enumerate().fold(0u32, |bits, (index, byte)| {
+            bits | u32::from(*byte) << (16 - 8 * index)
+        });
+        for index in 0..=chunk.len() {
+            text.push(char::from(
+                ALPHABET[(bits >> (18 - 6 * index) & 63) as usize],
+            ));
+        }
+    }
+    text
+}
+
 pub(crate) fn base64url_decode(text: &str) -> Option<Vec<u8>> {
     let (mut bits, mut count, mut bytes) = (0u32, 0u32, Vec::new());
     for character in text.bytes() {

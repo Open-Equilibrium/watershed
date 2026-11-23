@@ -241,6 +241,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   bool dco_decode_box_autoadd_bool(dynamic raw);
 
   @protected
+  BridgeAgentMove dco_decode_box_autoadd_bridge_agent_move(dynamic raw);
+
+  @protected
   BridgeApproval dco_decode_box_autoadd_bridge_approval(dynamic raw);
 
   @protected
@@ -372,6 +375,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   BridgeAgentChangeKind dco_decode_bridge_agent_change_kind(dynamic raw);
+
+  @protected
+  BridgeAgentMove dco_decode_bridge_agent_move(dynamic raw);
 
   @protected
   BridgeAllows dco_decode_bridge_allows(dynamic raw);
@@ -1012,6 +1018,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   bool? dco_decode_opt_box_autoadd_bool(dynamic raw);
 
   @protected
+  BridgeAgentMove? dco_decode_opt_box_autoadd_bridge_agent_move(dynamic raw);
+
+  @protected
   BridgeApproval? dco_decode_opt_box_autoadd_bridge_approval(dynamic raw);
 
   @protected
@@ -1319,6 +1328,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   bool sse_decode_box_autoadd_bool(SseDeserializer deserializer);
 
   @protected
+  BridgeAgentMove sse_decode_box_autoadd_bridge_agent_move(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   BridgeApproval sse_decode_box_autoadd_bridge_approval(
     SseDeserializer deserializer,
   );
@@ -1508,6 +1522,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   BridgeAgentChangeKind sse_decode_bridge_agent_change_kind(
     SseDeserializer deserializer,
   );
+
+  @protected
+  BridgeAgentMove sse_decode_bridge_agent_move(SseDeserializer deserializer);
 
   @protected
   BridgeAllows sse_decode_bridge_allows(SseDeserializer deserializer);
@@ -2270,6 +2287,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   bool? sse_decode_opt_box_autoadd_bool(SseDeserializer deserializer);
 
   @protected
+  BridgeAgentMove? sse_decode_opt_box_autoadd_bridge_agent_move(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   BridgeApproval? sse_decode_opt_box_autoadd_bridge_approval(
     SseDeserializer deserializer,
   );
@@ -2666,6 +2688,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_box_autoadd_bool(bool self, SseSerializer serializer);
 
   @protected
+  void sse_encode_box_autoadd_bridge_agent_move(
+    BridgeAgentMove self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_box_autoadd_bridge_approval(
     BridgeApproval self,
     SseSerializer serializer,
@@ -2917,6 +2945,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_bridge_agent_change_kind(
     BridgeAgentChangeKind self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_bridge_agent_move(
+    BridgeAgentMove self,
     SseSerializer serializer,
   );
 
@@ -3972,6 +4006,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_opt_box_autoadd_bool(bool? self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_opt_box_autoadd_bridge_agent_move(
+    BridgeAgentMove? self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_opt_box_autoadd_bridge_approval(

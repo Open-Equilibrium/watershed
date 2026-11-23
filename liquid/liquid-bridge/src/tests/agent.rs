@@ -987,6 +987,7 @@ fn a_move_in_lands_in_the_project_it_names_not_the_handles_one() {
             transcript: Vec::new(),
             transcript_capped: false,
             queued: Vec::new(),
+            agent: None,
             transfer: "transfer".to_owned(),
         },
     };
