@@ -98,7 +98,11 @@ const OWNER_TTL: &str = "24h";
 
 const ISSUE_WAIT: Duration = Duration::from_secs(30);
 
-async fn issue(binary: PathBuf, home: PathBuf, wait: Duration) -> Result<String, String> {
+pub(crate) async fn issue(
+    binary: PathBuf,
+    home: PathBuf,
+    wait: Duration,
+) -> Result<String, String> {
     let child = tokio::process::Command::new(&binary)
         .args([
             "auth",
@@ -193,7 +197,7 @@ async fn wait_for_origin(
     ))
 }
 
-fn listening_origin(text: &str, pid: Option<u32>) -> Result<Option<String>, String> {
+pub(crate) fn listening_origin(text: &str, pid: Option<u32>) -> Result<Option<String>, String> {
     let Ok(value) = serde_json::from_str::<serde_json::Value>(text) else {
         return Ok(None);
     };
@@ -207,124 +211,5 @@ fn listening_origin(text: &str, pid: Option<u32>) -> Result<Option<String>, Stri
         )),
         Some(_) => Ok(value["origin"].as_str().map(str::to_owned)),
         None => Ok(None),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[cfg(unix)]
-    #[tokio::test]
-    async fn a_server_that_ends_during_its_start_is_started_again() {
-        use std::os::unix::fs::PermissionsExt;
-        let dir = std::env::temp_dir().join(format!("t3-start-{}", std::process::id()));
-        let home = dir.join("home");
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(home.join("userdata")).unwrap();
-        let binary = dir.join("t3");
-        let script = format!(
-            "#!/bin/sh\n\
-             [ \"$1\" = serve ] || exit 1\n\
-             echo start >> \"{starts}\"\n\
-             if [ ! -e \"{started}\" ]; then : > \"{started}\"; exit 1; fi\n\
-             printf '{{\"pid\":%s,\"serverVersion\":\"{version}\",\"origin\":\"http://127.0.0.1:1\"}}' $$ \
-             > \"$T3CODE_HOME/userdata/server-runtime.json\"\n\
-             exec sleep 30\n",
-            started = dir.join("started").display(),
-            starts = dir.join("starts").display(),
-            version = t3_version(),
-        );
-        std::fs::write(&binary, script).unwrap();
-        std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o755)).unwrap();
-
-        let started = std::time::Instant::now();
-        let mut server = Server::start(&binary, &home)
-            .await
-            .expect("the second start serves");
-        assert_eq!(server.origin, "http://127.0.0.1:1");
-        assert!(
-            started.elapsed() < Duration::from_secs(10),
-            "{:?}",
-            started.elapsed()
-        );
-        let starts = std::fs::read_to_string(dir.join("starts")).unwrap();
-        assert_eq!(starts.lines().count(), 2, "started again once");
-        server.stop().await;
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[cfg(unix)]
-    #[tokio::test]
-    async fn a_token_issue_that_never_ends_is_killed_at_its_wait() {
-        use std::os::unix::fs::PermissionsExt;
-        let dir = std::env::temp_dir().join(format!("t3-issue-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
-        let binary = dir.join("t3");
-        std::fs::write(&binary, "#!/bin/sh\nexec sleep 60\n").unwrap();
-        std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o755)).unwrap();
-
-        let started = std::time::Instant::now();
-        let result = issue(binary, dir.clone(), Duration::from_millis(200)).await;
-        assert!(result.is_err(), "{result:?}");
-        assert!(
-            started.elapsed() < Duration::from_secs(10),
-            "{:?}",
-            started.elapsed()
-        );
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn a_stale_pid_counts_as_t3_only_when_it_serves_the_folder_with_the_binary() {
-        let (binary, home) = (Path::new("/x/t3"), Path::new("/data/a"));
-        for (command, runs) in [
-            (
-                "/x/t3 serve --host 127.0.0.1 --no-browser --base-dir /data/a\n",
-                true,
-            ),
-            (
-                "/x/t3 serve --host 127.0.0.1 --no-browser --base-dir /data/b\n",
-                false,
-            ),
-            (
-                "/x/t3 serve --host 127.0.0.1 --no-browser --base-dir /data/a2\n",
-                false,
-            ),
-            (
-                "/x/t3backup serve --host 127.0.0.1 --base-dir /data/a\n",
-                false,
-            ),
-            ("/x/t3-helper serve --other\n", false),
-            ("/x/t3 auth session issue\n", false),
-        ] {
-            let base = home.to_string_lossy();
-            let arguments = [
-                "serve",
-                "--host",
-                "127.0.0.1",
-                "--no-browser",
-                "--base-dir",
-                &base,
-            ];
-            assert_eq!(
-                crate::platform::matches_command(command, binary, &arguments),
-                runs,
-                "{command}"
-            );
-        }
-    }
-
-    #[test]
-    fn a_server_of_another_release_fails_at_once_naming_both() {
-        let text = r#"{"pid":7,"serverVersion":"0.0.0","origin":"http://127.0.0.1:1"}"#;
-        assert_eq!(
-            listening_origin(text, Some(7)),
-            Err(format!(
-                "The t3 executable runs T3 0.0.0; Meta-Harness needs {}",
-                t3_version()
-            ))
-        );
     }
 }
