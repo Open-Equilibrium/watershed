@@ -13,6 +13,8 @@ mod order;
 mod patch;
 mod purge;
 mod revision;
+mod revision_restore;
+mod revision_undo;
 mod role;
 mod search;
 mod sort_key;
