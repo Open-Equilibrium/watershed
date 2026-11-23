@@ -167,16 +167,16 @@ importers:
   .:
     devDependencies:
       clawpatch:
-        specifier: 0.8.2
-        version: 0.8.2
+        specifier: 0.8.4
+        version: 0.8.4
       playwright:
-        specifier: 1.63.0
-        version: 1.63.0
+        specifier: 1.65.1
+        version: 1.65.1
 
 packages:
 
-  clawpatch@0.8.2:
-    resolution: {integrity: sha512-pye4c+5LemI5XyNk87Zk8RGX4yVAAeBtNReRHYiLfW2fZTY0J0Oqf/KYzZGj8g95O/oYWoxmyfcQZI1Ow46MYQ==}
+  clawpatch@0.8.4:
+    resolution: {integrity: sha512-4tO9sng640S/8ljEiX0F/ho9zsxtLWiliQ60fWr0LaeWCqV8TZblMWaCidTKgpV7Ob7VP0Aexp1KMTxv6ajMsw==}
     engines: {node: '>=22'}
     hasBin: true
 
@@ -186,13 +186,13 @@ packages:
   js-tokens@10.0.0:
     resolution: {integrity: sha512-lM/UBzQmfJRo9ABXbPWemivdCW8V2G8FHaHdypQaIy523snUjog0W71ayWXTjiR+ixeMyVHN2XcpnTd/liPg/Q==}
 
-  playwright-core@1.63.0:
-    resolution: {integrity: sha512-rYCsBF/M5HjUch52bbtVONEFjv6Xu8sm8h72dNlR5bzIE1fvC/bxgspzkjSfU+MweEMmPM8KJebG6nnyxo5mCg==}
+  playwright-core@1.65.1:
+    resolution: {integrity: sha512-hqPpz7blSMPxWVdoeE1yiBSzXsKiVOd2k+kjCvmUywD2GPO2Dd9HfcWnq9NN0GHbNZDFgZ9JfBFr+X5/BLo0qw==}
     engines: {node: '>=20'}
     hasBin: true
 
-  playwright@1.63.0:
-    resolution: {integrity: sha512-+7ziBLidS4NaNCdt57SUDT+wYmmd5fmiQejUic/kb+YsYSCPyOOE9sebzMjNmQrsnNpDJqd4WHvV/8lfKfUDUg==}
+  playwright@1.65.1:
+    resolution: {integrity: sha512-vJ1FuoOrNwOKHUIVEvSt3jT1L+wjjDpwhwIstKtfvTh8XIG4FG4bIFuvNdMxi81LGfAhUgUZleVFaOLY4RIUUw==}
     engines: {node: '>=20'}
     hasBin: true
 
@@ -211,7 +211,7 @@ packages:
 
 snapshots:
 
-  clawpatch@0.8.2:
+  clawpatch@0.8.4:
     dependencies:
       js-tokens: 10.0.0
       proper-lockfile: 4.1.2
@@ -221,11 +221,11 @@ snapshots:
 
   js-tokens@10.0.0: {}
 
-  playwright-core@1.63.0: {}
+  playwright-core@1.65.1: {}
 
-  playwright@1.63.0:
+  playwright@1.65.1:
     dependencies:
-      playwright-core: 1.63.0
+      playwright-core: 1.65.1
 
   proper-lockfile@4.1.2:
     dependencies:
