@@ -312,34 +312,39 @@ class _SourcePageState extends State<SourcePage> {
       ),
       child: Row(
         children: [
-          for (final (at, (label, target)) in crumbs.indexed) ...[
-            if (at > 0)
-              Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: WsMetrics.space2,
-                ),
-                child: Text('›', style: muted),
-              ),
-            Flexible(
-              child: target == null
-                  ? Text(
-                      label,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: at == crumbs.length - 1
-                          ? TextStyle(
-                              color: ws.text,
-                              fontWeight: WsMetrics.fwMedium,
-                            )
-                          : muted,
-                    )
-                  : InkWell(
-                      onTap: () => _open(target),
-                      child: Text(label, maxLines: 1, style: muted),
+          Expanded(
+            child: Row(
+              children: [
+                for (final (at, (label, target)) in crumbs.indexed) ...[
+                  if (at > 0)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: WsMetrics.space2,
+                      ),
+                      child: Text('›', style: muted),
                     ),
+                  Flexible(
+                    child: target == null
+                        ? Text(
+                            label,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: at == crumbs.length - 1
+                                ? TextStyle(
+                                    color: ws.text,
+                                    fontWeight: WsMetrics.fwMedium,
+                                  )
+                                : muted,
+                          )
+                        : InkWell(
+                            onTap: () => _open(target),
+                            child: Text(label, maxLines: 1, style: muted),
+                          ),
+                  ),
+                ],
+              ],
             ),
-          ],
-          const Spacer(),
+          ),
           GhostButton(
             label: 'Reload',
             icon: LucideIcons.refreshCw,
@@ -550,7 +555,7 @@ class _SourcePageState extends State<SourcePage> {
 
   Widget _missing(BuildContext context, BridgeSource entry) {
     final ws = context.ws;
-    final folder = entry.kind == BridgeSourceKind.folder;
+    final folder = _inside.isEmpty && entry.kind == BridgeSourceKind.folder;
     return Container(
       key: const Key('source missing'),
       padding: const EdgeInsets.all(WsMetrics.space4),
