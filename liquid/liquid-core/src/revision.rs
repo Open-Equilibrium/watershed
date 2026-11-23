@@ -6,7 +6,8 @@ use automerge::{AutoCommit, ChangeHash, ObjId, ROOT, ReadDoc, Value};
 use crate::model;
 use crate::order::Order;
 use crate::store::Store;
-use crate::workspace::{Recorded, header, page_entry, table_entry};
+use crate::workspace::{Recorded, header};
+use crate::workspace_index::{page_entry, table_entry};
 use crate::{
     Action, ActionId, Actor, Applied, BlockId, BlockKind, Changed, Document, Error, IndexWrite,
     MemoryStore, Mutation, Operation, Origin, PageId, Permission, Purge, RevertKind, SourceId,
