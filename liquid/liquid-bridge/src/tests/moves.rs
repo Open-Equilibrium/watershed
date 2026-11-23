@@ -77,6 +77,7 @@ fn a_move_check_says_whether_its_session_has_moved() {
         blocked: Some("This session has already moved to another host.".into()),
         moved,
         moving: None,
+        agent: None,
     };
 
     assert!(move_check_of(check(true)).moved);

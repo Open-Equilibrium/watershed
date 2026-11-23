@@ -80,6 +80,8 @@ pub struct MoveCheck {
     pub moved: bool,
     #[serde(default)]
     pub moving: Option<Moving>,
+    #[serde(default)]
+    pub agent: Option<crate::agents::AgentMoveFacts>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
@@ -97,6 +99,8 @@ pub struct MovePackage {
     #[serde(default)]
     pub queued: Vec<String>,
     pub transfer: String,
+    #[serde(default)]
+    pub agent: Option<Box<crate::agents::AgentCarry>>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
@@ -249,6 +253,7 @@ pub(crate) fn check(facts: &Facts, state: Option<State>) -> MoveCheck {
         blocked: movable(facts, state, None).err(),
         moved: state == Some(State::Sealed),
         moving: None,
+        agent: None,
     }
 }
 
@@ -409,6 +414,23 @@ pub(crate) enum Phase {
     Handed,
     Sealed,
     Released,
+}
+
+pub(crate) fn owned_by(db: &Connection, transfer: &str, thread: &str) -> Result<(), String> {
+    let owner: Option<String> = db
+        .query_row(
+            "SELECT thread FROM moved_thread WHERE transfer = ?1",
+            [transfer],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(failed)?;
+    match owner {
+        Some(owner) if owner != thread => {
+            Err("This transfer belongs to another session, so nothing changed.".to_owned())
+        }
+        _ => Ok(()),
+    }
 }
 
 pub(crate) fn begin(

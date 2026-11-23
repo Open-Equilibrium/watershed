@@ -23,6 +23,13 @@ impl Session {
         let state = host_move::state(&self.shared.store.db(), thread.id())?;
         let mut check = host_move::check(&facts, state);
         check.moving = host_move::open_move(&self.shared.store.db(), thread.id())?;
+        check.agent = super::agents::move_facts(&self.shared, thread).await?;
+        if check.blocked.is_none() {
+            check.blocked = check
+                .agent
+                .as_ref()
+                .and_then(|agent| crate::agents::too_large(agent.memory_bytes));
+        }
         to(check)
     }
 
@@ -193,6 +200,14 @@ async fn depart_once(
         reconcile(thread, &shared.store, transfer).await?;
     }
     let facts = thread.move_facts().await?;
+    host_move::owned_by(&shared.store.db(), transfer, thread.id())?;
+    let fresh = host_move::phase(&shared.store.db(), transfer)?.is_none();
+    if fresh
+        && let Some(agent) = super::agents::move_facts(shared, thread).await?
+        && let Some(reason) = crate::agents::too_large(agent.memory_bytes)
+    {
+        return Err(reason);
+    }
     let entry = {
         let _gate = shared.moves.write().await;
         let db = shared.store.db();
@@ -248,6 +263,7 @@ async fn depart_once(
         .move_out(movable, departure, commit, message, saving)
         .await?;
     package.queued = host_move::queued(&store.db(), transfer)?;
+    package.agent = super::agents::carry(shared, thread).await?.map(Box::new);
     let text = serde_json::to_string(&package).map_err(|e| e.to_string())?;
     host_move::hand(&store.db(), transfer, &text, now_ms())?;
     Ok(package)
@@ -263,6 +279,7 @@ async fn finish_move(
         MoveFinish::Seal { to_host } => Some(to_host.clone()),
         MoveFinish::Release => None,
     };
+    host_move::owned_by(&shared.store.db(), transfer, thread.id())?;
     shared
         .transfers
         .run(transfer, async {
@@ -276,7 +293,9 @@ async fn finish_move(
                 }
             }
             if seal_to.is_some() {
+                let away = super::agents::moved_away(shared, thread).await;
                 pause(shared, thread).await;
+                away?;
             }
             Ok(())
         })
@@ -381,13 +400,14 @@ async fn start_held(thread: &Thread, text: &str) -> Result<(), String> {
 }
 
 async fn arrive(
-    shared: &Shared,
+    shared: &Arc<Shared>,
     project: &Project,
     root: &str,
     package: MovePackage,
 ) -> Result<Thread, String> {
     let transfer = package.transfer.clone();
     shared.transfers.run(&transfer, async {
+        host_move::within_budget(&package)?;
         let existing = host_move::arrival(&shared.store.db(), &transfer)?;
         let thread_id = match existing {
             Some(row) if row.state == "refused" => {
@@ -437,7 +457,7 @@ async fn arrive(
 }
 
 async fn land(
-    shared: &Shared,
+    shared: &Arc<Shared>,
     root: &str,
     package: MovePackage,
     thread: Thread,
@@ -451,6 +471,9 @@ async fn land(
         transcript,
     };
     host_move::put_record(&shared.store.db(), thread.id(), &transfer, &record)?;
+    if let Some(carry) = package.agent {
+        super::agents::adopt(shared, root, &thread, *carry).await?;
+    }
     let landed = ArrivalRow {
         state: "landed".to_owned(),
         root: root.to_owned(),

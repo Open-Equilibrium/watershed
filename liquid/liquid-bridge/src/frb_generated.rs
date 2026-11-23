@@ -7105,6 +7105,22 @@ impl SseDecode for crate::api::agents::BridgeAgentChangeKind {
     }
 }
 
+impl SseDecode for crate::api::moves::BridgeAgentMove {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_name = <String>::sse_decode(deserializer);
+        let mut var_memoryBytes = <i64>::sse_decode(deserializer);
+        let mut var_routines = <i64>::sse_decode(deserializer);
+        let mut var_earlier = <i64>::sse_decode(deserializer);
+        return crate::api::moves::BridgeAgentMove {
+            name: var_name,
+            memory_bytes: var_memoryBytes,
+            routines: var_routines,
+            earlier: var_earlier,
+        };
+    }
+}
+
 impl SseDecode for crate::api::role::BridgeAllows {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -8455,6 +8471,7 @@ impl SseDecode for crate::api::moves::BridgeMoveCheck {
         let mut var_blocked = <Option<String>>::sse_decode(deserializer);
         let mut var_moved = <bool>::sse_decode(deserializer);
         let mut var_moving = <Option<crate::api::moves::BridgeMoving>>::sse_decode(deserializer);
+        let mut var_agent = <Option<crate::api::moves::BridgeAgentMove>>::sse_decode(deserializer);
         return crate::api::moves::BridgeMoveCheck {
             title: var_title,
             movable: var_movable,
@@ -8467,6 +8484,7 @@ impl SseDecode for crate::api::moves::BridgeMoveCheck {
             blocked: var_blocked,
             moved: var_moved,
             moving: var_moving,
+            agent: var_agent,
         };
     }
 }
@@ -10585,6 +10603,19 @@ impl SseDecode for Option<bool> {
     }
 }
 
+impl SseDecode for Option<crate::api::moves::BridgeAgentMove> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        if (<bool>::sse_decode(deserializer)) {
+            return Some(<crate::api::moves::BridgeAgentMove>::sse_decode(
+                deserializer,
+            ));
+        } else {
+            return None;
+        }
+    }
+}
+
 impl SseDecode for Option<crate::api::events::BridgeApproval> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -11829,6 +11860,29 @@ impl flutter_rust_bridge::IntoIntoDart<crate::api::agents::BridgeAgentChangeKind
     for crate::api::agents::BridgeAgentChangeKind
 {
     fn into_into_dart(self) -> crate::api::agents::BridgeAgentChangeKind {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::moves::BridgeAgentMove {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.name.into_into_dart().into_dart(),
+            self.memory_bytes.into_into_dart().into_dart(),
+            self.routines.into_into_dart().into_dart(),
+            self.earlier.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::moves::BridgeAgentMove
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::moves::BridgeAgentMove>
+    for crate::api::moves::BridgeAgentMove
+{
+    fn into_into_dart(self) -> crate::api::moves::BridgeAgentMove {
         self
     }
 }
@@ -13668,6 +13722,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::moves::BridgeMoveCheck {
             self.blocked.into_into_dart().into_dart(),
             self.moved.into_into_dart().into_dart(),
             self.moving.into_into_dart().into_dart(),
+            self.agent.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -15655,6 +15710,16 @@ impl SseEncode for crate::api::agents::BridgeAgentChangeKind {
     }
 }
 
+impl SseEncode for crate::api::moves::BridgeAgentMove {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <String>::sse_encode(self.name, serializer);
+        <i64>::sse_encode(self.memory_bytes, serializer);
+        <i64>::sse_encode(self.routines, serializer);
+        <i64>::sse_encode(self.earlier, serializer);
+    }
+}
+
 impl SseEncode for crate::api::role::BridgeAllows {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
@@ -16716,6 +16781,7 @@ impl SseEncode for crate::api::moves::BridgeMoveCheck {
         <Option<String>>::sse_encode(self.blocked, serializer);
         <bool>::sse_encode(self.moved, serializer);
         <Option<crate::api::moves::BridgeMoving>>::sse_encode(self.moving, serializer);
+        <Option<crate::api::moves::BridgeAgentMove>>::sse_encode(self.agent, serializer);
     }
 }
 
@@ -18345,6 +18411,16 @@ impl SseEncode for Option<bool> {
         <bool>::sse_encode(self.is_some(), serializer);
         if let Some(value) = self {
             <bool>::sse_encode(value, serializer);
+        }
+    }
+}
+
+impl SseEncode for Option<crate::api::moves::BridgeAgentMove> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <bool>::sse_encode(self.is_some(), serializer);
+        if let Some(value) = self {
+            <crate::api::moves::BridgeAgentMove>::sse_encode(value, serializer);
         }
     }
 }

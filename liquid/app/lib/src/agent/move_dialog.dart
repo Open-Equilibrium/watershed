@@ -140,7 +140,11 @@ class MoveDialog extends StatelessWidget {
       final reason = model.blockedReason;
       return ActionDialog(
         title: flow == null || target == null
-            ? 'Move “${check?.title ?? 'this session'}” to another host'
+            ? switch (check?.agent) {
+                final agent? => 'Move agent “${agent.name}” to another host',
+                null =>
+                  'Move “${check?.title ?? 'this session'}” to another host',
+              }
             : 'Moving to $target',
         bindings: {
           if (flow == null && model.canMove)
@@ -215,6 +219,25 @@ class _Choices extends StatelessWidget {
               if (check.remoteUrl != null || check.blocked == null)
                 _ProjectCheck(model: model, target: target),
               _ConfigCheck(model: model, target: target),
+              if (check.agent case final agent?) ...[
+                _Check.ok(
+                  'Memory folder, ${_size(agent.memoryBytes)}, is copied '
+                  '(at most 100 MiB)',
+                ),
+                const _Check.ok(
+                  'The current thread moves with a handoff, as a session does',
+                ),
+                if (agent.routines > 0)
+                  _Check.ok(
+                    '${agent.routines} routine${agent.routines == 1 ? ' is' : 's are'} '
+                    'made again there; a webhook routine gets a new URL',
+                  ),
+                if (agent.earlier > 0)
+                  _Check.info(
+                    '${agent.earlier} earlier thread${agent.earlier == 1 ? '' : 's'} '
+                    'stay on ${model.sourceName}, readable there',
+                  ),
+              ],
               const _Check.info(
                 'Secrets you entered in this session are asked for again there',
               ),
@@ -824,3 +847,7 @@ class _Progress extends StatelessWidget {
     );
   }
 }
+
+String _size(int bytes) => bytes < 1024 * 1024
+    ? '${(bytes / 1024).ceil()} KB'
+    : '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';

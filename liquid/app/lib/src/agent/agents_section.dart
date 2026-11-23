@@ -13,10 +13,16 @@ import 'session_menus.dart';
 import 'sidebar.dart';
 
 class AgentsSection extends StatefulWidget {
-  const AgentsSection({super.key, required this.state, this.onShow});
+  const AgentsSection({
+    super.key,
+    required this.state,
+    this.onShow,
+    this.onMove,
+  });
 
   final SessionState state;
   final VoidCallback? onShow;
+  final void Function(HostThread listed)? onMove;
 
   @override
   State<AgentsSection> createState() => _AgentsSectionState();
@@ -80,6 +86,7 @@ class _AgentsSectionState extends State<AgentsSection> {
               state: widget.state,
               hosted: hosted,
               onShow: widget.onShow,
+              onMove: widget.onMove,
             ),
         ],
       ),
@@ -88,18 +95,24 @@ class _AgentsSectionState extends State<AgentsSection> {
 }
 
 class _AgentRow extends StatelessWidget {
-  const _AgentRow({required this.state, required this.hosted, this.onShow})
-    : composing = false;
+  const _AgentRow({
+    required this.state,
+    required this.hosted,
+    this.onShow,
+    this.onMove,
+  }) : composing = false;
 
   const _AgentRow.composing()
     : state = null,
       hosted = null,
       onShow = null,
+      onMove = null,
       composing = true;
 
   final SessionState? state;
   final HostAgent? hosted;
   final VoidCallback? onShow;
+  final void Function(HostThread listed)? onMove;
   final bool composing;
 
   (String, Color)? _label(BuildContext context, bool selected) {
@@ -155,8 +168,22 @@ class _AgentRow extends StatelessWidget {
         !state.agents.composing.value;
     final label = _label(context, selected);
     final unread = _unread(state, selected);
+    final listed = state.recent.value
+        .where(
+          (listed) =>
+              listed.thread.id == agent.thread &&
+              listed.address == hosted.address,
+        )
+        .firstOrNull;
     return RowMenu(
       actions: [
+        RowAction(
+          'Move to host…',
+          () => onMove?.call(listed!),
+          enabled: listed != null && listed.thread.movable && onMove != null,
+          disabledReason: 'Only Claude Code and Codex agents can move.',
+        ),
+        null,
         RowAction(
           'Remove agent…',
           () => unawaited(confirmRemoveAgent(context, state, hosted)),

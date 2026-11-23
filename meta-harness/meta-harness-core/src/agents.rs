@@ -128,6 +128,164 @@ pub(crate) struct Snapshot {
     pub fresh: bool,
 }
 
+pub const MAX_MEMORY_BYTES: u64 = 100 * 1024 * 1024;
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub struct AgentCarry {
+    pub name: String,
+    #[serde(default = "named_default")]
+    pub named: bool,
+    pub model: ModelChoice,
+    pub permissions: Permissions,
+    pub files: Vec<CarriedFile>,
+    pub routines: Vec<Value>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+pub struct CarriedFile {
+    pub path: String,
+    pub bytes: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+pub struct AgentMoveFacts {
+    pub name: String,
+    pub memory_bytes: u64,
+    pub routines: u32,
+    pub earlier: u32,
+}
+
+fn named_default() -> bool {
+    true
+}
+
+pub(crate) fn free_name(db: &Connection, home: &Path, name: &str) -> Result<String, String> {
+    if get(db, home, name)?.is_none() {
+        return Ok(name.to_owned());
+    }
+    for number in 2..100 {
+        let candidate = format!("{name}-{number}");
+        if check_name(&candidate).is_ok() && get(db, home, &candidate)?.is_none() {
+            return Ok(candidate);
+        }
+    }
+    Err(format!("No free name like {name} is left on this host."))
+}
+
+pub(crate) fn memory_files(folder: &Path) -> Result<Vec<(String, PathBuf, u64)>, String> {
+    let mut found = Vec::new();
+    let mut pending = vec![(String::new(), folder.to_path_buf())];
+    while let Some((prefix, dir)) = pending.pop() {
+        let entries = match std::fs::read_dir(&dir) {
+            Ok(entries) => entries,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => return Err(format!("Could not read {}: {error}", dir.display())),
+        };
+        for entry in entries {
+            let entry = entry.map_err(|e| format!("Could not read {}: {e}", dir.display()))?;
+            let kind = entry
+                .file_type()
+                .map_err(|e| format!("Could not read {}: {e}", entry.path().display()))?;
+            let name = entry.file_name().to_string_lossy().into_owned();
+            let relative = if prefix.is_empty() {
+                name
+            } else {
+                format!("{prefix}/{name}")
+            };
+            if kind.is_dir() {
+                pending.push((relative, entry.path()));
+            } else if kind.is_file() {
+                let size = entry
+                    .metadata()
+                    .map_err(|e| format!("Could not read {}: {e}", entry.path().display()))?
+                    .len();
+                found.push((relative, entry.path(), size));
+            }
+        }
+    }
+    found.sort();
+    Ok(found)
+}
+
+pub(crate) fn memory_bytes(agent: &Agent) -> Result<u64, String> {
+    Ok(memory_files(&agent.memory)?
+        .iter()
+        .map(|(_, _, size)| size)
+        .sum())
+}
+
+pub(crate) fn too_large(bytes: u64) -> Option<String> {
+    (bytes > MAX_MEMORY_BYTES).then(|| {
+        format!(
+            "The agent's memory folder holds {} MiB; a move carries at most {} MiB.",
+            bytes.div_ceil(1024 * 1024),
+            MAX_MEMORY_BYTES / (1024 * 1024)
+        )
+    })
+}
+
+pub(crate) fn pack(agent: &Agent, routines: Vec<Value>) -> Result<AgentCarry, String> {
+    if let Some(reason) = too_large(memory_bytes(agent)?) {
+        return Err(reason);
+    }
+    let files = memory_files(&agent.memory)?
+        .into_iter()
+        .map(|(path, full, _)| {
+            let bytes = std::fs::read(&full)
+                .map_err(|e| format!("Could not read {}: {e}", full.display()))?;
+            Ok(CarriedFile {
+                path,
+                bytes: crate::util::base64url_encode(&bytes),
+            })
+        })
+        .collect::<Result<_, String>>()?;
+    Ok(AgentCarry {
+        name: agent.name.clone(),
+        named: agent.named,
+        model: agent.model.clone(),
+        permissions: agent.permissions,
+        files,
+        routines,
+    })
+}
+
+pub(crate) fn unpack(folder: &Path, files: &[CarriedFile]) -> Result<(), String> {
+    for file in files {
+        let relative = Path::new(&file.path);
+        let plain = relative
+            .components()
+            .all(|part| matches!(part, std::path::Component::Normal(_)));
+        if !plain || file.path.is_empty() {
+            return Err(format!(
+                "A carried memory file has no plain path: {:?}",
+                file.path
+            ));
+        }
+        let bytes = crate::util::base64url_decode(&file.bytes)
+            .ok_or_else(|| format!("The carried memory file {} is not readable.", file.path))?;
+        let target = folder.join(relative);
+        if let Some(parent) = target.parent() {
+            crate::service::create_private_dir(parent)?;
+        }
+        std::fs::write(&target, &bytes)
+            .map_err(|e| format!("Could not write {}: {e}", target.display()))?;
+        #[cfg(unix)]
+        std::fs::set_permissions(&target, std::os::unix::fs::PermissionsExt::from_mode(0o600))
+            .map_err(|e| format!("Could not protect {}: {e}", target.display()))?;
+    }
+    Ok(())
+}
+
+pub(crate) fn of_thread(
+    db: &Connection,
+    home: &Path,
+    thread: &str,
+) -> Result<Option<Agent>, String> {
+    Ok(list(db, home)?
+        .into_iter()
+        .find(|agent| agent.thread == thread))
+}
+
 pub(crate) fn memory(home: &Path, id: &str) -> PathBuf {
     home.join("agents").join(id).join("memory")
 }

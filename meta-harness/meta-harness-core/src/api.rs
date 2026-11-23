@@ -50,6 +50,14 @@ pub(crate) enum Call {
     Agents(AgentsCall),
 }
 
+pub(crate) const MAX_MESSAGE_BYTES: usize = 176 * 1024 * 1024;
+
+pub(crate) fn socket_config() -> tokio_tungstenite::tungstenite::protocol::WebSocketConfig {
+    tokio_tungstenite::tungstenite::protocol::WebSocketConfig::default()
+        .max_message_size(Some(MAX_MESSAGE_BYTES))
+        .max_frame_size(Some(MAX_MESSAGE_BYTES))
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum AgentsCall {

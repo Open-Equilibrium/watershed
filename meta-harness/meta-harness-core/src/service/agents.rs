@@ -26,14 +26,14 @@ pub(super) struct Watchers {
 }
 
 impl Watchers {
-    fn start(&self, shared: &Arc<Shared>, id: &str) {
+    pub(super) fn start(&self, shared: &Arc<Shared>, id: &str) {
         let task = tokio::spawn(watch(shared.clone(), id.to_owned()));
         if let Some(old) = crate::util::lock(&self.tasks).insert(id.to_owned(), task) {
             old.abort();
         }
     }
 
-    fn stop(&self, id: &str) {
+    pub(super) fn stop(&self, id: &str) {
         if let Some(task) = crate::util::lock(&self.tasks).remove(id) {
             task.abort();
         }
@@ -254,6 +254,110 @@ async fn mentions(shared: &Shared, source: &str) -> Result<Value, String> {
         }
     }
     to(mentions)
+}
+
+pub(super) async fn move_facts(
+    shared: &Shared,
+    thread: &Thread,
+) -> Result<Option<crate::agents::AgentMoveFacts>, String> {
+    let Some(agent) = agents::of_thread(&shared.store.db(), &shared.home, thread.id())? else {
+        return Ok(None);
+    };
+    Ok(Some(crate::agents::AgentMoveFacts {
+        memory_bytes: agents::memory_bytes(&agent)?,
+        routines: u32::try_from(thread.routine_tasks().await?.len()).unwrap_or(u32::MAX),
+        earlier: u32::try_from(
+            agents::threads(&shared.store.db(), &agent.id)?
+                .len()
+                .saturating_sub(1),
+        )
+        .unwrap_or(u32::MAX),
+        name: agent.name,
+    }))
+}
+
+pub(super) async fn carry(
+    shared: &Shared,
+    thread: &Thread,
+) -> Result<Option<crate::agents::AgentCarry>, String> {
+    let _serial = shared.agents.serial.lock().await;
+    let agent = agents::of_thread(&shared.store.db(), &shared.home, thread.id())?;
+    match agent {
+        Some(agent) => Ok(Some(agents::pack(&agent, thread.routine_tasks().await?)?)),
+        None => Ok(None),
+    }
+}
+
+pub(super) async fn adopt(
+    shared: &Arc<Shared>,
+    root: &str,
+    thread: &Thread,
+    carry: crate::agents::AgentCarry,
+) -> Result<(), String> {
+    let _serial = shared.agents.serial.lock().await;
+    let known = agents::of_thread(&shared.store.db(), &shared.home, thread.id())?;
+    let name = if carry.named && known.is_none() {
+        let free = agents::free_name(&shared.store.db(), &shared.home, &carry.name)?;
+        Some(free)
+    } else {
+        None
+    };
+    let agent = match known {
+        Some(agent) => agent,
+        None => agents::create(
+            &shared.store.db(),
+            &shared.home,
+            &agents::NewAgent {
+                name,
+                root: root.to_owned(),
+                model: carry.model.clone(),
+                permissions: carry.permissions,
+                instructions: String::new(),
+                request: None,
+            },
+            thread.id(),
+        )?,
+    };
+    agents::unpack(&agent.memory, &carry.files)?;
+    let mut routines = Vec::new();
+    for routine in &carry.routines {
+        routines.push(thread.save_routine(routine, false).await?);
+    }
+    agents::set_seen(
+        &shared.store.db(),
+        &agent.id,
+        &Snapshot {
+            instructions: agents::instructions(&agent)?,
+            routines,
+            fresh: false,
+        },
+    )?;
+    let opening = agents::opening(&agent, &agents::instructions(&agent)?, None);
+    thread
+        .send_once(
+            &agents::message_id(&agent.id, agent.generation),
+            &opening,
+            false,
+        )
+        .await?;
+    shared.agents.start(shared, &agent.id);
+    Ok(())
+}
+
+pub(super) async fn moved_away(shared: &Shared, thread: &Thread) -> Result<(), String> {
+    let _serial = shared.agents.serial.lock().await;
+    let agent = agents::of_thread(&shared.store.db(), &shared.home, thread.id())?;
+    let Some(agent) = agent else {
+        return Ok(());
+    };
+    for routine in thread.routine_tasks().await? {
+        thread
+            .remove_routine(routine["id"].as_str().unwrap_or_default())
+            .await?;
+    }
+    agents::remove(&shared.store.db(), &agent.id)?;
+    shared.agents.stop(&agent.id);
+    Ok(())
 }
 
 fn label(title: &str) -> String {
@@ -616,6 +720,18 @@ async fn watch(shared: Arc<Shared>, id: String) {
 
 async fn follow(shared: &Shared, id: &str) -> Result<(), String> {
     loop {
+        let agent = agents::get(&shared.store.db(), &shared.home, id)?;
+        let Some(agent) = agent else {
+            return Ok(());
+        };
+        let sealed = crate::host_move::state(&shared.store.db(), &agent.thread)?
+            == Some(crate::host_move::State::Sealed);
+        if sealed {
+            return match existing(shared, &agent.root, &agent.thread).await? {
+                Some(thread) => moved_away(shared, &thread).await,
+                None => agents::remove(&shared.store.db(), &agent.id),
+            };
+        }
         let thread = {
             let _serial = shared.agents.serial.lock().await;
             let Some(agent) = agents::get(&shared.store.db(), &shared.home, id)? else {
