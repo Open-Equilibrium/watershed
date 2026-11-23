@@ -13,6 +13,7 @@ import 'media.dart';
 
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
+import 'role.dart';
 import 'workspace.dart';
 
 // These functions are ignored because they are not marked as `pub`: `notify`, `open_lock`, `open_with`, `read`, `release_unfollowed`, `reported`, `row_query`, `state`, `take_lock`, `watch`

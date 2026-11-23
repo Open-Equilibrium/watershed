@@ -9,6 +9,7 @@ mod hosts;
 mod media;
 mod moves;
 mod record;
+mod role;
 mod session;
 mod stream;
 mod workspace;

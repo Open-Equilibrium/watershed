@@ -188,6 +188,7 @@ class BridgeWorkspaceAutomation {
   final BridgeAttention? attention;
   final BridgeLastRun? last;
   final String? owner;
+  final String role;
 
   const BridgeWorkspaceAutomation({
     required this.id,
@@ -196,6 +197,7 @@ class BridgeWorkspaceAutomation {
     this.attention,
     this.last,
     this.owner,
+    required this.role,
   });
 
   @override
@@ -205,7 +207,8 @@ class BridgeWorkspaceAutomation {
       on_.hashCode ^
       attention.hashCode ^
       last.hashCode ^
-      owner.hashCode;
+      owner.hashCode ^
+      role.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -217,5 +220,6 @@ class BridgeWorkspaceAutomation {
           on_ == other.on_ &&
           attention == other.attention &&
           last == other.last &&
-          owner == other.owner;
+          owner == other.owner &&
+          role == other.role;
 }

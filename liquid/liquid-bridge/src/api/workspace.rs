@@ -12,6 +12,7 @@ use super::database::{
 };
 use super::drawing::{BridgeDrawing, BridgeDrawingEdit, BridgeDrawingStyle};
 use super::media::BridgeMedia;
+use super::role::{BridgeRole, BridgeRoleAllows, BridgeRoleSetup, role_id};
 
 pub const MAX_WINDOW: i64 = 500;
 
@@ -77,6 +78,12 @@ pub enum BridgeMutationKind {
     SetAutomation,
     SetAutomationOn,
     RemoveAutomation,
+    SetAutomationRole,
+    CreateRole,
+    SetRole,
+    RemoveRole,
+    ProtectTable,
+    UnprotectTable,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -160,6 +167,9 @@ pub struct BridgeMutation {
     pub automation: Option<String>,
     pub automation_setup: Option<BridgeAutomationSetup>,
     pub on: bool,
+    pub role: Option<String>,
+    pub role_setup: Option<BridgeRoleSetup>,
+    pub roles: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -176,6 +186,7 @@ pub struct BridgeApplied {
     pub elements: Vec<String>,
     pub line: Option<String>,
     pub automation: Option<String>,
+    pub role: Option<String>,
     pub ran: Vec<BridgeRan>,
 }
 
@@ -199,6 +210,8 @@ pub enum BridgeQueryKind {
     Tables,
     TableViews,
     Automations,
+    Roles,
+    Allows,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -235,6 +248,7 @@ pub struct BridgeTable {
     pub id: String,
     pub area: String,
     pub name: String,
+    pub protected: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -331,6 +345,8 @@ pub struct BridgeAnswer {
     pub chart: Option<BridgeChart>,
     pub follows: Vec<BridgeResource>,
     pub automations: Vec<BridgeWorkspaceAutomation>,
+    pub roles: Vec<BridgeRole>,
+    pub allows: Vec<BridgeRoleAllows>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -343,6 +359,7 @@ pub enum BridgeResourceKind {
     Tables,
     Table,
     Automations,
+    Roles,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -390,6 +407,9 @@ pub(crate) fn message(error: Error) -> String {
         Error::TooLong => "no more fit at this spot; move one of its neighbors first".into(),
         Error::TooLarge => "a file can be at most 5 GiB".into(),
         Error::Formula { at } => format!("the formula can't be read from character {}", at + 1),
+        Error::Denied { capability, table } => {
+            format!("its Role allows no {capability} on “{table}”")
+        }
         Error::Changed => "the file changed while it was added; add it again".into(),
         Error::Random => "the random source failed".into(),
         Error::Document(message) | Error::Storage(message) => message,
@@ -421,6 +441,13 @@ impl BridgeMutation {
             .as_ref()
             .ok_or("line_setup is missing")?
             .to_core())
+    }
+
+    fn role_setup(&self) -> Result<liquid_core::RoleSetup, String> {
+        self.role_setup
+            .as_ref()
+            .ok_or("role_setup is missing")?
+            .to_core()
     }
 
     fn automation_setup(&self) -> Result<liquid_core::AutomationSetup, String> {
@@ -769,6 +796,29 @@ impl BridgeMutation {
             BridgeMutationKind::RemoveAutomation => Mutation::RemoveAutomation {
                 automation: automation()?,
             },
+            BridgeMutationKind::SetAutomationRole => Mutation::SetAutomationRole {
+                automation: automation()?,
+                role: role_id(&self.role)?,
+            },
+            BridgeMutationKind::CreateRole => Mutation::CreateRole {
+                setup: self.role_setup()?,
+            },
+            BridgeMutationKind::SetRole => Mutation::SetRole {
+                role: role_id(&self.role)?,
+                setup: self.role_setup()?,
+            },
+            BridgeMutationKind::RemoveRole => Mutation::RemoveRole {
+                role: role_id(&self.role)?,
+            },
+            BridgeMutationKind::ProtectTable => Mutation::ProtectTable {
+                table: block()?,
+                roles: self
+                    .roles
+                    .iter()
+                    .map(|role| role_id(&Some(role.clone())))
+                    .collect::<Result<_, _>>()?,
+            },
+            BridgeMutationKind::UnprotectTable => Mutation::UnprotectTable { table: block()? },
         })
     }
 }
@@ -784,7 +834,9 @@ impl BridgeResource {
             BridgeResourceKind::Pages => (area()?, None, None),
             BridgeResourceKind::Views => (None, page()?, None),
             BridgeResourceKind::Block => (None, page()?, block()?),
-            BridgeResourceKind::Tables | BridgeResourceKind::Automations => (None, None, None),
+            BridgeResourceKind::Tables
+            | BridgeResourceKind::Automations
+            | BridgeResourceKind::Roles => (None, None, None),
             BridgeResourceKind::Table => (None, None, block()?),
         };
         Ok(Self {
@@ -819,6 +871,7 @@ impl BridgeResource {
             ),
             Changed::Tables => (BridgeResourceKind::Tables, None, None, None),
             Changed::Automations => (BridgeResourceKind::Automations, None, None, None),
+            Changed::Roles => (BridgeResourceKind::Roles, None, None, None),
             Changed::Table(block) => (
                 BridgeResourceKind::Table,
                 None,

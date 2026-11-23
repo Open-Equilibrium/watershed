@@ -12,6 +12,7 @@ pub mod media;
 pub mod moves;
 pub(crate) mod record;
 pub mod replica;
+pub mod role;
 pub mod session;
 pub mod thread;
 pub mod workspace;
