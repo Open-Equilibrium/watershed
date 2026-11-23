@@ -24,6 +24,9 @@ import 'slash_commands.dart';
 import 'table_pickers.dart';
 import 'workspace_state.dart';
 
+part 'text_block_insert.dart';
+part 'text_block_keys.dart';
+
 const _end = caretEnd;
 
 class TextBlock extends StatefulWidget {
@@ -174,155 +177,6 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
   }
 
   void _take(SlashCommand choice) => _state.track(_choose(choice));
-
-  Future<void> _choose(SlashCommand choice) async {
-    _closeMenu();
-    _set('', 0);
-    _send('');
-    if (choice.style case final style?) {
-      if (style != _style) _restyle(style);
-      return;
-    }
-    if (choice.block == BridgeBlockKind.code) return _turnIntoCode();
-    if (choice.block == BridgeBlockKind.math) return _turnIntoMath();
-    if (choice.block == BridgeBlockKind.media) return _addMedia(_pickFiles);
-    if (choice.block == BridgeBlockKind.whiteboard) {
-      return _addBlock(BridgeMutationKind.addWhiteboardBlock, 'Whiteboard');
-    }
-    if (choice.block == BridgeBlockKind.chart) {
-      return _addBlock(BridgeMutationKind.addChartBlock, 'Chart');
-    }
-    if (choice.block == BridgeBlockKind.calculation) {
-      return _addBlock(BridgeMutationKind.addCalculationBlock, 'Calculation');
-    }
-    ExistingView? existing;
-    if (choice.existing) {
-      existing = await pickExistingTable(context, _state);
-      if (existing == null || !mounted) return;
-    }
-    final views = widget.views;
-    final view = widget.view;
-    final last = widget.index == (views.count ?? 0) - 1;
-    _adding = true;
-    final BridgeApplied added;
-    try {
-      String? after = view.id;
-      if (last) {
-        final above = widget.index > 0
-            ? await views.viewAt(widget.index - 1)
-            : null;
-        if (widget.index > 0 && above == null) {
-          _state.report(
-            'Liquid did not add the Table, as the Page changed; choose Table again.',
-          );
-          throw StateError('The Page changed.');
-        }
-        after = above?.id;
-      }
-      added = await views.write(switch (existing) {
-        final existing? => mutation(
-          BridgeMutationKind.addTableView,
-          page: _page,
-          after: after,
-          block: existing.table,
-          text: existing.title,
-          tabs: existing.tabs,
-        ),
-        null => mutation(
-          BridgeMutationKind.addDatabaseBlock,
-          page: _page,
-          after: after,
-          text: '',
-          layout: choice.layout,
-        ),
-      }, const []);
-    } on Object {
-      if (mounted) {
-        _adding = false;
-        _typed();
-      } else if (_gone case final gone? when gone.isNotEmpty) {
-        unawaited(
-          views
-              .write(textEdit(_page, block, '', gone), [block])
-              .then<void>((_) {}, onError: (Object _) {}),
-        );
-      }
-      return;
-    }
-    _added = added;
-    if (existing != null) {
-      _adding = false;
-      _added = null;
-      views.moveCaret(Caret(added.view!, 0));
-    } else if (!mounted) {
-      _name(views, added, _gone ?? '');
-    } else if (!_focus.hasFocus || _state.quitting) {
-      _finish(_text.text);
-    } else {
-      views.naming[added.view!] = _handOver;
-      views.moveCaret(Caret(added.view!, 0));
-    }
-    try {
-      Future<void> boundary(String view, bool starts) => views.write(
-        mutation(
-          BridgeMutationKind.setSectionBoundary,
-          page: _page,
-          view: view,
-          boundary: starts,
-        ),
-        const [],
-      );
-      if (view.boundary) {
-        await boundary(added.view!, true);
-        if (last) await boundary(view.id, false);
-      }
-      if (!last) {
-        await views.write(
-          mutation(BridgeMutationKind.removeView, page: _page, view: view.id),
-          [block],
-        );
-      }
-    } on Object catch (_) {}
-  }
-
-  (String, bool) _handOver() {
-    final typed = _text.text;
-    _release();
-    return (typed, false);
-  }
-
-  void _finish(String typed) {
-    final added = _added!;
-    final views = widget.views;
-    if (views.caret.value?.view == added.view) views.caret.value = null;
-    _name(views, added, typed);
-    _release();
-  }
-
-  void _name(PageViews views, BridgeApplied added, String typed) {
-    views.naming.remove(added.view);
-    if (typed.isEmpty) return;
-    unawaited(
-      views
-          .write(
-            mutation(
-              BridgeMutationKind.renameView,
-              page: _page,
-              view: added.view,
-              text: typed,
-            ),
-            [added.view!],
-          )
-          .then<void>((_) {}, onError: (Object _) {}),
-    );
-  }
-
-  void _release() {
-    widget.views.naming.remove(_added?.view);
-    _adding = false;
-    _added = null;
-    if (mounted) _set('', 0);
-  }
 
   Widget _menuView(BuildContext context) => SlashCommands(
     choices: _choices,
@@ -546,94 +400,42 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
         .then<void>((_) {}, onError: (Object _) {}),
   );
 
-  Future<List<MediaSource>> _pickFiles() async {
-    try {
-      return await MediaPlatform.pickFiles();
-    } on Object catch (error) {
-      _state.report('Liquid could not open the file dialog: $error');
-      return const [];
-    }
-  }
-
-  Future<void> _addMedia(Future<List<MediaSource>> Function() sources) async {
-    final views = widget.views;
-    final view = widget.view;
-    final index = widget.index;
-    final empty = _text.text.isEmpty;
-    final last = index == (views.count ?? 0) - 1;
-    final added = await sources();
-    if (added.isEmpty) return;
-    String? after = view.id;
-    if (empty && last) {
-      final above = index > 0 ? await views.viewAt(index - 1) : null;
-      if (index > 0 && above == null) {
-        _state.report(
-          'Liquid did not add the files, as the Page changed; choose Media again.',
-        );
-        return;
-      }
-      after = above?.id;
-    }
-    final first = await addMedia(
-      views,
-      added,
-      after: after,
-      replacing: empty && !last ? view : null,
+  void _turnIntoCode() {
+    _write(
+      mutation(BridgeMutationKind.turnIntoCode, page: _page, block: block),
     );
-    if (empty && first != null) await _handOverSection(first, last: last);
+    widget.views.moveCaret(
+      Caret(widget.view.id, 0, kind: BridgeBlockKind.code),
+    );
   }
 
-  Future<void> _handOverSection(String added, {required bool last}) async {
-    final view = widget.view;
-    if (!view.boundary) return;
-    Future<void> boundary(String at, bool starts) => widget.views.write(
+  void _turnIntoMath() {
+    _write(
+      mutation(BridgeMutationKind.turnIntoMath, page: _page, block: block),
+    );
+    widget.views.moveCaret(
+      Caret(widget.view.id, 0, kind: BridgeBlockKind.math),
+    );
+  }
+
+  void _toggleToDo() {
+    final done = _style == BridgeTextStyle.done;
+    if (done || _style == BridgeTextStyle.todo) {
+      _restyle(done ? BridgeTextStyle.todo : BridgeTextStyle.done);
+    }
+  }
+
+  void _restyle(BridgeTextStyle style) {
+    setState(() => _style = style);
+    widget.views.setStyle(block, style);
+    _write(
       mutation(
-        BridgeMutationKind.setSectionBoundary,
+        BridgeMutationKind.setTextStyle,
         page: _page,
-        view: at,
-        boundary: starts,
+        block: block,
+        style: style,
       ),
-      const [],
     );
-    try {
-      await boundary(added, true);
-      if (last) await boundary(view.id, false);
-    } on Object catch (_) {}
-  }
-
-  Future<void> _addBlock(BridgeMutationKind kind, String name) async {
-    final views = widget.views;
-    final view = widget.view;
-    final index = widget.index;
-    final empty = _text.text.isEmpty;
-    final last = index == (views.count ?? 0) - 1;
-    String? after = view.id;
-    if (empty && last) {
-      final above = index > 0 ? await views.viewAt(index - 1) : null;
-      if (index > 0 && above == null) {
-        _state.report(
-          'Liquid did not add the $name, as the Page changed; choose $name again.',
-        );
-        return;
-      }
-      after = above?.id;
-    }
-    try {
-      final added = await views.write(
-        mutation(kind, page: _page, after: after),
-        const [],
-      );
-      if (kind == BridgeMutationKind.addWhiteboardBlock) {
-        views.focusBoard.value = added.view;
-      }
-      if (empty) await _handOverSection(added.view!, last: last);
-      if (empty && !last) {
-        await views.write(
-          mutation(BridgeMutationKind.removeView, page: _page, view: view.id),
-          [view.block],
-        );
-      }
-    } on Object catch (_) {}
   }
 
   Future<void> _paste() async {
@@ -738,167 +540,6 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
       return;
     }
     views.moveCaret(Caret(target.view, caretEnd, kind: BridgeBlockKind.code));
-  }
-
-  void _turnIntoCode() {
-    _write(
-      mutation(BridgeMutationKind.turnIntoCode, page: _page, block: block),
-    );
-    widget.views.moveCaret(
-      Caret(widget.view.id, 0, kind: BridgeBlockKind.code),
-    );
-  }
-
-  void _turnIntoMath() {
-    _write(
-      mutation(BridgeMutationKind.turnIntoMath, page: _page, block: block),
-    );
-    widget.views.moveCaret(
-      Caret(widget.view.id, 0, kind: BridgeBlockKind.math),
-    );
-  }
-
-  void _toggleToDo() {
-    final done = _style == BridgeTextStyle.done;
-    if (done || _style == BridgeTextStyle.todo) {
-      _restyle(done ? BridgeTextStyle.todo : BridgeTextStyle.done);
-    }
-  }
-
-  void _restyle(BridgeTextStyle style) {
-    setState(() => _style = style);
-    widget.views.setStyle(block, style);
-    _write(
-      mutation(
-        BridgeMutationKind.setTextStyle,
-        page: _page,
-        block: block,
-        style: style,
-      ),
-    );
-  }
-
-  KeyEventResult _key(KeyEvent event) {
-    if (event is KeyUpEvent || _composing || _stored == null) {
-      return KeyEventResult.ignored;
-    }
-    if (!widget.views.ready.value) return KeyEventResult.handled;
-    final keys = HardwareKeyboard.instance;
-    final plain =
-        !keys.isShiftPressed &&
-        !keys.isMetaPressed &&
-        !keys.isControlPressed &&
-        !keys.isAltPressed &&
-        !keys.logicalKeysPressed.contains(liquidKey);
-    if (isPaste(event) &&
-        !_editor.isSource(this) &&
-        !_adding &&
-        !_menu.isShowing) {
-      _state.track(_paste());
-      return KeyEventResult.handled;
-    }
-    if (!plain) return KeyEventResult.ignored;
-    if (_editor.isSource(this)) return _editor.queue(this, event);
-    if (_menu.isShowing) return _menuKey(event.logicalKey);
-    if (_adding) {
-      return switch (event.logicalKey) {
-        LogicalKeyboardKey.enter ||
-        LogicalKeyboardKey.numpadEnter ||
-        LogicalKeyboardKey.arrowUp ||
-        LogicalKeyboardKey.arrowDown ||
-        LogicalKeyboardKey.arrowLeft ||
-        LogicalKeyboardKey.arrowRight => KeyEventResult.handled,
-        LogicalKeyboardKey.backspace
-            when _text.selection.isCollapsed &&
-                _text.selection.baseOffset == 0 =>
-          KeyEventResult.handled,
-        _ => KeyEventResult.ignored,
-      };
-    }
-    final selection = _text.selection;
-    if (!selection.isValid) return KeyEventResult.ignored;
-    final at = selection.baseOffset;
-    final collapsed = selection.isCollapsed;
-    switch (event.logicalKey) {
-      case LogicalKeyboardKey.enter || LogicalKeyboardKey.numpadEnter:
-        if (!collapsed) {
-          final text = _text.text.replaceRange(
-            selection.start,
-            selection.end,
-            '',
-          );
-          _set(text, selection.start);
-          _send(text);
-        }
-        _structure(LogicalKeyboardKey.enter);
-        return KeyEventResult.handled;
-      case LogicalKeyboardKey.backspace when collapsed && at == 0:
-        _structure(LogicalKeyboardKey.backspace);
-        return KeyEventResult.handled;
-      case LogicalKeyboardKey.arrowUp when collapsed && _onLine(first: true):
-      case LogicalKeyboardKey.arrowLeft when collapsed && at == 0:
-        return _move(-1) ? KeyEventResult.handled : KeyEventResult.ignored;
-      case LogicalKeyboardKey.arrowDown when collapsed && _onLine(first: false):
-      case LogicalKeyboardKey.arrowRight
-          when collapsed && at == _text.text.length:
-        return _move(1) ? KeyEventResult.handled : KeyEventResult.ignored;
-      default:
-        return KeyEventResult.ignored;
-    }
-  }
-
-  void _structure(LogicalKeyboardKey key) => _editor.start(
-    this,
-    EditorTarget(
-      view: widget.view.id,
-      block: block,
-      index: widget.index,
-      text: _stored!,
-      caret: _text.selection.start,
-      style: _style,
-      boundary: widget.view.boundary,
-    ),
-    key,
-  );
-
-  bool _onLine({required bool first}) {
-    RenderEditable? editable;
-    void find(RenderObject object) {
-      if (object is RenderEditable) {
-        editable = object;
-      } else {
-        object.visitChildren(find);
-      }
-    }
-
-    final root = _focus.context?.findRenderObject();
-    if (root == null) return false;
-    find(root);
-    final found = editable;
-    if (found == null) return false;
-    final caret = found
-        .getLocalRectForCaret(TextPosition(offset: _text.selection.baseOffset))
-        .center
-        .dy;
-    final edge = found
-        .getLocalRectForCaret(
-          TextPosition(offset: first ? 0 : _text.text.length),
-        )
-        .center
-        .dy;
-    return (caret - edge).abs() < 1;
-  }
-
-  bool _move(int by) {
-    if (_editor.busy) return false;
-    final neighbour = widget.views.caretFrom(widget.index + by, by);
-    if (neighbour == null) return false;
-    widget.views.caret.value = Caret(
-      neighbour.id,
-      by < 0 ? _end : 0,
-      kind: neighbour.kind,
-    );
-    return true;
   }
 
   @override
