@@ -133,6 +133,8 @@ pub const MAX_MEMORY_BYTES: u64 = 100 * 1024 * 1024;
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct AgentCarry {
     pub name: String,
+    #[serde(default = "named_default")]
+    pub named: bool,
     pub model: ModelChoice,
     pub permissions: Permissions,
     pub files: Vec<CarriedFile>,
@@ -151,6 +153,23 @@ pub struct AgentMoveFacts {
     pub memory_bytes: u64,
     pub routines: u32,
     pub earlier: u32,
+}
+
+fn named_default() -> bool {
+    true
+}
+
+pub(crate) fn free_name(db: &Connection, home: &Path, name: &str) -> Result<String, String> {
+    if get(db, home, name)?.is_none() {
+        return Ok(name.to_owned());
+    }
+    for number in 2..100 {
+        let candidate = format!("{name}-{number}");
+        if check_name(&candidate).is_ok() && get(db, home, &candidate)?.is_none() {
+            return Ok(candidate);
+        }
+    }
+    Err(format!("No free name like {name} is left on this host."))
 }
 
 pub(crate) fn memory_files(folder: &Path) -> Result<Vec<(String, PathBuf, u64)>, String> {
@@ -222,6 +241,7 @@ pub(crate) fn pack(agent: &Agent, routines: Vec<Value>) -> Result<AgentCarry, St
         .collect::<Result<_, String>>()?;
     Ok(AgentCarry {
         name: agent.name.clone(),
+        named: agent.named,
         model: agent.model.clone(),
         permissions: agent.permissions,
         files,

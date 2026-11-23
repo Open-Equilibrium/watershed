@@ -2681,6 +2681,17 @@ async fn an_agent_moves_to_another_host_with_its_memory_and_routines() {
             .unwrap()
             .contains("Keep the news page current.")
     );
+    let memory = arrived[0].memory.display().to_string();
+    let told = wait(&moved, |s| {
+        s.turns.iter().any(|t| t.prompt.contains(&memory))
+    })
+    .await;
+    assert!(
+        told.turns
+            .iter()
+            .any(|t| t.prompt.contains("You are news-bot")),
+        "the moved agent learns its new memory folder"
+    );
     let routines = host_b.agent_routines("news-bot").await.unwrap();
     assert_eq!(
         routines

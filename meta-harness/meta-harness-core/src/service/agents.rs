@@ -310,13 +310,19 @@ pub(super) async fn adopt(
 ) -> Result<(), String> {
     let _serial = shared.agents.serial.lock().await;
     let known = agents::of_thread(&shared.store.db(), &shared.home, thread.id())?;
+    let name = if carry.named && known.is_none() {
+        let free = agents::free_name(&shared.store.db(), &shared.home, &carry.name)?;
+        Some(free)
+    } else {
+        None
+    };
     let agent = match known {
         Some(agent) => agent,
         None => agents::create(
             &shared.store.db(),
             &shared.home,
             &agents::NewAgent {
-                name: Some(carry.name.clone()),
+                name,
                 root: root.to_owned(),
                 model: carry.model.clone(),
                 permissions: carry.permissions,
@@ -340,6 +346,14 @@ pub(super) async fn adopt(
             fresh: false,
         },
     )?;
+    let opening = agents::opening(&agent, &agents::instructions(&agent)?, None);
+    thread
+        .send_once(
+            &agents::message_id(&agent.id, agent.generation),
+            &opening,
+            false,
+        )
+        .await?;
     shared.agents.start(shared, &agent.id);
     Ok(())
 }
