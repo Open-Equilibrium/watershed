@@ -1,6 +1,6 @@
 use meta_harness_core::{Access, ClientKind, DEFAULT_REMOTE_PORT, remote};
 
-use crate::USAGE;
+use crate::{USAGE, print};
 
 pub async fn remote(host: &remote::Host, args: &[&str]) -> Result<(), String> {
     match args {
@@ -61,12 +61,7 @@ pub async fn host(host: &remote::Host, args: &[&str]) -> Result<(), String> {
             println!("Linked {name} at {} access.", access.as_str());
             Ok(())
         }
-        ["list"] => {
-            let listed = host.hosts().await?;
-            let text = serde_json::to_string_pretty(&listed).map_err(|e| e.to_string())?;
-            println!("{text}");
-            Ok(())
-        }
+        ["list"] => print(&host.hosts().await?),
         ["remove", name] => {
             let client = host.host_remove(name).await?;
             println!(

@@ -285,38 +285,27 @@ pub(crate) fn state(db: &Connection, thread: &str) -> Result<Option<State>, Stri
 }
 
 pub(crate) fn open_move(db: &Connection, thread: &str) -> Result<Option<Moving>, String> {
-    let row: Option<(String, String, String, String, String, i64)> = db
-        .query_row(
-            "SELECT transfer, state, target_address, target_name, target_environment, since_ms \
-             FROM moved_thread WHERE thread = ?1 AND state IN ('preparing', 'handed')",
-            [thread],
-            |row| {
-                Ok((
-                    row.get(0)?,
-                    row.get(1)?,
-                    row.get(2)?,
-                    row.get(3)?,
-                    row.get(4)?,
-                    row.get(5)?,
-                ))
-            },
-        )
-        .optional()
-        .map_err(failed)?;
-    Ok(row.map(
-        |(transfer, state, target_address, target_name, target_environment, since)| Moving {
-            transfer,
-            phase: if state == "handed" {
-                MovePhase::Handed
-            } else {
-                MovePhase::Preparing
-            },
-            target_address,
-            target_name,
-            target_environment,
-            since_ms: count(since),
+    db.query_row(
+        "SELECT transfer, state, target_address, target_name, target_environment, since_ms \
+         FROM moved_thread WHERE thread = ?1 AND state IN ('preparing', 'handed')",
+        [thread],
+        |row| {
+            Ok(Moving {
+                transfer: row.get(0)?,
+                phase: if row.get::<_, String>(1)? == "handed" {
+                    MovePhase::Handed
+                } else {
+                    MovePhase::Preparing
+                },
+                target_address: row.get(2)?,
+                target_name: row.get(3)?,
+                target_environment: row.get(4)?,
+                since_ms: count(row.get(5)?),
+            })
         },
-    ))
+    )
+    .optional()
+    .map_err(failed)
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
