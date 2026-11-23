@@ -69,13 +69,9 @@ impl Session {
     ) -> Result<Value, String> {
         let shared = self.shared.clone();
         let project = project.clone();
-        let carried = package.agent.clone();
-        let landing = root.to_owned();
+        let root = root.to_owned();
         let thread =
-            detached(async move { arrive(&shared, &project, &landing, package).await }).await?;
-        if let Some(carry) = carried {
-            super::agents::adopt(&self.shared, root, &thread, *carry).await?;
-        }
+            detached(async move { arrive(&shared, &project, &root, package).await }).await?;
         let id = thread.id().to_owned();
         self.keep(thread).await;
         to(id)
@@ -288,8 +284,9 @@ async fn finish_move(
                 }
             }
             if seal_to.is_some() {
-                super::agents::moved_away(shared, thread).await?;
+                let away = super::agents::moved_away(shared, thread).await;
                 pause(shared, thread).await;
+                away?;
             }
             Ok(())
         })
@@ -394,7 +391,7 @@ async fn start_held(thread: &Thread, text: &str) -> Result<(), String> {
 }
 
 async fn arrive(
-    shared: &Shared,
+    shared: &Arc<Shared>,
     project: &Project,
     root: &str,
     package: MovePackage,
@@ -453,7 +450,7 @@ async fn arrive(
 }
 
 async fn land(
-    shared: &Shared,
+    shared: &Arc<Shared>,
     root: &str,
     package: MovePackage,
     thread: Thread,
@@ -467,6 +464,9 @@ async fn land(
         transcript,
     };
     host_move::put_record(&shared.store.db(), thread.id(), &transfer, &record)?;
+    if let Some(carry) = package.agent {
+        super::agents::adopt(shared, root, &thread, *carry).await?;
+    }
     let landed = ArrivalRow {
         state: "landed".to_owned(),
         root: root.to_owned(),

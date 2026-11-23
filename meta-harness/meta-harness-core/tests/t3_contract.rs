@@ -2617,6 +2617,8 @@ async fn an_agent_moves_to_another_host_with_its_memory_and_routines() {
     wait(&thread, completed(1)).await;
     std::fs::create_dir_all(created.memory.join("days")).unwrap();
     std::fs::write(created.memory.join("days/monday.md"), "Saw 4 items.\n").unwrap();
+    let large = vec![7u8; 20 * 1024 * 1024];
+    std::fs::write(created.memory.join("feeds.bin"), &large).unwrap();
     host_a
         .agent_routine_add(
             "news-bot",
@@ -2666,6 +2668,11 @@ async fn an_agent_moves_to_another_host_with_its_memory_and_routines() {
     assert_eq!(
         std::fs::read_to_string(arrived[0].memory.join("days/monday.md")).unwrap(),
         "Saw 4 items.\n"
+    );
+    assert_eq!(
+        std::fs::read(arrived[0].memory.join("feeds.bin")).unwrap(),
+        large,
+        "a memory past one socket frame arrives whole"
     );
     assert!(
         host_b

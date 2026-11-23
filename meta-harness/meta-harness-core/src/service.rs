@@ -316,7 +316,7 @@ async fn serve(
     };
     let Ok(Ok(mut socket)) = tokio::time::timeout(
         HANDSHAKE,
-        tokio_tungstenite::accept_hdr_async(socket, check),
+        tokio_tungstenite::accept_hdr_async_with_config(socket, check, Some(api::socket_config())),
     )
     .await
     else {

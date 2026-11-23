@@ -162,7 +162,11 @@ impl Host {
                 (api::CLIENT_HEADER, self.inner.client.as_str()),
             ],
         )?;
-        let (socket, _) = tokio::time::timeout(TIMEOUT, tokio_tungstenite::connect_async(request))
+        let (socket, _) = tokio::time::timeout(TIMEOUT, tokio_tungstenite::connect_async_with_config(
+            request,
+            Some(crate::api::socket_config()),
+            false,
+        ))
             .await
             .map_err(|_| format!("Could not reach Meta-Harness at {url}: it did not answer in time."))?
             .map_err(|e| match e {
@@ -588,13 +592,20 @@ pub async fn pair(address: &str, code: &str, client: &str) -> Result<api::Pairin
         address,
         &[(api::PAIRING_HEADER, code), (api::CLIENT_HEADER, client)],
     )?;
-    let (mut socket, _) = tokio::time::timeout(TIMEOUT, tokio_tungstenite::connect_async(request))
-        .await
-        .map_err(|_| format!("Meta-Harness at {address} did not answer in time."))?
-        .map_err(|e| match e {
-            tokio_tungstenite::tungstenite::Error::Http(response) => refusal(&response),
-            e => format!("Could not reach Meta-Harness at {address}: {e}"),
-        })?;
+    let (mut socket, _) = tokio::time::timeout(
+        TIMEOUT,
+        tokio_tungstenite::connect_async_with_config(
+            request,
+            Some(crate::api::socket_config()),
+            false,
+        ),
+    )
+    .await
+    .map_err(|_| format!("Meta-Harness at {address} did not answer in time."))?
+    .map_err(|e| match e {
+        tokio_tungstenite::tungstenite::Error::Http(response) => refusal(&response),
+        e => format!("Could not reach Meta-Harness at {address}: {e}"),
+    })?;
     let answer = tokio::time::timeout(TIMEOUT, async {
         loop {
             match socket.next().await {

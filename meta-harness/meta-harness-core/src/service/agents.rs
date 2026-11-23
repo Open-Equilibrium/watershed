@@ -720,6 +720,18 @@ async fn watch(shared: Arc<Shared>, id: String) {
 
 async fn follow(shared: &Shared, id: &str) -> Result<(), String> {
     loop {
+        let agent = agents::get(&shared.store.db(), &shared.home, id)?;
+        let Some(agent) = agent else {
+            return Ok(());
+        };
+        let sealed = crate::host_move::state(&shared.store.db(), &agent.thread)?
+            == Some(crate::host_move::State::Sealed);
+        if sealed {
+            return match existing(shared, &agent.root, &agent.thread).await? {
+                Some(thread) => moved_away(shared, &thread).await,
+                None => agents::remove(&shared.store.db(), &agent.id),
+            };
+        }
         let thread = {
             let _serial = shared.agents.serial.lock().await;
             let Some(agent) = agents::get(&shared.store.db(), &shared.home, id)? else {
