@@ -80,7 +80,7 @@ The replica workloads compared on 2026-11-23 at `ddcaa376` (Rust 1.99.1, `rusqli
 | Drawing a stroke of 150 points, median | 6.94, 7.98, 8.08 ms | 7.99, 8.67, 9.01 ms |
 | Loading the Page and reading its 2,000 strokes | 28.2, 30.7, 32.1 ms | 32.0, 27.0, 27.4 ms |
 
-CommonCrypto is as fast or faster in every workload; peak memory differs by less than 1 MB.
+CommonCrypto is about as fast in every workload and faster at adding a large file; peak memory differs by less than 1 MB.
 
 ### Raw output
 
