@@ -10,6 +10,7 @@ import tarfile
 import tempfile
 import tomllib
 import unittest
+import zipfile
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -212,6 +213,37 @@ class PackagerTest(unittest.TestCase):
                     links = {member.name.removeprefix(f"{name}/"): member.linkname
                              for member in bundle.getmembers() if member.issym()}
                     self.assertEqual(links, {f"lib/meta-harness/t3-{T3_VERSION}-{target}/helper": "t3"})
+
+    def test_a_windows_download_is_a_zip_with_meta_exe_and_no_shell_installer(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            target = "win32-x64"
+            t3 = root / "fixtures" / f"t3-{T3_VERSION}-{target}"
+            write(t3 / "t3.exe", b"synthetic T3 program")
+            write(t3 / "client" / "index.html", b"synthetic client")
+            output = root / "download"
+            result = run_packager(root, target, output, t3=t3)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            name = f"meta-harness-{META_VERSION}-{target}"
+            archive = output / f"{name}.zip"
+            digest = hashlib.sha256(archive.read_bytes()).hexdigest()
+            self.assertEqual((output / "SHA256SUMS").read_text(encoding="ascii"),
+                             f"{digest}  {archive.name}\n")
+            expected = {
+                "bin/meta.exe": b"synthetic meta program",
+                f"lib/meta-harness/t3-{T3_VERSION}-{target}/t3.exe": b"synthetic T3 program",
+                f"lib/meta-harness/t3-{T3_VERSION}-{target}/client/index.html": b"synthetic client",
+                "bundle-info": f"{META_VERSION}\n{target}\n".encode("ascii"),
+                "LICENSE": (ROOT / "LICENSE").read_bytes(),
+                "LICENSE-t3code": (ROOT / "meta-harness" / "LICENSE-t3code").read_bytes(),
+                "THIRD_PARTY_NOTICES.md": (ROOT / "THIRD_PARTY_NOTICES.md").read_bytes(),
+            }
+            with zipfile.ZipFile(archive) as bundle:
+                self.assertIsNone(bundle.testzip())
+                files = {info.filename.removeprefix(f"{name}/"): info for info in bundle.infolist()}
+                self.assertEqual(set(files), set(expected))
+                for relative, contents in expected.items():
+                    self.assertEqual(bundle.read(files[relative]), contents, relative)
 
     def test_a_symlinked_t3_folder_is_packed_as_the_folder_it_names(self):
         for target in PLATFORMS:
