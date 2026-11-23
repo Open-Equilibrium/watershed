@@ -123,6 +123,7 @@ Each topic's canonical home; other files link there.
 | History and Workspace CLI/API | [Liquid V-Spec](docs/concept/V-Spec_Liquid.html#history) |
 | Liquid client architecture | [docs/concept/liquid-client-architecture.md](docs/concept/liquid-client-architecture.md) |
 | Implementation architecture | [docs/architecture.md](docs/architecture.md) |
+| Dependency updates and the monthly dependency audit | [SECURITY.md](SECURITY.md#supply-chain) |
 | Platforms, Windows and WSL | [PLATFORMS.md](PLATFORMS.md) |
 | Events, CLI and API protocol | [PROTOCOL.md](PROTOCOL.md) |
 | Testing and CI gates | [TESTING.md](TESTING.md#ci) |

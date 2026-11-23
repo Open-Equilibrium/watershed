@@ -172,6 +172,16 @@ This is Liquid's **workspace** action history (over Liquid's own data), not a pr
 
 Dependency hygiene: committed lockfiles, exact pins and minimal dependencies; CI runs `cargo audit` (RustSec advisories), `cargo deny` (license/bans/sources/advisory policy via `deny.toml`) and `pnpm audit`. Rust reduces but does not eliminate supply-chain risk (`build.rs`/proc-macros run at build time); future isolated runtimes must limit blast radius regardless of language.
 
+Dependabot (`.github/dependabot.yml`) proposes weekly grouped updates for Cargo, pub, npm and GitHub Actions, each release at least three days old. A monthly dependency audit covers what Dependabot and the advisory gates cannot see (ADR-0320):
+
+- toolchains: both `rust-toolchain.toml` files, Flutter in `liquid/app/pubspec.yaml`, `.node-version` and pnpm;
+- the tools and downloads in `.github/workflows/ci.yml`, including the flutter_rust_bridge codegen;
+- the T3 Code pin in `meta-harness/t3.lock` and the Node it declares;
+- C libraries vendored inside crates, such as SQLCipher and OpenSSL, and the material in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md);
+- host packages: Bubblewrap and `sandbox-exec` ([PLATFORMS.md](PLATFORMS.md));
+- advisories published only in an upstream repository, for parsers of untrusted input, crypto and native code;
+- maintainers: the real upstream behind registry links, bus factor, releases, and answers to bugs on our platforms.
+
 ## M0/M1 policy-emulation scope
 
 Fixture execution checks modeled invocation decisions in process; it never proves Flow-owned write protection. Fixture scenarios ([TESTING.md](TESTING.md#fixture-contract)) do not grant or assert productive filesystem/network containment. Own-script fixture output remains create-only: an existing leaf rejects before runtime or temporary-file mutation; output replacement remains [D-056](docs/decisions/open-decisions.html#d-056).

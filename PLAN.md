@@ -12,6 +12,19 @@ Build the shared substrate, then Flow Agent, Meta-Harness and Liquid. This depen
 
 The initial adoption wedge is technical teams that need reusable, measurable, and reversible AI-agent workflows. Do not attempt separate adoption motions for all three layers before the Flow Agent and Meta-Harness wedges are validated.
 
+## Dependency follow-ups
+
+Approved after the dependency audit of 2026-11-23; each lands as its own PR.
+
+- `noyalib` to its latest release with two new corpus fixtures, then the `serde-saphyr` trial (ADR-0318).
+- SQLCipher on CommonCrypto for macOS and plain bundled SQLite for Meta-Harness now; a supported OpenSSL before Liquid builds for Linux, Windows or Android (ADR-0319).
+- Rust 1.99.1 or later in both `rust-toolchain.toml` files ([rust#163911](https://github.com/rust-lang/rust/issues/163911)).
+- T3 Code past 0.1.9 through the contract tests (ADR-0281), for Node 26.13.1 or later.
+- Bubblewrap: review the bind arguments against CVE-2026-87766 and name the minimum patched package in [PLATFORMS.md](PLATFORMS.md).
+- CI: check the Flutter SDK and lychee downloads against pinned SHA-256 values.
+- Before Android: keyring-core with a store per platform. Before Windows or Android: native_toolchain_rust 1.1.1 or later in the lock.
+- Before each product's first release: third-party notices in every bundle, covering rough.js (its MIT text left `rough.dart` in #100), SQLCipher, OpenSSL and the linked Rust crates.
+
 ## Milestones
 
 ### M1.2 — Flow-owned write protection
