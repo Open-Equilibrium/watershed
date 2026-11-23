@@ -297,14 +297,22 @@ class _AutomationEditorState extends State<AutomationEditor> {
       _ => null,
     };
     if (trigger == null) return;
-    final moved = _setup.trigger?.table != trigger.table;
+    final left = _setup.trigger?.table;
+    final moved = left != trigger.table;
     _write(
       trigger: trigger,
       conditions: moved ? const [] : null,
       steps: moved
           ? [
               for (final step in _setup.steps)
-                if (step.kind == BridgeStepKind.addRow) step,
+                if (step.kind == BridgeStepKind.addRow)
+                  step
+                else if (step.kind == BridgeStepKind.notify)
+                  BridgeStep(
+                    kind: BridgeStepKind.notify,
+                    cells: const [],
+                    message: shownMessage(step.message ?? '', _databases[left]),
+                  ),
             ]
           : null,
     );

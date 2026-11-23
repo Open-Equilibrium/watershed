@@ -282,4 +282,47 @@ void main() {
     );
     expect(find.text('New Automation'), findsOneWidget);
   });
+
+  testWidgets('moving the trigger to another Table keeps a notification, '
+      'its fields named as text', (tester) async {
+    final kit = PageKit();
+    final table = await showBudget(tester, kit);
+    await kit.workspace.apply(
+      mutation(
+        BridgeMutationKind.createTable,
+        area: kit.workspace.areas.value.first.id,
+        text: 'Bills',
+      ),
+    );
+    kit.fake.automations.add(
+      BridgeWorkspaceAutomation(
+        id: 'a1',
+        setup: BridgeAutomationSetup(
+          name: 'Log',
+          trigger: BridgeTrigger(
+            kind: BridgeTriggerKind.rowAdded,
+            table: table,
+          ),
+          conditions: const [],
+          steps: const [
+            BridgeStep(
+              kind: BridgeStepKind.notify,
+              cells: [],
+              message: '{name} added',
+            ),
+          ],
+        ),
+        on_: true,
+        owner: table,
+      ),
+    );
+    await kit.workspace.apply(
+      mutation(BridgeMutationKind.setAutomationOn, automation: 'a1', on: true),
+    );
+    await openAutomations(tester);
+    await tester.tap(find.text('Log'));
+    await tester.pumpAndSettle();
+    await choose(tester, 'table', 'Bills');
+    expect(lastSetup(kit).steps.single.message, '{Name} added');
+  });
 }
