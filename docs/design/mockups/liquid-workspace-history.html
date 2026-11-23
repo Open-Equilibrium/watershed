@@ -2,52 +2,6 @@
 <html lang="en"><head><title>Liquid: Workspace settings mockups</title>
 <link rel="stylesheet" href="mockup.css"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <style>
-.dlg{width:540px;box-sizing:border-box;border-radius:12px;background:var(--ws-surface);box-shadow:var(--ws-shadow);padding:16px;display:flex;flex-direction:column;gap:12px;font-size:13px;line-height:20px}
-.dlg h4{margin:0;font-size:16px;line-height:22px;font-weight:600}
-.dlg p{margin:0;color:var(--ws-text-muted)}
-.dlg .acts{display:flex;gap:8px;align-items:center}.dlg .acts .sp{flex:1}
-/* Liquid's questions show Cancel left and the main action right; the markup lists the main action first, as the app does (design guidelines). */
-.dlg .acts{flex-direction:row-reverse;justify-content:flex-start}.dlg .acts .sp{display:none}
-.flist{border-radius:8px;background:var(--ws-subtle);padding:6px;display:flex;flex-direction:column;gap:1px}
-.frow{display:flex;gap:8px;align-items:center;min-height:28px;padding:0 6px;border-radius:6px;font-size:13px;white-space:nowrap}
-.frow .r{margin-left:auto;font-size:12px;color:var(--ws-text-faint)}
-.frow .r.warn{color:var(--ws-warning)}
-.frow.h{min-height:22px;padding-top:4px;font-size:12px;color:var(--ws-text-faint)}
-.btn.dngp{background:var(--ws-danger);color:var(--ws-on-accent);box-shadow:none}
-.toast{position:absolute;left:50%;bottom:20px;transform:translateX(-50%);display:flex;gap:14px;align-items:center;padding:8px 10px 8px 14px;border-radius:8px;background:var(--ws-text);color:var(--ws-canvas);font-size:13px;box-shadow:var(--ws-shadow);white-space:nowrap;z-index:3}
-.toast b{font-weight:600}
-.toast .u{color:var(--ws-canvas);opacity:.75}
-.hist{display:flex;flex:1;min-height:0}
-.hl{width:430px;flex:none;box-shadow:inset -1px 0 0 var(--ws-border);display:flex;flex-direction:column;min-height:0}
-.flt{display:flex;gap:6px;padding:10px 12px;flex-wrap:wrap;box-shadow:inset 0 -1px 0 var(--ws-border)}
-.flt .sel{height:26px;font-size:13px;color:var(--ws-text-muted)}
-.hday{font-size:12px;color:var(--ws-text-faint);padding:10px 16px 4px}
-.he{display:grid;grid-template-columns:44px 1fr;gap:2px 8px;padding:7px 12px 7px 16px;font-size:14px;line-height:20px;box-shadow:inset 0 -1px 0 var(--ws-border)}
-.he.on{background:var(--ws-selected)}
-.he .t{color:var(--ws-text-faint);font-size:12px;font-variant-numeric:tabular-nums}
-.he .m{grid-column:2;font-size:12px;line-height:18px;color:var(--ws-text-faint);display:flex;gap:6px;align-items:center;white-space:nowrap;overflow:hidden}
-.org{font-size:11px;line-height:16px;padding:0 5px;border-radius:4px;background:var(--ws-hover);color:var(--ws-text-muted)}
-.org.auto{background:color-mix(in srgb,var(--ws-data-2) 14%,transparent);color:var(--ws-data-2)}
-.hd2{flex:1;min-width:0;padding:16px 24px;display:flex;flex-direction:column;gap:14px;overflow:hidden;font-size:14px}
-.hd2 h2{margin:0;font-size:var(--ws-fs-h2);line-height:var(--ws-lh-h2);font-weight:600}
-.kv{display:grid;grid-template-columns:110px 1fr;gap:4px 12px;font-size:13px}
-.kv .l{color:var(--ws-text-faint)}
-.chg{display:flex;flex-direction:column;gap:1px;border-radius:8px;background:var(--ws-subtle);padding:6px}
-.chg div{display:flex;gap:8px;align-items:center;min-height:28px;padding:0 6px;font-size:13px}
-.chg .r{margin-left:auto;font-size:12px;color:var(--ws-text-faint)}
-.chg .d{color:var(--ws-danger);font-weight:600;width:12px}.chg .w{color:var(--ws-warning);font-weight:600;width:12px}
-.tr.gone{background:var(--ws-diff-del)}
-.tr.gone>span{text-decoration:line-through;color:var(--ws-text-muted)}
-.tr.new{background:var(--ws-diff-add)}
-.vers{width:300px;flex:none;box-shadow:inset 1px 0 0 var(--ws-border);padding:12px 10px;display:flex;flex-direction:column;gap:1px;font-size:14px}
-.vers h5{margin:0 6px 8px;font-size:12px;font-weight:500;color:var(--ws-text-faint)}
-.vr{padding:6px 8px;border-radius:6px;line-height:20px}
-.vr.on{background:var(--ws-selected)}
-.vr span{display:block;font-size:12px;line-height:18px;color:var(--ws-text-faint)}
-.vban{display:flex;align-items:center;gap:10px;height:44px;flex:none;padding:0 16px 0 24px;background:var(--ws-subtle);font-size:13px;color:var(--ws-text-muted);box-shadow:inset 0 -1px 0 var(--ws-border)}
-.vban .end{margin-left:auto;display:flex;gap:8px}
-.mark-add{background:var(--ws-diff-add);border-radius:3px}
-.mark-del{background:var(--ws-diff-del);text-decoration:line-through;border-radius:3px}
 .sett{display:flex;flex:1;min-height:0}
 .snav{width:180px;flex:none;padding:16px 8px;display:flex;flex-direction:column;gap:1px;box-shadow:inset -1px 0 0 var(--ws-border)}
 .snav .h{font-size:12px;color:var(--ws-text-faint);padding:10px 10px 4px}
@@ -68,8 +22,8 @@
   </div>
   <section>
     <h1>Liquid Workspace: Workspace settings</h1>
-    <p class="sub">Mockups for the M3a slice in <a href="../../../PLAN.md#m3a--local-workspace-foundation">PLAN.md</a>, approved by the maintainer on 2026-11-01: Workspace settings. History, revert, Restore version, deleting for good, Roles and protected Tables are built; the <a href="../../concept/V-Spec_Liquid.html#history">V-Spec</a> holds their rules. They follow the <a href="../../concept/V-Spec_Liquid.html#history">V-Spec</a>, ADR-0235 and <a href="../guidelines.md">guidelines.md</a>; the shell is the one in the <a href="liquid-workspace-pages.html">Pages mockups</a>.</p>
-    <p class="sub"><b>Revised by ADR-0239 and ADR-0241:</b> the rail with the Workspace switcher, Inbox and Settings, tabs side by side, Chats in place of agent sessions and Notion's scale are in <a href="liquid-app-concept.html">the app's structure</a>; this file keeps its slice's content, and the shell is redrawn as each slice is built.</p>
+    <p class="sub">Mockups for the M3a slice in <a href="../../../PLAN.md#m3a--local-workspace-foundation">PLAN.md</a>, approved by the maintainer on 2026-11-01: Workspace settings. History, revert, Restore version, deleting for good, Roles and protected Tables are built; the V-Spec's <a href="../../concept/V-Spec_Liquid.html#history">History</a> and <a href="../../concept/V-Spec_Liquid.html#permissions">Roles</a> sections hold their rules. They follow ADR-0235 and <a href="../guidelines.md">guidelines.md</a>; the shell is the one in the <a href="liquid-workspace-pages.html">Pages mockups</a>.</p>
+    <p class="sub"><b>Revised by ADR-0239 and ADR-0241:</b> the rail with Inbox and Settings, the Workspace switcher in the sidebar's top row, tabs side by side, Chats in place of agent sessions and Notion's scale are in <a href="liquid-app-concept.html">the app's structure</a>; this file keeps its slice's content, and the shell is redrawn as each slice is built.</p>
   </section>
   <section>
     <h3 class="sec">1 · Workspace settings</h3>
@@ -81,10 +35,6 @@
     <h4 class="qh">Approved with these mockups (2026-11-01)</h4>
     <ol class="qs">
       <li>Workspace settings: General with name and areas.</li>
-    </ol>
-    <h4 class="qh">Added on request, approved the same day</h4>
-    <ol class="qs">
-      <li>Settings opens as a dialog over the current Page or Source, as History does; closing it shows the Page again. This replaces the Settings page that takes over the main area.</li>
     </ol>
   </section>
 </div>
@@ -150,13 +100,11 @@ const fxBlk=(o={})=>`<div class="card"><div class="cap">Left this month</div><di
 
 Object.assign(I,{
 lock:sv('<rect x="3.5" y="7" width="9" height="7" rx="1.2"/><path d="M5.5 7V5a2.5 2.5 0 015 0v2"/>'),
-undo:sv('<path d="M5 3L2 6l3 3"/><path d="M2 6h7.5a4 4 0 010 8H7"/>'),
 area:sv('<rect x="2" y="3" width="12" height="10" rx="1.5"/><path d="M2 6.5h12"/>'),
 });
 const bgPage=`<div class="pg"><div class="col"><div class="ttl"><span class="tic">💰</span>Household budget</div><div class="prose"><p>October is almost done.</p></div>${dbHead({synced:true})}${dbTable()}</div></div>`;
 const bgHead=head('Private <span>›</span> <b>💰 Household budget</b>');
 const snav=(on)=>`<div class="snav"><div class="h">App</div><div class="it">Appearance</div><div class="it">Shortcuts</div><div class="it">Diff</div><div class="h">Workspace</div><div class="it ${on=='gen'?'on':''}">General</div><div class="it ${on=='roles'?'on':''}">Roles</div></div>`;
-// 4 · Settings
 frame('w-set',{h:540,side:{sel:'set'},head:bgHead,main:bgPage,over:modal('Settings',`<div class="sett">${snav('gen')}<div class="sc"><h2>General</h2>
 <div class="fieldrow"><span class="l">Workspace name</span><span class="inp">Benni's Workspace</span>
 <span class="l">Icon</span><span><span class="av">B</span></span></div>
