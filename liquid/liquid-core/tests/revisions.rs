@@ -459,13 +459,14 @@ fn an_undone_edit_stays_undone_once_its_page_loads_again() {
 #[test]
 fn reverting_an_edit_that_was_undone_and_redone_reverts_what_now_carries_it() {
     let mut budget = Budget::new();
-    let typed = budget.typed(0, "Rent");
+    let first = budget.typed(0, "Re");
+    let typed = budget.typed(2, "nt");
     budget.workspace.undo(&owner()).unwrap().unwrap();
     budget.workspace.redo(&owner()).unwrap().unwrap();
     assert_eq!(budget.text(), "Rent");
     budget
         .workspace
-        .revert(&owner(), std::slice::from_ref(&typed))
+        .revert(&owner(), &[typed.clone(), first])
         .unwrap();
     assert_eq!(budget.text(), "");
     let entry = budget
@@ -593,4 +594,26 @@ fn history_reaches_past_a_long_stretch_of_typing() {
             .iter()
             .any(|entry| entry.title == "Created the Page “Household budget”")
     );
+}
+
+#[test]
+fn after_deleting_earlier_versions_undo_passes_over_a_restore_it_cannot_take_back() {
+    let mut budget = Budget::new();
+    let rent = budget.typed(0, "Rent");
+    budget.typed(4, " due");
+    let page = budget.page.clone();
+    let restored = budget.workspace.restore(&owner(), &page, &rent).unwrap();
+    assert_eq!(budget.text(), "Rent");
+    budget
+        .workspace
+        .purge(&owner(), &Purge::Page(page.clone()))
+        .unwrap();
+    budget.workspace.undo(&owner()).unwrap();
+    assert_eq!(budget.text(), "Rent");
+    let entry = budget
+        .entries()
+        .into_iter()
+        .find(|entry| entry.actions.contains(&restored.action))
+        .unwrap();
+    assert!(!entry.revertable);
 }

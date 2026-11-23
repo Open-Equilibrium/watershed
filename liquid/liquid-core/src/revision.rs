@@ -481,7 +481,13 @@ impl<S: Store> Workspace<S> {
     pub fn revert(&mut self, actor: &Actor, ids: &[ActionId]) -> Result<Applied, Error> {
         self.permit(actor)?;
         let recent = self.reaching(ids)?;
-        let carriers: Vec<ActionId> = ids.iter().map(|id| carrier(&recent, id)).collect();
+        let mut carriers: Vec<ActionId> = Vec::new();
+        for id in ids {
+            let carried = carrier(&recent, id);
+            if !carriers.contains(&carried) {
+                carriers.push(carried);
+            }
+        }
         let actions = self.actions(&carriers)?;
         if actions.iter().any(|action| !revertable(action)) {
             return Err(Error::Purged);
@@ -649,7 +655,7 @@ impl<S: Store> Workspace<S> {
     fn own_newest_first(
         &mut self,
         actor: &Actor,
-        mut visit: impl FnMut(&Action, &HashSet<ActionId>) -> Visit,
+        mut visit: impl FnMut(&Action, &HashSet<ActionId>, bool) -> Visit,
     ) -> Result<Option<Action>, Error> {
         self.permit(actor)?;
         let mut undone = HashSet::new();
@@ -669,7 +675,8 @@ impl<S: Store> Workspace<S> {
                 if action.actor != *actor || action.origin != Origin::Ui {
                     continue;
                 }
-                match visit(&action, &undone) {
+                let kept = self.kept(&action);
+                match visit(&action, &undone, kept) {
                     Visit::Next => {}
                     Visit::Take => return Ok(Some(action)),
                     Visit::Stop => return Ok(None),
@@ -680,8 +687,9 @@ impl<S: Store> Workspace<S> {
 
     pub fn undo(&mut self, actor: &Actor) -> Result<Option<Applied>, Error> {
         let mut group: Vec<Action> = Vec::new();
-        self.own_newest_first(actor, |action, undone| {
-            let counts = !undone.contains(&action.id)
+        self.own_newest_first(actor, |action, undone, kept| {
+            let counts = kept
+                && !undone.contains(&action.id)
                 && match &action.operation {
                     Operation::Mutation(_) | Operation::Restore { .. } => true,
                     Operation::Revert { kind, .. } => *kind != RevertKind::Undo,
@@ -703,9 +711,12 @@ impl<S: Store> Workspace<S> {
     }
 
     pub fn redo(&mut self, actor: &Actor) -> Result<Option<Applied>, Error> {
-        let target = self.own_newest_first(actor, |action, undone| {
+        let target = self.own_newest_first(actor, |action, undone, kept| {
             if undone.contains(&action.id) {
                 return Visit::Next;
+            }
+            if !kept {
+                return Visit::Stop;
             }
             match &action.operation {
                 Operation::Revert {

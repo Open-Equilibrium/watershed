@@ -35,9 +35,9 @@ fn redacted(
     if !touches && !names && !created {
         return None;
     }
-    action.changes.retain(|(document, _)| document != gone);
     action.heads.retain(|(document, _)| document != gone);
     if matches!(action.operation, Operation::Mutation(_)) {
+        action.changes.retain(|(document, _)| document != gone);
         action.operation = Operation::Purged {
             kind: kind(&action.operation),
         };
