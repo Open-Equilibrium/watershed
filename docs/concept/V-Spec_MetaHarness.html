@@ -377,14 +377,17 @@ meta uninstall</code></pre>
         </div>
       </div>
       <h3 id="persistent-agents">Persistent agents</h3>
-      <p>Built on macOS and Linux (ADR-0283). The agent profile, not a thread, is the lasting unit, as with Grok Bot.</p>
+      <p>Profiles, routines and the thread switch are built on macOS and Linux (ADR-0283). The agent profile, not a thread, is the lasting unit, as with Grok Bot.</p>
       <ul>
         <li><strong>Profile:</strong> <code>meta agent create</code> stores a name, a project, a model, a permission mode (approval-required by default) and instructions in the service's SQLite. It also creates a private memory folder, <code>&lt;home&gt;/agents/&lt;name&gt;/memory</code> (mode 0700), outside any repository.</li>
         <li><strong>Thread:</strong> the profile owns one current T3 thread in the project's checkout. Its first message names the agent and gives its instructions and memory folder.</li>
         <li><strong>Routines:</strong> T3 scheduled tasks bound to that thread in <code>continue</code> mode. A routine runs on an interval of at least a minute, at a time on chosen weekdays, once, or per webhook request on T3's <code>/api/hooks/&lt;task&gt;/&lt;token&gt;</code> path. Each wake-up is a turn in the current thread.</li>
         <li><strong>Full context:</strong> when a turn ends and T3 reports the context window at least 80% full, Meta-Harness opens the next thread. The new thread starts with the same opening plus the host-move handoff text (ADR-0231), the routines move to it, and the old thread stays. A next thread is stored before it starts, so a restart finishes the switch.</li>
         <li><strong>Removal:</strong> <code>meta agent remove</code> deletes the profile's routines and keeps its memory folder.</li>
-        <li><strong>Open:</strong> Liquid's screens, and moving a profile with its memory to another host.</li>
+        <li><strong>Target, by chat:</strong> a person makes and changes an agent by writing to it, as with Grok Bot. A new agent names itself from its first message. Its instructions move to <code>instructions.md</code> in its memory folder, which it and the person edit, and it sets its routines with T3's own <code>schedule_task</code> tool, bound to its thread. Liquid shows each such change in the Chat with Undo (<a href="../design/mockups/liquid-persistent-agents.html">mockups</a>). Model and permission mode change only by hand.</li>
+        <li><strong>Target, mentions:</strong> <code>@name</code> in another Chat sends the message and that Chat's conversation to the agent's thread as a turn; its answer appears in that Chat.</li>
+        <li><strong>Target, sharing:</strong> with the Liquid account, the creator always edits an agent and grants other members the Role Can use (write to it, mention it) or Can edit (also instructions, routines, model, permission mode). An approval goes to the person whose message caused it; a routine's to the creator or an editor.</li>
+        <li><strong>Open:</strong> moving a profile with its memory to another host.</li>
       </ul>
       <p><strong>Another harness</strong> (ADR-0231): a session moves to another harness, such as from Claude Code to Codex, only as a handoff, as in T3 Code. The target starts a new session that receives the conversation so far as text, at most 16,000 tokens by default, marked as context, not a new request; attachments and the provider's tool and reasoning state do not move. A target that already saw part of the conversation receives only what followed; the files come from T3's Git checkpoint ref.</p>
     </div></section>
