@@ -6,6 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:liquid/src/launch.dart';
 import 'package:liquid/src/rust/api/session.dart' show BridgeThreadSummary;
 import 'package:liquid/src/session/backend.dart';
+import 'package:liquid/src/session/session_state.dart';
 
 import 'fake_backend.dart';
 
