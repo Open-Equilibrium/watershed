@@ -180,13 +180,7 @@ fn mcp_answer(connect: &str, host: &str, bearer: &str) -> String {
 }
 
 fn t3_sessions(home: &Path) -> Vec<serde_json::Value> {
-    let output = Command::new(t3())
-        .args(["auth", "session", "list", "--json"])
-        .env("T3CODE_HOME", home.join("t3"))
-        .env("T3CODE_TELEMETRY_ENABLED", "false")
-        .output()
-        .unwrap();
-    serde_json::from_slice(&output.stdout).unwrap()
+    t3_json(home, &["auth", "session", "list", "--json"])
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -291,9 +285,13 @@ async fn revoking_a_client_closes_the_connections_it_has_open() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn a_linked_agent_reaches_t3_and_another_pairings_client_id_is_refused_by_the_tunnel() {
+async fn a_linked_agent_reaches_t3_another_pairing_is_refused_and_revoking_its_host_ends_its_sign_ins()
+ {
     let (dir, _repo, _home) = fixture();
     let (link, name_a) = linked(dir.path()).await;
+    let a_clients = host_client_names(&link.b.1).await;
+    assert_eq!(a_clients.len(), 1, "{a_clients:?}");
+    let a_client = a_clients[0].clone();
     let home_c = dir.path().join("c");
     let (_c, c) = start_service(&home_c).await;
     c.host_agents(true).await.unwrap();
@@ -325,6 +323,21 @@ async fn a_linked_agent_reaches_t3_and_another_pairings_client_id_is_refused_by_
         &code_form(&code, &client_id, &addr_a),
     );
     assert_eq!(status_of(&answer), 403, "a token exchange: {answer}");
+    assert_eq!(status_of(&mcp_answer(&addr_c, &addr_a, &bearer)), 200);
+
+    link.b.1.revoke_client(&a_client).await.unwrap();
+    assert!(
+        t3_sessions(&dir.path().join("b"))
+            .iter()
+            .all(|session| session["client"]["label"] != a_client.as_str()),
+        "A's T3 sessions end with its pairing"
+    );
+    let refused = mcp_answer(&addr_c, &addr_a, &bearer);
+    assert_eq!(
+        status_of(&refused),
+        401,
+        "T3 refuses the revoked session's token: {refused:?}"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -345,8 +358,7 @@ async fn revoking_a_name_with_no_client_still_ends_the_sign_ins_made_under_it() 
             .iter()
             .any(|s| s["client"]["label"] == client.as_str())
     );
-    rusqlite::Connection::open(home_b.join("meta-harness.sqlite"))
-        .unwrap()
+    db(&home_b)
         .execute("DELETE FROM client WHERE name = ?1", [client])
         .unwrap();
     b.revoke_client(client).await.unwrap();
@@ -355,44 +367,5 @@ async fn revoking_a_name_with_no_client_still_ends_the_sign_ins_made_under_it() 
             .iter()
             .all(|s| s["client"]["label"] != client.as_str()),
         "the name's sessions end"
-    );
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn revoking_a_host_ends_the_t3_sessions_its_link_made() {
-    let (dir, _repo, _home) = fixture();
-    let (link, name_a) = linked(dir.path()).await;
-    let a_clients = host_client_names(&link.b.1).await;
-    assert_eq!(a_clients.len(), 1, "{a_clients:?}");
-    let a_client = a_clients[0].clone();
-    let home_c = dir.path().join("c");
-    let (_c, c) = start_service(&home_c).await;
-    c.host_agents(true).await.unwrap();
-    let code = link
-        .b
-        .1
-        .invite(ClientKind::Host, Access::Auto)
-        .await
-        .unwrap();
-    let (name_c, _) = c.host_add(&link.url_b, &code, None).await.unwrap();
-
-    let tester = connect_paired(&link.b.1, &link.url_b, ClientKind::Host, "tester").await;
-    let addr_a = tunnel_addr(&dir.path().join("a"), &name_a);
-    let addr_c = tunnel_addr(&home_c, &name_c);
-    let bearer = sign_in(&addr_a, &tester.t3_pairing().await.unwrap());
-    assert_eq!(status_of(&mcp_answer(&addr_c, &addr_a, &bearer)), 200);
-
-    link.b.1.revoke_client(&a_client).await.unwrap();
-    assert!(
-        t3_sessions(&dir.path().join("b"))
-            .iter()
-            .all(|session| session["client"]["label"] != a_client.as_str()),
-        "A's T3 sessions end with its pairing"
-    );
-    let refused = mcp_answer(&addr_c, &addr_a, &bearer);
-    assert_eq!(
-        status_of(&refused),
-        401,
-        "T3 refuses the revoked session's token: {refused:?}"
     );
 }

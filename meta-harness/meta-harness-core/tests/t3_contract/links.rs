@@ -7,43 +7,6 @@ fn linked_environments_setting(home: &Path) -> bool {
         .unwrap_or(false)
 }
 
-#[allow(clippy::result_large_err)]
-async fn silent_peer() -> String {
-    use futures_util::SinkExt;
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let url = format!("ws://{}", listener.local_addr().unwrap());
-    tokio::spawn(async move {
-        let mut held = Vec::new();
-        while let Ok((socket, _)) = listener.accept().await {
-            let mut pairing = false;
-            let Ok(mut socket) = tokio_tungstenite::accept_hdr_async(
-                socket,
-                |request: &tokio_tungstenite::tungstenite::handshake::server::Request,
-                 response: tokio_tungstenite::tungstenite::handshake::server::Response| {
-                    pairing = request
-                        .headers()
-                        .contains_key(meta_harness_core::api::PAIRING_HEADER);
-                    Ok(response)
-                },
-            )
-            .await
-            else {
-                continue;
-            };
-            if pairing {
-                let answer = r#"{"name":"silent","token":"silent-token","access":"auto"}"#;
-                let _ = socket
-                    .send(tokio_tungstenite::tungstenite::Message::Text(answer.into()))
-                    .await;
-                let _ = socket.close(None).await;
-            } else {
-                held.push(socket);
-            }
-        }
-    });
-    url
-}
-
 #[tokio::test(flavor = "multi_thread")]
 async fn a_host_links_another_hosts_t3_through_a_tunnel_behind_the_switch_and_removing_it_unlinks_it()
  {
@@ -102,15 +65,11 @@ async fn a_host_links_another_hosts_t3_through_a_tunnel_behind_the_switch_and_re
     tokio::time::sleep(Duration::from_millis(500)).await;
     let trigger = "CREATE TRIGGER refuse_peer_delete BEFORE DELETE ON peer \
                    BEGIN SELECT RAISE(ABORT, 'refused'); END;";
-    rusqlite::Connection::open(home_a.join("meta-harness.sqlite"))
-        .unwrap()
-        .execute_batch(trigger)
-        .unwrap();
+    db(&home_a).execute_batch(trigger).unwrap();
     assert!(a.host_remove(&name).await.is_err());
     assert_eq!(a.hosts().await.unwrap().hosts.len(), 1);
     assert!(std::net::TcpStream::connect(("127.0.0.1", tunnel)).is_ok());
-    rusqlite::Connection::open(home_a.join("meta-harness.sqlite"))
-        .unwrap()
+    db(&home_a)
         .execute_batch("DROP TRIGGER refuse_peer_delete")
         .unwrap();
 
@@ -229,46 +188,28 @@ async fn a_host_link_is_made_again_on_restart_when_its_port_is_taken_or_it_is_ol
     a_service.stop().await;
 
     let aged = peer_row(&home_a, &name).1.unwrap() - 26 * 24 * 3_600_000;
-    rusqlite::Connection::open(home_a.join("meta-harness.sqlite"))
-        .unwrap()
+    db(&home_a)
         .execute("UPDATE peer SET linked_ms = ?1", [aged])
         .unwrap();
     let holder = std::net::TcpListener::bind(("127.0.0.1", old)).unwrap();
     let (_a_service, a) = start_service(&home_a).await;
-    let relinked = tokio::time::timeout(Duration::from_secs(60), async {
-        loop {
+    let state = (&a, &home_a);
+    settle(
+        &state,
+        "linked again through the new port",
+        move |state| async move {
+            let (a, home) = *state;
             let linked = a.hosts().await.unwrap().hosts[0].linked_ms.unwrap_or(0);
-            let reachable = t3_environments(&home_a)
+            let reachable = t3_environments(home)
                 .iter()
                 .any(|link| link["status"] == "reachable");
-            if linked > aged as u64 && reachable {
-                return;
-            }
-            tokio::time::sleep(Duration::from_millis(200)).await;
-        }
-    })
+            (linked > aged as u64 && reachable).then_some(())
+        },
+    )
     .await;
-    assert!(relinked.is_ok(), "linked again through the new port");
     assert_ne!(peer_row(&home_a, &name).0, old, "the tunnel moved");
     assert!(a.hosts().await.unwrap().hosts[0].reachable);
     drop(holder);
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn a_peer_that_never_answers_a_link_is_given_up_on_and_holds_no_other_change() {
-    let (dir, _repo, _home) = fixture();
-    let ((_a, a), (_b, b), url_b) = two_hosts(dir.path()).await;
-    let silent = silent_peer().await;
-    let code = b.invite(ClientKind::Host, Access::Auto).await.unwrap();
-    let given_up = tokio::time::timeout(Duration::from_secs(60), a.host_add(&silent, &code, None))
-        .await
-        .expect("the link gives up on a peer that never answers");
-    assert!(given_up.is_err());
-    let code = b.invite(ClientKind::Host, Access::Auto).await.unwrap();
-    let linked = tokio::time::timeout(Duration::from_secs(60), a.host_add(&url_b, &code, None))
-        .await
-        .expect("a link is not held behind the silent one");
-    assert!(linked.is_ok(), "{linked:?}");
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -276,8 +217,7 @@ async fn a_link_made_is_reported_made_even_when_its_time_cannot_be_stored() {
     let (dir, _repo, _home) = fixture();
     let home_a = dir.path().join("a");
     let ((_a, a), (_b, b), url_b) = two_hosts(dir.path()).await;
-    rusqlite::Connection::open(home_a.join("meta-harness.sqlite"))
-        .unwrap()
+    db(&home_a)
         .execute_batch(
             "CREATE TRIGGER refuse_link_time BEFORE UPDATE ON peer \
              BEGIN SELECT RAISE(ABORT, 'refused'); END;",

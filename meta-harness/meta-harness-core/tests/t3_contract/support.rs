@@ -220,15 +220,59 @@ pub(crate) async fn move_out(
         .await
 }
 
+pub(crate) async fn handoff(thread: &remote::Thread) -> MovePackage {
+    move_out(thread, &transfer(), Some("Append")).await.unwrap()
+}
+
+pub(crate) async fn arrival(host: &remote::Host, transfer: &str) -> Arrival {
+    host.move_status(transfer).await.unwrap()
+}
+
+pub(crate) async fn withdraw(host: &remote::Host, transfer: &str) -> Arrival {
+    host.move_abort(transfer).await.unwrap()
+}
+
+pub(crate) async fn release(thread: &remote::Thread, transfer: &str) {
+    thread
+        .move_finish(transfer, MoveFinish::Release)
+        .await
+        .unwrap();
+}
+
+pub(crate) async fn appended(project: &remote::Project) -> remote::Thread {
+    let thread = project.start(codex_start("append first")).await.unwrap();
+    wait(&thread, completed(1)).await;
+    thread
+}
+
+pub(crate) fn pushed_branch(repo: &Path, name: &str) {
+    git(repo, &["checkout", "-q", "-b", name]);
+    git(repo, &["push", "-q", "-u", "origin", name]);
+}
+
+pub(crate) async fn settle<'a, A, T, F, Fut>(arg: &'a A, what: &str, mut step: F) -> T
+where
+    F: FnMut(&'a A) -> Fut,
+    Fut: std::future::Future<Output = Option<T>>,
+{
+    tokio::time::timeout(Duration::from_secs(60), async {
+        loop {
+            if let Some(found) = step(arg).await {
+                return found;
+            }
+            tokio::time::sleep(Duration::from_millis(200)).await;
+        }
+    })
+    .await
+    .unwrap_or_else(|_| panic!("not {what} within a minute"))
+}
+
 pub(crate) mod tempdir {
     pub struct Dir(std::path::PathBuf);
 
     impl Dir {
         pub fn new() -> Self {
-            let mut bytes = [0u8; 8];
-            getrandom::fill(&mut bytes).unwrap();
-            let name: String = bytes.iter().map(|b| format!("{b:02x}")).collect();
-            let path = std::env::temp_dir().join(format!("mh-{name}"));
+            let path = std::env::temp_dir().join(format!("mh-{}", super::transfer()));
             std::fs::create_dir(&path).unwrap();
             Self(path.canonicalize().unwrap())
         }
@@ -336,6 +380,13 @@ impl Pair {
         }
     }
 
+    pub(crate) async fn projects(&self) -> (remote::Project, remote::Project) {
+        (
+            self.host_a.project(&self.repo_a).await.unwrap(),
+            self.host_b.project(&self.repo_b).await.unwrap(),
+        )
+    }
+
     pub(crate) async fn stop(self) {
         self.service_a.stop().await;
         self.service_b.stop().await;
@@ -364,9 +415,12 @@ pub(crate) async fn two_hosts(
     )
 }
 
+pub(crate) fn db(home: &Path) -> rusqlite::Connection {
+    rusqlite::Connection::open(home.join("meta-harness.sqlite")).unwrap()
+}
+
 pub(crate) fn peer_row(home: &Path, name: &str) -> (u16, Option<i64>) {
-    rusqlite::Connection::open(home.join("meta-harness.sqlite"))
-        .unwrap()
+    db(home)
         .query_row(
             "SELECT tunnel_port, linked_ms FROM peer WHERE name = ?1",
             [name],
@@ -420,8 +474,12 @@ pub(crate) async fn host_client_names(on: &remote::Host) -> Vec<String> {
 }
 
 pub(crate) fn t3_environments(home: &Path) -> Vec<serde_json::Value> {
+    t3_json(home, &["environment", "list", "--json"])
+}
+
+pub(crate) fn t3_json(home: &Path, args: &[&str]) -> Vec<serde_json::Value> {
     let output = Command::new(t3())
-        .args(["environment", "list", "--json"])
+        .args(args)
         .env("T3CODE_HOME", home.join("t3"))
         .env("T3CODE_TELEMETRY_ENABLED", "false")
         .output()

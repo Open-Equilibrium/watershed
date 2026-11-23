@@ -1,17 +1,14 @@
 use super::*;
 
 async fn change_at(host: &remote::Host, index: usize) -> AgentChange {
-    tokio::time::timeout(Duration::from_secs(30), async {
-        loop {
-            let changes = host.agent_changes("news-bot").await.unwrap();
-            if let Some(change) = changes.get(index) {
-                return change.clone();
-            }
-            tokio::time::sleep(Duration::from_millis(200)).await;
-        }
+    settle(host, "the agent's change is noticed", |host| async move {
+        host.agent_changes("news-bot")
+            .await
+            .unwrap()
+            .get(index)
+            .cloned()
     })
     .await
-    .expect("the agent's change is noticed")
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -51,39 +48,26 @@ async fn a_persistent_agent_moves_to_a_fresh_thread_with_its_routines_when_its_c
         .unwrap();
 
     first.send("fill", false).await.unwrap();
-    let moved = tokio::time::timeout(Duration::from_secs(60), async {
-        loop {
-            let agents = host.agents().await.unwrap();
-            if agents[0].generation == 1 && agents[0].previous.is_none() {
-                return agents[0].clone();
-            }
-            tokio::time::sleep(Duration::from_millis(200)).await;
-        }
+    let moved = settle(&host, "the agent moves on", |host| async move {
+        let agents = host.agents().await.unwrap();
+        (agents[0].generation == 1 && agents[0].previous.is_none()).then(|| agents[0].clone())
     })
-    .await
-    .expect("the agent moves on within a minute");
+    .await;
     let next = project.open(&moved.thread).await.unwrap();
     let opened = wait(&next, completed(1)).await;
 
     assert!(created.memory.is_dir());
     assert_ne!(moved.thread, created.thread);
-    assert_eq!(
-        opened.transcript[0].detail,
-        ItemDetail::Opening { handoff: true }
-    );
-    assert_eq!(
-        opened.transcript[0].text, "",
-        "Liquid shows no opening text"
-    );
+    let item = &opened.transcript[0];
+    assert_eq!(item.detail, ItemDetail::Opening { handoff: true });
+    assert_eq!(item.text, "", "Liquid shows no opening text");
     let opening = &opened.turns[0].prompt;
     assert!(opening.contains("Keep the news page current."), "{opening}");
     assert!(opening.contains(&created.memory.display().to_string()));
     assert!(opening.contains("Imported conversation history"));
     let routines = host.agent_routines("news-bot").await.unwrap();
-    assert_eq!(
-        routines.iter().map(|r| r.id.as_str()).collect::<Vec<_>>(),
-        [routine.id.as_str()]
-    );
+    let ids: Vec<&str> = routines.iter().map(|r| r.id.as_str()).collect();
+    assert_eq!(ids, [routine.id.as_str()]);
     assert!(first.automations().await.unwrap().current().is_empty());
 
     service.stop().await;
@@ -121,17 +105,15 @@ async fn an_agent_made_by_chat_names_itself_logs_its_changes_and_answers_a_menti
         opened.transcript[0].text, "instruct",
         "Liquid shows the person's words"
     );
-    let named = tokio::time::timeout(Duration::from_secs(30), async {
-        loop {
+    let named = settle(
+        &host,
+        "the agent names itself after its first turn",
+        |host| async move {
             let agents = host.agents().await.unwrap();
-            if agents[0].named {
-                return agents[0].clone();
-            }
-            tokio::time::sleep(Duration::from_millis(200)).await;
-        }
-    })
-    .await
-    .expect("the agent names itself after its first turn");
+            agents[0].named.then(|| agents[0].clone())
+        },
+    )
+    .await;
     assert_eq!(named.name, "news-bot");
     assert_eq!(named.memory, created.memory);
     let kinds = |changes: Vec<AgentChange>| changes.into_iter().map(|c| c.kind).collect::<Vec<_>>();
@@ -150,11 +132,7 @@ async fn an_agent_made_by_chat_names_itself_logs_its_changes_and_answers_a_menti
     assert_eq!(host.agent_instructions("news-bot").await.unwrap(), "");
     assert!(host.agent_undo("news-bot", changes[1].id).await.is_err());
     let after = host.agent_changes("news-bot").await.unwrap();
-    assert_eq!(
-        after.len(),
-        2,
-        "the person's own changes are not the agent's"
-    );
+    assert_eq!(after.len(), 2, "the person's changes are not the agent's");
     assert!(after[1].undone);
 
     thread.run_automation_now(&routine.id).await.unwrap();
@@ -181,15 +159,16 @@ async fn an_agent_made_by_chat_names_itself_logs_its_changes_and_answers_a_menti
         .unwrap();
     thread.run_automation_now(&stopped.id).await.unwrap();
     until_running(&thread).await;
-    tokio::time::timeout(Duration::from_secs(30), async {
-        while host.agent_instructions("news-bot").await.unwrap()
-            != "# news-bot\n\nRead the feeds three times.\n"
-        {
-            tokio::time::sleep(Duration::from_millis(100)).await;
-        }
-    })
-    .await
-    .expect("the stopped routine run rewrites the instructions first");
+    settle(
+        &host,
+        "the stopped routine run rewrites the instructions first",
+        |host| async move {
+            (host.agent_instructions("news-bot").await.unwrap()
+                == "# news-bot\n\nRead the feeds three times.\n")
+                .then_some(())
+        },
+    )
+    .await;
     thread.stop().await.unwrap();
     let aborted = change_at(&host, 3).await;
     assert!(aborted.held, "a routine run that was stopped is held too");
@@ -310,13 +289,8 @@ async fn an_agent_moves_to_another_host_with_its_memory_and_routines() {
         large,
         "a memory past one socket frame arrives whole"
     );
-    assert!(
-        pair.host_b
-            .agent_instructions("news-bot")
-            .await
-            .unwrap()
-            .contains("Keep the news page current.")
-    );
+    let instructions = pair.host_b.agent_instructions("news-bot").await.unwrap();
+    assert!(instructions.contains("Keep the news page current."));
     let memory = arrived[0].memory.display().to_string();
     let told = wait(&moved, |s| {
         s.turns.iter().any(|t| t.prompt.contains(&memory))
@@ -329,20 +303,10 @@ async fn an_agent_moves_to_another_host_with_its_memory_and_routines() {
         "the moved agent learns its new memory folder"
     );
     let routines = pair.host_b.agent_routines("news-bot").await.unwrap();
-    assert_eq!(
-        routines
-            .iter()
-            .map(|r| r.title.as_str())
-            .collect::<Vec<_>>(),
-        ["Morning"]
-    );
-    assert!(
-        pair.host_b
-            .agent_changes("news-bot")
-            .await
-            .unwrap()
-            .is_empty()
-    );
+    let titles: Vec<&str> = routines.iter().map(|r| r.title.as_str()).collect();
+    assert_eq!(titles, ["Morning"]);
+    let changes = pair.host_b.agent_changes("news-bot").await.unwrap();
+    assert!(changes.is_empty());
 
     let record = moved.move_record().await.unwrap().unwrap();
     thread

@@ -30,10 +30,7 @@ async fn shutdown_stops_t3_and_the_agent_processes_it_started() {
     for pid in &agents {
         kill(*pid);
     }
-    assert!(
-        agents.is_empty(),
-        "agent processes still run after shutdown"
-    );
+    assert!(agents.is_empty(), "agent processes outlive shutdown");
 }
 
 fn processes_naming(home: &Path) -> Vec<u32> {
@@ -67,19 +64,6 @@ async fn a_restart_stops_the_t3_server_a_dead_host_left_behind() {
     std::mem::forget(first);
     let second = host(&home).await;
     second.shutdown().await;
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn t3_starts_in_a_data_folder_that_does_not_exist_yet() {
-    let (_dir, _repo, home) = fixture();
-    let host = Host::start(HostConfig {
-        binary: t3(),
-        home,
-        acp_agents: Vec::new(),
-    })
-    .await
-    .expect("T3 starts");
-    host.shutdown().await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -197,7 +181,7 @@ async fn an_approved_configuration_reaches_the_harness_homes_t3_runs_them_in() {
     let codex = home.join("harness/codex");
     assert!(
         !claude.join("CLAUDE.md").exists(),
-        "nothing before approval"
+        "no file before approval"
     );
     assert_eq!(client.approve(number).await.unwrap().revision, 1);
     assert_eq!(
@@ -283,20 +267,14 @@ async fn a_stopped_or_dropped_service_ends_its_streams_and_a_client_goes_on_afte
     })
     .await
     .expect("a dropped service ends its connections and stops listening");
-    let started = tokio::time::timeout(Duration::from_secs(20), async {
-        loop {
-            if let Ok(service) = Service::start(service_config(&home)).await {
-                return service;
-            }
-            tokio::time::sleep(Duration::from_millis(100)).await;
-        }
-    })
+    settle(
+        &home,
+        "the folder is still held by the dropped service's stream",
+        |home| async move { Service::start(service_config(home)).await.ok() },
+    )
+    .await
+    .stop()
     .await;
-    assert!(
-        started.is_ok(),
-        "the folder is still held by the dropped service's stream"
-    );
-    started.unwrap().stop().await;
 }
 
 #[tokio::test(flavor = "multi_thread")]

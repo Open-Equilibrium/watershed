@@ -8,9 +8,9 @@ use meta_harness_core::{
 };
 use meta_harness_core::{
     AcpAgent, AgentChange, AgentChangeKind, AgentEvent, GitAction, GitActionRequest, GitProgress,
-    Group, Harness, Host, HostConfig, ItemDetail, ItemKind, LineCount, ModelChoice, NewAgent,
-    NewRoutine, Permissions, Relation, Request, Schedule, ScheduleKind, Snapshot, StartThread,
-    StepStatus, TaskStep, Thread, ThreadEvent, TurnStatus, Workspace,
+    Group, Harness, Host, HostConfig, ItemDetail, LineCount, ModelChoice, NewAgent, NewRoutine,
+    Permissions, Relation, Request, Schedule, ScheduleKind, Snapshot, StartThread, TurnStatus,
+    Workspace,
 };
 use std::path::{Path, PathBuf};
 use std::process::Command;

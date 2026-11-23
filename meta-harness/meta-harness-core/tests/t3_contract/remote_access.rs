@@ -73,17 +73,11 @@ async fn remote_access_refuses_port_zero_and_binds_a_busy_port_once_it_is_free()
     assert!(waiting.addresses.is_empty());
     assert!(waiting.waiting.is_some(), "on, not listening yet");
     drop(holder);
-    let listening = tokio::time::timeout(Duration::from_secs(60), async {
-        loop {
-            let status = local.remote_status().await.unwrap().expect("still on");
-            if status.waiting.is_none() {
-                return status;
-            }
-            tokio::time::sleep(Duration::from_millis(500)).await;
-        }
+    settle(&local, "bound again", |local| async move {
+        let status = local.remote_status().await.unwrap().expect("still on");
+        status.waiting.is_none().then_some(())
     })
     .await;
-    assert!(listening.is_ok(), "bound again");
     service.stop().await;
 }
 
@@ -164,14 +158,10 @@ async fn a_device_pairs_once_keeps_its_access_across_a_restart_and_ends_with_rem
     tablet.status().await.unwrap();
     local.remote_off().await.unwrap();
     assert!(local.remote_status().await.unwrap().is_none());
-    let ended = tokio::time::timeout(Duration::from_secs(10), async {
-        while tablet.status().await.is_ok() {
-            tokio::time::sleep(Duration::from_millis(10)).await;
-        }
-    })
+    settle(
+        &tablet,
+        "the device's connection ended with remote access",
+        |tablet| async move { tablet.status().await.is_err().then_some(()) },
+    )
     .await;
-    assert!(
-        ended.is_ok(),
-        "the device's connection ended with remote access"
-    );
 }

@@ -12,9 +12,7 @@ fn worktree_count(repo: &Path) -> usize {
 }
 
 async fn moving_with_queued(host_a: &remote::Host, repo_a: &Path, texts: &[&str]) -> MovePackage {
-    let project_a = host_a.project(repo_a).await.unwrap();
-    let thread = project_a.start(codex_start("append first")).await.unwrap();
-    wait(&thread, completed(1)).await;
+    let thread = appended(&host_a.project(repo_a).await.unwrap()).await;
     hold_turn(&thread).await;
     for text in texts {
         thread.send(text, false).await.unwrap();
@@ -28,9 +26,7 @@ async fn moving_with_queued(host_a: &remote::Host, repo_a: &Path, texts: &[&str]
             == queued
     })
     .await;
-    move_out(&thread, &transfer(), Some("Append"))
-        .await
-        .unwrap()
+    handoff(&thread).await
 }
 
 fn carried_prompts(snapshot: &Snapshot) -> Vec<String> {
@@ -54,23 +50,12 @@ fn carried_done(snapshot: &Snapshot) -> usize {
 #[tokio::test(flavor = "multi_thread")]
 async fn a_move_in_whose_record_cannot_be_kept_stays_retryable_until_it_is_withdrawn() {
     let pair = Pair::codex().await;
-    git(
-        &pair.repo_a,
-        &["checkout", "-q", "-b", "feature/unrecorded"],
-    );
-    git(
-        &pair.repo_a,
-        &["push", "-q", "-u", "origin", "feature/unrecorded"],
-    );
-    let project_a = pair.host_a.project(&pair.repo_a).await.unwrap();
-    let project_b = pair.host_b.project(&pair.repo_b).await.unwrap();
-    let thread = project_a.start(codex_start("append first")).await.unwrap();
-    wait(&thread, completed(1)).await;
-    let package = move_out(&thread, &transfer(), Some("Append"))
-        .await
-        .unwrap();
-    rusqlite::Connection::open(pair.dir.path().join("host-b/meta-harness.sqlite"))
-        .unwrap()
+    pushed_branch(&pair.repo_a, "feature/unrecorded");
+    let home_b = pair.dir.path().join("host-b");
+    let (project_a, project_b) = pair.projects().await;
+    let package = handoff(&appended(&project_a).await).await;
+    let token = package.transfer.as_str();
+    db(&home_b)
         .execute_batch(
             "CREATE TRIGGER refuse BEFORE INSERT ON move_record \
              BEGIN SELECT RAISE(ABORT, 'refused'); END;",
@@ -79,19 +64,13 @@ async fn a_move_in_whose_record_cannot_be_kept_stays_retryable_until_it_is_withd
 
     let refused = project_b.move_in(package.clone()).await.err().unwrap();
     assert!(refused.contains("refused"), "{refused}");
-    assert_eq!(
-        pair.host_b.move_status(&package.transfer).await.unwrap(),
-        Arrival::Starting
-    );
-    assert_eq!(
-        pair.host_b.move_abort(&package.transfer).await.unwrap(),
-        Arrival::Refused
-    );
+    assert_eq!(arrival(&pair.host_b, token).await, Arrival::Starting);
+    assert_eq!(withdraw(&pair.host_b, token).await, Arrival::Refused);
     assert!(project_b.threads().await.unwrap().is_empty());
     assert_eq!(
         worktree_count(&pair.repo_b),
         2,
-        "the launch's worktree stays: a move never removes a worktree"
+        "a move never removes a worktree"
     );
     pair.stop().await;
 }
@@ -99,15 +78,12 @@ async fn a_move_in_whose_record_cannot_be_kept_stays_retryable_until_it_is_withd
 #[tokio::test(flavor = "multi_thread")]
 async fn carried_messages_reach_the_target_only_after_it_lands_and_once_each_in_order() {
     let pair = Pair::codex().await;
-    git(&pair.repo_a, &["checkout", "-q", "-b", "feature/resumed"]);
-    git(
-        &pair.repo_a,
-        &["push", "-q", "-u", "origin", "feature/resumed"],
-    );
-    let project_b = pair.host_b.project(&pair.repo_b).await.unwrap();
+    pushed_branch(&pair.repo_a, "feature/resumed");
     let home_b = pair.dir.path().join("host-b");
+    let project_b = pair.host_b.project(&pair.repo_b).await.unwrap();
     let package = moving_with_queued(&pair.host_a, &pair.repo_a, &["carry one", "carry two"]).await;
-    let raw = rusqlite::Connection::open(home_b.join("meta-harness.sqlite")).unwrap();
+    let token = package.transfer.as_str();
+    let raw = db(&home_b);
     raw.execute_batch(
         "CREATE TRIGGER refuse_record BEFORE INSERT ON move_record \
          BEGIN SELECT RAISE(ABORT, 'refused'); END;",
@@ -128,12 +104,9 @@ async fn carried_messages_reach_the_target_only_after_it_lands_and_once_each_in_
     )
     .unwrap();
     assert!(project_b.move_in(package.clone()).await.is_err());
+    assert_eq!(arrival(&pair.host_b, token).await, Arrival::Starting);
     assert_eq!(
-        pair.host_b.move_status(&package.transfer).await.unwrap(),
-        Arrival::Starting
-    );
-    assert_eq!(
-        pair.host_b.move_abort(&package.transfer).await.unwrap(),
+        withdraw(&pair.host_b, token).await,
         Arrival::Starting,
         "an abort on a landed transfer never refuses it"
     );
@@ -144,7 +117,7 @@ async fn carried_messages_reach_the_target_only_after_it_lands_and_once_each_in_
     );
     raw.execute_batch("DROP TRIGGER refuse_progress").unwrap();
     assert!(matches!(
-        pair.host_b.move_status(&package.transfer).await.unwrap(),
+        arrival(&pair.host_b, token).await,
         Arrival::Landed { .. }
     ));
     let listed = project_b.threads().await.unwrap();
@@ -161,18 +134,10 @@ async fn carried_messages_reach_the_target_only_after_it_lands_and_once_each_in_
 #[tokio::test(flavor = "multi_thread")]
 async fn a_move_in_repeated_or_concurrent_lands_the_session_once() {
     let pair = Pair::codex().await;
-    git(&pair.repo_a, &["checkout", "-q", "-b", "feature/landed"]);
-    git(
-        &pair.repo_a,
-        &["push", "-q", "-u", "origin", "feature/landed"],
-    );
-    let project_a = pair.host_a.project(&pair.repo_a).await.unwrap();
-    let project_b = pair.host_b.project(&pair.repo_b).await.unwrap();
-    let thread = project_a.start(codex_start("append first")).await.unwrap();
-    wait(&thread, completed(1)).await;
-    let package = move_out(&thread, &transfer(), Some("Append"))
-        .await
-        .unwrap();
+    pushed_branch(&pair.repo_a, "feature/landed");
+    let (project_a, project_b) = pair.projects().await;
+    let package = handoff(&appended(&project_a).await).await;
+    let token = package.transfer.as_str();
 
     let (first, second) = tokio::join!(
         project_b.move_in(package.clone()),
@@ -183,55 +148,40 @@ async fn a_move_in_repeated_or_concurrent_lands_the_session_once() {
     assert_eq!(project_b.threads().await.unwrap().len(), 1);
     let again = project_b.move_in(package.clone()).await.unwrap();
     assert_eq!(again.id(), landed.id());
+    let thread = landed.id().to_owned();
     assert_eq!(
-        pair.host_b.move_status(&package.transfer).await.unwrap(),
-        Arrival::Landed {
-            thread: landed.id().to_owned()
-        }
+        arrival(&pair.host_b, token).await,
+        Arrival::Landed { thread }
     );
-    assert_eq!(
-        pair.host_b.move_status("unknown").await.unwrap(),
-        Arrival::Unknown
-    );
+    assert_eq!(arrival(&pair.host_b, "unknown").await, Arrival::Unknown);
     pair.stop().await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn a_starting_arrival_launches_its_chosen_thread_id_and_adopts_it_once_it_exists() {
     let pair = Pair::codex().await;
-    git(&pair.repo_a, &["checkout", "-q", "-b", "feature/chosen"]);
-    git(
-        &pair.repo_a,
-        &["push", "-q", "-u", "origin", "feature/chosen"],
-    );
+    pushed_branch(&pair.repo_a, "feature/chosen");
     let home_b = pair.dir.path().join("host-b");
-    let project_a = pair.host_a.project(&pair.repo_a).await.unwrap();
-    let project_b = pair.host_b.project(&pair.repo_b).await.unwrap();
-    let thread = project_a.start(codex_start("append first")).await.unwrap();
-    wait(&thread, completed(1)).await;
-    let package = move_out(&thread, &transfer(), Some("Append"))
-        .await
-        .unwrap();
-    rusqlite::Connection::open(home_b.join("meta-harness.sqlite"))
-        .unwrap()
+    let (project_a, project_b) = pair.projects().await;
+    let package = handoff(&appended(&project_a).await).await;
+    let token = package.transfer.as_str();
+    db(&home_b)
         .execute(
             "INSERT INTO arrival (transfer, state, root, thread, at_ms) \
              VALUES (?1, 'starting', ?2, 'thread-chosen-before-launch', 0)",
-            rusqlite::params![package.transfer, pair.repo_b.to_string_lossy()],
+            rusqlite::params![token, pair.repo_b.to_string_lossy()],
         )
         .unwrap();
 
     let landed = project_b.move_in(package.clone()).await.unwrap();
     assert_eq!(landed.id(), "thread-chosen-before-launch");
+    let thread = "thread-chosen-before-launch".to_owned();
     assert_eq!(
-        pair.host_b.move_status(&package.transfer).await.unwrap(),
-        Arrival::Landed {
-            thread: "thread-chosen-before-launch".to_owned()
-        }
+        arrival(&pair.host_b, token).await,
+        Arrival::Landed { thread }
     );
 
-    rusqlite::Connection::open(home_b.join("meta-harness.sqlite"))
-        .unwrap()
+    db(&home_b)
         .execute("UPDATE arrival SET state = 'starting'", [])
         .unwrap();
     let adopted = project_b.move_in(package.clone()).await.unwrap();
@@ -243,44 +193,23 @@ async fn a_starting_arrival_launches_its_chosen_thread_id_and_adopts_it_once_it_
 #[tokio::test(flavor = "multi_thread")]
 async fn a_move_abort_removes_the_thread_keeps_the_worktree_and_refuses_the_transfer() {
     let pair = Pair::codex().await;
-    git(&pair.repo_a, &["checkout", "-q", "-b", "feature/withdrawn"]);
-    git(
-        &pair.repo_a,
-        &["push", "-q", "-u", "origin", "feature/withdrawn"],
-    );
+    pushed_branch(&pair.repo_a, "feature/withdrawn");
     let home_b = pair.dir.path().join("host-b");
-    let project_a = pair.host_a.project(&pair.repo_a).await.unwrap();
-    let project_b = pair.host_b.project(&pair.repo_b).await.unwrap();
-    let thread = project_a.start(codex_start("append first")).await.unwrap();
-    wait(&thread, completed(1)).await;
-    let package = move_out(&thread, &transfer(), Some("Append"))
-        .await
-        .unwrap();
+    let (project_a, project_b) = pair.projects().await;
+    let package = handoff(&appended(&project_a).await).await;
+    let token = package.transfer.as_str();
     let landed = project_b.move_in(package.clone()).await.unwrap();
     let worktree = landed.worktree().await.unwrap().expect("its own worktree");
-    rusqlite::Connection::open(home_b.join("meta-harness.sqlite"))
-        .unwrap()
+    db(&home_b)
         .execute("UPDATE arrival SET state = 'starting'", [])
         .unwrap();
-    assert_eq!(
-        pair.host_b.move_status(&package.transfer).await.unwrap(),
-        Arrival::Starting
-    );
+    assert_eq!(arrival(&pair.host_b, token).await, Arrival::Starting);
 
-    assert_eq!(
-        pair.host_b.move_abort(&package.transfer).await.unwrap(),
-        Arrival::Refused
-    );
-    assert_eq!(
-        pair.host_b.move_abort(&package.transfer).await.unwrap(),
-        Arrival::Refused
-    );
+    assert_eq!(withdraw(&pair.host_b, token).await, Arrival::Refused);
+    assert_eq!(withdraw(&pair.host_b, token).await, Arrival::Refused);
     assert!(project_b.threads().await.unwrap().is_empty());
     assert!(worktree.exists(), "a move never removes a worktree");
-    assert_eq!(
-        pair.host_b.move_status(&package.transfer).await.unwrap(),
-        Arrival::Unknown
-    );
+    assert_eq!(arrival(&pair.host_b, token).await, Arrival::Unknown);
     assert!(project_b.move_in(package.clone()).await.is_err());
     pair.stop().await;
 }
@@ -288,18 +217,9 @@ async fn a_move_abort_removes_the_thread_keeps_the_worktree_and_refuses_the_tran
 #[tokio::test(flavor = "multi_thread")]
 async fn a_move_abort_racing_a_landing_answers_what_landed() {
     let pair = Pair::codex().await;
-    git(&pair.repo_a, &["checkout", "-q", "-b", "feature/raced"]);
-    git(
-        &pair.repo_a,
-        &["push", "-q", "-u", "origin", "feature/raced"],
-    );
-    let project_a = pair.host_a.project(&pair.repo_a).await.unwrap();
-    let project_b = pair.host_b.project(&pair.repo_b).await.unwrap();
-    let thread = project_a.start(codex_start("append first")).await.unwrap();
-    wait(&thread, completed(1)).await;
-    let package = move_out(&thread, &transfer(), Some("Append"))
-        .await
-        .unwrap();
+    pushed_branch(&pair.repo_a, "feature/raced");
+    let (project_a, project_b) = pair.projects().await;
+    let package = handoff(&appended(&project_a).await).await;
 
     let (arrived, withdrawn) = tokio::join!(
         project_b.move_in(package.clone()),
@@ -319,20 +239,12 @@ async fn a_move_abort_racing_a_landing_answers_what_landed() {
 #[tokio::test(flavor = "multi_thread")]
 async fn a_failed_record_store_is_retried_on_the_same_thread_and_lands_listed() {
     let pair = Pair::codex().await;
-    git(&pair.repo_a, &["checkout", "-q", "-b", "feature/recorded"]);
-    git(
-        &pair.repo_a,
-        &["push", "-q", "-u", "origin", "feature/recorded"],
-    );
+    pushed_branch(&pair.repo_a, "feature/recorded");
     let home_b = pair.dir.path().join("host-b");
-    let project_a = pair.host_a.project(&pair.repo_a).await.unwrap();
-    let project_b = pair.host_b.project(&pair.repo_b).await.unwrap();
-    let thread = project_a.start(codex_start("append first")).await.unwrap();
-    wait(&thread, completed(1)).await;
-    let package = move_out(&thread, &transfer(), Some("Append"))
-        .await
-        .unwrap();
-    let raw = rusqlite::Connection::open(home_b.join("meta-harness.sqlite")).unwrap();
+    let (project_a, project_b) = pair.projects().await;
+    let package = handoff(&appended(&project_a).await).await;
+    let token = package.transfer.as_str();
+    let raw = db(&home_b);
     raw.execute_batch(
         "CREATE TRIGGER refuse BEFORE INSERT ON move_record BEGIN SELECT RAISE(ABORT, 'refused'); END;",
     )
@@ -343,11 +255,10 @@ async fn a_failed_record_store_is_retried_on_the_same_thread_and_lands_listed() 
     let landed = project_b.move_in(package.clone()).await.unwrap();
     let listed = project_b.threads().await.unwrap();
     assert!(listed.iter().any(|t| t.id == landed.id()));
+    let thread = landed.id().to_owned();
     assert_eq!(
-        pair.host_b.move_status(&package.transfer).await.unwrap(),
-        Arrival::Landed {
-            thread: landed.id().to_owned()
-        }
+        arrival(&pair.host_b, token).await,
+        Arrival::Landed { thread }
     );
     pair.stop().await;
 }
@@ -356,22 +267,11 @@ async fn a_failed_record_store_is_retried_on_the_same_thread_and_lands_listed() 
 async fn a_withdrawal_interrupted_after_its_delete_refuses_a_late_move_in_and_never_reports_landed()
 {
     let pair = Pair::codex().await;
-    git(
-        &pair.repo_a,
-        &["checkout", "-q", "-b", "feature/withdrawn-late"],
-    );
-    git(
-        &pair.repo_a,
-        &["push", "-q", "-u", "origin", "feature/withdrawn-late"],
-    );
+    pushed_branch(&pair.repo_a, "feature/withdrawn-late");
     let home_b = pair.dir.path().join("host-b");
-    let project_a = pair.host_a.project(&pair.repo_a).await.unwrap();
-    let project_b = pair.host_b.project(&pair.repo_b).await.unwrap();
-    let thread = project_a.start(codex_start("append first")).await.unwrap();
-    wait(&thread, completed(1)).await;
-    let package = move_out(&thread, &transfer(), Some("Append"))
-        .await
-        .unwrap();
+    let (project_a, project_b) = pair.projects().await;
+    let package = handoff(&appended(&project_a).await).await;
+    let token = package.transfer.as_str();
     let landed = project_b.move_in(package.clone()).await.unwrap();
     let summary = project_b
         .threads()
@@ -381,11 +281,11 @@ async fn a_withdrawal_interrupted_after_its_delete_refuses_a_late_move_in_and_ne
         .find(|t| t.id == landed.id())
         .unwrap();
     project_b.delete(&summary, false).await.unwrap();
-    let raw = rusqlite::Connection::open(home_b.join("meta-harness.sqlite")).unwrap();
+    let raw = db(&home_b);
     raw.execute("UPDATE arrival SET state = 'landed'", [])
         .unwrap();
     assert_eq!(
-        pair.host_b.move_status(&package.transfer).await.unwrap(),
+        arrival(&pair.host_b, token).await,
         Arrival::Unknown,
         "a deleted thread is never reported as landed"
     );
@@ -402,18 +302,10 @@ async fn a_withdrawal_interrupted_after_its_delete_refuses_a_late_move_in_and_ne
 #[tokio::test(flavor = "multi_thread")]
 async fn a_session_moved_again_carries_its_transcript_and_moves_back_to_the_host_it_left() {
     let pair = Pair::codex().await;
-    git(&pair.repo_a, &["checkout", "-q", "-b", "feature/loop"]);
-    git(
-        &pair.repo_a,
-        &["push", "-q", "-u", "origin", "feature/loop"],
-    );
-    let project_a = pair.host_a.project(&pair.repo_a).await.unwrap();
-    let project_b = pair.host_b.project(&pair.repo_b).await.unwrap();
-    let thread = project_a.start(codex_start("append first")).await.unwrap();
-    wait(&thread, completed(1)).await;
-    let first = move_out(&thread, &transfer(), Some("Append"))
-        .await
-        .unwrap();
+    pushed_branch(&pair.repo_a, "feature/loop");
+    let (project_a, project_b) = pair.projects().await;
+    let thread = appended(&project_a).await;
+    let first = handoff(&thread).await;
     let there = project_b.move_in(first.clone()).await.unwrap();
     wait(&there, completed(1)).await;
 
@@ -464,14 +356,7 @@ async fn a_session_moved_again_carries_its_transcript_and_moves_back_to_the_host
 #[tokio::test(flavor = "multi_thread")]
 async fn a_move_whose_arrival_cannot_be_recorded_keeps_its_worktree_and_refuses() {
     let pair = Pair::codex().await;
-    git(
-        &pair.repo_a,
-        &["checkout", "-q", "-b", "feature/late-record"],
-    );
-    git(
-        &pair.repo_a,
-        &["push", "-q", "-u", "origin", "feature/late-record"],
-    );
+    pushed_branch(&pair.repo_a, "feature/late-record");
     git(&pair.repo_b, &["fetch", "-q", "origin"]);
     git(
         &pair.repo_b,
@@ -482,31 +367,28 @@ async fn a_move_whose_arrival_cannot_be_recorded_keeps_its_worktree_and_refuses(
         ],
     );
     let home_b = pair.dir.path().join("host-b");
-    let project_a = pair.host_a.project(&pair.repo_a).await.unwrap();
-    let project_b = pair.host_b.project(&pair.repo_b).await.unwrap();
-    let thread = project_a.start(codex_start("append first")).await.unwrap();
-    wait(&thread, completed(1)).await;
-    let package = move_out(&thread, &transfer(), Some("Append"))
-        .await
+    let (project_a, project_b) = pair.projects().await;
+    let package = handoff(&appended(&project_a).await).await;
+    db(&home_b)
+        .execute_batch(
+            "CREATE TRIGGER refuse_row BEFORE INSERT ON arrival \
+             WHEN NEW.state = 'starting' BEGIN SELECT RAISE(ABORT, 'refused'); END;",
+        )
         .unwrap();
-    let raw = rusqlite::Connection::open(home_b.join("meta-harness.sqlite")).unwrap();
-    raw.execute_batch(
-        "CREATE TRIGGER refuse_row BEFORE INSERT ON arrival \
-         WHEN NEW.state = 'starting' BEGIN SELECT RAISE(ABORT, 'refused'); END;",
-    )
-    .unwrap();
 
     let refused = project_b.move_in(package.clone()).await.err().unwrap();
     assert!(refused.contains("refused"), "{refused}");
-    raw.execute_batch("DROP TRIGGER refuse_row").unwrap();
+    db(&home_b)
+        .execute_batch("DROP TRIGGER refuse_row")
+        .unwrap();
     assert_eq!(
-        pair.host_b.move_abort(&package.transfer).await.unwrap(),
+        withdraw(&pair.host_b, &package.transfer).await,
         Arrival::Refused
     );
     assert_eq!(
         worktree_count(&pair.repo_b),
         2,
-        "the worktree the move made stays: a move never removes a worktree"
+        "the worktree the move made stays"
     );
     pair.stop().await;
 }
