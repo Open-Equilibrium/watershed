@@ -355,14 +355,21 @@ fn refusal(response: &Response<Option<Vec<u8>>>) -> String {
     }
 }
 
+fn frame(request: &api::Request) -> Message {
+    Message::Text(
+        serde_json::to_string(request)
+            .expect("requests serialize")
+            .into(),
+    )
+}
+
 fn send(link: &Link, id: u64, waiter: Waiter, request: &api::Request) -> Result<(), String> {
     let mut waiters = lock(&link.waiters);
     let waiters = waiters
         .as_mut()
         .ok_or("Meta-Harness closed the connection")?;
     waiters.insert(id, waiter);
-    let text = serde_json::to_string(request).expect("requests serialize");
-    link.out.send(Message::Text(text.into())).map_err(|_| {
+    link.out.send(frame(request)).map_err(|_| {
         waiters.remove(&id);
         "Meta-Harness closed the connection".to_owned()
     })
@@ -405,10 +412,8 @@ fn deliver(
             };
             if full {
                 waiters.remove(&id);
-                let text = serde_json::to_string(&api::Request::Cancel { cancel: id })
-                    .expect("requests serialize");
                 if let Some(out) = out.upgrade() {
-                    let _ = out.send(Message::Text(text.into()));
+                    let _ = out.send(frame(&api::Request::Cancel { cancel: id }));
                 }
             }
         }
@@ -451,9 +456,10 @@ impl<T> Drop for Stream<T> {
             .as_mut()
             .is_some_and(|w| w.remove(&self.id).is_some());
         if open {
-            let text = serde_json::to_string(&api::Request::Cancel { cancel: self.id })
-                .expect("requests serialize");
-            let _ = self.link.out.send(Message::Text(text.into()));
+            let _ = self
+                .link
+                .out
+                .send(frame(&api::Request::Cancel { cancel: self.id }));
         }
     }
 }
