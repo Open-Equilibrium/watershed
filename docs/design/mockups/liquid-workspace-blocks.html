@@ -34,7 +34,7 @@
   </div>
   <section>
     <h1>Liquid Workspace: Blocks</h1>
-    <p class="sub">Mockups for the M3a slice in <a href="../../../PLAN.md#m3a--local-workspace-foundation">PLAN.md</a>, approved by the maintainer on 2026-11-01: synchronized Views over one Block, copying and the deletion cascade. Connections, formulas and Automations are built; the <a href="../../concept/V-Spec_Liquid.html#logic">V-Spec</a> holds their rules. They follow the <a href="../../concept/V-Spec_Liquid.html#model">V-Spec</a>, ADR-0235 and <a href="../guidelines.md">guidelines.md</a>; the shell is the one in the <a href="liquid-workspace-pages.html">Pages mockups</a>.</p>
+    <p class="sub">Mockups for the M3a slice in <a href="../../../PLAN.md#m3a--local-workspace-foundation">PLAN.md</a>, approved by the maintainer on 2026-11-01: synchronized Views over one Block, copying and the deletion cascade. Connections, formulas and Automations are built; the <a href="../../concept/V-Spec_Liquid.html#logic">V-Spec</a> holds their rules. They follow the <a href="../../concept/V-Spec_Liquid.html#model">V-Spec</a>, and <a href="../guidelines.md">guidelines.md</a>; the shell is the one in the <a href="liquid-workspace-pages.html">Pages mockups</a>.</p>
     <p class="sub"><b>Revised by ADR-0239 and ADR-0241:</b> the rail with Inbox and Settings, the Workspace switcher in the sidebar's top row, tabs side by side, Chats in place of agent sessions and Notion's scale are in <a href="liquid-app-concept.html">the app's structure</a>; this file keeps its slice's content, and the shell is redrawn as each slice is built.</p>
   </section>
   <section>
@@ -44,7 +44,7 @@
   </section>
   <section>
     <h3 class="sec">2 · Copy, paste and Add to Page</h3>
-    <p class="sub">Pasting a copied Block creates an independent copy (ADR-0235); a chip right after the paste offers "Paste as View" instead, as Notion offers choices after a paste. "Add to Page…" in the Block menu, and "Existing Block…" in the chooser, add a View on purpose.</p>
+    <p class="sub">Pasting a copied Block creates an independent copy; a chip right after the paste offers "Paste as View" instead, as Notion offers choices after a paste. "Add to Page…" in the Block menu, and "Existing Block…" in the chooser, add a View on purpose.</p>
     <div class="stage"><div class="scaler"><div class="win bare" id="w-paste" data-w="1240"></div></div></div>
   </section>
   <section>
@@ -55,7 +55,7 @@
   </section>
   <section>
     <h3 class="sec">Decisions</h3>
-    <h4 class="qh">Decided (V-Spec, ADR-0235)</h4>
+    <h4 class="qh">Decided (V-Spec)</h4>
     <ol class="qs">
       <li>Removing the last View deletes the Block, its Connections and its own Automations in one revertible Action; Automations of the Workspace that use it turn off and need attention. There is no Trash.</li>
       <li>Pasting a copied Block creates a copy; a View is always explicit.</li>
