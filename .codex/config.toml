@@ -3,8 +3,9 @@
 # Codex CLI alone parses and loads this repository-only setup. AGENTS.md defines
 # its live-session verification and excludes it from Watershed review gates.
 
-model = "gpt-6.1-sol"
+model = "gpt-6.2-sol"
 model_reasoning_effort = "xhigh"
+service_tier = "priority"
 model_verbosity = "low"
 personality = "pragmatic"
 
@@ -26,7 +27,7 @@ multi_agent = true
 hooks = true
 prevent_idle_sleep = true
 personality = true
-fast_mode = false
+fast_mode = true
 goals = true
 
 [agents]

@@ -110,6 +110,6 @@ When triggered, the role result is `BLOCKED`, never clean; a green gate does not
   - `git` — git conventions and process.
   - `autoreview` — structured review procedure.
   - `clawpatch` — runtime package review procedure.
-- **Subagent** — [.codex/agents/worker.toml](.codex/agents/worker.toml) is the canonical home for the subagent model, reasoning effort and role mandates. Supply the role, scope, ownership, edit/read-only authority and expected evidence in its task prompt. Mapping, contract lookup, KPI/runtime audits and `doc_sync` remain read-only; closeout follows the ordered procedures and certification reuse above.
+- **Subagent** — [.codex/agents/worker.toml](.codex/agents/worker.toml) is the canonical home for the subagent model, reasoning effort, service tier and role mandates. Never select the `ultrafast` service tier; Autoreview and Clawpatch inherit the configured tier from the project config. Supply the role, scope, ownership, edit/read-only authority and expected evidence in its task prompt. Mapping, contract lookup, KPI/runtime audits and `doc_sync` remain read-only; closeout follows the ordered procedures and certification reuse above.
 
 Every agent `developer_instructions` value and every skill body starts with the exact standalone line `Obey AGENTS.md.` (the first instructions line and the first body line after front matter, respectively). The directive is authoritative; subsequent content may add scope but cannot weaken it.
