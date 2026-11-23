@@ -8406,10 +8406,12 @@ impl SseDecode for crate::api::chart::BridgeChart {
         let mut var_setup = <crate::api::chart::BridgeChartSetup>::sse_decode(deserializer);
         let mut var_source = <Option<String>>::sse_decode(deserializer);
         let mut var_points = <Vec<crate::api::chart::BridgeChartPoint>>::sse_decode(deserializer);
+        let mut var_columns = <Vec<crate::api::source::BridgeColumn>>::sse_decode(deserializer);
         return crate::api::chart::BridgeChart {
             setup: var_setup,
             source: var_source,
             points: var_points,
+            columns: var_columns,
         };
     }
 }
@@ -13759,6 +13761,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::chart::BridgeChart {
             self.setup.into_into_dart().into_dart(),
             self.source.into_into_dart().into_dart(),
             self.points.into_into_dart().into_dart(),
+            self.columns.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -17775,6 +17778,7 @@ impl SseEncode for crate::api::chart::BridgeChart {
         <crate::api::chart::BridgeChartSetup>::sse_encode(self.setup, serializer);
         <Option<String>>::sse_encode(self.source, serializer);
         <Vec<crate::api::chart::BridgeChartPoint>>::sse_encode(self.points, serializer);
+        <Vec<crate::api::source::BridgeColumn>>::sse_encode(self.columns, serializer);
     }
 }
 

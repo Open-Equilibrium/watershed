@@ -41,6 +41,7 @@ pub struct BridgeChart {
     pub setup: BridgeChartSetup,
     pub source: Option<String>,
     pub points: Vec<BridgeChartPoint>,
+    pub columns: Vec<super::source::BridgeColumn>,
 }
 
 impl BridgeChartSetup {
@@ -126,6 +127,15 @@ impl BridgeChart {
                 .map(|point| BridgeChartPoint {
                     label: point.label,
                     value: point.value,
+                })
+                .collect(),
+            columns: chart
+                .columns
+                .into_iter()
+                .map(|column| super::source::BridgeColumn {
+                    id: column.id.to_string(),
+                    name: column.name,
+                    number: column.number,
                 })
                 .collect(),
         }

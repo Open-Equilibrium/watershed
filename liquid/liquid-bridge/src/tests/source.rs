@@ -28,11 +28,13 @@ fn a_source_crosses_the_bridge_and_feeds_a_chart() {
         )
         .unwrap();
     let sources = workspace.sources(area.clone()).unwrap();
+    let mut listed: Vec<_> = sources
+        .iter()
+        .map(|source| (source.name.as_str(), source.kind, source.parent.as_deref()))
+        .collect();
+    listed.sort_by_key(|(name, ..)| *name);
     assert_eq!(
-        sources
-            .iter()
-            .map(|source| (source.name.as_str(), source.kind, source.parent.as_deref()))
-            .collect::<Vec<_>>(),
+        listed,
         [
             ("bank-export.csv", BridgeSourceKind::File, None),
             ("files", BridgeSourceKind::Folder, Some(page.as_str()))
@@ -116,6 +118,14 @@ fn a_source_crosses_the_bridge_and_feeds_a_chart() {
     assert_eq!(drawn.setup.source.as_deref(), Some(file.as_str()));
     assert_eq!(
         drawn
+            .columns
+            .iter()
+            .map(|column| (column.name.as_str(), column.number))
+            .collect::<Vec<_>>(),
+        [("Date", false), ("Amount", true)]
+    );
+    assert_eq!(
+        drawn
             .points
             .iter()
             .map(|point| (point.label.as_str(), point.value))
@@ -148,6 +158,18 @@ fn a_source_crosses_the_bridge_and_feeds_a_chart() {
             .unwrap()
             .read,
         BridgeRead::Read
+    );
+    let versions = workspace.versions(page.clone()).unwrap();
+    let preview = workspace
+        .preview(page.clone(), versions[0].after.clone())
+        .unwrap();
+    assert!(
+        preview
+            .locate_source(
+                file.clone(),
+                files.join("moved.csv").to_str().unwrap().into()
+            )
+            .is_err()
     );
     workspace
         .rename_source(file.clone(), "Bank".into())

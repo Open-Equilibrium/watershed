@@ -176,6 +176,9 @@ impl LiquidWorkspace {
     }
 
     pub fn locate_source(&self, source_id: String, path: String) -> Result<(), String> {
+        if self.read_only {
+            return Err("a version is read-only".into());
+        }
         let source = source(source_id)?;
         let mut inner = self.state()?;
         let actor = liquid_core::Actor::Person(inner.workspace.owner().clone());

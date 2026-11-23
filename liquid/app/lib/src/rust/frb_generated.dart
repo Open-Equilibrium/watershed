@@ -7370,12 +7370,13 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   BridgeChart dco_decode_bridge_chart(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 3)
-      throw Exception('unexpected arr length: expect 3 but see ${arr.length}');
+    if (arr.length != 4)
+      throw Exception('unexpected arr length: expect 4 but see ${arr.length}');
     return BridgeChart(
       setup: dco_decode_bridge_chart_setup(arr[0]),
       source: dco_decode_opt_String(arr[1]),
       points: dco_decode_list_bridge_chart_point(arr[2]),
+      columns: dco_decode_list_bridge_column(arr[3]),
     );
   }
 
@@ -10912,10 +10913,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_setup = sse_decode_bridge_chart_setup(deserializer);
     var var_source = sse_decode_opt_String(deserializer);
     var var_points = sse_decode_list_bridge_chart_point(deserializer);
+    var var_columns = sse_decode_list_bridge_column(deserializer);
     return BridgeChart(
       setup: var_setup,
       source: var_source,
       points: var_points,
+      columns: var_columns,
     );
   }
 
@@ -15420,6 +15423,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_bridge_chart_setup(self.setup, serializer);
     sse_encode_opt_String(self.source, serializer);
     sse_encode_list_bridge_chart_point(self.points, serializer);
+    sse_encode_list_bridge_column(self.columns, serializer);
   }
 
   @protected

@@ -60,9 +60,15 @@ Future<void> addFrom(WidgetTester tester, String key) async {
 void main() {
   late StreamController<void> changed;
 
+  final watched = <String>[];
+
   setUp(() {
     changed = StreamController<void>.broadcast();
-    SourcePlatform.watch = (_) => changed.stream;
+    watched.clear();
+    SourcePlatform.watch = (path) {
+      watched.add(path);
+      return changed.stream;
+    };
   });
 
   tearDown(() async {
@@ -186,6 +192,7 @@ void main() {
     await tester.tap(find.text('Choose file…'));
     await settle(tester);
     expect(kit.fake.located.single, (source, moved));
+    expect(watched.last, moved);
     await tester.tap(find.text('Open in default app'));
     await settle(tester);
     expect(opened.last, [moved]);

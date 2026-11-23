@@ -432,6 +432,10 @@ class WorkspaceState {
     }
   }
 
+  final _located = StreamController<String>.broadcast();
+
+  Stream<String> get located => _located.stream;
+
   Future<void> locateSource(String source, {required bool folder}) async {
     final path = await (folder
         ? SourcePlatform.pickFolder()
@@ -439,6 +443,7 @@ class WorkspaceState {
     if (path == null) return;
     try {
       await workspace.locateSource(sourceId: source, path: path);
+      if (!_disposed) _located.add(source);
     } on Object catch (error) {
       report('Liquid did not use this file: $error');
     }
@@ -745,5 +750,6 @@ class WorkspaceState {
     for (final sources in _sources.values) {
       sources.dispose();
     }
+    await _located.close();
   }
 }

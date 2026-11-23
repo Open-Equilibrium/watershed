@@ -65,6 +65,7 @@ class _ChartBlockState extends State<ChartBlock> {
   List<ChartSourceChoice> _sources = const [];
   int _reads = 0;
   StreamSubscription<BridgeChange>? _followed;
+  StreamSubscription<String>? _located;
   late final FollowedSources _sourcesFollowed = FollowedSources(
     _state.workspace,
     changed: () => unawaited(_read()),
@@ -111,6 +112,11 @@ class _ChartBlockState extends State<ChartBlock> {
         block: _block,
       ),
     ).listen((_) => unawaited(_read()), onError: _report);
+    _located = _state.located.listen((source) {
+      if (source != _watched) return;
+      _follow(source, again: true);
+      unawaited(_read());
+    });
   }
 
   @override
@@ -128,6 +134,7 @@ class _ChartBlockState extends State<ChartBlock> {
     _state.finishing.remove(_name.typed);
     unawaited(_followed?.cancel());
     unawaited(_watch?.cancel());
+    unawaited(_located?.cancel());
     _settle?.cancel();
     _sourcesFollowed.dispose();
     _name.dispose();
@@ -152,12 +159,7 @@ class _ChartBlockState extends State<ChartBlock> {
           : (await _state.read(query(BridgeQueryKind.database, block: table)))
                 .database;
       final source = chart?.setup.source;
-      final columns = source == null
-          ? const <BridgeColumn>[]
-          : (await _state.workspace.sourceFile(
-              sourceId: source,
-              inside: '',
-            )).columns;
+      final columns = chart?.columns ?? const <BridgeColumn>[];
       if (!mounted || read != _reads) return;
       _sourcesFollowed.sync(answer.follows);
       _follow(source);
@@ -171,8 +173,8 @@ class _ChartBlockState extends State<ChartBlock> {
     }
   }
 
-  void _follow(String? source) {
-    if (source == _watched) return;
+  void _follow(String? source, {bool again = false}) {
+    if (source == _watched && !again) return;
     _watched = source;
     unawaited(_watch?.cancel());
     _watch = source == null

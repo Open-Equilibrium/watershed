@@ -68,6 +68,7 @@ class _SourcePageState extends State<SourcePage> {
   String? _path;
   DateTime? _readAt;
   StreamSubscription<void>? _watch;
+  StreamSubscription<String>? _located;
   Timer? _settle;
   int _reads = 0;
   late final _name = StoredName(
@@ -100,6 +101,14 @@ class _SourcePageState extends State<SourcePage> {
       if (!_nameFocus.hasFocus) _name.write();
     });
     _state.sources(widget.open.area).addListener(_renamed);
+    _rewatch();
+    _located = _state.located.listen((source) {
+      if (source == _source) _rewatch();
+    });
+  }
+
+  void _rewatch() {
+    unawaited(_watch?.cancel());
     unawaited(_read());
     _watch = _state.watchSource(_source).listen((_) {
       _settle?.cancel();
@@ -115,6 +124,7 @@ class _SourcePageState extends State<SourcePage> {
     _state.finishing.remove(_name.typed);
     _state.sources(widget.open.area).removeListener(_renamed);
     unawaited(_watch?.cancel());
+    unawaited(_located?.cancel());
     _settle?.cancel();
     _name.dispose();
     _nameFocus.dispose();
@@ -182,12 +192,23 @@ class _SourcePageState extends State<SourcePage> {
       ? _path
       : '$_path/$_inside';
 
-  Future<void> _system(List<String> arguments) async {
+  Future<void> _reveal(String path) =>
+      _system(switch (Platform.operatingSystem) {
+        'macos' => ('open', ['-R', path]),
+        'windows' => ('explorer', ['/select,$path']),
+        _ => ('xdg-open', [File(path).parent.path]),
+      });
+
+  Future<void> _launch(String path) =>
+      _system(switch (Platform.operatingSystem) {
+        'macos' => ('open', [path]),
+        'windows' => ('explorer', [path]),
+        _ => ('xdg-open', [path]),
+      });
+
+  Future<void> _system((String, List<String>) command) async {
     try {
-      final result = await SourceOpener.run(
-        Platform.isMacOS ? 'open' : 'xdg-open',
-        arguments,
-      );
+      final result = await SourceOpener.run(command.$1, command.$2);
       if (result.exitCode != 0) {
         _state.report('Liquid could not open it: ${result.stderr}');
       }
@@ -353,7 +374,7 @@ class _SourcePageState extends State<SourcePage> {
           if (_absolute case final path?)
             GhostButton(
               label: Platform.isMacOS ? 'Show in Finder' : 'Show in folder',
-              onPressed: () => unawaited(_system(['-R', path])),
+              onPressed: () => unawaited(_reveal(path)),
             ),
           MoreMenu(
             label: 'Source actions',
@@ -364,12 +385,10 @@ class _SourcePageState extends State<SourcePage> {
                     ? 'Choose folder…'
                     : 'Choose file…',
                 () => unawaited(
-                  _state
-                      .locateSource(
-                        _source,
-                        folder: entry?.kind == BridgeSourceKind.folder,
-                      )
-                      .then((_) => _read()),
+                  _state.locateSource(
+                    _source,
+                    folder: entry?.kind == BridgeSourceKind.folder,
+                  ),
                 ),
               ),
               (LucideIcons.trash, 'Remove Source', () => unawaited(_remove())),
@@ -585,11 +604,8 @@ class _SourcePageState extends State<SourcePage> {
               children: [
                 PrimaryButton(
                   label: folder ? 'Choose folder…' : 'Choose file…',
-                  onPressed: () => unawaited(
-                    _state
-                        .locateSource(_source, folder: folder)
-                        .then((_) => _read()),
-                  ),
+                  onPressed: () =>
+                      unawaited(_state.locateSource(_source, folder: folder)),
                 ),
                 SecondaryButton(
                   label: 'Remove Source',
@@ -633,7 +649,7 @@ class _SourcePageState extends State<SourcePage> {
           ),
           SecondaryButton(
             label: 'Open in default app',
-            onPressed: () => unawaited(_system([path])),
+            onPressed: () => unawaited(_launch(path)),
           ),
         ],
       ),

@@ -57,6 +57,7 @@ pub struct Chart {
     pub source_name: Option<String>,
     pub points: Vec<ChartPoint>,
     pub uses: Vec<Used>,
+    pub columns: Vec<crate::Column>,
 }
 
 pub(crate) fn create(doc: &mut AutoCommit, block: &BlockId) -> Result<(), Error> {
@@ -164,6 +165,7 @@ pub(crate) fn read<S: Store>(
         return Ok(None);
     };
     let mut uses = Vec::new();
+    let mut columns = Vec::new();
     let (source_name, mut points) = match &setup.source {
         None => (None, Vec::new()),
         Some(ChartSource::Table(table)) => match workspace.database(table)? {
@@ -177,6 +179,7 @@ pub(crate) fn read<S: Store>(
         Some(ChartSource::Source(source)) => match workspace.source_table(source) {
             Ok((name, table)) => {
                 let points = source_points(&name, &table, &setup);
+                columns = table.columns;
                 (Some(name), points)
             }
             Err(_) => (workspace.source_name(source).ok(), Vec::new()),
@@ -219,6 +222,7 @@ pub(crate) fn read<S: Store>(
         source_name,
         points,
         uses,
+        columns,
     }))
 }
 

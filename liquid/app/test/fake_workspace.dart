@@ -1572,6 +1572,10 @@ class FakeWorkspace implements LiquidWorkspace {
           final setup? => BridgeChart(
             setup: setup,
             source: chartSource(setup),
+            columns: [
+              if (setup.source case final source?)
+                ...?sourceFiles[(source, '')]?.columns,
+            ],
             points: chartSource(setup) == null
                 ? const []
                 : chartPoints[query.block] ?? const [],

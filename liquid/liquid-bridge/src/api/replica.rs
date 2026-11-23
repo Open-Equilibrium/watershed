@@ -32,7 +32,7 @@ use crate::subscriptions::Subscriptions;
 pub struct LiquidWorkspace {
     inner: Mutex<Inner>,
     _lock: Option<ReplicaLock>,
-    read_only: bool,
+    pub(crate) read_only: bool,
 }
 
 struct ReplicaLock(File);
