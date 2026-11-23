@@ -17,6 +17,7 @@ class SourceTable extends StatelessWidget {
     required this.users,
     required this.root,
     required this.onPage,
+    required this.onOpenPage,
   });
 
   final WorkspaceState state;
@@ -25,6 +26,7 @@ class SourceTable extends StatelessWidget {
   final List<(String, String, String)> users;
   final bool root;
   final ValueChanged<String> onPage;
+  final ValueChanged<String> onOpenPage;
 
   @override
   Widget build(BuildContext context) {
@@ -83,17 +85,7 @@ class SourceTable extends StatelessWidget {
         for (final (page, _, title) in users)
           InkWell(
             key: ValueKey('source user $page'),
-            onTap: () {
-              final area = state.areas.value
-                  .where(
-                    (area) => state
-                        .pages(area.id)
-                        .value
-                        .any((known) => known.id == page),
-                  )
-                  .firstOrNull;
-              if (area != null) state.open.value = OpenPage(area.id, page);
-            },
+            onTap: () => onOpenPage(page),
             child: SizedBox(
               height: 32,
               child: Row(

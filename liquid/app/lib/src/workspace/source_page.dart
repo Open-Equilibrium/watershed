@@ -219,6 +219,16 @@ class _SourcePageState extends State<SourcePage> {
     if (confirmed == true) await _state.removeSource(_source);
   }
 
+  void _openPage(String page) {
+    final area = _state.areas.value
+        .where(
+          (area) =>
+              _state.pages(area.id).value.any((known) => known.id == page),
+        )
+        .firstOrNull;
+    if (area != null) _state.open.value = OpenPage(area.id, page);
+  }
+
   Future<void> _useInBlock(String page) async {
     final file = _file;
     if (file == null) return;
@@ -244,13 +254,7 @@ class _SourcePageState extends State<SourcePage> {
           ),
         ),
       );
-      final area = _state.areas.value
-          .where(
-            (area) =>
-                _state.pages(area.id).value.any((known) => known.id == page),
-          )
-          .firstOrNull;
-      if (area != null) _state.open.value = OpenPage(area.id, page);
+      _openPage(page);
     } on Object catch (error) {
       _state.report('Liquid did not add the Chart: $error');
     }
@@ -482,13 +486,14 @@ class _SourcePageState extends State<SourcePage> {
       return _column(children);
     }
     final shown = file!;
+    void launch() => unawaited(_launch(shown.path));
     switch (shown.read) {
       case BridgeRead.tooLarge:
         children.add(
           SourceCard(
             text: 'Liquid reads at most 50 MiB of a file.',
             path: shown.path,
-            onOpen: () => unawaited(_launch(shown.path)),
+            onOpen: launch,
           ),
         );
         return _column(children);
@@ -497,7 +502,7 @@ class _SourcePageState extends State<SourcePage> {
           SourceCard(
             text: 'Liquid can\'t read this file as text.',
             path: shown.path,
-            onOpen: () => unawaited(_launch(shown.path)),
+            onOpen: launch,
           ),
         );
         return _column(children);
@@ -513,6 +518,7 @@ class _SourcePageState extends State<SourcePage> {
           users: _users,
           root: _inside.isEmpty,
           onPage: (page) => unawaited(_useInBlock(page)),
+          onOpenPage: _openPage,
         );
       case BridgeFileView.text:
         children.add(
@@ -537,7 +543,7 @@ class _SourcePageState extends State<SourcePage> {
           SourceCard(
             text: 'Liquid shows no preview for this kind of file.',
             path: shown.path,
-            onOpen: () => unawaited(_launch(shown.path)),
+            onOpen: launch,
           ),
         );
     }
