@@ -422,22 +422,23 @@ async fn an_agent_made_by_chat_names_itself_logs_its_changes_and_answers_a_menti
     );
     assert_eq!(changes[1].turn, Some(1));
 
-    host.agent_routine_add(
-        "news-bot",
-        NewRoutine {
-            title: "Morning".to_owned(),
-            prompt: "Check the feeds.".to_owned(),
-            schedule: Schedule {
-                kind: ScheduleKind::Interval,
-                every_ms: Some(3_600_000),
-                time_of_day: None,
-                weekdays: Vec::new(),
-                run_at: None,
+    let routine = host
+        .agent_routine_add(
+            "news-bot",
+            NewRoutine {
+                title: "Morning".to_owned(),
+                prompt: "reinstruct".to_owned(),
+                schedule: Schedule {
+                    kind: ScheduleKind::Interval,
+                    every_ms: Some(3_600_000),
+                    time_of_day: None,
+                    weekdays: Vec::new(),
+                    run_at: None,
+                },
             },
-        },
-    )
-    .await
-    .unwrap();
+        )
+        .await
+        .unwrap();
     host.agent_undo("news-bot", changes[1].id).await.unwrap();
     assert_eq!(host.agent_instructions("news-bot").await.unwrap(), "");
     assert!(host.agent_undo("news-bot", changes[1].id).await.is_err());
@@ -448,6 +449,34 @@ async fn an_agent_made_by_chat_names_itself_logs_its_changes_and_answers_a_menti
         "the person's own changes are not the agent's"
     );
     assert!(after[1].undone);
+
+    thread.run_automation_now(&routine.id).await.unwrap();
+    wait(&thread, completed(2)).await;
+    let held = tokio::time::timeout(Duration::from_secs(30), async {
+        loop {
+            let changes = host.agent_changes("news-bot").await.unwrap();
+            if changes.len() == 3 {
+                return changes[2].clone();
+            }
+            tokio::time::sleep(Duration::from_millis(200)).await;
+        }
+    })
+    .await
+    .expect("the routine's change is noticed");
+    assert_eq!(held.kind, AgentChangeKind::Instructions);
+    assert!(held.held, "a change from a routine waits for approval");
+    assert_eq!(
+        host.agent_instructions("news-bot").await.unwrap(),
+        "",
+        "and is undone until then"
+    );
+    host.agent_apply("news-bot", held.id).await.unwrap();
+    assert_eq!(
+        host.agent_instructions("news-bot").await.unwrap(),
+        "# news-bot\n\nRead the feeds twice.\n"
+    );
+    assert!(!host.agent_changes("news-bot").await.unwrap()[2].held);
+    assert!(host.agent_apply("news-bot", held.id).await.is_err());
 
     let chat = project
         .start(start(
@@ -467,9 +496,9 @@ async fn an_agent_made_by_chat_names_itself_logs_its_changes_and_answers_a_menti
         )
         .await
         .unwrap();
-    let answered = wait(&thread, completed(2)).await;
-    assert!(answered.turns[1].prompt.contains("Is main green?"));
-    assert!(answered.turns[1].prompt.contains("t3-context://v1/thread/"));
+    let answered = wait(&thread, completed(3)).await;
+    assert!(answered.turns[2].prompt.contains("Is main green?"));
+    assert!(answered.turns[2].prompt.contains("t3-context://v1/thread/"));
     let mentions = host.agent_mentions(chat.id()).await.unwrap();
     assert_eq!(
         (

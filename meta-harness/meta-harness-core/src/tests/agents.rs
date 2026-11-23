@@ -214,6 +214,7 @@ fn changes_and_mentions_are_kept_per_agent() {
         &agent.id,
         "thread-1",
         Some(2),
+        false,
         (
             AgentChangeKind::RoutineAdded,
             None,

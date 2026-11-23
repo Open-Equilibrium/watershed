@@ -8,6 +8,7 @@ import threading
 sessions = {}
 cancelled = {}
 replies = {}
+instructions = {}
 
 
 def send(message):
@@ -23,11 +24,12 @@ def say(sid, text):
     update(sid, {"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": text}})
 
 
-def prompt(mid, sid, script, text):
-    if script == "instruct":
-        path = re.search(r"(/\S+/instructions\.md)", text).group(1)
+def prompt(mid, sid, script):
+    if script in ("instruct", "reinstruct"):
+        path = instructions[sid]
+        twice = " twice" if script == "reinstruct" else ""
         with open(path, "w", encoding="utf-8") as f:
-            f.write("# news-bot\n\nRead the feeds.\n")
+            f.write(f"# news-bot\n\nRead the feeds{twice}.\n")
         say(sid, "Saved.")
         reason = "end_turn"
     elif script.startswith("append "):
@@ -96,10 +98,13 @@ for raw in sys.stdin:
         sid = params["sessionId"]
         cancelled[sid].clear()
         text = "".join(p.get("text", "") for p in params.get("prompt", []) if p.get("type") == "text")
+        named = re.search(r"(/\S+/instructions\.md)", text)
+        if named:
+            instructions[sid] = named.group(1)
         lines = [line.split("<")[0].strip() for line in text.splitlines()]
         handoff = "Imported conversation history from the previous host" in text
-        script = "" if handoff else next((line for line in lines if line.startswith(("append ", "stream ")) or line in ("ask", "wait", "plan", "fill", "instruct")), "")
-        threading.Thread(target=prompt, args=(mid, sid, script, text)).start()
+        script = "" if handoff else next((line for line in lines if line.startswith(("append ", "stream ")) or line in ("ask", "wait", "plan", "fill", "instruct", "reinstruct")), "")
+        threading.Thread(target=prompt, args=(mid, sid, script)).start()
     elif method == "session/cancel":
         cancelled[params["sessionId"]].set()
     elif mid is not None:

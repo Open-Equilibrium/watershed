@@ -195,6 +195,11 @@ pub(super) async fn call(shared: &Arc<Shared>, call: AgentsCall) -> Result<Value
             undo(shared, &agent, change).await?;
             to(())
         }
+        AgentsCall::Apply { name, change } => {
+            let agent = named(shared, &name)?;
+            apply(shared, &agent, change).await?;
+            to(())
+        }
         AgentsCall::Mention {
             name,
             root,
@@ -311,57 +316,85 @@ async fn undo(shared: &Shared, agent: &Agent, id: i64) -> Result<(), String> {
     if change.undone {
         return Err("This change is already undone.".to_owned());
     }
-    let task = |text: &Option<String>| -> Result<Value, String> {
-        serde_json::from_str(text.as_deref().ok_or("The change keeps no routine.")?)
-            .map_err(|e| e.to_string())
+    if !change.held {
+        if change.kind == AgentChangeKind::Name && change.before.is_none() {
+            return Err("An agent's first name changes with Rename.".to_owned());
+        }
+        restore(shared, agent, change.kind, &change.after, &change.before).await?;
+    }
+    agents::mark_undone(&shared.store.db(), id)
+}
+
+async fn apply(shared: &Shared, agent: &Agent, id: i64) -> Result<(), String> {
+    let change = agents::change(&shared.store.db(), &agent.id, id)?;
+    if !change.held || change.undone {
+        return Err("This change does not wait for approval.".to_owned());
+    }
+    restore(shared, agent, change.kind, &change.before, &change.after).await?;
+    agents::mark_applied(&shared.store.db(), id)
+}
+
+async fn restore(
+    shared: &Shared,
+    agent: &Agent,
+    kind: AgentChangeKind,
+    from: &Option<String>,
+    to: &Option<String>,
+) -> Result<(), String> {
+    let task = |text: &Option<String>| -> Result<Option<Value>, String> {
+        text.as_deref()
+            .map(|text| serde_json::from_str(text).map_err(|e| e.to_string()))
+            .transpose()
     };
-    match change.kind {
+    match kind {
         AgentChangeKind::Name => {
-            let before = change
-                .before
-                .as_deref()
-                .ok_or("An agent's first name changes with Rename.")?;
-            rename_to(shared, agent, before).await?;
+            if let Some(name) = to {
+                rename_to(shared, agent, name).await?;
+            }
         }
         AgentChangeKind::Instructions => {
-            set_instructions(shared, agent, change.before.as_deref().unwrap_or_default()).await?;
+            set_instructions(shared, agent, to.as_deref().unwrap_or_default()).await?;
         }
-        AgentChangeKind::RoutineAdded => {
-            let added = task(&change.after)?;
-            if let Some(thread) = existing(shared, &agent.root, &agent.thread).await?
-                && thread
-                    .routine_tasks()
-                    .await?
-                    .iter()
-                    .any(|task| task["id"] == added["id"])
-            {
-                thread
-                    .remove_routine(added["id"].as_str().unwrap_or_default())
-                    .await?;
-            }
-            absorb(shared, agent, |seen| {
-                seen.routines.retain(|task| task["id"] != added["id"]);
-            })?;
-        }
-        AgentChangeKind::RoutineRemoved => {
+        AgentChangeKind::RoutineAdded
+        | AgentChangeKind::RoutineRemoved
+        | AgentChangeKind::RoutineChanged => {
+            let (from, to) = (task(from)?, task(to)?);
             let thread = current(shared, agent).await?;
-            let restored = thread.save_routine(&task(&change.before)?, false).await?;
-            absorb(shared, agent, |seen| seen.routines.push(restored))?;
-        }
-        AgentChangeKind::RoutineChanged => {
-            let before = task(&change.before)?;
-            let thread = current(shared, agent).await?;
-            let saved = thread.save_routine(&before, true).await?;
-            absorb(shared, agent, |seen| {
-                for task in &mut seen.routines {
-                    if task["id"] == saved["id"] {
-                        *task = saved.clone();
-                    }
+            let gone = from.as_ref().map(|task| task["id"].clone());
+            let replaced = to.as_ref().map(|task| task["id"].clone());
+            let saved = match &to {
+                Some(to) => {
+                    let exists = thread
+                        .routine_tasks()
+                        .await?
+                        .iter()
+                        .any(|task| task["id"] == to["id"]);
+                    Some(thread.save_routine(to, exists).await?)
                 }
+                None => {
+                    if let Some(id) = gone.as_ref().and_then(Value::as_str)
+                        && thread
+                            .routine_tasks()
+                            .await?
+                            .iter()
+                            .any(|task| task["id"] == id)
+                    {
+                        thread.remove_routine(id).await?;
+                    }
+                    None
+                }
+            };
+            absorb(shared, agent, |seen| {
+                seen.routines.retain(|task| {
+                    Some(&task["id"]) != gone.as_ref()
+                        && Some(&task["id"]) != replaced.as_ref()
+                        && saved.as_ref().is_none_or(|saved| task["id"] != saved["id"])
+                });
+                seen.routines.extend(saved);
             })?;
         }
     }
-    agents::mark_undone(&shared.store.db(), id)
+    Ok(())
 }
 
 async fn existing(shared: &Shared, root: &str, id: &str) -> Result<Option<Thread>, String> {
@@ -411,15 +444,34 @@ async fn current(shared: &Shared, agent: &Agent) -> Result<Thread, String> {
     Ok(thread)
 }
 
-async fn notice(shared: &Shared, agent: &Agent, thread: &Thread, turn: u64) -> Result<(), String> {
+async fn notice(
+    shared: &Shared,
+    agent: &Agent,
+    thread: &Thread,
+    turn: Option<u64>,
+) -> Result<(), String> {
     let now = Snapshot {
         instructions: agents::instructions(agent)?,
         routines: thread.routine_tasks().await?,
         fresh: false,
     };
     let seen = agents::seen(&shared.store.db(), &agent.id)?;
-    for change in agents::differences(&seen, &now) {
-        if let (AgentChangeKind::Name, Some(name)) = (change.0, &change.2) {
+    let held = turn.is_none_or(|turn| started_by_routine(thread, turn));
+    let mut found = agents::differences(&seen, &now);
+    found.retain(|(kind, _, after)| {
+        *kind != AgentChangeKind::Name || after.as_deref() != Some(agent.name.as_str())
+    });
+    if held {
+        for (kind, before, after) in found.iter().rev() {
+            if *kind != AgentChangeKind::Name {
+                restore(shared, agent, *kind, after, before).await?;
+            }
+        }
+    } else {
+        agents::set_seen(&shared.store.db(), &agent.id, &now)?;
+    }
+    for change in found {
+        if !held && let (AgentChangeKind::Name, Some(name)) = (change.0, &change.2) {
             if agents::rename(&shared.store.db(), &shared.home, &agent.id, name).is_err() {
                 continue;
             }
@@ -429,11 +481,20 @@ async fn notice(shared: &Shared, agent: &Agent, thread: &Thread, turn: u64) -> R
             &shared.store.db(),
             &agent.id,
             thread.id(),
-            Some(turn),
+            turn,
+            held,
             change,
         )?;
     }
-    agents::set_seen(&shared.store.db(), &agent.id, &now)
+    Ok(())
+}
+
+fn started_by_routine(thread: &Thread, turn: u64) -> bool {
+    thread
+        .snapshot()
+        .transcript
+        .iter()
+        .any(|item| item.turn.0 == turn && matches!(item.detail, crate::ItemDetail::Routine { .. }))
 }
 
 async fn watch(shared: Arc<Shared>, id: String) {
@@ -465,6 +526,19 @@ async fn follow(shared: &Shared, id: &str) -> Result<(), String> {
         };
         crate::util::lock(&shared.agents.followed).insert(id.to_owned(), thread.clone());
         let (_, mut events) = thread.subscribe();
+        if idle(&thread) {
+            let _serial = shared.agents.serial.lock().await;
+            let agent = agents::get(&shared.store.db(), &shared.home, id)?;
+            if let Some(agent) = agent.filter(|agent| agent.thread == thread.id()) {
+                let last = thread
+                    .turns()
+                    .iter()
+                    .filter(|turn| turn.status == TurnStatus::Completed)
+                    .map(|turn| turn.number)
+                    .max();
+                notice(shared, &agent, &thread, last).await?;
+            }
+        }
         let mut full = filled(&thread);
         let mut ended = None;
         while !full
@@ -482,7 +556,7 @@ async fn follow(shared: &Shared, id: &str) -> Result<(), String> {
             let _serial = shared.agents.serial.lock().await;
             let agent = agents::get(&shared.store.db(), &shared.home, id)?;
             if let Some(agent) = agent.filter(|agent| agent.thread == thread.id()) {
-                notice(shared, &agent, &thread, turn).await?;
+                notice(shared, &agent, &thread, Some(turn)).await?;
             }
             full = filled(&thread);
         }
@@ -499,10 +573,13 @@ async fn follow(shared: &Shared, id: &str) -> Result<(), String> {
     }
 }
 
-fn filled(thread: &Thread) -> bool {
-    let idle = thread
+fn idle(thread: &Thread) -> bool {
+    thread
         .turns()
         .iter()
-        .all(|turn| !matches!(turn.status, TurnStatus::Queued | TurnStatus::Running));
-    idle && agents::full(thread.context())
+        .all(|turn| !matches!(turn.status, TurnStatus::Queued | TurnStatus::Running))
+}
+
+fn filled(thread: &Thread) -> bool {
+    idle(thread) && agents::full(thread.context())
 }

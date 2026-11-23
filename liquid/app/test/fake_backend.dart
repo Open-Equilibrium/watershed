@@ -342,11 +342,13 @@ class FakeProject implements ProjectBackend {
   }
 
   @override
-  Future<List<BridgeAgentChange>> agentChanges(String name) async =>
-      changeList;
+  Future<List<BridgeAgentChange>> agentChanges(String name) async => changeList;
   @override
   Future<void> agentUndo(String name, int change) async =>
       calls.add('agent undo $name $change');
+  @override
+  Future<void> agentApply(String name, int change) async =>
+      calls.add('agent apply $name $change');
   @override
   Future<BridgeAddedRoutine> agentRoutineAdd(
     String name,
@@ -370,8 +372,7 @@ class FakeProject implements ProjectBackend {
   }
 
   @override
-  Future<List<BridgeMention>> agentMentions(String thread) async =>
-      mentionList;
+  Future<List<BridgeMention>> agentMentions(String thread) async => mentionList;
 }
 
 BridgeAgent agentOf(

@@ -190,6 +190,11 @@ class AgentsState {
     return true;
   }
 
+  Future<void> apply(BridgeAgentChange change) => _change(
+    'apply the change',
+    (project, id) => project.agentApply(id, change.id),
+  );
+
   Future<void> undo(BridgeAgentChange change) => _change(
     'undo the change',
     (project, id) => project.agentUndo(id, change.id),

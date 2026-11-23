@@ -19,7 +19,7 @@ CREATE TABLE IF NOT EXISTS agent_thread (
 CREATE TABLE IF NOT EXISTS agent_change (
     id INTEGER PRIMARY KEY AUTOINCREMENT, agent TEXT NOT NULL, thread TEXT NOT NULL,
     turn INTEGER, kind TEXT NOT NULL, before TEXT, after TEXT, created_ms INTEGER NOT NULL,
-    undone INTEGER NOT NULL DEFAULT 0);
+    undone INTEGER NOT NULL DEFAULT 0, held INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE IF NOT EXISTS agent_mention (
     id INTEGER PRIMARY KEY AUTOINCREMENT, agent TEXT NOT NULL, source TEXT NOT NULL,
     thread TEXT NOT NULL, message TEXT NOT NULL, text TEXT NOT NULL,
@@ -105,6 +105,7 @@ pub struct AgentChange {
     pub routine: Option<crate::Automation>,
     pub created_ms: u64,
     pub undone: bool,
+    pub held: bool,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
@@ -346,6 +347,20 @@ pub(crate) fn seen(db: &Connection, id: &str) -> Result<Snapshot, String> {
 }
 
 pub(crate) fn migrate(db: &Connection, home: &Path) -> Result<(), String> {
+    let held: i64 = db
+        .query_row(
+            "SELECT count(*) FROM pragma_table_info('agent_change') WHERE name = 'held'",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(failed)?;
+    if held == 0 {
+        db.execute(
+            "ALTER TABLE agent_change ADD COLUMN held INTEGER NOT NULL DEFAULT 0",
+            [],
+        )
+        .map_err(failed)?;
+    }
     let old: i64 = db
         .query_row(
             "SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'agent'",
@@ -507,11 +522,12 @@ pub(crate) fn record(
     id: &str,
     thread: &str,
     turn: Option<u64>,
+    held: bool,
     (kind, before, after): (AgentChangeKind, Option<String>, Option<String>),
 ) -> Result<(), String> {
     db.execute(
-        "INSERT INTO agent_change (agent, thread, turn, kind, before, after, created_ms)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        "INSERT INTO agent_change (agent, thread, turn, kind, before, after, created_ms, held)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
         params![
             id,
             thread,
@@ -519,7 +535,8 @@ pub(crate) fn record(
             to_json(&kind)?,
             before,
             after,
-            sql(now_ms())
+            sql(now_ms()),
+            held
         ],
     )
     .map_err(failed)
@@ -529,7 +546,7 @@ pub(crate) fn record(
 pub(crate) fn changes(db: &Connection, id: &str) -> Result<Vec<AgentChange>, String> {
     let mut query = db
         .prepare(
-            "SELECT id, thread, turn, kind, before, after, created_ms, undone
+            "SELECT id, thread, turn, kind, before, after, created_ms, undone, held
              FROM agent_change WHERE agent = ?1 ORDER BY id",
         )
         .map_err(failed)?;
@@ -539,7 +556,7 @@ pub(crate) fn changes(db: &Connection, id: &str) -> Result<Vec<AgentChange>, Str
 
 pub(crate) fn change(db: &Connection, id: &str, change: i64) -> Result<AgentChange, String> {
     db.query_row(
-        "SELECT id, thread, turn, kind, before, after, created_ms, undone
+        "SELECT id, thread, turn, kind, before, after, created_ms, undone, held
          FROM agent_change WHERE agent = ?1 AND id = ?2",
         params![id, change],
         change_of,
@@ -547,6 +564,12 @@ pub(crate) fn change(db: &Connection, id: &str, change: i64) -> Result<AgentChan
     .optional()
     .map_err(failed)?
     .ok_or_else(|| format!("The agent has no change {change}."))?
+}
+
+pub(crate) fn mark_applied(db: &Connection, change: i64) -> Result<(), String> {
+    db.execute("UPDATE agent_change SET held = 0 WHERE id = ?1", [change])
+        .map_err(failed)
+        .map(|_| ())
 }
 
 pub(crate) fn mark_undone(db: &Connection, change: i64) -> Result<(), String> {
@@ -618,7 +641,10 @@ pub(crate) fn opening(agent: &Agent, instructions: &str, handoff: Option<&str>) 
          wake up, and write down there whatever you need to remember next time: when this \
          conversation grows long, a fresh one replaces it. When the person asks you to work \
          differently, change {INSTRUCTIONS}. For recurring or scheduled work, use your \
-         schedule_task tool, which binds the routine to this thread."
+         schedule_task tool, which binds the routine to this thread. Change your instructions, \
+         name or routines only when the person asks in this conversation: what you change \
+         while a routine woke you is undone and waits for the person's approval, so say what \
+         you would change and why."
     ));
     if let Some(handoff) = handoff {
         text.push_str("\n\n");
@@ -672,6 +698,7 @@ fn change_of(row: &rusqlite::Row<'_>) -> rusqlite::Result<Result<AgentChange, St
     let after: Option<String> = row.get(5)?;
     let created: i64 = row.get(6)?;
     let undone: bool = row.get(7)?;
+    let held: bool = row.get(8)?;
     let id: i64 = row.get(0)?;
     let thread: String = row.get(1)?;
     let turn: Option<i64> = row.get(2)?;
@@ -694,6 +721,7 @@ fn change_of(row: &rusqlite::Row<'_>) -> rusqlite::Result<Result<AgentChange, St
             routine,
             created_ms: u64::try_from(created).unwrap_or_default(),
             undone,
+            held,
         })
     })())
 }

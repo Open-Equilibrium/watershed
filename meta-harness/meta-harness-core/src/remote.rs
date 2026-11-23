@@ -509,6 +509,14 @@ impl Host {
             .await
     }
 
+    pub async fn agent_apply(&self, name: &str, change: i64) -> Result<(), String> {
+        self.call(Call::Agents(AgentsCall::Apply {
+            name: name.to_owned(),
+            change,
+        }))
+        .await
+    }
+
     pub async fn agent_undo(&self, name: &str, change: i64) -> Result<(), String> {
         self.call(Call::Agents(AgentsCall::Undo {
             name: name.to_owned(),

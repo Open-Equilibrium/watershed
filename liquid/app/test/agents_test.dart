@@ -27,6 +27,7 @@ BridgeAgentChange changeOf(
   String? after,
   BridgeAutomation? routine,
   bool undone = false,
+  bool held = false,
 }) => BridgeAgentChange(
   id: id,
   thread: thread,
@@ -36,6 +37,7 @@ BridgeAgentChange changeOf(
   after: after,
   routine: routine,
   undone: undone,
+  held: held,
 );
 
 BridgeAutomation routineOf(String id, String title) => BridgeAutomation(
@@ -340,4 +342,59 @@ void main() {
     await tester.pumpAndSettle();
     expect(project.calls, contains('open thread-2'));
   });
+
+  testWidgets(
+    'a change a routine made waits in the Chat until the person applies it',
+    (tester) async {
+      final routine = routineOf('task-1', 'Morning news');
+      await show(
+        tester,
+        agents: [agentOf('news-bot', thread: 'thread-1')],
+        transcript: [
+          chatItem(
+            item(1, BridgeItemKind.userMessage, ended: true, routine: 'task-1'),
+            1,
+            'Check the feeds.',
+          ),
+          chatItem(
+            item(2, BridgeItemKind.assistantMessage, ended: true),
+            1,
+            'I would read them twice.',
+          ),
+        ],
+        turns: [turnOf(1, checkpoint: false)],
+        automations: [routine],
+        changes: [
+          changeOf(
+            5,
+            BridgeAgentChangeKind.instructions,
+            before: '# news-bot\n',
+            after: '# news-bot\n\nRead twice.\n',
+            held: true,
+          ),
+          changeOf(
+            6,
+            BridgeAgentChangeKind.routineAdded,
+            routine: routine,
+            held: true,
+            undone: true,
+          ),
+        ],
+      );
+
+      expect(
+        find.text('Waiting for you · Instructions saved · 3 lines'),
+        findsOneWidget,
+      );
+      expect(find.text('Discarded'), findsOneWidget);
+      expect(find.byKey(const Key('change-6-Run now')), findsNothing);
+
+      await tester.tap(find.byKey(const Key('change-5-Apply')));
+      await tester.pumpAndSettle();
+      expect(project.calls, contains('agent apply agent-news-bot 5'));
+      await tester.tap(find.byKey(const Key('change-5-Discard')));
+      await tester.pumpAndSettle();
+      expect(project.calls, contains('agent undo agent-news-bot 5'));
+    },
+  );
 }
