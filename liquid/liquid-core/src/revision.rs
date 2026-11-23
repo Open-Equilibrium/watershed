@@ -535,11 +535,13 @@ impl<S: Store> Workspace<S> {
         actions: &[Action],
         kind: RevertKind,
     ) -> Result<Applied, Error> {
-        let mut steps: Vec<(Document, ChangeHash)> = Vec::new();
         for action in actions {
-            if action.changes.is_empty() {
+            if action.changes.is_empty() || !self.kept(action) {
                 return Err(Error::Purged);
             }
+        }
+        let mut steps: Vec<(Document, ChangeHash)> = Vec::new();
+        for action in actions {
             for (document, hash) in &action.changes {
                 let doc = self.doc(document).map_err(|_| Error::Purged)?;
                 let change = doc.get_change_by_hash(hash).ok_or(Error::Purged)?;
@@ -548,9 +550,14 @@ impl<S: Store> Workspace<S> {
                 let undoes: HashSet<_> = patch::touched(&doc.diff(&deps, &[*hash]))
                     .into_iter()
                     .collect();
-                let later = patch::touched(&doc.diff(&[*hash], &current));
-                let own_group = actions.len() > 1;
-                if !own_group && later.iter().any(|key| undoes.contains(key)) {
+                let group: Vec<ChangeHash> = actions
+                    .iter()
+                    .flat_map(|member| &member.changes)
+                    .filter(|(kept, _)| kept == document)
+                    .map(|(_, member)| *member)
+                    .collect();
+                let later = patch::touched(&doc.diff(&group, &current));
+                if later.iter().any(|key| undoes.contains(key)) {
                     return Err(Error::Conflict);
                 }
                 steps.push((document.clone(), *hash));

@@ -644,3 +644,24 @@ fn a_version_brings_back_a_table_the_page_showed_then_as_it_was() {
     budget.workspace.restore(&owner(), &page, &point).unwrap();
     assert_eq!(budget.amounts(), [Cell::Number(950.0)]);
 }
+
+#[test]
+fn reverting_several_actions_together_is_refused_when_a_later_change_would_hide_one() {
+    let mut budget = Budget::new();
+    let rent = budget.row();
+    let food = budget.row();
+    let first = budget.set(&rent, 950.0);
+    let second = budget.set(&food, 300.0);
+    budget.set(&rent, 900.0);
+    assert_eq!(
+        budget
+            .workspace
+            .revert(&owner(), &[second, first])
+            .unwrap_err(),
+        Error::Conflict
+    );
+    assert_eq!(
+        budget.amounts(),
+        [Cell::Number(900.0), Cell::Number(300.0)]
+    );
+}
