@@ -28,10 +28,11 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
-  # Ships the fonts' license notices inside every app bundle.
+  # Ships the license notices of bundled third-party material inside every app bundle.
   assets:
     - assets/fonts/LICENSE-lucide
     - assets/fonts/LICENSE-excalifont
+    - assets/licenses/LICENSE-roughjs
   fonts:
     - family: Lucide
       fonts:

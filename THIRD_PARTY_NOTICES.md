@@ -29,7 +29,8 @@ Watershed-authored files remain licensed under `AGPL-3.0-only` unless otherwise 
 ## rough.js
 
 - Purpose: the hand-drawn lines of Liquid's Whiteboard Blocks, ported to Dart in `liquid/app/lib/src/whiteboard/rough.dart` (ADR-0306).
-- License: MIT; the notice is kept at the top of the ported file.
+- License: MIT.
+- License text is bundled in `liquid/app/assets/licenses/LICENSE-roughjs` and shipped as an app asset.
 - Copyright notice: `Copyright (c) 2019 Preet Shihn`.
 - Upstream/source: `rough-stuff/rough` 4.6.6.
 
