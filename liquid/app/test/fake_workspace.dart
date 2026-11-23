@@ -7,8 +7,29 @@ import 'package:liquid/src/rust/api/chart.dart';
 import 'package:liquid/src/rust/api/database.dart';
 import 'package:liquid/src/rust/api/media.dart';
 import 'package:liquid/src/rust/api/replica.dart';
+import 'package:liquid/src/rust/api/role.dart';
 import 'package:liquid/src/rust/api/drawing.dart';
 import 'package:liquid/src/rust/api/workspace.dart';
+
+const canManage = '00000000000000000000000000000001';
+const canEdit = '00000000000000000000000000000002';
+const canView = '00000000000000000000000000000003';
+
+const everything = BridgeAllows(
+  read: true,
+  propose: true,
+  apply: true,
+  approve: true,
+  manage: true,
+);
+
+const nothing = BridgeAllows(
+  read: false,
+  propose: false,
+  apply: false,
+  approve: false,
+  manage: false,
+);
 
 class FakeWorkspace implements LiquidWorkspace {
   @override
@@ -168,6 +189,49 @@ class FakeWorkspace implements LiquidWorkspace {
         BridgeRan(automation: automation, name: '', notices: const []);
   }
 
+  final roles = <BridgeRole>[
+    for (final (index, (name, template, allows)) in const [
+      ('Can manage', BridgeTemplate.canManage, everything),
+      (
+        'Can edit',
+        BridgeTemplate.canEdit,
+        BridgeAllows(
+          read: true,
+          propose: false,
+          apply: true,
+          approve: false,
+          manage: false,
+        ),
+      ),
+      (
+        'Can view',
+        BridgeTemplate.canView,
+        BridgeAllows(
+          read: true,
+          propose: false,
+          apply: false,
+          approve: false,
+          manage: false,
+        ),
+      ),
+    ].indexed)
+      BridgeRole(
+        id: '${index + 1}'.padLeft(32, '0'),
+        template: template,
+        setup: BridgeRoleSetup(
+          name: name,
+          grants: [
+            BridgeGrant(kind: BridgeTargetKind.workspace, allows: allows),
+          ],
+        ),
+      ),
+  ];
+
+  final allowances = <String, Map<String, BridgeAllows>>{};
+
+  void _rolesChanged() =>
+      _changed(const BridgeResource(kind: BridgeResourceKind.roles));
+
   void _automationsChanged() =>
       _changed(const BridgeResource(kind: BridgeResourceKind.automations));
 
@@ -203,6 +267,7 @@ class FakeWorkspace implements LiquidWorkspace {
             setup: setup,
             on_: true,
             owner: setup.trigger?.table,
+            role: canEdit,
           ),
         );
         _automationsChanged();
@@ -221,6 +286,7 @@ class FakeWorkspace implements LiquidWorkspace {
             on_: kept.on_,
             last: kept.last,
             owner: mutation.automationSetup!.trigger?.table,
+            role: kept.role,
           ),
         );
         return BridgeApplied(ran: const [], elements: const [], action: _id());
@@ -234,8 +300,56 @@ class FakeWorkspace implements LiquidWorkspace {
             attention: kept.attention,
             last: kept.last,
             owner: kept.owner,
+            role: kept.role,
           ),
         );
+        return BridgeApplied(ran: const [], elements: const [], action: _id());
+      case BridgeMutationKind.setAutomationRole:
+        _replaceAutomation(
+          mutation.automation,
+          (kept) => BridgeWorkspaceAutomation(
+            id: kept.id,
+            setup: kept.setup,
+            on_: kept.on_,
+            attention: kept.attention,
+            last: kept.last,
+            owner: kept.owner,
+            role: mutation.role!,
+          ),
+        );
+        return BridgeApplied(ran: const [], elements: const [], action: _id());
+      case BridgeMutationKind.createRole:
+        final id = _id();
+        roles.add(BridgeRole(id: id, setup: mutation.roleSetup!));
+        _rolesChanged();
+        return BridgeApplied(
+          ran: const [],
+          elements: const [],
+          action: _id(),
+          role: id,
+        );
+      case BridgeMutationKind.setRole:
+        final at = roles.indexWhere((role) => role.id == mutation.role);
+        roles[at] = BridgeRole(
+          id: roles[at].id,
+          setup: mutation.roleSetup!,
+          template: roles[at].template,
+        );
+        _rolesChanged();
+        return BridgeApplied(ran: const [], elements: const [], action: _id());
+      case BridgeMutationKind.removeRole:
+        roles.removeWhere((role) => role.id == mutation.role);
+        _rolesChanged();
+        return BridgeApplied(ran: const [], elements: const [], action: _id());
+      case BridgeMutationKind.protectTable || BridgeMutationKind.unprotectTable:
+        final at = tables.indexWhere((table) => table.id == mutation.block);
+        tables[at] = BridgeTable(
+          id: tables[at].id,
+          area: tables[at].area,
+          name: tables[at].name,
+          protected: mutation.kind == BridgeMutationKind.protectTable,
+        );
+        _changed(const BridgeResource(kind: BridgeResourceKind.tables));
         return BridgeApplied(ran: const [], elements: const [], action: _id());
       case BridgeMutationKind.removeAutomation:
         automations.removeWhere((kept) => kept.id == mutation.automation);
@@ -1044,14 +1158,19 @@ class FakeWorkspace implements LiquidWorkspace {
   final tables = <BridgeTable>[];
 
   void _newTable(String id, String area, String name) {
-    tables.add(BridgeTable(id: id, area: area, name: name));
+    tables.add(BridgeTable(id: id, area: area, name: name, protected: false));
     _changed(const BridgeResource(kind: BridgeResourceKind.tables));
   }
 
   void _renameTable(String id, String name) {
     final at = tables.indexWhere((table) => table.id == id);
     if (at < 0) return;
-    tables[at] = BridgeTable(id: id, area: tables[at].area, name: name);
+    tables[at] = BridgeTable(
+      id: id,
+      area: tables[at].area,
+      name: name,
+      protected: tables[at].protected,
+    );
     final database = databases[id];
     if (database != null) {
       databases[id] = BridgeDatabase(name: name, fields: database.fields);
@@ -1278,6 +1397,8 @@ class FakeWorkspace implements LiquidWorkspace {
       BridgeChart? chart,
       List<BridgeResource> follows = const [],
       List<BridgeWorkspaceAutomation> automations = const [],
+      List<BridgeRole> roles = const [],
+      List<BridgeRoleAllows> allows = const [],
     }) => BridgeAnswer(
       areas: areas,
       pages: pages,
@@ -1301,6 +1422,8 @@ class FakeWorkspace implements LiquidWorkspace {
       chart: chart,
       follows: follows,
       automations: automations,
+      roles: roles,
+      allows: allows,
     );
     final code = _isCode(query.block);
     return switch (query.kind) {
@@ -1401,6 +1524,26 @@ class FakeWorkspace implements LiquidWorkspace {
       BridgeQueryKind.tables => answer(
         count: tables.length,
         tables: window(tables),
+      ),
+      BridgeQueryKind.roles => answer(count: roles.length, roles: [...roles]),
+      BridgeQueryKind.allows => answer(
+        allows: [
+          for (final role in roles)
+            BridgeRoleAllows(
+              role: role.id,
+              allows:
+                  allowances[query.block]?[role.id] ??
+                  role.setup.grants
+                      .where(
+                        (grant) =>
+                            grant.kind == BridgeTargetKind.workspace ||
+                            grant.id == query.block,
+                      )
+                      .map((grant) => grant.allows)
+                      .firstOrNull ??
+                  nothing,
+            ),
+        ],
       ),
       BridgeQueryKind.automations => answer(
         count: automations.length,

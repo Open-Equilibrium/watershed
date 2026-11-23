@@ -17,7 +17,7 @@ import 'theme/icons.dart';
 import 'theme/theme.dart';
 import 'theme/tokens.g.dart';
 
-enum SettingsSection { appearance, shortcuts, writer, agentHosts }
+enum SettingsSection { appearance, shortcuts, writer, agentHosts, roles }
 
 class SettingsPage extends StatefulWidget {
   const SettingsPage({
@@ -32,6 +32,7 @@ class SettingsPage extends StatefulWidget {
     this.cardSettings,
     this.writer,
     this.agentHosts,
+    this.roles,
   });
 
   final ShortcutController shortcuts;
@@ -50,6 +51,8 @@ class SettingsPage extends StatefulWidget {
   final Widget? writer;
 
   final Widget? agentHosts;
+
+  final Widget? roles;
 
   @override
   State<SettingsPage> createState() => _SettingsPageState();
@@ -116,42 +119,61 @@ class _SettingsPageState extends State<SettingsPage> {
                         ('Writer model', SettingsSection.writer),
                       if (widget.agentHosts != null)
                         ('Agent hosts', SettingsSection.agentHosts),
+                      if (widget.roles != null) ...[
+                        ('Workspace', null),
+                        ('Roles', SettingsSection.roles),
+                      ],
                     ])
-                      Semantics(
-                        selected: widget.section == section,
-                        child: Shortcuts(
-                          shortcuts: activateKeys,
-                          child: InkWell(
-                            onTap: () => widget.onSection(section),
-                            borderRadius: BorderRadius.circular(
-                              WsMetrics.radiusMd,
+                      if (section == null)
+                        Padding(
+                          padding: const EdgeInsets.only(
+                            top: WsMetrics.space4,
+                            bottom: WsMetrics.space2,
+                          ),
+                          child: Text(
+                            label,
+                            style: TextStyle(
+                              color: ws.textFaint,
+                              fontSize: WsMetrics.fsSmall,
                             ),
-                            child: Ink(
-                              height: WsMetrics.rowNav,
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: WsMetrics.space3,
+                          ),
+                        )
+                      else
+                        Semantics(
+                          selected: widget.section == section,
+                          child: Shortcuts(
+                            shortcuts: activateKeys,
+                            child: InkWell(
+                              onTap: () => widget.onSection(section),
+                              borderRadius: BorderRadius.circular(
+                                WsMetrics.radiusMd,
                               ),
-                              decoration: BoxDecoration(
-                                color: widget.section == section
-                                    ? ws.selected
-                                    : null,
-                                borderRadius: BorderRadius.circular(
-                                  WsMetrics.radiusMd,
+                              child: Ink(
+                                height: WsMetrics.rowNav,
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: WsMetrics.space3,
                                 ),
-                              ),
-                              child: Align(
-                                alignment: Alignment.centerLeft,
-                                child: Text(
-                                  label,
-                                  style: const TextStyle(
-                                    fontWeight: WsMetrics.fwMedium,
+                                decoration: BoxDecoration(
+                                  color: widget.section == section
+                                      ? ws.selected
+                                      : null,
+                                  borderRadius: BorderRadius.circular(
+                                    WsMetrics.radiusMd,
+                                  ),
+                                ),
+                                child: Align(
+                                  alignment: Alignment.centerLeft,
+                                  child: Text(
+                                    label,
+                                    style: const TextStyle(
+                                      fontWeight: WsMetrics.fwMedium,
+                                    ),
                                   ),
                                 ),
                               ),
                             ),
                           ),
                         ),
-                      ),
                   ],
                 ),
               ),
@@ -183,6 +205,9 @@ class _SettingsPageState extends State<SettingsPage> {
                         ),
                       (SettingsSection.writer, _, final writer?, _) => writer,
                       (SettingsSection.agentHosts, _, _, final hosts?) => hosts,
+                      (SettingsSection.roles, _, _, _)
+                          when widget.roles != null =>
+                        widget.roles!,
                       _ => ShortcutsPane(shortcuts: widget.shortcuts),
                     },
                   ),

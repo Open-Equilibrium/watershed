@@ -14,6 +14,7 @@ import 'page_views.dart';
 import 'stored_name.dart';
 import 'table_block.dart';
 import 'table_tabs.dart';
+import 'roles.dart' show ProtectedMark, protectTable;
 import 'table_view_parts.dart';
 import 'workspace_state.dart';
 
@@ -234,8 +235,46 @@ class _TablePageState extends State<TablePage> {
                               ],
                             ),
                           ),
+                          if (table.protected)
+                            const Padding(
+                              padding: EdgeInsets.only(
+                                top: WsMetrics.space3,
+                                right: WsMetrics.space3,
+                              ),
+                              child: ProtectedMark(),
+                            ),
                           MoreMenu(
                             label: 'Table actions',
+                            plain: [
+                              if (table.protected)
+                                (
+                                  LucideIcons.lockOpen,
+                                  'Stop protecting',
+                                  () => unawaited(
+                                    widget.state
+                                        .apply(
+                                          mutation(
+                                            BridgeMutationKind.unprotectTable,
+                                            block: widget.table,
+                                          ),
+                                        )
+                                        .then<void>((_) {}, onError: (_) {}),
+                                  ),
+                                )
+                              else
+                                (
+                                  LucideIcons.lock,
+                                  'Protect…',
+                                  () => unawaited(
+                                    protectTable(
+                                      context,
+                                      widget.state,
+                                      widget.table,
+                                      table.name,
+                                    ),
+                                  ),
+                                ),
+                            ],
                             items: [
                               (LucideIcons.trash, 'Delete Table…', _delete),
                             ],

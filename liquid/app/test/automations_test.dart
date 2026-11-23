@@ -6,6 +6,7 @@ import 'package:liquid/src/rust/api/workspace.dart';
 import 'package:liquid/src/workspace/table_cells.dart';
 import 'package:liquid/src/workspace/workspace_state.dart';
 
+import 'fake_workspace.dart';
 import 'page_kit.dart';
 
 const buttonFields = [
@@ -80,6 +81,7 @@ void main() {
           setup: flagLarge(table),
           on_: true,
           owner: table,
+          role: canEdit,
         ),
       )
       ..add(
@@ -91,6 +93,7 @@ void main() {
             steps: [],
           ),
           on_: false,
+          role: canEdit,
           attention: BridgeAttention(
             kind: BridgeAttentionKind.tableDeleted,
             table: 'Bills',
@@ -221,6 +224,7 @@ void main() {
         setup: flagLarge(table),
         on_: true,
         owner: table,
+        role: canEdit,
       ),
     );
     await kit.workspace.apply(
@@ -315,6 +319,7 @@ void main() {
         ),
         on_: true,
         owner: table,
+        role: canEdit,
       ),
     );
     await kit.workspace.apply(
