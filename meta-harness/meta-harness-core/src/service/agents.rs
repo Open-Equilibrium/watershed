@@ -500,8 +500,38 @@ async fn notice(
             change,
         )?;
     }
-    let settled = snapshot(agent, thread).await?;
-    agents::set_seen(&shared.store.db(), &agent.id, &settled)
+    agents::set_seen(&shared.store.db(), &agent.id, &baseline(now, &held))
+}
+
+fn baseline(
+    mut now: Snapshot,
+    held: &[(AgentChangeKind, Option<String>, Option<String>)],
+) -> Snapshot {
+    let task = |text: &Option<String>| {
+        text.as_deref()
+            .and_then(|text| serde_json::from_str::<Value>(text).ok())
+    };
+    for (kind, before, after) in held {
+        match kind {
+            AgentChangeKind::Name => {}
+            AgentChangeKind::Instructions => {
+                now.instructions = before.clone().unwrap_or_default();
+            }
+            AgentChangeKind::RoutineAdded
+            | AgentChangeKind::RoutineRemoved
+            | AgentChangeKind::RoutineChanged => {
+                let (before, after) = (task(before), task(after));
+                now.routines.retain(|task| {
+                    after.as_ref().is_none_or(|after| task["id"] != after["id"])
+                        && before
+                            .as_ref()
+                            .is_none_or(|before| task["id"] != before["id"])
+                });
+                now.routines.extend(before);
+            }
+        }
+    }
+    now
 }
 
 async fn snapshot(agent: &Agent, thread: &Thread) -> Result<Snapshot, String> {
