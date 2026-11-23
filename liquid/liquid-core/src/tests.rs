@@ -174,6 +174,14 @@ impl Store for Flaky {
         self.inner.remember(key, value, most)
     }
 
+    fn source_path(&mut self, source: &crate::SourceId) -> Result<Option<String>, Error> {
+        self.inner.source_path(source)
+    }
+
+    fn locate(&mut self, source: &crate::SourceId, path: Option<&str>) -> Result<(), Error> {
+        self.inner.locate(source, path)
+    }
+
     fn index(&mut self, writes: &[crate::IndexWrite], version: Option<u32>) -> Result<(), Error> {
         if self.index_failing {
             return Err(Error::Storage("disk full".into()));

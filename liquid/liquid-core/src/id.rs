@@ -60,6 +60,7 @@ ids! {
     LineId,
     AutomationId,
     RoleId,
+    SourceId,
     #[derive(Default)]
     TabId,
 }

@@ -1,6 +1,6 @@
 use liquid_core::{
     Action, ActionId, AttachmentId, Commit, Document, Error, Found, Hit, IndexWrite, MemoryStore,
-    Store,
+    SourceId, Store,
 };
 use liquid_storage::Sqlite;
 
@@ -75,6 +75,14 @@ impl Store for Replica {
 
     fn remember(&mut self, key: &str, value: Option<&str>, most: usize) -> Result<(), Error> {
         each!(self, store => store.remember(key, value, most))
+    }
+
+    fn source_path(&mut self, source: &SourceId) -> Result<Option<String>, Error> {
+        each!(self, store => store.source_path(source))
+    }
+
+    fn locate(&mut self, source: &SourceId, path: Option<&str>) -> Result<(), Error> {
+        each!(self, store => store.locate(source, path))
     }
 
     fn index(&mut self, writes: &[IndexWrite], version: Option<u32>) -> Result<(), Error> {

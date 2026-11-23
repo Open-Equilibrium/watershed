@@ -12,5 +12,6 @@ mod moves;
 mod record;
 mod role;
 mod session;
+mod source;
 mod stream;
 mod workspace;

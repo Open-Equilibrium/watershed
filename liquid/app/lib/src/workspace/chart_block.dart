@@ -15,6 +15,7 @@ import 'explorer.dart' show untitled;
 import 'follow.dart';
 import 'page_views.dart';
 import 'stored_name.dart';
+import '../rust/api/source.dart';
 import 'workspace_state.dart';
 
 const chartHeight = 180.0;
@@ -29,12 +30,19 @@ String chartSummary(BridgeChart chart, NumberFormat numbers) =>
     '${chartKindName(chart.setup.kind)} chart: ${[for (final point in chart.points) '${point.label} ${numbers.format(point.value)}'].join('; ')}';
 
 class ChartSourceChoice {
-  const ChartSourceChoice(this.name, this.detail, {this.table, this.block});
+  const ChartSourceChoice(
+    this.name,
+    this.detail, {
+    this.table,
+    this.block,
+    this.source,
+  });
 
   final String name;
   final String detail;
   final String? table;
   final String? block;
+  final String? source;
 }
 
 class ChartBlock extends StatefulWidget {
@@ -50,9 +58,14 @@ class ChartBlock extends StatefulWidget {
 class _ChartBlockState extends State<ChartBlock> {
   BridgeChart? _chart;
   BridgeDatabase? _database;
+  List<BridgeColumn> _columns = const [];
+  String? _watched;
+  StreamSubscription<void>? _watch;
+  Timer? _settle;
   List<ChartSourceChoice> _sources = const [];
   int _reads = 0;
   StreamSubscription<BridgeChange>? _followed;
+  StreamSubscription<String>? _located;
   late final FollowedSources _sourcesFollowed = FollowedSources(
     _state.workspace,
     changed: () => unawaited(_read()),
@@ -99,6 +112,11 @@ class _ChartBlockState extends State<ChartBlock> {
         block: _block,
       ),
     ).listen((_) => unawaited(_read()), onError: _report);
+    _located = _state.located.listen((source) {
+      if (source != _watched) return;
+      _follow(source, again: true);
+      unawaited(_read());
+    });
   }
 
   @override
@@ -115,6 +133,9 @@ class _ChartBlockState extends State<ChartBlock> {
   void dispose() {
     _state.finishing.remove(_name.typed);
     unawaited(_followed?.cancel());
+    unawaited(_watch?.cancel());
+    unawaited(_located?.cancel());
+    _settle?.cancel();
     _sourcesFollowed.dispose();
     _name.dispose();
     _nameFocus.dispose();
@@ -137,15 +158,34 @@ class _ChartBlockState extends State<ChartBlock> {
           ? null
           : (await _state.read(query(BridgeQueryKind.database, block: table)))
                 .database;
+      final source = chart?.setup.source;
+      final columns = chart?.columns ?? const <BridgeColumn>[];
       if (!mounted || read != _reads) return;
       _sourcesFollowed.sync(answer.follows);
+      _follow(source);
       setState(() {
         _chart = chart;
         _database = database;
+        _columns = columns;
       });
     } on Object catch (error) {
       _report(error);
     }
+  }
+
+  void _follow(String? source, {bool again = false}) {
+    if (source == _watched && !again) return;
+    _watched = source;
+    unawaited(_watch?.cancel());
+    _watch = source == null
+        ? null
+        : _state.watchSource(source).listen((_) {
+            _settle?.cancel();
+            _settle = Timer(
+              const Duration(milliseconds: 200),
+              () => unawaited(_read()),
+            );
+          });
   }
 
   Future<void> _loadSources() async {
@@ -166,6 +206,14 @@ class _ChartBlockState extends State<ChartBlock> {
                 'Calculation',
                 block: view.block,
               ),
+          for (final area in _state.areas.value)
+            for (final source in _state.sources(area.id).value)
+              if (source.kind == BridgeSourceKind.file &&
+                  RegExp(
+                    r'\.(csv|tsv)$',
+                    caseSensitive: false,
+                  ).hasMatch(source.name))
+                ChartSourceChoice(source.name, 'Source', source: source.id),
         ],
       );
     } on Object catch (error) {
@@ -198,19 +246,20 @@ class _ChartBlockState extends State<ChartBlock> {
 
   BridgeChartSetup _with({
     BridgeChartKind? kind,
-    (String?, String?, String?)? source,
+    (String?, String?, String?, String?)? source,
     (String?,)? group,
     (BridgeChartValue, String?)? value,
   }) {
     final setup = _setup;
-    final (table, page, block) =
-        source ?? (setup.table, setup.page, setup.block);
+    final (table, page, block, file) =
+        source ?? (setup.table, setup.page, setup.block, setup.source);
     final (measure, field) = value ?? (setup.value, setup.field);
     return BridgeChartSetup(
       kind: kind ?? setup.kind,
       table: table,
       page: page,
       block: block,
+      source: file,
       group: group == null ? setup.group : group.$1,
       value: measure,
       field: field,
@@ -245,6 +294,7 @@ class _ChartBlockState extends State<ChartBlock> {
         title: widget.view.title,
         chart: chart,
         database: _database,
+        columns: _columns,
         sources: _sources,
         onClose: _togglePanel,
         onSource: (source) => _set(
@@ -253,6 +303,7 @@ class _ChartBlockState extends State<ChartBlock> {
               source?.table,
               source?.block == null ? null : _page,
               source?.block,
+              source?.source,
             ),
             group: (null,),
             value: (BridgeChartValue.count, null),
@@ -327,7 +378,7 @@ class _ChartBlockState extends State<ChartBlock> {
               null => const SizedBox.shrink(),
               BridgeChart(source: null) => Center(
                 child: Text(
-                  'Choose its data from a Table or a Calculation',
+                  'Choose its data from a Table, a Calculation or a Source',
                   style: faint,
                 ),
               ),
@@ -469,6 +520,7 @@ class ChartPanel extends StatelessWidget {
     required this.title,
     required this.chart,
     required this.database,
+    this.columns = const [],
     required this.sources,
     required this.onClose,
     required this.onSource,
@@ -481,6 +533,7 @@ class ChartPanel extends StatelessWidget {
   final String title;
   final BridgeChart? chart;
   final BridgeDatabase? database;
+  final List<BridgeColumn> columns;
   final List<ChartSourceChoice> sources;
   final VoidCallback onClose;
   final ValueChanged<ChartSourceChoice?> onSource;
@@ -494,19 +547,23 @@ class ChartPanel extends StatelessWidget {
     final setup = chart?.setup;
     final fields = database?.fields ?? const <BridgeField>[];
     String? nameOf(String? field) =>
-        fields.where((known) => known.id == field).firstOrNull?.name;
-    final groups = [
+        fields.where((known) => known.id == field).firstOrNull?.name ??
+        columns.where((known) => known.id == field).firstOrNull?.name;
+    final groups = <({String id, String name})>[
       for (final field in fields)
         if (field.kind == BridgeFieldKind.select ||
             field.kind == BridgeFieldKind.checkbox ||
             field.kind == BridgeFieldKind.text)
-          field,
+          (id: field.id, name: field.name),
+      for (final column in columns) (id: column.id, name: column.name),
     ];
-    final numbers = [
+    final numbers = <({String id, String name})>[
       for (final field in fields)
         if (field.kind == BridgeFieldKind.number ||
             field.kind == BridgeFieldKind.formula)
-          field,
+          (id: field.id, name: field.name),
+      for (final column in columns)
+        if (column.number) (id: column.id, name: column.name),
     ];
     String valueName(BridgeChartValue value, String? field) => switch (value) {
       BridgeChartValue.count => 'Count of rows',
@@ -520,6 +577,7 @@ class ChartPanel extends StatelessWidget {
     );
     final caption = TextStyle(fontSize: WsMetrics.fsSmall, color: ws.textFaint);
     final table = setup?.table != null;
+    final file = setup?.source != null;
     return Container(
       key: const Key('chart panel'),
       width: chartPanelWidth,
@@ -567,20 +625,26 @@ class ChartPanel extends StatelessWidget {
                 choices: [
                   (
                     'None',
-                    setup?.table == null && setup?.block == null,
+                    setup?.table == null &&
+                        setup?.block == null &&
+                        setup?.source == null,
                     () => onSource(null),
                   ),
                   for (final source in sources)
                     (
                       '${source.name} · ${source.detail}',
-                      source.table != null
-                          ? source.table == setup?.table
-                          : source.block == setup?.block,
+                      switch (source) {
+                        ChartSourceChoice(:final table?) =>
+                          table == setup?.table,
+                        ChartSourceChoice(:final source?) =>
+                          source == setup?.source,
+                        _ => source.block == setup?.block,
+                      },
                       () => onSource(source),
                     ),
                 ],
               ),
-              if (table) ...[
+              if (table || file) ...[
                 _Field(
                   group: group,
                   label: 'Group by',
@@ -648,7 +712,11 @@ class ChartPanel extends StatelessWidget {
                   child: Row(
                     children: [
                       Icon(
-                        table ? LucideIcons.table : LucideIcons.calculator,
+                        table
+                            ? LucideIcons.table
+                            : file
+                            ? LucideIcons.fileSpreadsheet
+                            : LucideIcons.calculator,
                         size: 14,
                         color: ws.textFaint,
                       ),
@@ -656,7 +724,14 @@ class ChartPanel extends StatelessWidget {
                       Expanded(
                         child: Text(source, overflow: TextOverflow.ellipsis),
                       ),
-                      Text(table ? 'Table' : 'Calculation', style: caption),
+                      Text(
+                        table
+                            ? 'Table'
+                            : file
+                            ? 'Source'
+                            : 'Calculation',
+                        style: caption,
+                      ),
                     ],
                   ),
                 ),
@@ -668,7 +743,7 @@ class ChartPanel extends StatelessWidget {
                 style: caption,
               ),
               Text(
-                'The data list offers Tables and Calculation Blocks you may read. '
+                'The data list offers Tables, Calculation Blocks and CSV Sources you may read. '
                 'Removing a Connection leaves both Blocks in place.',
                 style: caption,
               ),

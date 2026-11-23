@@ -129,6 +129,19 @@ pub enum Mutation {
         page: PageId,
         title: String,
     },
+    AddSource {
+        area: AreaId,
+        parent: Option<PageId>,
+        name: String,
+        kind: crate::SourceKind,
+    },
+    RenameSource {
+        source: crate::SourceId,
+        name: String,
+    },
+    RemoveSource {
+        source: crate::SourceId,
+    },
     AddTextBlock {
         page: PageId,
         after: Option<ViewId>,
@@ -467,6 +480,7 @@ pub enum Created {
     Line(crate::LineId),
     Automation(AutomationId),
     Role(crate::RoleId),
+    Source(crate::SourceId),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

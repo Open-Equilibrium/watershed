@@ -117,4 +117,10 @@ abstract final class LucideIcons {
   static const arrowLeft = IconData(0xe048, fontFamily: _family);
   static const lock = IconData(0xe10b, fontFamily: _family);
   static const lockOpen = IconData(0xe10c, fontFamily: _family);
+  static const refreshCw = IconData(0xe145, fontFamily: _family);
+  static const link = IconData(0xe102, fontFamily: _family);
+  static const fileText = IconData(0xe0cc, fontFamily: _family);
+  static const externalLink = IconData(0xe0b9, fontFamily: _family);
+  static const fileSpreadsheet = IconData(0xe326, fontFamily: _family);
+  static const folderOpen = IconData(0xe247, fontFamily: _family);
 }

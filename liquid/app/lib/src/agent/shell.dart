@@ -24,6 +24,7 @@ import '../shortcuts/shortcut_store.dart';
 import '../theme/icons.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
+import '../workspace/source_page.dart';
 import '../workspace/automations.dart';
 import '../workspace/history_dialog.dart';
 import '../workspace/notices.dart';
@@ -567,6 +568,15 @@ class _AgentShellState extends State<AgentShell> {
                                     key: ValueKey(table),
                                     state: widget.workspace!,
                                     table: table,
+                                  ),
+                                )
+                              else if (open?.source case final source?)
+                                UndoScope(
+                                  state: widget.workspace!,
+                                  child: SourcePage(
+                                    key: ValueKey((source, open!.inside)),
+                                    state: widget.workspace!,
+                                    open: open,
                                   ),
                                 )
                               else if (open != null)

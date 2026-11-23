@@ -15,6 +15,7 @@ import 'media.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
 import 'role.dart';
+import 'source.dart';
 import 'workspace.dart';
 
 // These functions are ignored because they are not marked as `pub`: `change_maybe`, `change`, `notify`, `open_lock`, `open_with`, `read`, `release_unfollowed`, `reported`, `row_query`, `state`, `take_lock`, `version`, `watch`
@@ -27,11 +28,19 @@ abstract class LiquidWorkspace implements RustOpaqueInterface {
 
   Stream<BridgeUpload> addFile({required String path});
 
+  Future<String> addSource({
+    required String area,
+    String? parent,
+    required String path,
+  });
+
   Future<BridgeApplied> apply({required BridgeMutation mutation});
 
   Future<void> close({required PlatformInt64 subscription});
 
   Future<BridgeHistory> history({required BridgeEntryQuery asked});
+
+  Future<void> locateSource({required String sourceId, required String path});
 
   static Future<LiquidWorkspace> open({required String dir}) =>
       RustLib.instance.api.crateApiReplicaLiquidWorkspaceOpen(dir: dir);
@@ -56,6 +65,10 @@ abstract class LiquidWorkspace implements RustOpaqueInterface {
 
   Future<String?> remembered({required String key});
 
+  Future<void> removeSource({required String sourceId});
+
+  Future<void> renameSource({required String sourceId, required String name});
+
   Future<void> restore({required String page, required String to});
 
   Future<BridgeReverted> revert({required List<String> actions});
@@ -64,6 +77,22 @@ abstract class LiquidWorkspace implements RustOpaqueInterface {
     required String attachment,
     required String path,
   });
+
+  Future<BridgeSourceFile> sourceFile({
+    required String sourceId,
+    required String inside,
+  });
+
+  Future<BridgeFolder> sourceFolder({
+    required String sourceId,
+    required String inside,
+  });
+
+  Future<String?> sourcePath({required String sourceId});
+
+  Future<List<BridgeSourceUser>> sourceUsers({required String sourceId});
+
+  Future<List<BridgeSource>> sources({required String area});
 
   Stream<BridgeChange> subscribe({
     required PlatformInt64 subscription,

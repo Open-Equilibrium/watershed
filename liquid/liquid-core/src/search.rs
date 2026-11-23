@@ -2,13 +2,14 @@ use serde::{Deserialize, Serialize};
 
 use crate::PageId;
 
-pub const INDEX_VERSION: u32 = 1;
+pub const INDEX_VERSION: u32 = 2;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Found {
     Page,
     Table,
     Text,
+    Source,
 }
 
 impl Found {
@@ -17,6 +18,7 @@ impl Found {
             Self::Page => "page",
             Self::Table => "table",
             Self::Text => "text",
+            Self::Source => "source",
         }
     }
 }

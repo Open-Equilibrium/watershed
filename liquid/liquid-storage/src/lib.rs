@@ -2,8 +2,8 @@ use std::fmt::Write as _;
 use std::path::Path;
 
 use liquid_core::{
-    Action, ActionId, AttachmentId, Commit, Document, Error, Found, Hit, IndexWrite, PageId, Store,
-    Write,
+    Action, ActionId, AttachmentId, Commit, Document, Error, Found, Hit, IndexWrite, PageId,
+    SourceId, Store, Write,
 };
 use rusqlite::{Connection, ErrorCode, OptionalExtension, params};
 
@@ -50,6 +50,10 @@ const DEVICE: &str = "
     CREATE TABLE IF NOT EXISTS device (
         key TEXT PRIMARY KEY,
         value TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS source_paths (
+        source TEXT PRIMARY KEY,
+        path TEXT NOT NULL
     );
     CREATE VIRTUAL TABLE IF NOT EXISTS search USING fts5(
         found UNINDEXED,
@@ -479,6 +483,33 @@ impl Store for Sqlite {
             }
         }
         transaction.commit().map_err(failed)
+    }
+
+    fn source_path(&mut self, source: &SourceId) -> Result<Option<String>, Error> {
+        self.connection
+            .query_row(
+                "SELECT path FROM source_paths WHERE source = ?1",
+                [source.as_str()],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(failed)
+    }
+
+    fn locate(&mut self, source: &SourceId, path: Option<&str>) -> Result<(), Error> {
+        match path {
+            Some(path) => self.connection.execute(
+                "INSERT INTO source_paths (source, path) VALUES (?1, ?2) \
+                 ON CONFLICT (source) DO UPDATE SET path = excluded.path",
+                [source.as_str(), path],
+            ),
+            None => self.connection.execute(
+                "DELETE FROM source_paths WHERE source = ?1",
+                [source.as_str()],
+            ),
+        }
+        .map_err(failed)?;
+        Ok(())
     }
 
     fn index(&mut self, writes: &[IndexWrite], version: Option<u32>) -> Result<(), Error> {

@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 
-use crate::{Action, ActionId, AttachmentId, Document, Error, Found, Hit, IndexEntry, IndexWrite};
+use crate::{
+    Action, ActionId, AttachmentId, Document, Error, Found, Hit, IndexEntry, IndexWrite, SourceId,
+};
 
 pub struct Commit<'a> {
     pub action: &'a Action,
@@ -49,6 +51,8 @@ pub trait Store {
     fn part(&mut self, attachment: &AttachmentId, index: u64) -> Result<Option<Vec<u8>>, Error>;
     fn remembered(&mut self, key: &str) -> Result<Option<String>, Error>;
     fn remember(&mut self, key: &str, value: Option<&str>, most: usize) -> Result<(), Error>;
+    fn source_path(&mut self, source: &SourceId) -> Result<Option<String>, Error>;
+    fn locate(&mut self, source: &SourceId, path: Option<&str>) -> Result<(), Error>;
     fn index(&mut self, writes: &[IndexWrite], version: Option<u32>) -> Result<(), Error>;
     fn index_version(&mut self) -> Result<u32, Error>;
     fn search(&mut self, words: &[String], found: Found, limit: usize) -> Result<Vec<Hit>, Error>;
@@ -61,6 +65,7 @@ pub struct MemoryStore {
     uploads: HashMap<String, Vec<Vec<u8>>>,
     attachments: HashMap<AttachmentId, (u64, Vec<Vec<u8>>)>,
     device: Vec<(String, String)>,
+    sources: HashMap<SourceId, String>,
     search: Vec<(Found, String, IndexEntry)>,
     version: u32,
 }
@@ -241,6 +246,18 @@ impl Store for MemoryStore {
                 self.device.push((key.to_string(), value.to_string()));
             }
         }
+        Ok(())
+    }
+
+    fn source_path(&mut self, source: &SourceId) -> Result<Option<String>, Error> {
+        Ok(self.sources.get(source).cloned())
+    }
+
+    fn locate(&mut self, source: &SourceId, path: Option<&str>) -> Result<(), Error> {
+        match path {
+            Some(path) => self.sources.insert(source.clone(), path.to_string()),
+            None => self.sources.remove(source),
+        };
         Ok(())
     }
 

@@ -7,6 +7,8 @@ import '../frb_generated.dart';
 
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
+import 'source.dart';
+
 // These functions are ignored because they are not marked as `pub`: `of`, `of`, `to_core`
 // These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
 
@@ -14,11 +16,18 @@ class BridgeChart {
   final BridgeChartSetup setup;
   final String? source;
   final List<BridgeChartPoint> points;
+  final List<BridgeColumn> columns;
 
-  const BridgeChart({required this.setup, this.source, required this.points});
+  const BridgeChart({
+    required this.setup,
+    this.source,
+    required this.points,
+    required this.columns,
+  });
 
   @override
-  int get hashCode => setup.hashCode ^ source.hashCode ^ points.hashCode;
+  int get hashCode =>
+      setup.hashCode ^ source.hashCode ^ points.hashCode ^ columns.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -27,7 +36,8 @@ class BridgeChart {
           runtimeType == other.runtimeType &&
           setup == other.setup &&
           source == other.source &&
-          points == other.points;
+          points == other.points &&
+          columns == other.columns;
 }
 
 enum BridgeChartKind { bar, line, pie }
@@ -55,6 +65,7 @@ class BridgeChartSetup {
   final String? table;
   final String? page;
   final String? block;
+  final String? source;
   final String? group;
   final BridgeChartValue value;
   final String? field;
@@ -64,6 +75,7 @@ class BridgeChartSetup {
     this.table,
     this.page,
     this.block,
+    this.source,
     this.group,
     required this.value,
     this.field,
@@ -75,6 +87,7 @@ class BridgeChartSetup {
       table.hashCode ^
       page.hashCode ^
       block.hashCode ^
+      source.hashCode ^
       group.hashCode ^
       value.hashCode ^
       field.hashCode;
@@ -88,6 +101,7 @@ class BridgeChartSetup {
           table == other.table &&
           page == other.page &&
           block == other.block &&
+          source == other.source &&
           group == other.group &&
           value == other.value &&
           field == other.field;

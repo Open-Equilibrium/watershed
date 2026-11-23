@@ -565,3 +565,42 @@ fn an_upgrade_that_cannot_index_its_actions_is_retried_on_the_next_open() {
             .is_empty()
     );
 }
+
+#[test]
+fn a_source_s_path_stays_on_this_device_after_a_reopen() {
+    let scratch = Scratch::new("source");
+    let file = scratch.0.join("bank-export.csv");
+    std::fs::write(&file, "Date,Amount\n2026-11-01,-84.20\n").unwrap();
+    let (mut workspace, _, _) = lisbon(&scratch.db());
+    let area = workspace.areas().unwrap()[0].id.clone();
+    let applied = workspace
+        .add_source(&owner(), &area, None, file.to_str().unwrap())
+        .unwrap();
+    let Some(Created::Source(source)) = applied.created else {
+        panic!("a Source")
+    };
+    drop(workspace);
+
+    let store = Sqlite::open(&scratch.db(), &KEY).unwrap();
+    let mut workspace = Workspace::open(store).unwrap();
+    assert_eq!(
+        workspace.source_path(&source).unwrap().as_deref(),
+        file.to_str()
+    );
+    drop(workspace);
+    let connection = keyed(&scratch.db());
+    let path = file.to_str().unwrap();
+    for table in ["actions", "chunks"] {
+        let holding: i64 = connection
+            .query_row(
+                &format!(
+                    "SELECT count(*) FROM {table} WHERE instr(CAST({} AS BLOB), CAST(?1 AS BLOB)) > 0",
+                    if table == "actions" { "record" } else { "bytes" }
+                ),
+                [path],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(holding, 0, "{table}");
+    }
+}
