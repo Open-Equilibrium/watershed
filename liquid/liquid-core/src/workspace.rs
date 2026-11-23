@@ -1527,13 +1527,13 @@ impl<S: Store> Workspace<S> {
 
     fn write_delete_table(&mut self, table: &BlockId) -> Result<Written, Error> {
         let shown = self.table_views(table)?;
-        let name = self.table_name(table)?.unwrap_or_default();
+        let database = self.database(table)?.ok_or(Error::NotFound)?;
         let workspace = self.doc(&Document::Workspace)?;
         let entry = model::live(workspace, TABLES, table.as_str()).ok_or(Error::NotFound)?;
         model::mark_deleted(workspace, &entry)?;
         let mut written = Written::new(Document::Workspace, Changed::Tables);
         written.changed.push(Changed::Table(table.clone()));
-        self.table_deleted(table, &name, &mut written)?;
+        self.table_deleted(table, &database, &mut written)?;
         for (page, view) in shown {
             let Ok((doc, order)) = self.page(&page) else {
                 continue;

@@ -497,24 +497,13 @@ fn deleting_a_table_takes_its_own_automations_and_turns_off_those_that_use_it() 
         })
     );
     assert!(!left.iter().any(|automation| automation.id == flag));
-    let on = Mutation::SetAutomationOn {
-        automation: summary.clone(),
-        on: true,
-    };
-    assert_eq!(budget.edit(on.clone()).unwrap_err(), Error::NotAllowed);
-
-    let mut repaired = left[0].setup.clone();
-    repaired.steps = vec![Step::Notify {
-        message: "Summarized".into(),
-    }];
+    assert!(left[0].setup.steps.is_empty());
     budget
-        .edit(Mutation::SetAutomation {
-            automation: summary.clone(),
-            setup: Box::new(repaired),
+        .edit(Mutation::SetAutomationOn {
+            automation: summary,
+            on: true,
         })
         .unwrap();
-    assert_eq!(budget.workspace.automations().unwrap()[0].attention, None);
-    budget.edit(on).unwrap();
     assert!(budget.workspace.automations().unwrap()[0].on);
 }
 
@@ -669,4 +658,68 @@ fn conditions_compare_numbers_and_dates_and_rule_out_values() {
         Cell::Select(budget.review.clone()),
     );
     assert!(due_on(&mut budget, "2026-10-03").is_empty());
+}
+
+#[test]
+fn a_deleted_trigger_table_takes_its_uses_along_so_choosing_another_repairs() {
+    let mut budget = Budget::new();
+    let setup = AutomationSetup {
+        name: "Mirror".into(),
+        trigger: Some(Trigger::RowAdded(budget.expenses.clone())),
+        conditions: vec![Filter {
+            field: budget.amount.clone(),
+            matches: Match::NotEmpty,
+        }],
+        steps: vec![
+            Step::AddRow {
+                table: budget.expenses.clone(),
+                cells: Vec::new(),
+            },
+            Step::AddRow {
+                table: budget.months.clone(),
+                cells: Vec::new(),
+            },
+            Step::Set {
+                field: budget.category.clone(),
+                value: Cell::Empty,
+            },
+            Step::Notify {
+                message: format!("{{{}}} added", budget.item),
+            },
+        ],
+    };
+    let mirror = budget.create(setup).unwrap();
+    budget
+        .edit(Mutation::DeleteTable {
+            block: budget.expenses.clone(),
+        })
+        .unwrap();
+    let broken = budget.workspace.automations().unwrap().remove(0);
+    assert!(broken.setup.conditions.is_empty());
+    assert_eq!(
+        broken.setup.steps,
+        [
+            Step::AddRow {
+                table: budget.months.clone(),
+                cells: Vec::new(),
+            },
+            Step::Notify {
+                message: "{Name} added".into(),
+            },
+        ]
+    );
+    let mut repaired = broken.setup;
+    repaired.trigger = Some(Trigger::RowAdded(budget.months.clone()));
+    budget
+        .edit(Mutation::SetAutomation {
+            automation: mirror.clone(),
+            setup: Box::new(repaired),
+        })
+        .unwrap();
+    budget
+        .edit(Mutation::SetAutomationOn {
+            automation: mirror,
+            on: true,
+        })
+        .unwrap();
 }

@@ -382,11 +382,11 @@ impl<S: Store> Workspace<S> {
     pub(crate) fn table_deleted(
         &mut self,
         table: &BlockId,
-        name: &str,
+        database: &crate::Database,
         written: &mut Written,
     ) -> Result<(), Error> {
         let attention = Attention::TableDeleted {
-            name: name.to_string(),
+            name: database.name.clone(),
         };
         let doc = self.doc(&Document::Workspace)?;
         let mut touched = false;
@@ -398,6 +398,14 @@ impl<S: Store> Workspace<S> {
             if automation.owner.as_ref() == Some(table) {
                 model::mark_deleted(doc, &entry)?;
             } else {
+                let mut setup = automation.setup;
+                for field in &database.fields {
+                    setup = setup.without_field(table, &field.id, &field.name);
+                }
+                setup
+                    .steps
+                    .retain(|step| !matches!(step, Step::AddRow { table: to, .. } if to == table));
+                doc.put(&entry, SETUP, encode(&setup)?)?;
                 turn_off(doc, &entry, &attention)?;
             }
             touched = true;
