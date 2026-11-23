@@ -58,8 +58,6 @@ abstract class AgentHost implements RustOpaqueInterface {
     required String request,
   });
 
-  Future<List<String>> agentThreads({required String name});
-
   Future<void> agentUndo({required String name, required PlatformInt64 change});
 
   Future<BridgeAgent> agentUpdate({

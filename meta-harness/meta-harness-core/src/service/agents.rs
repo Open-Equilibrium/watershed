@@ -60,6 +60,7 @@ pub(super) async fn call(shared: &Arc<Shared>, call: AgentsCall) -> Result<Value
             let mut listed = agents::list(&shared.store.db(), &shared.home)?;
             let tasks = shared.host.scheduled_tasks().await?;
             for agent in &mut listed {
+                agent.threads = agents::threads(&shared.store.db(), &agent.id)?;
                 agent.next_run_ms = crate::thread::details::automations(&tasks, &agent.thread)
                     .iter()
                     .filter(|routine| routine.enabled)
@@ -179,12 +180,6 @@ pub(super) async fn call(shared: &Arc<Shared>, call: AgentsCall) -> Result<Value
             undo(shared, &agent, change).await?;
             to(())
         }
-        AgentsCall::Threads(name) => {
-            let agent = named(shared, &name)?;
-            let mut threads = agents::threads(&shared.store.db(), &agent.id)?;
-            threads.retain(|thread| *thread != agent.thread);
-            to(threads)
-        }
         AgentsCall::Mention {
             name,
             root,
@@ -207,10 +202,10 @@ pub(super) async fn call(shared: &Arc<Shared>, call: AgentsCall) -> Result<Value
                 "environmentId": shared.host.environment_id().await?,
                 "threadId": thread, "title": label,
             }]});
-            let text =
+            let sent =
                 format!("Mentioned in [{label}](t3-context://v1/thread/{context_id}): {text}");
-            target.post_with_context(&message, &text, context).await?;
-            agents::add_mention(&shared.store.db(), &agent, &thread, &message)?;
+            target.post_with_context(&message, &sent, context).await?;
+            agents::add_mention(&shared.store.db(), &agent, &thread, &message, &text)?;
             to(message)
         }
         AgentsCall::Mentions(thread) => {

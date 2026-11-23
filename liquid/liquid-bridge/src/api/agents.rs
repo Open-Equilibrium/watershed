@@ -17,6 +17,7 @@ pub struct BridgeAgent {
     pub permissions: BridgePermissions,
     pub memory: String,
     pub thread: String,
+    pub threads: Vec<String>,
     pub next_run_ms: Option<i64>,
 }
 
@@ -47,6 +48,7 @@ pub struct BridgeMention {
     pub name: String,
     pub thread: String,
     pub message: String,
+    pub text: String,
     pub created_ms: i64,
     pub answered: bool,
     pub answer: String,
@@ -118,10 +120,6 @@ impl AgentHost {
         run(self.host.agent_undo(&name, change))
     }
 
-    pub fn agent_threads(&self, name: String) -> Result<Vec<String>, String> {
-        run(self.host.agent_threads(&name))
-    }
-
     pub fn agent_routine_add(
         &self,
         name: String,
@@ -181,6 +179,7 @@ fn agent(agent: Agent) -> BridgeAgent {
         id: agent.id,
         root: agent.root,
         thread: agent.thread,
+        threads: agent.threads,
     }
 }
 
@@ -212,6 +211,7 @@ fn mention(mention: Mention) -> BridgeMention {
         name: visible_name(&mention.name),
         thread: mention.thread,
         message: mention.message,
+        text: visible(&mention.text),
         created_ms: i64::try_from(mention.created_ms).unwrap_or(i64::MAX),
         answered: mention.answered,
         answer: visible(&mention.answer),

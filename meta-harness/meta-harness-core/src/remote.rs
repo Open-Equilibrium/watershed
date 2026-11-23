@@ -517,11 +517,6 @@ impl Host {
         .await
     }
 
-    pub async fn agent_threads(&self, name: &str) -> Result<Vec<String>, String> {
-        self.call(Call::Agents(AgentsCall::Threads(name.to_owned())))
-            .await
-    }
-
     pub async fn agent_mention(
         &self,
         name: &str,

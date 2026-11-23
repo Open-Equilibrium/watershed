@@ -17,6 +17,7 @@ import '../workspace/workspace_switcher.dart';
 import '../workspace/workspaces.dart';
 import '../workspace/explorer.dart';
 import '../workspace/workspace_state.dart';
+import 'agents_section.dart';
 import 'session_menus.dart';
 
 @immutable
@@ -218,6 +219,8 @@ class Sidebar extends StatelessWidget {
                             _ => const SizedBox.shrink(),
                           },
                         ),
+                      if (state case final state?)
+                        AgentsSection(state: state, onShow: onShowSession),
                       const SidebarHeading('Threads'),
                       if ((state, info) case (final state?, final info?)) ...[
                         _ProjectRow(
@@ -407,32 +410,35 @@ class _Sessions extends StatelessWidget {
       state.sessionTitle,
       state.status,
       state.model,
+      state.agents.list,
       workspace?.open ?? _noPage,
     ]),
     builder: (context, _) {
       final open = workspace?.open.value == null;
       final current = state.session?.id;
+      final agentThreads = state.agents.threads;
       return Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           for (final listed in state.recent.value)
-            _SessionRow(
-              state: state,
-              listed: listed,
-              selected:
-                  open &&
-                  listed.thread.id == current &&
-                  listed.address == state.sessionAddress,
-              status:
-                  listed.thread.id == current &&
-                      listed.address == state.sessionAddress
-                  ? state.status.value
-                  : listed.thread.running
-                  ? RunStatus.running
-                  : RunStatus.idle,
-              onShow: onShow,
-              onMove: onMove,
-            ),
+            if (!agentThreads.contains(listed.thread.id))
+              _SessionRow(
+                state: state,
+                listed: listed,
+                selected:
+                    open &&
+                    listed.thread.id == current &&
+                    listed.address == state.sessionAddress,
+                status:
+                    listed.thread.id == current &&
+                        listed.address == state.sessionAddress
+                    ? state.status.value
+                    : listed.thread.running
+                    ? RunStatus.running
+                    : RunStatus.idle,
+                onShow: onShow,
+                onMove: onMove,
+              ),
         ],
       );
     },

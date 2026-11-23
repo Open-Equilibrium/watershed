@@ -40,6 +40,7 @@ class BridgeAgent {
   final BridgePermissions permissions;
   final String memory;
   final String thread;
+  final List<String> threads;
   final PlatformInt64? nextRunMs;
 
   const BridgeAgent({
@@ -51,6 +52,7 @@ class BridgeAgent {
     required this.permissions,
     required this.memory,
     required this.thread,
+    required this.threads,
     this.nextRunMs,
   });
 
@@ -64,6 +66,7 @@ class BridgeAgent {
       permissions.hashCode ^
       memory.hashCode ^
       thread.hashCode ^
+      threads.hashCode ^
       nextRunMs.hashCode;
 
   @override
@@ -79,6 +82,7 @@ class BridgeAgent {
           permissions == other.permissions &&
           memory == other.memory &&
           thread == other.thread &&
+          threads == other.threads &&
           nextRunMs == other.nextRunMs;
 }
 
@@ -142,6 +146,7 @@ class BridgeMention {
   final String name;
   final String thread;
   final String message;
+  final String text;
   final PlatformInt64 createdMs;
   final bool answered;
   final String answer;
@@ -151,6 +156,7 @@ class BridgeMention {
     required this.name,
     required this.thread,
     required this.message,
+    required this.text,
     required this.createdMs,
     required this.answered,
     required this.answer,
@@ -162,6 +168,7 @@ class BridgeMention {
       name.hashCode ^
       thread.hashCode ^
       message.hashCode ^
+      text.hashCode ^
       createdMs.hashCode ^
       answered.hashCode ^
       answer.hashCode;
@@ -175,6 +182,7 @@ class BridgeMention {
           name == other.name &&
           thread == other.thread &&
           message == other.message &&
+          text == other.text &&
           createdMs == other.createdMs &&
           answered == other.answered &&
           answer == other.answer;

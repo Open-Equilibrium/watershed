@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:liquid/src/rust/api/agents.dart';
 import 'package:liquid/src/rust/api/details.dart';
 import 'package:liquid/src/rust/api/events.dart';
 import 'package:liquid/src/rust/api/git.dart';
@@ -288,7 +289,114 @@ class FakeProject implements ProjectBackend {
 
   @override
   Future<String> environmentMachine() async => 'server';
+
+  List<BridgeAgent> agentList = [];
+  List<BridgeAgentChange> changeList = [];
+  List<BridgeMention> mentionList = [];
+  String instructionsText = '';
+
+  @override
+  Future<List<BridgeAgent>> agents() async => agentList;
+  @override
+  Future<BridgeAgent> agentStart(
+    BridgeModelChoice model,
+    BridgePermissions permissions,
+    String request,
+  ) async {
+    calls.add('agent start $request');
+    final started = agentOf('agent-1', named: false);
+    agentList = [...agentList, started];
+    return started;
+  }
+
+  @override
+  Future<String> agentRemove(String name) async {
+    calls.add('agent remove $name');
+    agentList = [
+      for (final agent in agentList)
+        if (agent.name != name) agent,
+    ];
+    return '/home/agents/$name/memory';
+  }
+
+  @override
+  Future<BridgeAgent> agentUpdate(
+    String name, {
+    String? rename,
+    BridgeModelChoice? model,
+    BridgePermissions? permissions,
+  }) async {
+    calls.add(
+      'agent update $name rename=$rename model=${model?.model} '
+      'permissions=${permissions?.name}',
+    );
+    return agentList.firstWhere((agent) => agent.name == name);
+  }
+
+  @override
+  Future<String> agentInstructions(String name) async => instructionsText;
+  @override
+  Future<void> agentSetInstructions(String name, String text) async {
+    calls.add('agent instructions $name');
+    instructionsText = text;
+  }
+
+  @override
+  Future<List<BridgeAgentChange>> agentChanges(String name) async =>
+      changeList;
+  @override
+  Future<void> agentUndo(String name, int change) async =>
+      calls.add('agent undo $name $change');
+  @override
+  Future<BridgeAddedRoutine> agentRoutineAdd(
+    String name,
+    String title,
+    String prompt,
+    BridgeSchedule schedule,
+  ) async {
+    calls.add('agent routine $name $title ${schedule.kind.name}');
+    return BridgeAddedRoutine(
+      id: 'task-9',
+      webhook: schedule.kind == BridgeScheduleKind.webhook
+          ? 'http://127.0.0.1:3773/api/hooks/task-9/secret'
+          : null,
+    );
+  }
+
+  @override
+  Future<String> agentMention(String name, String thread, String text) async {
+    calls.add('agent mention $name $thread $text');
+    return 'msg-1';
+  }
+
+  @override
+  Future<List<BridgeMention>> agentMentions(String thread) async =>
+      mentionList;
 }
+
+BridgeAgent agentOf(
+  String name, {
+  bool named = true,
+  String? thread,
+  List<String>? threads,
+  int? nextRunMs,
+}) => BridgeAgent(
+  id: 'agent-$name',
+  name: name,
+  named: named,
+  root: '/work/acme-api',
+  model: const BridgeModelChoice(
+    instance: 'codex',
+    model: 'gpt-6.1',
+    optionIds: [],
+    values: [],
+  ),
+  permissions: BridgePermissions.supervised,
+  memory: '/home/agents/agent-$name/memory',
+  thread: thread ?? 'thread-$name',
+  threads: threads ?? [thread ?? 'thread-$name'],
+  nextRunMs: nextRunMs,
+);
 
 class UnreachableProject extends FakeProject {
   @override
@@ -497,6 +605,9 @@ class FakeSession implements SessionBackend {
   @override
   Future<void> runAutomationNow(String id) async =>
       calls.add('run automation $id');
+  int visits = 0;
+  @override
+  Future<void> visit() async => visits++;
   @override
   Future<BridgeLineage> lineage() async {
     _firstRead.add('lineage');
@@ -769,6 +880,7 @@ BridgeThreadSummary threadOf(
   bool movable = true,
   bool harnessKnown = true,
   BridgeMoving? moving,
+  int? visitedMs,
 }) => BridgeThreadSummary(
   id: id,
   title: title ?? id,
@@ -779,6 +891,7 @@ BridgeThreadSummary threadOf(
   movable: movable,
   harnessKnown: harnessKnown,
   moving: moving,
+  visitedMs: visitedMs,
 );
 
 BridgeSnapshot snapshotOf({
@@ -822,6 +935,8 @@ BridgeItem item(
   bool failed = false,
   int? durationMs,
   List<BridgeTaskStep> steps = const [],
+  String? routine,
+  BridgeOpening opening = BridgeOpening.none,
 }) => BridgeItem(
   id: id,
   kind: kind,
@@ -831,6 +946,8 @@ BridgeItem item(
   failed: failed,
   durationMs: durationMs,
   steps: steps,
+  routine: routine,
+  opening: opening,
 );
 
 BridgeTaskStep step(String text, BridgeStepStatus status) =>
@@ -855,10 +972,12 @@ BridgeTurn turnOf(
   int added = 0,
   int removed = 0,
   bool checkpoint = true,
+  int? startedMs,
 }) => BridgeTurn(
   number: number,
   status: status,
   prompt: prompt,
+  startedMs: startedMs,
   files: files,
   added: added,
   removed: removed,

@@ -81,7 +81,6 @@ pub(crate) enum AgentsCall {
         name: String,
         change: i64,
     },
-    Threads(String),
     Mention {
         name: String,
         root: String,

@@ -23,7 +23,8 @@ CREATE TABLE IF NOT EXISTS agent_change (
     undone INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE IF NOT EXISTS agent_mention (
     id INTEGER PRIMARY KEY AUTOINCREMENT, agent TEXT NOT NULL, source TEXT NOT NULL,
-    thread TEXT NOT NULL, message TEXT NOT NULL, created_ms INTEGER NOT NULL);
+    thread TEXT NOT NULL, message TEXT NOT NULL, text TEXT NOT NULL,
+    created_ms INTEGER NOT NULL);
 ";
 
 const MAX_NAME_CHARS: usize = 40;
@@ -68,6 +69,8 @@ pub struct Agent {
     pub generation: u64,
     #[serde(default)]
     pub next_run_ms: Option<u64>,
+    #[serde(default)]
+    pub threads: Vec<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
@@ -111,6 +114,7 @@ pub struct Mention {
     pub name: String,
     pub thread: String,
     pub message: String,
+    pub text: String,
     pub created_ms: u64,
     pub root: String,
     pub answered: bool,
@@ -464,11 +468,12 @@ pub(crate) fn add_mention(
     agent: &Agent,
     source: &str,
     message: &str,
+    text: &str,
 ) -> Result<(), String> {
     db.execute(
-        "INSERT INTO agent_mention (agent, source, thread, message, created_ms)
-         VALUES (?1, ?2, ?3, ?4, ?5)",
-        params![agent.id, source, agent.thread, message, sql(now_ms())],
+        "INSERT INTO agent_mention (agent, source, thread, message, text, created_ms)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        params![agent.id, source, agent.thread, message, text, sql(now_ms())],
     )
     .map_err(failed)
     .map(|_| ())
@@ -477,7 +482,7 @@ pub(crate) fn add_mention(
 pub(crate) fn mentions(db: &Connection, source: &str) -> Result<Vec<Mention>, String> {
     let mut query = db
         .prepare(
-            "SELECT m.agent, p.name, m.thread, m.message, m.created_ms, p.root
+            "SELECT m.agent, p.name, m.thread, m.message, m.created_ms, p.root, m.text
              FROM agent_mention m JOIN agent_profile p ON p.id = m.agent
              WHERE m.source = ?1 ORDER BY m.id",
         )
@@ -492,6 +497,7 @@ pub(crate) fn mentions(db: &Connection, source: &str) -> Result<Vec<Mention>, St
                 message: row.get(3)?,
                 created_ms: u64::try_from(created).unwrap_or_default(),
                 root: row.get(5)?,
+                text: row.get(6)?,
                 answered: false,
                 answer: String::new(),
             })
@@ -618,6 +624,7 @@ fn row_of(row: &rusqlite::Row<'_>, home: &Path) -> rusqlite::Result<Result<Agent
             previous: row.get(8).map_err(failed)?,
             generation: u64::try_from(generation).map_err(|e| e.to_string())?,
             next_run_ms: None,
+            threads: Vec::new(),
             id,
         })
     })())

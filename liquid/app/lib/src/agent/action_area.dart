@@ -11,7 +11,6 @@ import '../session/session_state.dart';
 import '../shortcuts/keymap.dart';
 import '../theme/icons.dart';
 import '../theme/theme.dart';
-import '../session/task_tree.dart';
 import '../theme/tokens.g.dart';
 import '../workspace/anchored_menu.dart';
 import 'mention_menu.dart';
@@ -192,7 +191,7 @@ class Composer extends StatefulWidget {
 class _ComposerState extends State<Composer> {
   BridgeTurn? _editing;
   final _menu = OverlayPortalController();
-  var _choices = const <RunningInstance>[];
+  var _choices = const <MentionChoice>[];
   var _chosen = 0;
   String? _dismissedFor;
 
@@ -201,6 +200,7 @@ class _ComposerState extends State<Composer> {
     super.initState();
     widget.controller.addListener(_offer);
     widget.state.runningInstances.addListener(_offer);
+    widget.state.agents.list.addListener(_offer);
   }
 
   @override
@@ -216,14 +216,27 @@ class _ComposerState extends State<Composer> {
   void dispose() {
     widget.controller.removeListener(_offer);
     widget.state.runningInstances.removeListener(_offer);
+    widget.state.agents.list.removeListener(_offer);
     super.dispose();
   }
 
   void _offer() {
     final value = widget.controller.value;
-    final choices = value.text == _dismissedFor
-        ? const <RunningInstance>[]
-        : mentionChoices(value, widget.state.runningInstances.value);
+    final state = widget.state;
+    final own = state.agents.ofThread(state.session?.id, state.sessionAddress);
+    final choices = value.text == _dismissedFor || state.session == null
+        ? const <MentionChoice>[]
+        : mentionChoices(
+            value,
+            state.runningInstances.value,
+            agents: [
+              for (final hosted in state.agents.list.value)
+                if (hosted.address == state.sessionAddress &&
+                    hosted.agent.named &&
+                    hosted != own)
+                  (name: hosted.name, detail: 'Agent', agent: true),
+            ],
+          );
     if (choices.isEmpty && _choices.isEmpty) return;
     setState(() {
       if (!listEquals(choices, _choices)) _chosen = 0;
@@ -232,7 +245,7 @@ class _ComposerState extends State<Composer> {
     choices.isEmpty ? _menu.hide() : _menu.show();
   }
 
-  void _take(RunningInstance choice) {
+  void _take(MentionChoice choice) {
     final text = '@${choice.name} ';
     writeText(
       widget.controller,
@@ -304,9 +317,28 @@ class _ComposerState extends State<Composer> {
           state.items,
           state.queued,
           state.request,
+          state.agents.open,
           controller,
         ]),
         builder: (context, _) {
+          if (state.agents.earlier) {
+            return Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    'An earlier thread of ${state.agents.open.value?.name}. '
+                    'It stays as it was.',
+                    style: TextStyle(color: ws.textMuted),
+                  ),
+                ),
+                GhostButton(
+                  label: 'Open current thread',
+                  onPressed: () =>
+                      unawaited(state.agents.show(state.agents.open.value!)),
+                ),
+              ],
+            );
+          }
           final busy = state.status.value != RunStatus.idle;
           final sendable = controller.text.trim().isNotEmpty;
           final approving = state.request.value?.approval != null;
@@ -355,7 +387,7 @@ class _ComposerState extends State<Composer> {
                         : KeyEventResult.ignored,
                     child: AnchoredMenu(
                       controller: _menu,
-                      height: MentionMenu.heightFor(_choices.length),
+                      height: MentionMenu.heightFor(_choices),
                       menu: (context) => MentionMenu(
                         choices: _choices,
                         chosen: _chosen,
@@ -374,6 +406,8 @@ class _ComposerState extends State<Composer> {
                           decoration: InputDecoration.collapsed(
                             hintText: approving
                                 ? 'Send a message to decline and redirect the agent'
+                                : state.agents.composing.value
+                                ? 'Describe the agent\'s job…'
                                 : 'Ask anything. @ files, \$ skills, / commands',
                             hintStyle: TextStyle(color: ws.textFaint),
                           ),

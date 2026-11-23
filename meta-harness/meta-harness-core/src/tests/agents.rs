@@ -231,15 +231,16 @@ fn changes_and_mentions_are_kept_per_agent() {
     );
     assert!(agents::change(&store.db(), "other", changes[0].id).is_err());
 
-    agents::add_mention(&store.db(), &agent, "chat-7", "msg-1").unwrap();
+    agents::add_mention(&store.db(), &agent, "chat-7", "msg-1", "Is main green?").unwrap();
     let mentions = agents::mentions(&store.db(), "chat-7").unwrap();
     assert_eq!(
         (
             mentions[0].name.as_str(),
             mentions[0].thread.as_str(),
-            mentions[0].message.as_str()
+            mentions[0].message.as_str(),
+            mentions[0].text.as_str()
         ),
-        ("news-bot", "thread-1", "msg-1")
+        ("news-bot", "thread-1", "msg-1", "Is main green?")
     );
     assert!(agents::mentions(&store.db(), "chat-8").unwrap().is_empty());
 }
