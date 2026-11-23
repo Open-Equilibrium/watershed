@@ -7,13 +7,14 @@ use serde::{Deserialize, Serialize};
 use tokio::net::TcpListener;
 use tokio::task::JoinHandle;
 
-use super::{Access, ClientInfo, fitted, printable};
+use super::{Access, ClientInfo, fitted, printable, random};
 use crate::config::{Store, count, failed, now_ms, sql};
 use crate::util::{TIMEOUT, hex, lock};
 use crate::{remote, t3, tunnel};
 
 const RELINK_AFTER_MS: u64 = 25 * 24 * 3_600_000;
 
+#[derive(Clone)]
 struct LinkedHost {
     name: String,
     address: String,
@@ -125,9 +126,7 @@ fn linked_at(db: &Connection, address: &str) -> Result<Option<String>, String> {
 }
 
 fn pairing_name(host: &str) -> String {
-    let mut bytes = [0u8; 2];
-    getrandom::fill(&mut bytes).expect("the operating system provides random bytes");
-    format!("{}-{}", fitted(host, 59, 95), hex(&bytes))
+    format!("{}-{}", fitted(host, 59, 95), hex(&random::<2>()))
 }
 
 fn remove_linked_host(db: &Connection, name: &str) -> Result<(), String> {
@@ -147,6 +146,23 @@ fn set_linked(db: &Connection, name: &str, at: Option<u64>) -> Result<(), String
 
 fn tunnel_url(port: u16) -> String {
     format!("http://127.0.0.1:{port}")
+}
+
+async fn loopback() -> Result<(TcpListener, u16), String> {
+    let socket = TcpListener::bind("127.0.0.1:0")
+        .await
+        .map_err(|e| format!("Could not listen on the loopback: {e}"))?;
+    let port = socket
+        .local_addr()
+        .map_err(|e| format!("Could not listen on the loopback: {e}"))?
+        .port();
+    Ok((socket, port))
+}
+
+fn record_link(store: &Store, name: &str) {
+    if let Err(error) = set_linked(&store.db(), name, Some(now_ms())) {
+        eprintln!("meta: could not record the link to {name}: {error}");
+    }
 }
 
 fn is_due(linked: Option<u64>, now: u64) -> bool {
@@ -191,18 +207,8 @@ impl Links {
     }
 
     async fn move_tunnel(&self, store: &Store, host: &LinkedHost) -> Result<(), String> {
-        let socket = TcpListener::bind("127.0.0.1:0")
-            .await
-            .map_err(|e| format!("Could not listen on the loopback: {e}"))?;
-        let port = socket
-            .local_addr()
-            .map_err(|e| format!("Could not listen on the loopback: {e}"))?
-            .port();
-        let old = tunnel_url(host.tunnel_port);
-        let t3_links = t3::links(&self.t3, &self.t3_home).await?;
-        if let Some(link) = t3_links.iter().find(|link| link.urls.contains(&old)) {
-            t3::unlink(&self.t3, &self.t3_home, &link.environment_id).await?;
-        }
+        let (socket, port) = loopback().await?;
+        self.unlink_url(tunnel_url(host.tunnel_port)).await?;
         store
             .db()
             .execute(
@@ -211,13 +217,9 @@ impl Links {
             )
             .map_err(failed)?;
         let moved = LinkedHost {
-            name: host.name.clone(),
-            address: host.address.clone(),
-            token: host.token.clone(),
-            access: host.access,
             tunnel_port: port,
             linked_ms: None,
-            client: host.client.clone(),
+            ..host.clone()
         };
         self.tunnel(socket, &moved);
         Ok(())
@@ -272,13 +274,7 @@ impl Links {
         access: Access,
         client: &str,
     ) -> Result<(), String> {
-        let socket = TcpListener::bind("127.0.0.1:0")
-            .await
-            .map_err(|e| format!("Could not listen on the loopback: {e}"))?;
-        let tunnel_port = socket
-            .local_addr()
-            .map_err(|e| format!("Could not listen on the loopback: {e}"))?
-            .port();
+        let (socket, tunnel_port) = loopback().await?;
         let host = LinkedHost {
             name: name.to_owned(),
             address: address.to_owned(),
@@ -294,9 +290,7 @@ impl Links {
             self.forget(store, name)?;
             return Err(error);
         }
-        if let Err(error) = set_linked(&store.db(), name, Some(now_ms())) {
-            eprintln!("meta: could not record the link to {name}: {error}");
-        }
+        record_link(store, name);
         Ok(())
     }
 
@@ -304,11 +298,7 @@ impl Links {
         let _serial = self.serial.lock().await;
         let host = linked_named(&store.db(), name)?
             .ok_or_else(|| format!("There is no linked host named {name}."))?;
-        let url = tunnel_url(host.tunnel_port);
-        let t3_links = t3::links(&self.t3, &self.t3_home).await?;
-        if let Some(link) = t3_links.iter().find(|link| link.urls.contains(&url)) {
-            t3::unlink(&self.t3, &self.t3_home, &link.environment_id).await?;
-        }
+        self.unlink_url(tunnel_url(host.tunnel_port)).await?;
         if let Err(error) = self.forget(store, name) {
             if let Err(stored) = set_linked(&store.db(), name, None) {
                 eprintln!("meta: could not mark {name} for linking again: {stored}");
@@ -367,11 +357,7 @@ impl Links {
         };
         for host in due {
             match self.link_t3(&host).await {
-                Ok(()) => {
-                    if let Err(error) = set_linked(&store.db(), &host.name, Some(now_ms())) {
-                        eprintln!("meta: could not record the link to {}: {error}", host.name);
-                    }
-                }
+                Ok(()) => record_link(store, &host.name),
                 Err(error) => eprintln!("meta: could not link {} again: {error}", host.name),
             }
         }
@@ -385,6 +371,14 @@ impl Links {
 
     pub(crate) async fn pairing_code(&self, access: Access) -> Result<String, String> {
         t3::pairing_code(&self.t3, &self.t3_home, access).await
+    }
+
+    async fn unlink_url(&self, url: String) -> Result<(), String> {
+        let t3_links = t3::links(&self.t3, &self.t3_home).await?;
+        if let Some(link) = t3_links.iter().find(|link| link.urls.contains(&url)) {
+            t3::unlink(&self.t3, &self.t3_home, &link.environment_id).await?;
+        }
+        Ok(())
     }
 
     async fn link_t3(&self, host: &LinkedHost) -> Result<(), String> {

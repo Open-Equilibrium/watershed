@@ -1,7 +1,7 @@
 use rusqlite::{Connection, params};
 use serde::{Deserialize, Serialize};
 
-use super::{Access, ClientKind, digest, new_token, same};
+use super::{Access, ClientKind, digest, new_token, random, same};
 use crate::config::{count, failed, sql};
 
 const CODE_TTL_MS: u64 = 5 * 60_000;
@@ -21,9 +21,7 @@ pub struct ClientInfo {
 }
 
 fn new_code() -> String {
-    let mut bytes = [0u8; 8];
-    getrandom::fill(&mut bytes).expect("the operating system provides random bytes");
-    let letters: String = bytes
+    let letters: String = random::<8>()
         .iter()
         .map(|b| char::from(CODE_LETTERS[usize::from(*b) % CODE_LETTERS.len()]))
         .collect();
