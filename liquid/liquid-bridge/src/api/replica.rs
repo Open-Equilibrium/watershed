@@ -3,11 +3,12 @@ use std::path::Path;
 use std::sync::{Mutex, MutexGuard};
 
 use liquid_core::{
-    Actor, AreaId, BlockId, BlockKind, Created, Document, Error, FieldId, Found, Origin, PageId,
-    PersonId, Request, RowQuery, Workspace,
+    Actor, AreaId, AutomationId, BlockId, BlockKind, Created, Document, Error, FieldId, Found,
+    Origin, PageId, PersonId, Ran, Request, RowId, RowQuery, Workspace,
 };
 use liquid_storage::Sqlite;
 
+use super::automation::{BridgeRan, BridgeWorkspaceAutomation};
 use super::calculation::BridgeLine;
 use super::chart::BridgeChart;
 use super::database::{
@@ -140,7 +141,11 @@ impl LiquidWorkspace {
                 return Err(message(error));
             }
         };
-        for changed in &applied.changed {
+        for changed in applied
+            .changed
+            .iter()
+            .chain(applied.ran.iter().flat_map(|ran| &ran.changed))
+        {
             inner.notify(BridgeResource::of(changed));
         }
         inner.release_unfollowed();
@@ -156,6 +161,8 @@ impl LiquidWorkspace {
             tab: None,
             elements: Vec::new(),
             line: None,
+            automation: None,
+            ran: applied.ran.into_iter().map(BridgeRan::of).collect(),
         };
         match applied.created {
             Some(Created::Area(area)) => answer.area = Some(area.to_string()),
@@ -170,12 +177,41 @@ impl LiquidWorkspace {
             Some(Created::Option(option)) => answer.option = Some(option.to_string()),
             Some(Created::Tab(tab)) => answer.tab = Some(tab.to_string()),
             Some(Created::Line(line)) => answer.line = Some(line.to_string()),
+            Some(Created::Automation(automation)) => {
+                answer.automation = Some(automation.to_string());
+            }
             Some(Created::Elements(elements)) => {
                 answer.elements = elements.iter().map(ToString::to_string).collect();
             }
             None => {}
         }
         Ok(answer)
+    }
+
+    pub fn press(
+        &self,
+        table: String,
+        row: String,
+        field: String,
+    ) -> Result<Vec<BridgeRan>, String> {
+        let table = id(&Some(table), BlockId::parse, "table")?;
+        let row = id(&Some(row), RowId::parse, "row")?;
+        let field = id(&Some(field), FieldId::parse, "field")?;
+        let mut inner = self.state()?;
+        let actor = Actor::Person(inner.workspace.owner().clone());
+        let ran = inner.workspace.press(&actor, &table, &row, &field);
+        inner.reported(ran)
+    }
+
+    pub fn test(&self, automation: String) -> Result<BridgeRan, String> {
+        let automation = id(&Some(automation), AutomationId::parse, "automation")?;
+        let mut inner = self.state()?;
+        let actor = Actor::Person(inner.workspace.owner().clone());
+        let ran = inner
+            .workspace
+            .test(&actor, &automation)
+            .map(|ran| vec![ran]);
+        Ok(inner.reported(ran)?.remove(0))
     }
 
     pub fn remembered(&self, key: String) -> Result<Option<String>, String> {
@@ -226,6 +262,7 @@ impl LiquidWorkspace {
             totals: Vec::new(),
             chart: None,
             follows: Vec::new(),
+            automations: Vec::new(),
         };
         match query.kind {
             BridgeQueryKind::Workspace => {
@@ -411,6 +448,16 @@ impl LiquidWorkspace {
                     })
                     .collect();
             }
+            BridgeQueryKind::Automations => {
+                let automations = workspace.automations().map_err(message)?;
+                answer.count = automations.len() as i64;
+                answer.automations = automations
+                    .into_iter()
+                    .skip(start)
+                    .take(limit)
+                    .map(BridgeWorkspaceAutomation::of)
+                    .collect();
+            }
             BridgeQueryKind::TableViews => {
                 let block = id(&query.block, BlockId::parse, "block")?;
                 let shown = workspace.table_views(&block).map_err(message)?;
@@ -492,6 +539,21 @@ impl LiquidWorkspace {
 }
 
 impl Inner {
+    fn reported(&mut self, ran: Result<Vec<Ran>, Error>) -> Result<Vec<BridgeRan>, String> {
+        let ran = match ran {
+            Ok(ran) => ran,
+            Err(error) => {
+                self.release_unfollowed();
+                return Err(message(error));
+            }
+        };
+        for changed in ran.iter().flat_map(|ran| &ran.changed) {
+            self.notify(BridgeResource::of(changed));
+        }
+        self.release_unfollowed();
+        Ok(ran.into_iter().map(BridgeRan::of).collect())
+    }
+
     fn notify(&mut self, resource: BridgeResource) {
         if !self.subscriptions.notify(resource).is_empty() {
             self.release_unfollowed();

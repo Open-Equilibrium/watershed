@@ -16,6 +16,7 @@ pub enum BridgeFieldKind {
     Checkbox,
     File,
     Formula,
+    Button,
 }
 
 impl BridgeFieldKind {
@@ -28,6 +29,7 @@ impl BridgeFieldKind {
             Self::Checkbox => FieldKind::Checkbox,
             Self::File => FieldKind::File,
             Self::Formula => FieldKind::Formula,
+            Self::Button => FieldKind::Button,
         }
     }
 
@@ -40,6 +42,7 @@ impl BridgeFieldKind {
             FieldKind::Checkbox => Self::Checkbox,
             FieldKind::File => Self::File,
             FieldKind::Formula => Self::Formula,
+            FieldKind::Button => Self::Button,
         }
     }
 }
@@ -129,6 +132,9 @@ pub enum BridgeMatch {
     Is,
     Contains,
     Between,
+    IsNot,
+    Above,
+    Below,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -320,6 +326,9 @@ impl BridgeFilter {
             Match::Is(cell) => (BridgeMatch::Is, Some(BridgeCell::of(cell))),
             Match::Contains(part) => (BridgeMatch::Contains, Some(text(part))),
             Match::Between(from, _) => (BridgeMatch::Between, Some(text(from))),
+            Match::IsNot(cell) => (BridgeMatch::IsNot, Some(BridgeCell::of(cell))),
+            Match::Above(cell) => (BridgeMatch::Above, Some(BridgeCell::of(cell))),
+            Match::Below(cell) => (BridgeMatch::Below, Some(BridgeCell::of(cell))),
         };
         let until = match &filter.matches {
             Match::Between(_, until) => Some(until.clone()),
@@ -445,6 +454,9 @@ pub(crate) fn filter(filter: &Option<BridgeFilter>) -> Result<Option<Filter>, St
         BridgeMatch::Is => Match::Is(value()?.to_core()?),
         BridgeMatch::Contains => Match::Contains(text()?),
         BridgeMatch::Between => Match::Between(text()?, filter.until.clone().ok_or_else(missing)?),
+        BridgeMatch::IsNot => Match::IsNot(value()?.to_core()?),
+        BridgeMatch::Above => Match::Above(value()?.to_core()?),
+        BridgeMatch::Below => Match::Below(value()?.to_core()?),
     };
     Ok(Some(Filter {
         field: id(&Some(filter.field.clone()), FieldId::parse, "field")?,

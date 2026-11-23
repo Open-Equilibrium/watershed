@@ -148,7 +148,16 @@ class BridgeFieldCell {
           value == other.value;
 }
 
-enum BridgeFieldKind { text, number, select, date, checkbox, file, formula }
+enum BridgeFieldKind {
+  text,
+  number,
+  select,
+  date,
+  checkbox,
+  file,
+  formula,
+  button,
+}
 
 class BridgeFieldTotal {
   final String field;
@@ -226,7 +235,16 @@ class BridgeGroup {
 
 enum BridgeLayout { table, board, calendar }
 
-enum BridgeMatch { empty, notEmpty, is_, contains, between }
+enum BridgeMatch {
+  empty,
+  notEmpty,
+  is_,
+  contains,
+  between,
+  isNot,
+  above,
+  below,
+}
 
 class BridgeOption {
   final String id;

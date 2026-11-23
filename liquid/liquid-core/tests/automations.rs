@@ -582,7 +582,7 @@ fn conditions_compare_numbers_and_dates_and_rule_out_values() {
     };
     budget.create(setup).unwrap();
     let row = created_row(&budget.row(&budget.expenses.clone()));
-    let mut due_on = |budget: &mut Budget, date: &str| {
+    let due_on = |budget: &mut Budget, date: &str| {
         budget
             .edit(Mutation::SetCell {
                 block: budget.expenses.clone(),

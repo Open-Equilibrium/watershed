@@ -4,6 +4,7 @@
 // ignore_for_file: invalid_use_of_internal_member, unused_import, unnecessary_import
 
 import '../frb_generated.dart';
+import 'automation.dart';
 import 'calculation.dart';
 import 'chart.dart';
 import 'database.dart';
@@ -12,7 +13,7 @@ import 'media.dart';
 
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `follows`, `id`, `line_setup`, `message`, `normalized`, `of`, `of`, `of`, `optional_id`, `page`, `place`, `table`, `to_core`, `to_core`, `to_core`, `units`, `window`
+// These functions are ignored because they are not marked as `pub`: `automation_setup`, `follows`, `id`, `line_setup`, `message`, `normalized`, `of`, `of`, `of`, `optional_id`, `page`, `place`, `table`, `to_core`, `to_core`, `to_core`, `units`, `window`
 // These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `hash`, `hash`
 
 class BridgeAnswer {
@@ -37,6 +38,7 @@ class BridgeAnswer {
   final List<BridgeComputed> totals;
   final BridgeChart? chart;
   final List<BridgeResource> follows;
+  final List<BridgeWorkspaceAutomation> automations;
 
   const BridgeAnswer({
     required this.areas,
@@ -60,6 +62,7 @@ class BridgeAnswer {
     required this.totals,
     this.chart,
     required this.follows,
+    required this.automations,
   });
 
   @override
@@ -84,7 +87,8 @@ class BridgeAnswer {
       lines.hashCode ^
       totals.hashCode ^
       chart.hashCode ^
-      follows.hashCode;
+      follows.hashCode ^
+      automations.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -111,7 +115,8 @@ class BridgeAnswer {
           lines == other.lines &&
           totals == other.totals &&
           chart == other.chart &&
-          follows == other.follows;
+          follows == other.follows &&
+          automations == other.automations;
 }
 
 class BridgeApplied {
@@ -126,6 +131,8 @@ class BridgeApplied {
   final String? tab;
   final List<String> elements;
   final String? line;
+  final String? automation;
+  final List<BridgeRan> ran;
 
   const BridgeApplied({
     required this.action,
@@ -139,6 +146,8 @@ class BridgeApplied {
     this.tab,
     required this.elements,
     this.line,
+    this.automation,
+    required this.ran,
   });
 
   @override
@@ -153,7 +162,9 @@ class BridgeApplied {
       option.hashCode ^
       tab.hashCode ^
       elements.hashCode ^
-      line.hashCode;
+      line.hashCode ^
+      automation.hashCode ^
+      ran.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -170,7 +181,9 @@ class BridgeApplied {
           option == other.option &&
           tab == other.tab &&
           elements == other.elements &&
-          line == other.line;
+          line == other.line &&
+          automation == other.automation &&
+          ran == other.ran;
 }
 
 class BridgeArea {
@@ -285,6 +298,9 @@ class BridgeMutation {
   final BridgeLineSetup? lineSetup;
   final BridgeTotal? total;
   final BridgeChartSetup? chart;
+  final String? automation;
+  final BridgeAutomationSetup? automationSetup;
+  final bool on_;
 
   const BridgeMutation({
     required this.kind,
@@ -320,6 +336,9 @@ class BridgeMutation {
     this.lineSetup,
     this.total,
     this.chart,
+    this.automation,
+    this.automationSetup,
+    required this.on_,
   });
 
   @override
@@ -356,7 +375,10 @@ class BridgeMutation {
       line.hashCode ^
       lineSetup.hashCode ^
       total.hashCode ^
-      chart.hashCode;
+      chart.hashCode ^
+      automation.hashCode ^
+      automationSetup.hashCode ^
+      on_.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -395,7 +417,10 @@ class BridgeMutation {
           line == other.line &&
           lineSetup == other.lineSetup &&
           total == other.total &&
-          chart == other.chart;
+          chart == other.chart &&
+          automation == other.automation &&
+          automationSetup == other.automationSetup &&
+          on_ == other.on_;
 }
 
 enum BridgeMutationKind {
@@ -455,6 +480,10 @@ enum BridgeMutationKind {
   removeRow,
   moveRow,
   setCell,
+  createAutomation,
+  setAutomation,
+  setAutomationOn,
+  removeAutomation,
 }
 
 class BridgePage {
@@ -558,6 +587,7 @@ enum BridgeQueryKind {
   search,
   tables,
   tableViews,
+  automations,
 }
 
 class BridgeResource {
@@ -583,7 +613,16 @@ class BridgeResource {
           block == other.block;
 }
 
-enum BridgeResourceKind { workspace, areas, pages, views, block, tables, table }
+enum BridgeResourceKind {
+  workspace,
+  areas,
+  pages,
+  views,
+  block,
+  tables,
+  table,
+  automations,
+}
 
 class BridgeShown {
   final String page;
