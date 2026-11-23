@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_math_fork/flutter_math.dart';
 
+const hiddenSize = 0.01;
+
 final inlineMath = RegExp(
   r'(?<![\\$])\$(?![\s$])((?:\\.|[^$\\])+?)(?<![\s\\])\$(?![\d$])',
 );
@@ -27,7 +29,7 @@ class MathText extends TextEditingController {
     }
     final caret = selection.isValid ? selection.baseOffset : -1;
     final hidden = (style ?? const TextStyle()).copyWith(
-      fontSize: 0.01,
+      fontSize: hiddenSize,
       color: const Color(0x00000000),
       letterSpacing: 0,
       decoration: TextDecoration.none,
