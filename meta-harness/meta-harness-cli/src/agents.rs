@@ -103,28 +103,38 @@ fn routine(mut args: &[&str]) -> Result<NewRoutine, String> {
     while !args.is_empty() {
         args = match args {
             ["--webhook", rest @ ..] => {
-                schedule = Some(blank(ScheduleKind::Webhook));
+                choose(&mut schedule, blank(ScheduleKind::Webhook))?;
                 rest
             }
             ["--every", every, rest @ ..] => {
-                schedule = Some(Schedule {
-                    every_ms: Some(duration(every)?),
-                    ..blank(ScheduleKind::Interval)
-                });
+                let every_ms = Some(duration(every)?);
+                choose(
+                    &mut schedule,
+                    Schedule {
+                        every_ms,
+                        ..blank(ScheduleKind::Interval)
+                    },
+                )?;
                 rest
             }
             ["--at", time, rest @ ..] => {
-                schedule = Some(Schedule {
-                    time_of_day: Some((*time).to_owned()),
-                    ..blank(ScheduleKind::FixedTime)
-                });
+                choose(
+                    &mut schedule,
+                    Schedule {
+                        time_of_day: Some((*time).to_owned()),
+                        ..blank(ScheduleKind::FixedTime)
+                    },
+                )?;
                 rest
             }
             ["--once", at, rest @ ..] => {
-                schedule = Some(Schedule {
-                    run_at: Some((*at).to_owned()),
-                    ..blank(ScheduleKind::Once)
-                });
+                choose(
+                    &mut schedule,
+                    Schedule {
+                        run_at: Some((*at).to_owned()),
+                        ..blank(ScheduleKind::Once)
+                    },
+                )?;
                 rest
             }
             ["--days", list, rest @ ..] => {
@@ -169,6 +179,16 @@ fn routine(mut args: &[&str]) -> Result<NewRoutine, String> {
         prompt,
         schedule,
     })
+}
+
+fn choose(slot: &mut Option<Schedule>, schedule: Schedule) -> Result<(), String> {
+    if slot.is_some() {
+        return Err(
+            "meta agent routine add takes one of --every, --at, --once or --webhook".to_owned(),
+        );
+    }
+    *slot = Some(schedule);
+    Ok(())
 }
 
 fn blank(kind: ScheduleKind) -> Schedule {
@@ -291,6 +311,24 @@ mod tests {
             &["--every", "0m", "--prompt", "Never."],
             &["--every", "5ü", "--prompt", "Not a unit."],
             &["--webhook"],
+            &["--webhook", "--every", "30m", "--prompt", "Two schedules."],
+            &[
+                "--every",
+                "30m",
+                "--at",
+                "07:00",
+                "--prompt",
+                "Two schedules.",
+            ],
+            &[
+                "--at",
+                "07:30",
+                "--every",
+                "30m",
+                "--prompt",
+                "Two schedules.",
+            ],
+            &["--every", "30m", "--every", "1h", "--prompt", "Twice."],
             &["--webhook", "--days", "mon", "--prompt", "Days need --at."],
             &["--at", "07:30", "--days", "someday", "--prompt", "Plan."],
         ] {
