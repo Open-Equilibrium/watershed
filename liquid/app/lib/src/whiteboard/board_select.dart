@@ -40,12 +40,14 @@ extension _BoardSelect on BoardSurfaceState {
     board.notifyListeners();
   }
 
+  void _transform(BridgeElement Function(BridgeElement) change) =>
+      _show(_before.map((id, element) => MapEntry(id, change(element))));
+
   void _moveSelection(Offset from, Offset to) {
     final by = to - from;
-    _show({
-      for (final MapEntry(key: id, value: element) in _before.entries)
-        id: _with(element, frameOf(element).shift(by), element.rotation),
-    });
+    _transform(
+      (element) => _with(element, frameOf(element).shift(by), element.rotation),
+    );
   }
 
   void _resize(Offset to) {
@@ -75,19 +77,18 @@ extension _BoardSelect on BoardSurfaceState {
         from == anchor ? 1 : math.max(0.05, (to - anchor) / (from - anchor));
     final sx = scale(to.dx, dragged.dx, fixed.dx);
     final sy = scale(to.dy, dragged.dy, fixed.dy);
-    _show({
-      for (final MapEntry(key: id, value: element) in _before.entries)
-        id: _with(
-          element,
-          Rect.fromLTWH(
-            fixed.dx + (element.x - fixed.dx) * sx,
-            fixed.dy + (element.y - fixed.dy) * sy,
-            element.w * sx,
-            element.h * sy,
-          ),
-          element.rotation,
+    _transform(
+      (element) => _with(
+        element,
+        Rect.fromLTWH(
+          fixed.dx + (element.x - fixed.dx) * sx,
+          fixed.dy + (element.y - fixed.dy) * sy,
+          element.w * sx,
+          element.h * sy,
         ),
-    });
+        element.rotation,
+      ),
+    );
   }
 
   void _rotate(Offset from, Offset to) {
@@ -97,17 +98,14 @@ extension _BoardSelect on BoardSurfaceState {
     if (HardwareKeyboard.instance.isShiftPressed) {
       angle = (angle / (math.pi / 12)).round() * (math.pi / 12);
     }
-    _show({
-      for (final MapEntry(key: id, value: element) in _before.entries)
-        id: () {
-          final frame = frameOf(element);
-          final moved = _rotateAround(frame.center, center, angle);
-          return _with(
-            element,
-            frame.shift(moved - frame.center),
-            element.rotation + angle,
-          );
-        }(),
+    _transform((element) {
+      final frame = frameOf(element);
+      final moved = _rotateAround(frame.center, center, angle);
+      return _with(
+        element,
+        frame.shift(moved - frame.center),
+        element.rotation + angle,
+      );
     });
   }
 

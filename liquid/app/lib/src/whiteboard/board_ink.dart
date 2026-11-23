@@ -100,10 +100,10 @@ extension _BoardInk on BoardSurfaceState {
               : BridgeShape.ellipse,
         );
       case SnapKind.triangle:
-        var box = Rect.fromPoints(snapped.points[0], snapped.points[1]);
-        box = box.expandToInclude(
-          Rect.fromCenter(center: snapped.points[2], width: 0, height: 0),
-        );
+        final box = Rect.fromPoints(snapped.points[0], snapped.points[1])
+            .expandToInclude(
+              Rect.fromCenter(center: snapped.points[2], width: 0, height: 0),
+            );
         if (box.width == 0 || box.height == 0) return null;
         return newElement(
           BridgeElementKind.shape,
