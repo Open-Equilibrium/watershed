@@ -1,3 +1,5 @@
+import 'history_dialog.dart' show LiveFocusNode;
+
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -45,7 +47,7 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
   var _text = MathText.fromValue(TextEditingValue.empty);
 
   final _field = GlobalKey(debugLabel: 'Text Block field');
-  late final _focus = FocusNode(
+  late final _focus = LiveFocusNode(
     debugLabel: 'Text Block',
     onKeyEvent: (_, event) => _key(event),
   );

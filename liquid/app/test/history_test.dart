@@ -103,6 +103,24 @@ void main() {
     expect((kit.fake.undos, kit.fake.redos), (1, 1));
   });
 
+  testWidgets('⌘Z in a field whose typing is not yet a change undoes the '
+      'typing, not History', (tester) async {
+    final kit = PageKit();
+    await kit.show(tester, const [TablePart([])]);
+    await tap(tester, find.byKey(const Key('table search')));
+    final search = find.byKey(const Key('table search field'));
+    await tester.enterText(search, 'r');
+    await tester.pump(const Duration(milliseconds: 600));
+    await tester.enterText(search, 'rent');
+    await tester.pump(const Duration(milliseconds: 600));
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyZ);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+    await tester.pumpAndSettle();
+    expect(kit.fake.undos, 0);
+    expect(tester.widget<TextField>(search).controller!.text, 'r');
+  }, variant: TargetPlatformVariant.only(TargetPlatform.macOS));
+
   testWidgets('Page history shows a version read-only, restores it and '
       'deletes the earlier versions after asking', (tester) async {
     final kit = PageKit();

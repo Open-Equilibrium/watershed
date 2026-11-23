@@ -1,3 +1,5 @@
+import 'history_dialog.dart' show LiveFocusNode;
+
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -27,7 +29,7 @@ class MathBlock extends StatefulWidget {
 
 class _MathBlockState extends State<MathBlock> {
   final _text = TextEditingController();
-  late final _focus = FocusNode(
+  late final _focus = LiveFocusNode(
     debugLabel: 'Math Block',
     onKeyEvent: (_, event) => _key(event),
   );

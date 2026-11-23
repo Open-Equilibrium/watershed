@@ -598,6 +598,30 @@ class RedoIntent extends Intent {
   const RedoIntent();
 }
 
+class LiveFocusNode extends FocusNode {
+  LiveFocusNode({super.debugLabel, super.onKeyEvent});
+}
+
+class _HistoryAction<T extends Intent> extends Action<T> {
+  _HistoryAction(this.run);
+
+  final Future<void> Function() run;
+
+  @override
+  bool isEnabled(T intent) {
+    final focus = primaryFocus;
+    final typing =
+        focus?.context?.findAncestorWidgetOfExactType<EditableText>() != null;
+    return !typing || focus is LiveFocusNode;
+  }
+
+  @override
+  Object? invoke(T intent) {
+    unawaited(run());
+    return null;
+  }
+}
+
 class UndoScope extends StatelessWidget {
   const UndoScope({super.key, required this.state, required this.child});
 
@@ -613,12 +637,8 @@ class UndoScope extends StatelessWidget {
     },
     child: Actions(
       actions: {
-        UndoIntent: CallbackAction<UndoIntent>(
-          onInvoke: (_) => unawaited(state.undo()),
-        ),
-        RedoIntent: CallbackAction<RedoIntent>(
-          onInvoke: (_) => unawaited(state.redo()),
-        ),
+        UndoIntent: _HistoryAction<UndoIntent>(state.undo),
+        RedoIntent: _HistoryAction<RedoIntent>(state.redo),
       },
       child: child,
     ),
