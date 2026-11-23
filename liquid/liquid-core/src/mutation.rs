@@ -1,19 +1,21 @@
 use serde::{Deserialize, Deserializer, Serialize};
 
 use crate::{
-    ActionId, AreaId, AttachmentId, BlockId, FieldId, Layout, OptionId, PageId, PersonId, RowId,
-    TabId, TabSetup, ViewId,
+    ActionId, AreaId, AttachmentId, AutomationId, AutomationSetup, BlockId, FieldId, Layout,
+    OptionId, PageId, PersonId, RowId, TabId, TabSetup, ViewId,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Actor {
     Person(PersonId),
+    Automation(AutomationId),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Origin {
     Ui,
     Api,
+    Automation,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -35,6 +37,7 @@ pub enum FieldKind {
     Checkbox,
     File,
     Formula,
+    Button,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -406,6 +409,20 @@ pub enum Mutation {
         field: FieldId,
         value: Cell,
     },
+    CreateAutomation {
+        setup: Box<AutomationSetup>,
+    },
+    SetAutomation {
+        automation: AutomationId,
+        setup: Box<AutomationSetup>,
+    },
+    SetAutomationOn {
+        automation: AutomationId,
+        on: bool,
+    },
+    RemoveAutomation {
+        automation: AutomationId,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -427,6 +444,7 @@ pub enum Created {
     Tab(TabId),
     Elements(Vec<crate::ElementId>),
     Line(crate::LineId),
+    Automation(AutomationId),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -438,6 +456,7 @@ pub enum Changed {
     Block(PageId, BlockId),
     Tables,
     Table(BlockId),
+    Automations,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -445,6 +464,7 @@ pub struct Applied {
     pub action: ActionId,
     pub created: Option<Created>,
     pub changed: Vec<Changed>,
+    pub ran: Vec<crate::Ran>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

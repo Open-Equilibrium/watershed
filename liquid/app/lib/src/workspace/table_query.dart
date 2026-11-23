@@ -153,6 +153,7 @@ String? filterLabel(
     BridgeMatch.notEmpty => '$name is not empty',
     BridgeMatch.contains => '$name contains ${value?.text ?? ''}',
     BridgeMatch.between => '$name from ${value?.text ?? ''} to ${filter.until}',
+    BridgeMatch.isNot || BridgeMatch.above || BridgeMatch.below => null,
     BridgeMatch.is_ => switch (value?.kind) {
       BridgeCellKind.number => '$name is ${numberText(numbers, value!.number)}',
       BridgeCellKind.checkbox =>
@@ -412,7 +413,8 @@ class SortMenu extends StatelessWidget {
     final sortable = [
       for (final field in fields)
         if (field.kind != BridgeFieldKind.file &&
-            field.kind != BridgeFieldKind.formula)
+            field.kind != BridgeFieldKind.formula &&
+            field.kind != BridgeFieldKind.button)
           field,
     ];
     final sort = this.sort;
@@ -523,6 +525,9 @@ class _FilterMenuState extends State<FilterMenu> {
     BridgeMatch.empty => 'is empty',
     BridgeMatch.notEmpty => 'is not empty',
     BridgeMatch.between => 'is between',
+    BridgeMatch.isNot => 'is not',
+    BridgeMatch.above => 'is more than',
+    BridgeMatch.below => 'is less than',
   };
 
   bool get _types =>

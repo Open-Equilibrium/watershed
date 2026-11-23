@@ -1,4 +1,5 @@
 mod agent;
+mod automation;
 mod calculation;
 mod convert;
 mod database;

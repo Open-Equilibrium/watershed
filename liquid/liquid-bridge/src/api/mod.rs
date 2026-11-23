@@ -1,3 +1,4 @@
+pub mod automation;
 pub mod calculation;
 pub mod chart;
 pub mod database;

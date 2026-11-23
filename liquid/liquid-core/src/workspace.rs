@@ -42,15 +42,15 @@ pub(crate) struct Loaded {
     databases: HashMap<BlockId, database::Index>,
 }
 
-struct Written {
-    created: Option<Created>,
-    changed: Vec<Changed>,
-    touched: Vec<Document>,
+pub(crate) struct Written {
+    pub(crate) created: Option<Created>,
+    pub(crate) changed: Vec<Changed>,
+    pub(crate) touched: Vec<Document>,
     new: Vec<(Document, AutoCommit)>,
 }
 
 impl Written {
-    fn new(touched: Document, changed: Changed) -> Self {
+    pub(crate) fn new(touched: Document, changed: Changed) -> Self {
         Self {
             created: None,
             changed: vec![changed],
@@ -245,6 +245,7 @@ impl<S: Store> Workspace<S> {
         let permission = self.permit(&request.actor)?;
         let id = ActionId::new()?;
         let leaving = self.leaving(&request.mutation);
+        let trigger = trigger(&request.mutation);
         let written = match self.write(&request.mutation) {
             Ok(written) => written,
             Err(error) => {
@@ -277,10 +278,18 @@ impl<S: Store> Workspace<S> {
             changes: Vec::new(),
         };
         self.record(action, &written.touched, written.new, index)?;
+        let ran = match (trigger, &written.created) {
+            (Some((trigger, Some(row))), _) => self.run_triggered(&trigger, &row, Some(&id)),
+            (Some((trigger, None)), Some(Created::Row(row))) => {
+                self.run_triggered(&trigger, row, Some(&id))
+            }
+            _ => Vec::new(),
+        };
         Ok(Applied {
             action: id,
             created: written.created,
             changed: written.changed,
+            ran,
         })
     }
 
@@ -541,11 +550,9 @@ impl<S: Store> Workspace<S> {
     }
 
     pub(crate) fn permit(&self, actor: &Actor) -> Result<Permission, Error> {
-        let Actor::Person(person) = actor;
-        if *person == self.owner {
-            Ok(Permission::Owner)
-        } else {
-            Err(Error::NotAllowed)
+        match actor {
+            Actor::Person(person) if *person == self.owner => Ok(Permission::Owner),
+            _ => Err(Error::NotAllowed),
         }
     }
 
@@ -846,8 +853,10 @@ impl<S: Store> Workspace<S> {
                 Ok(table_changed(block, None))
             }
             Mutation::RemoveField { block, field } => {
+                let mut written = table_changed(block, None);
+                self.field_removed(block, field, &mut written)?;
                 database::remove_field(self.table_doc(block)?, block, field)?;
-                Ok(table_changed(block, None))
+                Ok(written)
             }
             Mutation::AddOption {
                 block,
@@ -966,6 +975,14 @@ impl<S: Store> Workspace<S> {
             Mutation::RemoveTab { page, view, tab } => self.write_tabs(page, view, |doc, entry| {
                 tab::remove(doc, entry, tab).map(|()| None)
             }),
+            Mutation::CreateAutomation { setup } => self.write_create_automation(setup),
+            Mutation::SetAutomation { automation, setup } => {
+                self.write_set_automation(automation, setup)
+            }
+            Mutation::SetAutomationOn { automation, on } => {
+                self.write_automation_on(automation, *on)
+            }
+            Mutation::RemoveAutomation { automation } => self.write_remove_automation(automation),
         }
     }
 
@@ -1047,7 +1064,7 @@ impl<S: Store> Workspace<S> {
         Err(Error::NotFound)
     }
 
-    fn table_doc(&mut self, table: &BlockId) -> Result<&mut AutoCommit, Error> {
+    pub(crate) fn table_doc(&mut self, table: &BlockId) -> Result<&mut AutoCommit, Error> {
         if self.table_name(table)?.is_none() {
             return Err(Error::NotFound);
         }
@@ -1510,11 +1527,13 @@ impl<S: Store> Workspace<S> {
 
     fn write_delete_table(&mut self, table: &BlockId) -> Result<Written, Error> {
         let shown = self.table_views(table)?;
+        let database = self.database(table)?.ok_or(Error::NotFound)?;
         let workspace = self.doc(&Document::Workspace)?;
         let entry = model::live(workspace, TABLES, table.as_str()).ok_or(Error::NotFound)?;
         model::mark_deleted(workspace, &entry)?;
         let mut written = Written::new(Document::Workspace, Changed::Tables);
         written.changed.push(Changed::Table(table.clone()));
+        self.table_deleted(table, &database, &mut written)?;
         for (page, view) in shown {
             let Ok((doc, order)) = self.page(&page) else {
                 continue;
@@ -1529,7 +1548,7 @@ impl<S: Store> Workspace<S> {
         Ok(written)
     }
 
-    fn write_set_cell(
+    pub(crate) fn write_set_cell(
         &mut self,
         block: &BlockId,
         row: &RowId,
@@ -1729,13 +1748,16 @@ impl<S: Store> Workspace<S> {
         Ok(written)
     }
 
-    fn rollback(&mut self) {
+    pub(crate) fn rollback(&mut self) {
         for loaded in self.docs.values_mut() {
-            loaded.doc.rollback();
+            if loaded.doc.rollback() > 0 {
+                loaded.order = None;
+                loaded.databases.clear();
+            }
         }
     }
 
-    fn record(
+    pub(crate) fn record(
         &mut self,
         mut action: Action,
         touched: &[Document],
@@ -1790,6 +1812,19 @@ impl<S: Store> Workspace<S> {
             return Err(error);
         }
         Ok(())
+    }
+}
+
+fn trigger(mutation: &Mutation) -> Option<(crate::Trigger, Option<RowId>)> {
+    match mutation {
+        Mutation::AddRow { block, .. } => Some((crate::Trigger::RowAdded(block.clone()), None)),
+        Mutation::SetCell {
+            block, row, field, ..
+        } => Some((
+            crate::Trigger::FieldChanged(block.clone(), field.clone()),
+            Some(row.clone()),
+        )),
+        _ => None,
     }
 }
 
