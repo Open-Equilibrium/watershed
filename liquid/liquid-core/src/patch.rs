@@ -1,7 +1,9 @@
 use std::collections::HashMap;
 
 use automerge::transaction::Transactable;
-use automerge::{AutoCommit, ObjId, ObjType, Patch, PatchAction, Prop, ROOT, ReadDoc, Value};
+use automerge::{
+    AutoCommit, ObjId, ObjType, Patch, PatchAction, Prop, ROOT, ReadDoc, ScalarValue, Value,
+};
 
 use crate::Error;
 
@@ -94,6 +96,13 @@ pub(crate) fn touched(patches: &[Patch]) -> Vec<(ObjId, String)> {
         .collect()
 }
 
+fn tombstone(source: &AutoCommit, obj: &ObjId) -> bool {
+    matches!(
+        source.get(obj, crate::model::DELETED),
+        Ok(Some((Value::Scalar(value), _))) if value.as_ref() == &ScalarValue::Boolean(true)
+    )
+}
+
 fn copy(
     source: &AutoCommit,
     from: &ObjId,
@@ -106,6 +115,7 @@ fn copy(
                 let key = item.key.to_string();
                 let child = item.id();
                 match item.value.into_value() {
+                    Value::Object(_) if tombstone(source, &child) => {}
                     Value::Object(kind) => {
                         let made = target.put_object(to, key.as_str(), kind)?;
                         copy(source, &child, target, &made)?;

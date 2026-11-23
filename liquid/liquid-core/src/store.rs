@@ -21,6 +21,9 @@ pub enum Write {
     Remove {
         document: Document,
     },
+    Forget {
+        attachment: AttachmentId,
+    },
 }
 
 pub trait Store {
@@ -115,6 +118,9 @@ impl Store for MemoryStore {
                 }
                 Write::Remove { document } => {
                     self.chunks.remove(document);
+                }
+                Write::Forget { attachment } => {
+                    self.attachments.remove(attachment);
                 }
             }
         }

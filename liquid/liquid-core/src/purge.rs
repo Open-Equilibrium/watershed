@@ -1,12 +1,15 @@
-use automerge::ROOT;
-use automerge::transaction::{CommitOptions, Transactable};
+use std::collections::HashSet;
 
-use crate::model::{self, NAME, TABLES};
+use automerge::legacy::OpType;
+use automerge::transaction::{CommitOptions, Transactable};
+use automerge::{AutoCommit, ROOT, ReadDoc, ScalarValue};
+
+use crate::model::{self, AREAS, NAME, PAGES, TABLES};
 use crate::store::{Store, Write};
 use crate::workspace::{Recorded, header};
 use crate::{
-    Action, ActionId, Actor, Applied, Document, Error, Mutation, Operation, Origin, PageId,
-    Permission, Purge, Workspace, patch,
+    Action, ActionId, Actor, Applied, AreaId, AttachmentId, BlockId, Document, Error, Mutation,
+    Operation, Origin, PageId, Permission, Purge, Workspace, patch,
 };
 
 const PAGE: usize = 1_000;
@@ -45,7 +48,84 @@ fn redacted(
     Some(action)
 }
 
+fn attachments(
+    doc: &mut AutoCommit,
+    wanted: Option<&HashSet<AttachmentId>>,
+) -> HashSet<AttachmentId> {
+    let mut found = HashSet::new();
+    for change in doc.get_changes(&[]) {
+        for op in change.decode().operations {
+            if let OpType::Put(ScalarValue::Str(text)) = op.action
+                && let Some(id) = AttachmentId::parse(&text)
+                && wanted.is_none_or(|wanted| wanted.contains(&id))
+            {
+                found.insert(id);
+            }
+        }
+    }
+    found
+}
+
+fn keys(doc: &AutoCommit, map: &str) -> Vec<String> {
+    model::child(doc, &ROOT, map).map_or_else(Vec::new, |top| {
+        doc.map_range(&top, ..)
+            .map(|item| item.key.to_string())
+            .collect()
+    })
+}
+
 impl<S: Store> Workspace<S> {
+    fn documents(&mut self) -> Result<Vec<Document>, Error> {
+        let workspace = self.doc(&Document::Workspace)?;
+        let tables = keys(workspace, TABLES);
+        let areas = keys(workspace, AREAS);
+        let mut documents = vec![Document::Workspace];
+        for area in areas {
+            let area = Document::Area(AreaId::stored(&area));
+            let pages = keys(self.doc(&area)?, PAGES);
+            documents.push(area);
+            documents.extend(
+                pages
+                    .iter()
+                    .map(|page| Document::Page(PageId::stored(page))),
+            );
+        }
+        documents.extend(
+            tables
+                .iter()
+                .map(|table| Document::Table(BlockId::stored(table))),
+        );
+        Ok(documents)
+    }
+
+    fn forgotten(
+        &mut self,
+        candidates: HashSet<AttachmentId>,
+        gone: Option<&Document>,
+    ) -> Result<Vec<Write>, Error> {
+        let mut unused = candidates;
+        for document in self.documents()? {
+            if unused.is_empty() {
+                break;
+            }
+            if Some(&document) == gone {
+                continue;
+            }
+            let doc = match self.doc(&document) {
+                Ok(doc) => doc,
+                Err(Error::NotFound) => continue,
+                Err(error) => return Err(error),
+            };
+            for used in attachments(doc, Some(&unused)) {
+                unused.remove(&used);
+            }
+        }
+        Ok(unused
+            .into_iter()
+            .map(|attachment| Write::Forget { attachment })
+            .collect())
+    }
+
     fn creates(&mut self, action: &Action, page: &PageId) -> Result<bool, Error> {
         if !matches!(
             action.operation,
@@ -98,6 +178,7 @@ impl<S: Store> Workspace<S> {
             at: 0,
         };
         let message = header(&action);
+        let candidates = attachments(self.doc(&document)?, None);
         let mut recorded = Recorded::default();
         let (mention, scanned) = match target {
             Purge::Table(table) if removed => (Some(table.to_string()), None),
@@ -167,6 +248,9 @@ impl<S: Store> Workspace<S> {
             }
         }
         recorded.redact = redact;
+        let gone = removed.then_some(&document);
+        let forgotten = self.forgotten(candidates, gone)?;
+        recorded.writes.extend(forgotten);
         let mut changed = Vec::new();
         let mut index = Vec::new();
         let shown: Vec<Document> = action

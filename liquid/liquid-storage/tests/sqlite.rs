@@ -417,6 +417,49 @@ fn a_page_s_earlier_versions_deleted_for_good_stay_gone_after_a_reopen() {
             insert: String::new(),
         },
     );
+    let Some(Created::Block {
+        view: typed_view, ..
+    }) = apply(
+        &mut workspace,
+        Mutation::AddTextBlock {
+            page: page.clone(),
+            after: None,
+            text: "hunter3".into(),
+        },
+    )
+    else {
+        panic!("a Text Block")
+    };
+    let receipt = b"the receipt";
+    let mut upload = workspace
+        .begin_upload(&owner(), receipt.len() as u64)
+        .unwrap();
+    workspace.upload(&mut upload, receipt).unwrap();
+    let attachment = workspace.finish_upload(upload).unwrap().id;
+    let Some(Created::Block {
+        view: media_view, ..
+    }) = apply(
+        &mut workspace,
+        Mutation::AddMediaBlock {
+            page: page.clone(),
+            after: None,
+            name: "Receipt.pdf".into(),
+            media_type: "application/pdf".into(),
+            attachment,
+        },
+    )
+    else {
+        panic!("a Media Block")
+    };
+    for view in [typed_view, media_view] {
+        apply(
+            &mut workspace,
+            Mutation::RemoveView {
+                page: page.clone(),
+                view,
+            },
+        );
+    }
     workspace
         .purge(&owner(), &liquid_core::Purge::Page(page.clone()))
         .unwrap();
@@ -441,14 +484,18 @@ fn a_page_s_earlier_versions_deleted_for_good_stay_gone_after_a_reopen() {
         Error::Purged
     );
     drop(workspace);
-    let indexed: i64 = keyed(&scratch.db())
-        .query_row(
-            "SELECT count(*) FROM search_data WHERE instr(block, CAST('hunter2' AS BLOB)) > 0",
-            [],
-            |row| row.get(0),
-        )
-        .unwrap();
-    assert_eq!(indexed, 0);
+    let connection = keyed(&scratch.db());
+    let count = |sql: &str| -> i64 { connection.query_row(sql, [], |row| row.get(0)).unwrap() };
+    assert_eq!(
+        count("SELECT count(*) FROM search_data WHERE instr(block, CAST('hunter2' AS BLOB)) > 0"),
+        0
+    );
+    assert_eq!(
+        count("SELECT count(*) FROM chunks WHERE instr(bytes, CAST('hunter3' AS BLOB)) > 0"),
+        0
+    );
+    assert_eq!(count("SELECT count(*) FROM attachments"), 0);
+    assert_eq!(count("SELECT count(*) FROM parts"), 0);
 }
 
 #[test]

@@ -693,3 +693,43 @@ fn deleting_a_table_s_earlier_versions_keeps_the_page_s_own() {
     budget.workspace.restore(&owner(), &page, &older).unwrap();
     assert_eq!(budget.text(), "October");
 }
+
+#[test]
+fn deleting_earlier_versions_drops_the_files_only_they_still_showed() {
+    let mut budget = Budget::new();
+    let page = budget.page.clone();
+    let media = |budget: &mut Budget, bytes: &[u8]| {
+        let mut upload = budget
+            .workspace
+            .begin_upload(&owner(), bytes.len() as u64)
+            .unwrap();
+        budget.workspace.upload(&mut upload, bytes).unwrap();
+        let attachment = budget.workspace.finish_upload(upload).unwrap().id;
+        let Applied {
+            created: Some(Created::Block { view, .. }),
+            ..
+        } = budget.edit(Mutation::AddMediaBlock {
+            page: page.clone(),
+            after: None,
+            name: "Receipt.pdf".into(),
+            media_type: "application/pdf".into(),
+            attachment: attachment.clone(),
+        })
+        else {
+            panic!("a Media Block")
+        };
+        (attachment, view)
+    };
+    let (gone, view) = media(&mut budget, b"the old receipt");
+    let (kept, _) = media(&mut budget, b"the new receipt");
+    budget.edit(Mutation::RemoveView {
+        page: page.clone(),
+        view,
+    });
+    budget
+        .workspace
+        .purge(&owner(), &Purge::Page(page))
+        .unwrap();
+    assert_eq!(budget.workspace.attachment_size(&gone).unwrap(), None);
+    assert!(budget.workspace.attachment_size(&kept).unwrap().is_some());
+}

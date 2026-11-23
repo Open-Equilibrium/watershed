@@ -224,6 +224,21 @@ impl Store for Sqlite {
                         .execute("DELETE FROM chunks WHERE document = ?1", [document.key()])
                         .map_err(failed)?;
                 }
+                Write::Forget { attachment } => {
+                    transaction
+                        .execute(
+                            "DELETE FROM parts WHERE upload IN \
+                             (SELECT upload FROM attachments WHERE id = ?1)",
+                            [attachment.as_str()],
+                        )
+                        .and_then(|_| {
+                            transaction.execute(
+                                "DELETE FROM attachments WHERE id = ?1",
+                                [attachment.as_str()],
+                            )
+                        })
+                        .map_err(failed)?;
+                }
             }
         }
         for redacted in &commit.redact {
@@ -257,7 +272,7 @@ impl Store for Sqlite {
             || commit
                 .writes
                 .iter()
-                .any(|write| matches!(write, Write::Remove { .. }));
+                .any(|write| matches!(write, Write::Remove { .. } | Write::Forget { .. }));
         if erased {
             transaction
                 .execute("INSERT INTO search(search) VALUES('optimize')", [])
