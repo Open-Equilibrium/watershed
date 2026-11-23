@@ -52,9 +52,21 @@ BridgeAutomation routineOf(String id, String title) => BridgeAutomation(
   lastRun: BridgeRunStatus.never,
 );
 
+Future<void> tap(WidgetTester tester, Finder finder) async {
+  await tester.tap(finder);
+  await tester.pumpAndSettle();
+}
+
+Future<void> typeInComposer(WidgetTester tester, String text) async {
+  await tester.enterText(find.byKey(const Key('composer')), text);
+  await tester.pumpAndSettle();
+}
+
+void expectOne(Finder finder) => expect(finder, findsOneWidget);
+void expectNone(Finder finder) => expect(finder, findsNothing);
+
 void main() {
   late FakeProject project;
-  late SessionState state;
 
   Future<void> show(
     WidgetTester tester, {
@@ -79,7 +91,7 @@ void main() {
       ..turnList = turns
       ..automationList = automations
       ..chosen = choiceOf('gpt-6.1');
-    state = SessionState(project);
+    final state = SessionState(project);
     await state.loadStart();
     if (open != null) await state.open(open);
     await tester.pumpWidget(
@@ -91,55 +103,64 @@ void main() {
     await tester.pumpAndSettle();
   }
 
-  testWidgets(
-    'agents are listed above the threads, and their threads only there',
-    (tester) async {
-      await show(
-        tester,
-        open: null,
-        agents: [
-          agentOf(
-            'news-bot',
-            thread: 'thread-2',
-            threads: ['thread-2', 'thread-0'],
-            nextRunMs: DateTime.now()
-                .add(const Duration(minutes: 5))
-                .millisecondsSinceEpoch,
-          ),
-        ],
-        threads: [
-          threadOf('thread-2', title: 'news-bot'),
-          threadOf('thread-0', title: 'news-bot earlier'),
-          threadOf('thread-9', title: 'Fix the move dialog'),
-        ],
-      );
+  testWidgets('agents are listed above the threads, and their threads only '
+      'there', (tester) async {
+    await show(
+      tester,
+      open: null,
+      agents: [
+        agentOf(
+          'news-bot',
+          thread: 'thread-2',
+          threads: ['thread-2', 'thread-0'],
+          nextRunMs: DateTime.now()
+              .add(const Duration(minutes: 5))
+              .millisecondsSinceEpoch,
+        ),
+      ],
+      threads: [
+        threadOf('thread-2', title: 'news-bot'),
+        threadOf('thread-0', title: 'news-bot earlier'),
+        threadOf('thread-9', title: 'Fix the move dialog'),
+      ],
+    );
 
-      final agents = tester.getTopLeft(find.text('Agents'));
-      final threads = tester.getTopLeft(find.text('Threads'));
-      expect(agents.dy, lessThan(threads.dy));
-      expect(find.text('news-bot'), findsOneWidget);
-      expect(find.textContaining('next '), findsOneWidget);
-      expect(find.text('news-bot earlier'), findsNothing);
-      expect(find.text('Fix the move dialog'), findsOneWidget);
+    final agents = tester.getTopLeft(find.text('Agents'));
+    final threads = tester.getTopLeft(find.text('Threads'));
+    expect(agents.dy, lessThan(threads.dy));
+    expectOne(find.text('news-bot'));
+    expectOne(find.textContaining('next '));
+    expectNone(find.text('news-bot earlier'));
+    expectOne(find.text('Fix the move dialog'));
 
-      await tester.tap(find.text('news-bot'));
-      await tester.pumpAndSettle();
-      expect(project.calls, contains('open thread-2'));
-    },
-  );
+    await tap(tester, find.text('news-bot'));
+    expect(project.calls, contains('open thread-2'));
 
-  testWidgets('a new agent starts as a Chat whose first message is its job', (
-    tester,
-  ) async {
+    await show(
+      tester,
+      agents: [
+        agentOf(
+          'news-bot',
+          thread: 'thread-2',
+          threads: ['thread-2', 'thread-1'],
+        ),
+      ],
+    );
+    expectOne(find.textContaining('An earlier thread of news-bot'));
+    expectNone(find.byKey(const Key('composer')));
+    await tap(tester, find.text('Open current thread'));
+    expect(project.calls, contains('open thread-2'));
+  });
+
+  testWidgets('a new agent starts as a Chat whose first message is its '
+      'job', (tester) async {
     await show(tester, open: null);
 
-    await tester.tap(find.byKey(const Key('new-agent')));
-    await tester.pumpAndSettle();
-    expect(find.text('What should this agent do?'), findsOneWidget);
-    expect(find.text('New agent'), findsOneWidget);
+    await tap(tester, find.byKey(const Key('new-agent')));
+    expectOne(find.text('What should this agent do?'));
+    expectOne(find.text('New agent'));
 
-    await tester.tap(find.text('Triage new issues.'));
-    await tester.pumpAndSettle();
+    await tap(tester, find.text('Triage new issues.'));
     expect(
       tester
           .widget<TextField>(find.byKey(const Key('composer')))
@@ -147,20 +168,17 @@ void main() {
           .text,
       'Triage new issues.',
     );
-    await tester.enterText(
-      find.byKey(const Key('composer')),
-      'Triage new issues.',
-    );
+    await typeInComposer(tester, 'Triage new issues.');
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     await tester.pumpAndSettle();
 
     expect(project.calls, contains('agent start Triage new issues.'));
     expect(project.calls, contains('open thread-agent-1'));
-    expect(find.text('What should this agent do?'), findsNothing);
+    expectNone(find.text('What should this agent do?'));
   });
 
   testWidgets(
-    "the agent's own changes show after its turn, with undo and run now",
+    "an agent's changes show after its turn with undo and run now, and a routine's change waits until applied",
     (tester) async {
       final routine = routineOf('task-1', 'Morning news');
       await show(
@@ -198,155 +216,18 @@ void main() {
         ],
       );
 
-      expect(find.text('Named itself news-bot'), findsOneWidget);
-      expect(find.text('Instructions saved · 3 lines'), findsOneWidget);
-      expect(
-        find.text('Routine added: Morning news · Every 60 min'),
-        findsOneWidget,
-      );
-      expect(find.text('Undone'), findsOneWidget);
-      expect(find.byKey(const Key('change-1-Undo')), findsNothing);
+      expectOne(find.text('Named itself news-bot'));
+      expectOne(find.text('Instructions saved · 3 lines'));
+      expectOne(find.text('Routine added: Morning news · Every 60 min'));
+      expectOne(find.text('Undone'));
+      expectNone(find.byKey(const Key('change-1-Undo')));
 
-      await tester.tap(find.byKey(const Key('change-3-Run now')));
-      await tester.pumpAndSettle();
+      await tap(tester, find.byKey(const Key('change-3-Run now')));
       expect(project.session.calls, contains('run automation task-1'));
 
-      await tester.tap(find.byKey(const Key('change-3-Undo')));
-      await tester.pumpAndSettle();
+      await tap(tester, find.byKey(const Key('change-3-Undo')));
       expect(project.calls, contains('agent undo agent-news-bot 3'));
-    },
-  );
 
-  testWidgets(
-    'the card shows the agent, renames it and adds a webhook routine',
-    (tester) async {
-      await show(tester, agents: [agentOf('news-bot', thread: 'thread-1')]);
-
-      expect(find.text('Agent'), findsOneWidget);
-      expect(find.text('Read the feeds.'), findsOneWidget);
-      expect(find.text('Approval required ⌄'), findsOneWidget);
-
-      await tester.tap(find.text('Rename'));
-      await tester.pumpAndSettle();
-      await tester.enterText(
-        find.byKey(const Key('agent-text')),
-        'morning-news',
-      );
-      await tester.tap(find.text('Rename').last);
-      await tester.pumpAndSettle();
-      expect(
-        project.calls,
-        contains(
-          'agent update agent-news-bot rename=morning-news model=null '
-          'permissions=null',
-        ),
-      );
-
-      await tester.tap(find.byKey(const Key('add-routine')));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('Webhook'));
-      await tester.pumpAndSettle();
-      await tester.enterText(
-        find.byKey(const Key('routine-prompt')),
-        'A feed sent: {{body}}',
-      );
-      await tester.tap(find.byKey(const Key('routine-add')));
-      await tester.pumpAndSettle();
-      expect(
-        project.calls,
-        contains('agent routine agent-news-bot A feed sent: {{body}} webhook'),
-      );
-      expect(
-        find.text('http://127.0.0.1:3773/api/hooks/task-9/secret'),
-        findsOneWidget,
-      );
-    },
-  );
-
-  testWidgets(
-    'a message starting with an agent goes to that agent and shows its answer',
-    (tester) async {
-      await show(
-        tester,
-        agents: [agentOf('release-watch', thread: 'thread-7')],
-        transcript: [
-          chatItem(
-            item(1, BridgeItemKind.userMessage, ended: true),
-            1,
-            'Fix the move dialog.',
-          ),
-        ],
-        turns: [turnOf(1, startedMs: 1000)],
-        mentions: [
-          BridgeMention(
-            agent: 'agent-release-watch',
-            name: 'release-watch',
-            thread: 'thread-7',
-            message: 'msg-1',
-            text: 'is main green?',
-            createdMs: 2000,
-            answered: true,
-            answer: 'Yes, CI passed at 10:12.',
-          ),
-        ],
-      );
-
-      expect(find.text('@release-watch is main green?'), findsOneWidget);
-      expect(find.text('Yes, CI passed at 10:12.'), findsOneWidget);
-
-      await tester.enterText(find.byKey(const Key('composer')), '@rel');
-      await tester.pumpAndSettle();
-      expect(find.text('Agents'), findsWidgets);
-      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
-      await tester.pumpAndSettle();
-      await tester.enterText(
-        find.byKey(const Key('composer')),
-        '@release-watch did the nightly pass?',
-      );
-      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
-      await tester.pumpAndSettle();
-
-      expect(
-        project.calls,
-        contains(
-          'agent mention agent-release-watch thread-1 did the nightly pass?',
-        ),
-      );
-      expect(
-        project.session.calls.where((call) => call.startsWith('send')),
-        isEmpty,
-      );
-    },
-  );
-
-  testWidgets('an earlier thread of an agent cannot be written to', (
-    tester,
-  ) async {
-    await show(
-      tester,
-      agents: [
-        agentOf(
-          'news-bot',
-          thread: 'thread-2',
-          threads: ['thread-2', 'thread-1'],
-        ),
-      ],
-    );
-
-    expect(
-      find.textContaining('An earlier thread of news-bot'),
-      findsOneWidget,
-    );
-    expect(find.byKey(const Key('composer')), findsNothing);
-    await tester.tap(find.text('Open current thread'));
-    await tester.pumpAndSettle();
-    expect(project.calls, contains('open thread-2'));
-  });
-
-  testWidgets(
-    'a change a routine made waits in the Chat until the person applies it',
-    (tester) async {
-      final routine = routineOf('task-1', 'Morning news');
       await show(
         tester,
         agents: [agentOf('news-bot', thread: 'thread-1')],
@@ -382,19 +263,97 @@ void main() {
         ],
       );
 
-      expect(
-        find.text('Waiting for you · Instructions saved · 3 lines'),
-        findsOneWidget,
-      );
-      expect(find.text('Discarded'), findsOneWidget);
-      expect(find.byKey(const Key('change-6-Run now')), findsNothing);
+      expectOne(find.text('Waiting for you · Instructions saved · 3 lines'));
+      expectOne(find.text('Discarded'));
+      expectNone(find.byKey(const Key('change-6-Run now')));
 
-      await tester.tap(find.byKey(const Key('change-5-Apply')));
-      await tester.pumpAndSettle();
+      await tap(tester, find.byKey(const Key('change-5-Apply')));
       expect(project.calls, contains('agent apply agent-news-bot 5'));
-      await tester.tap(find.byKey(const Key('change-5-Discard')));
-      await tester.pumpAndSettle();
+      await tap(tester, find.byKey(const Key('change-5-Discard')));
       expect(project.calls, contains('agent undo agent-news-bot 5'));
     },
   );
+
+  testWidgets('the card shows the agent, renames it and adds a webhook '
+      'routine', (tester) async {
+    await show(tester, agents: [agentOf('news-bot', thread: 'thread-1')]);
+
+    expectOne(find.text('Agent'));
+    expectOne(find.text('Read the feeds.'));
+    expectOne(find.text('Approval required ⌄'));
+
+    await tap(tester, find.text('Rename'));
+    await tester.enterText(find.byKey(const Key('agent-text')), 'morning-news');
+    await tap(tester, find.text('Rename').last);
+    expect(
+      project.calls,
+      contains(
+        'agent update agent-news-bot rename=morning-news model=null '
+        'permissions=null',
+      ),
+    );
+
+    await tap(tester, find.byKey(const Key('add-routine')));
+    await tap(tester, find.text('Webhook'));
+    await tester.enterText(
+      find.byKey(const Key('routine-prompt')),
+      'A feed sent: {{body}}',
+    );
+    await tap(tester, find.byKey(const Key('routine-add')));
+    expect(
+      project.calls,
+      contains('agent routine agent-news-bot A feed sent: {{body}} webhook'),
+    );
+    expectOne(find.text('http://127.0.0.1:3773/api/hooks/task-9/secret'));
+  });
+
+  testWidgets('a message starting with an agent goes to that agent and shows '
+      'its answer', (tester) async {
+    await show(
+      tester,
+      agents: [agentOf('release-watch', thread: 'thread-7')],
+      transcript: [
+        chatItem(
+          item(1, BridgeItemKind.userMessage, ended: true),
+          1,
+          'Fix the move dialog.',
+        ),
+      ],
+      turns: [turnOf(1, startedMs: 1000)],
+      mentions: [
+        BridgeMention(
+          agent: 'agent-release-watch',
+          name: 'release-watch',
+          thread: 'thread-7',
+          message: 'msg-1',
+          text: 'is main green?',
+          createdMs: 2000,
+          answered: true,
+          answer: 'Yes, CI passed at 10:12.',
+        ),
+      ],
+    );
+
+    expectOne(find.text('@release-watch is main green?'));
+    expectOne(find.text('Yes, CI passed at 10:12.'));
+
+    await typeInComposer(tester, '@rel');
+    expect(find.text('Agents'), findsWidgets);
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+    await typeInComposer(tester, '@release-watch did the nightly pass?');
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+
+    expect(
+      project.calls,
+      contains(
+        'agent mention agent-release-watch thread-1 did the nightly pass?',
+      ),
+    );
+    expect(
+      project.session.calls.where((call) => call.startsWith('send')),
+      isEmpty,
+    );
+  });
 }

@@ -8,6 +8,9 @@ void main() {
   late Directory temp;
   late File file;
 
+  Future<SessionCardSettingsController> load() =>
+      SessionCardSettingsController.load(SettingsFile(file));
+
   setUp(() {
     temp = Directory.systemTemp.createTempSync('session-card-settings');
     file = File('${temp.path}/settings/session_card.json');
@@ -15,7 +18,7 @@ void main() {
   tearDown(() => temp.deleteSync(recursive: true));
 
   test('keeps the rows hidden across a restart', () async {
-    final first = await SessionCardSettingsController.load(SettingsFile(file));
+    final first = await load();
     expect(
       first.value.shows(CardItem.changes),
       isTrue,
@@ -23,15 +26,13 @@ void main() {
     );
     await first.change(first.value.withItem(CardItem.changes, false));
 
-    final again = await SessionCardSettingsController.load(SettingsFile(file));
+    final again = await load();
     expect(again.value.shows(CardItem.changes), isFalse);
     expect(again.value.shows(CardItem.branch), isTrue);
   });
 
   test('stores only the rows that differ from their default', () async {
-    final settings = await SessionCardSettingsController.load(
-      SettingsFile(file),
-    );
+    final settings = await load();
     await settings.change(
       settings.value
           .withItem(CardItem.changes, false)
@@ -47,9 +48,7 @@ void main() {
   });
 
   test('a reset to default clears every choice', () async {
-    final settings = await SessionCardSettingsController.load(
-      SettingsFile(file),
-    );
+    final settings = await load();
     await settings.change(settings.value.withItem(CardItem.gitActions, false));
     await settings.change(const SessionCardSettings());
     expect(settings.value.isDefault, isTrue);
@@ -75,18 +74,9 @@ void main() {
     expect(settings.shows(CardItem.changes), isFalse);
     expect(settings.shows(CardItem.usage), isFalse);
     expect(settings.shows(CardItem.context), isTrue);
-    expect(CardItem.values.map((item) => item.id), [
-      'workspace',
-      'branch',
-      'gitActions',
-      'changes',
-      'servers',
-      'automations',
-      'lineage',
-      'sideChats',
-      'figures',
-      'usage',
-      'context',
-    ]);
+    expect(
+      CardItem.values.map((item) => item.id).join(' '),
+      'workspace branch gitActions changes servers automations lineage sideChats figures usage context',
+    );
   });
 }

@@ -1,4 +1,4 @@
-use super::workspace::{Folder, Memory, mutation, query};
+use super::workspace::{mutation, open, query};
 use crate::api::automation::{
     BridgeAutomationSetup, BridgeStep, BridgeStepKind, BridgeTrigger, BridgeTriggerKind,
 };
@@ -19,8 +19,7 @@ const EDIT: BridgeAllows = BridgeAllows {
 
 #[test]
 fn roles_protection_and_refused_runs_cross_the_bridge() {
-    let folder = Folder::new("roles");
-    let workspace = LiquidWorkspace::open_with(&folder.0, &Memory::default()).unwrap();
+    let (_folder, workspace) = open("roles");
     let area = workspace
         .apply(BridgeMutation {
             text: Some("Private".into()),

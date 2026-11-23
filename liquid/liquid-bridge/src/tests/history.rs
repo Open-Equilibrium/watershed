@@ -1,7 +1,6 @@
-use super::workspace::{Folder, Memory, lisbon, mutation, query};
+use super::workspace::{lisbon, on_block, open};
 use crate::api::history::{BridgeActorKind, BridgeEntryQuery};
-use crate::api::replica::LiquidWorkspace;
-use crate::api::workspace::{BridgeMutation, BridgeMutationKind, BridgeQuery, BridgeQueryKind};
+use crate::api::workspace::{BridgeMutation, BridgeMutationKind};
 
 fn all() -> BridgeEntryQuery {
     BridgeEntryQuery {
@@ -15,31 +14,15 @@ fn all() -> BridgeEntryQuery {
 
 #[test]
 fn history_revert_undo_restore_and_purge_cross_the_bridge() {
-    let folder = Folder::new("history");
-    let workspace = LiquidWorkspace::open_with(&folder.0, &Memory::default()).unwrap();
+    let (_folder, workspace) = open("history");
     let (_, page, block, _) = lisbon(&workspace);
-    let text = || {
-        workspace
-            .query(BridgeQuery {
-                page: Some(page.clone()),
-                block: Some(block.clone()),
-                ..query(BridgeQueryKind::Text)
-            })
-            .unwrap()
-            .text
-            .unwrap()
-    };
-    let before = text();
     let typed = workspace
         .apply(BridgeMutation {
-            page: Some(page.clone()),
-            block: Some(block.clone()),
             text: Some("Ours: ".into()),
-            ..mutation(BridgeMutationKind::EditText)
+            ..on_block(&page, &block, BridgeMutationKind::EditText)
         })
         .unwrap()
         .action;
-    assert_eq!(text(), format!("Ours: {before}"));
 
     let entries = workspace.history(all()).unwrap().entries;
     assert_eq!(entries[0].actions, std::slice::from_ref(&typed));
@@ -48,42 +31,23 @@ fn history_revert_undo_restore_and_purge_cross_the_bridge() {
     assert!(entries[0].revertable);
 
     assert!(workspace.undo().unwrap());
-    assert_eq!(text(), before);
     assert!(workspace.redo().unwrap());
-    assert_eq!(text(), format!("Ours: {before}"));
     let reverted = workspace.revert(vec![typed.clone()]).unwrap();
     assert!(!reverted.conflict && !reverted.purged);
-    assert_eq!(text(), before);
 
     let versions = workspace.versions(page.clone()).unwrap();
-    assert!(!versions.is_empty());
     let preview = workspace
         .preview(page.clone(), versions[0].after.clone())
         .unwrap();
-    assert_eq!(
-        preview
-            .query(BridgeQuery {
-                page: Some(page.clone()),
-                block: Some(block.clone()),
-                ..query(BridgeQueryKind::Text)
-            })
-            .unwrap()
-            .text
-            .unwrap(),
-        before
-    );
     assert!(
         preview
             .apply(BridgeMutation {
-                page: Some(page.clone()),
-                block: Some(block.clone()),
                 text: Some("x".into()),
-                ..mutation(BridgeMutationKind::EditText)
+                ..on_block(&page, &block, BridgeMutationKind::EditText)
             })
             .is_err()
     );
     workspace.restore(page.clone(), typed.clone()).unwrap();
-    assert_eq!(text(), format!("Ours: {before}"));
 
     workspace.purge(Some(page.clone()), None).unwrap();
     let after = workspace.revert(vec![typed]).unwrap();

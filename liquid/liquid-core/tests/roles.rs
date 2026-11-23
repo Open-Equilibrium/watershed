@@ -1,12 +1,13 @@
 #![allow(clippy::unwrap_used)]
 
-use liquid_core::{
-    Actor, Allows, Applied, AutomationId, AutomationSetup, BlockId, Capability, Cell, Created,
-    Error, FieldId, FieldKind, Grant, MemoryStore, Mutation, Origin, Permission, PersonId, Place,
-    Request, RoleId, RoleSetup, RowQuery, Step, Target, Template, Trigger,
-};
+mod common;
 
-type Workspace = liquid_core::Workspace<MemoryStore>;
+use common::*;
+use liquid_core::{
+    Allows, Applied, AreaId, AutomationId, AutomationSetup, BlockId, Capability, Cell, Created,
+    Error, FieldId, FieldKind, Grant, MAX_ROLE_NAME, Mutation, Permission, Place, RoleId,
+    RoleSetup, Step, Target, Template, Trigger,
+};
 
 const READ: Allows = Allows {
     read: true,
@@ -23,85 +24,103 @@ const EDIT: Allows = Allows {
 
 struct Budget {
     workspace: Workspace,
-    area: liquid_core::AreaId,
+    area: AreaId,
     expenses: BlockId,
     bills: BlockId,
     amount: FieldId,
 }
 
+fn table(workspace: &mut Workspace, area: &AreaId, name: &str) -> BlockId {
+    let Created::Table(table) = created(
+        workspace,
+        Mutation::CreateTable {
+            area: area.clone(),
+            name: name.into(),
+        },
+    ) else {
+        panic!("a Table")
+    };
+    table
+}
+
 impl Budget {
     fn new() -> Self {
-        let workspace = Workspace::create(PersonId::new("benni"), MemoryStore::default()).unwrap();
-        let mut budget = Self {
-            workspace,
-            area: liquid_core::AreaId::parse(&"0".repeat(32)).unwrap(),
-            expenses: BlockId::parse(&"0".repeat(32)).unwrap(),
-            bills: BlockId::parse(&"0".repeat(32)).unwrap(),
-            amount: FieldId::parse(&"0".repeat(32)).unwrap(),
-        };
-        let Some(Created::Area(area)) = budget
-            .edit(Mutation::CreateArea {
+        let mut workspace = workspace();
+        let Created::Area(area) = created(
+            &mut workspace,
+            Mutation::CreateArea {
                 name: "Private".into(),
-            })
-            .unwrap()
-            .created
-        else {
+            },
+        ) else {
             panic!("an area")
         };
-        budget.area = area;
-        budget.expenses = budget.table("Expenses");
-        budget.bills = budget.table("Bills");
-        budget.amount = match budget
-            .edit(Mutation::AddField {
-                block: budget.expenses.clone(),
+        let expenses = table(&mut workspace, &area, "Expenses");
+        let bills = table(&mut workspace, &area, "Bills");
+        let Created::Field(amount) = created(
+            &mut workspace,
+            Mutation::AddField {
+                block: expenses.clone(),
                 place: Place::Last,
                 name: "Amount".into(),
                 kind: FieldKind::Number,
-            })
-            .unwrap()
-            .created
-        {
-            Some(Created::Field(field)) => field,
-            other => panic!("a field, got {other:?}"),
+            },
+        ) else {
+            panic!("a field")
         };
-        budget
+        Self {
+            workspace,
+            area,
+            expenses,
+            bills,
+            amount,
+        }
     }
 
     fn edit(&mut self, mutation: Mutation) -> Result<Applied, Error> {
-        self.workspace.apply(Request {
-            actor: Actor::Person(PersonId::new("benni")),
-            origin: Origin::Ui,
-            mutation,
-        })
-    }
-
-    fn table(&mut self, name: &str) -> BlockId {
-        match self
-            .edit(Mutation::CreateTable {
-                area: self.area.clone(),
-                name: name.into(),
-            })
-            .unwrap()
-            .created
-        {
-            Some(Created::Table(table)) => table,
-            other => panic!("a Table, got {other:?}"),
-        }
+        apply(&mut self.workspace, mutation)
     }
 
     fn role(&mut self, name: &str, grants: Vec<Grant>) -> Result<RoleId, Error> {
-        match self
-            .edit(Mutation::CreateRole {
-                setup: RoleSetup {
-                    name: name.into(),
-                    grants,
-                },
-            })?
-            .created
-        {
+        let setup = RoleSetup {
+            name: name.into(),
+            grants,
+        };
+        match self.edit(Mutation::CreateRole { setup })?.created {
             Some(Created::Role(role)) => Ok(role),
             other => panic!("a Role, got {other:?}"),
         }
+    }
+
+    fn remove_role(&mut self, role: RoleId) -> Result<Applied, Error> {
+        self.edit(Mutation::RemoveRole { role })
+    }
+
+    fn set_role(&mut self, role: RoleId, name: &str, grants: Vec<Grant>) -> Result<Applied, Error> {
+        let setup = RoleSetup {
+            name: name.into(),
+            grants,
+        };
+        self.edit(Mutation::SetRole { role, setup })
+    }
+
+    fn protect(&mut self, table: &BlockId, roles: Vec<RoleId>) -> Result<Applied, Error> {
+        self.edit(Mutation::ProtectTable {
+            table: table.clone(),
+            roles,
+        })
+    }
+
+    fn unprotect(&mut self, table: &BlockId) -> Result<Applied, Error> {
+        self.edit(Mutation::UnprotectTable {
+            table: table.clone(),
+        })
+    }
+
+    fn protected(&mut self, table: &BlockId) -> bool {
+        let tables = self.workspace.tables().unwrap();
+        tables
+            .iter()
+            .any(|entry| entry.id == *table && entry.protected)
     }
 
     fn allows(&mut self, role: &RoleId, table: &BlockId) -> Allows {
@@ -118,16 +137,15 @@ impl Budget {
                 value: Cell::Number(1.0),
             }],
         };
-        match self
-            .edit(Mutation::CreateAutomation {
+        let Created::Automation(automation) = created(
+            &mut self.workspace,
+            Mutation::CreateAutomation {
                 setup: Box::new(setup),
-            })
-            .unwrap()
-            .created
-        {
-            Some(Created::Automation(automation)) => automation,
-            other => panic!("an Automation, got {other:?}"),
-        }
+            },
+        ) else {
+            panic!("an Automation")
+        };
+        automation
     }
 
     fn assign(&mut self, automation: &AutomationId, role: &RoleId) -> Result<Applied, Error> {
@@ -146,20 +164,8 @@ impl Budget {
     }
 
     fn amounts(&mut self) -> Vec<Cell> {
-        let all = RowQuery {
-            sort: None,
-            filter: None,
-            within: None,
-            start: 0,
-            limit: usize::MAX,
-            search: None,
-            totals: Vec::new(),
-        };
-        self.workspace
-            .rows(&self.expenses, &all)
-            .unwrap()
-            .rows
-            .iter()
+        let rows = self.workspace.rows(&self.expenses, &all()).unwrap().rows;
+        rows.iter()
             .map(|row| row.cell(&self.amount).cloned().unwrap_or(Cell::Empty))
             .collect()
     }
@@ -194,32 +200,27 @@ fn a_workspace_starts_with_three_templates_and_an_automation_runs_as_can_edit() 
 #[test]
 fn a_role_allows_only_what_it_lists_and_a_run_needs_apply_where_it_writes() {
     let mut budget = Budget::new();
-    let editor = budget
-        .role(
-            "Budget editor",
-            vec![Grant {
-                target: Target::Table(budget.expenses.clone()),
-                allows: EDIT,
-            }],
-        )
-        .unwrap();
+    let grant = Grant {
+        target: Target::Table(budget.expenses.clone()),
+        allows: EDIT,
+    };
+    let editor = budget.role("Budget editor", vec![grant]).unwrap();
     let (expenses, bills) = (budget.expenses.clone(), budget.bills.clone());
     assert_eq!(budget.allows(&editor, &expenses), EDIT);
     assert_eq!(budget.allows(&editor, &bills), Allows::default());
 
     let round = budget.setter();
     budget.assign(&round, &editor).unwrap();
-    let ran = budget.added().ran.remove(0);
-    let action = ran.outcome.unwrap();
+    let action = budget.added().ran.remove(0).outcome.unwrap();
     assert_eq!(budget.amounts(), [Cell::Number(1.0)]);
     let history = budget.workspace.history(None, 1).unwrap();
     assert_eq!(history[0].id, action);
     assert_eq!(history[0].permission, Permission::Role(editor));
 
     budget.assign(&round, &Template::CanView.id()).unwrap();
-    let refused = budget.added().ran.remove(0);
+    let refused = budget.added().ran.remove(0).outcome;
     assert_eq!(
-        refused.outcome,
+        refused,
         Err(Error::Denied {
             capability: Capability::Apply,
             table: "Expenses".into(),
@@ -229,45 +230,25 @@ fn a_role_allows_only_what_it_lists_and_a_run_needs_apply_where_it_writes() {
 }
 
 #[test]
-fn a_protected_table_keeps_only_the_roles_chosen_for_it_and_reading_follows_its_area() {
+fn a_protected_table_keeps_only_its_chosen_roles_reads_follow_its_area_and_people_add_rows() {
     let mut budget = Budget::new();
     let editor = budget.role("Budget editor", Vec::new()).unwrap();
     let expenses = budget.expenses.clone();
     budget.setter();
-    budget
-        .edit(Mutation::ProtectTable {
-            table: expenses.clone(),
-            roles: vec![editor.clone(), Template::CanEdit.id()],
-        })
-        .unwrap();
-    assert!(
-        budget
-            .workspace
-            .tables()
-            .unwrap()
-            .iter()
-            .find(|table| table.id == expenses)
-            .unwrap()
-            .protected
-    );
+    let roles = vec![editor.clone(), Template::CanEdit.id()];
+    budget.protect(&expenses, roles).unwrap();
+    assert!(budget.protected(&expenses));
     assert_eq!(budget.allows(&Template::CanEdit.id(), &expenses), EDIT);
     assert_eq!(budget.allows(&editor, &expenses), Allows::default());
     assert!(budget.allows(&Template::CanManage.id(), &expenses).manage);
 
-    budget
-        .edit(Mutation::ProtectTable {
-            table: expenses.clone(),
-            roles: Vec::new(),
-        })
-        .unwrap();
+    budget.protect(&expenses, Vec::new()).unwrap();
     assert_eq!(budget.allows(&Template::CanEdit.id(), &expenses), READ);
-    assert!(budget.added().ran[0].outcome.is_err());
+    let added = budget.added();
+    assert!(matches!(added.created, Some(Created::Row(_))));
+    assert!(added.ran[0].outcome.is_err());
 
-    budget
-        .edit(Mutation::UnprotectTable {
-            table: expenses.clone(),
-        })
-        .unwrap();
+    budget.unprotect(&expenses).unwrap();
     assert_eq!(budget.allows(&Template::CanEdit.id(), &expenses), EDIT);
     assert!(budget.added().ran[0].outcome.is_ok());
 }
@@ -275,72 +256,35 @@ fn a_protected_table_keeps_only_the_roles_chosen_for_it_and_reading_follows_its_
 #[test]
 fn templates_and_assigned_roles_hold_and_setups_name_what_exists() {
     let mut budget = Budget::new();
-    let manage = Mutation::SetRole {
-        role: Template::CanManage.id(),
-        setup: RoleSetup {
-            name: "Everything".into(),
-            grants: Vec::new(),
-        },
+    let everything = budget.set_role(Template::CanManage.id(), "Everything", Vec::new());
+    assert_eq!(everything.unwrap_err(), Error::NotAllowed);
+    let grant = Grant {
+        target: Target::Area(budget.area.clone()),
+        allows: READ,
     };
-    assert_eq!(budget.edit(manage).unwrap_err(), Error::NotAllowed);
-    budget
-        .edit(Mutation::SetRole {
-            role: Template::CanView.id(),
-            setup: RoleSetup {
-                name: "Readers".into(),
-                grants: vec![Grant {
-                    target: Target::Area(budget.area.clone()),
-                    allows: READ,
-                }],
-            },
-        })
-        .unwrap();
+    let readers = budget.set_role(Template::CanView.id(), "Readers", vec![grant]);
+    readers.unwrap();
     assert_eq!(budget.workspace.roles().unwrap()[2].setup.name, "Readers");
-    let remove = |role: RoleId| Mutation::RemoveRole { role };
-    assert_eq!(
-        budget.edit(remove(Template::CanView.id())).unwrap_err(),
-        Error::NotAllowed
-    );
+    let refused = budget.remove_role(Template::CanView.id()).unwrap_err();
+    assert_eq!(refused, Error::NotAllowed);
 
     let editor = budget.role("Budget editor", Vec::new()).unwrap();
     let round = budget.setter();
     budget.assign(&round, &editor).unwrap();
-    assert_eq!(
-        budget.edit(remove(editor.clone())).unwrap_err(),
-        Error::NotAllowed
-    );
+    let refused = budget.remove_role(editor.clone()).unwrap_err();
+    assert_eq!(refused, Error::NotAllowed);
     budget.assign(&round, &Template::CanEdit.id()).unwrap();
-    budget.edit(remove(editor.clone())).unwrap();
+    budget.remove_role(editor.clone()).unwrap();
     assert_eq!(budget.workspace.roles().unwrap().len(), 3);
     assert_eq!(budget.assign(&round, &editor).unwrap_err(), Error::NotFound);
 
-    let missing = BlockId::parse(&"e".repeat(32)).unwrap();
-    let grant = Grant {
-        target: Target::Table(missing),
+    let ghost = Grant {
+        target: Target::Table(BlockId::parse(&"e".repeat(32)).unwrap()),
         allows: READ,
     };
-    assert_eq!(
-        budget.role("Ghost", vec![grant]).unwrap_err(),
-        Error::NotFound
-    );
-    assert_eq!(
-        budget
-            .role(&"x".repeat(liquid_core::MAX_ROLE_NAME + 1), Vec::new())
-            .unwrap_err(),
-        Error::TooLong
-    );
-}
-
-#[test]
-fn rows_added_by_people_need_no_role() {
-    let mut budget = Budget::new();
-    let expenses = budget.expenses.clone();
-    budget
-        .edit(Mutation::ProtectTable {
-            table: expenses,
-            roles: Vec::new(),
-        })
-        .unwrap();
-    let added = budget.added();
-    assert!(matches!(added.created, Some(Created::Row(_))));
+    let refused = budget.role("Ghost", vec![ghost]).unwrap_err();
+    assert_eq!(refused, Error::NotFound);
+    let long_name = "x".repeat(MAX_ROLE_NAME + 1);
+    let refused = budget.role(&long_name, Vec::new()).unwrap_err();
+    assert_eq!(refused, Error::TooLong);
 }

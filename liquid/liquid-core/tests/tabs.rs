@@ -1,13 +1,13 @@
 #![allow(clippy::unwrap_used)]
 
-use liquid_core::{
-    Actor, Applied, BlockId, Cell, Created, Error, FieldId, FieldKind, Filter, Group, Layout,
-    MAX_DEVICE_KEY, MAX_DEVICE_VALUE, MAX_DEVICE_VALUES, MAX_TABS, Match, MemoryStore, Mutation,
-    OptionId, Origin, PageId, PersonId, Place, Request, RowId, RowQuery, Sort, Tab, TabId,
-    TabSetup, ViewId,
-};
+mod common;
 
-type Workspace = liquid_core::Workspace<MemoryStore>;
+use common::*;
+use liquid_core::{
+    Applied, BlockId, Cell, Created, Error, Field, FieldId, FieldKind, Filter, Group, Layout,
+    MAX_DEVICE_KEY, MAX_DEVICE_VALUE, MAX_DEVICE_VALUES, MAX_TABS, Match, Mutation, OptionId,
+    PageId, Place, RowId, RowQuery, Rows, Sort, Tab, TabId, TabSetup, ViewId,
+};
 
 struct Home {
     workspace: Workspace,
@@ -16,39 +16,30 @@ struct Home {
 
 impl Home {
     fn new() -> Self {
-        let mut workspace =
-            Workspace::create(PersonId::new("benni"), MemoryStore::default()).unwrap();
-        let mut home = |mutation| {
-            workspace
-                .apply(Request {
-                    actor: Actor::Person(PersonId::new("benni")),
-                    origin: Origin::Ui,
-                    mutation,
-                })
-                .unwrap()
-                .created
-        };
-        let Some(Created::Area(area)) = home(Mutation::CreateArea {
-            name: "Private".into(),
-        }) else {
+        let mut workspace = workspace();
+        let Created::Area(area) = created(
+            &mut workspace,
+            Mutation::CreateArea {
+                name: "Private".into(),
+            },
+        ) else {
             panic!("an area")
         };
-        let Some(Created::Page(page)) = home(Mutation::CreatePage {
-            area,
-            parent: None,
-            title: "Household budget".into(),
-        }) else {
+        let Created::Page(page) = created(
+            &mut workspace,
+            Mutation::CreatePage {
+                area,
+                parent: None,
+                title: "Household budget".into(),
+            },
+        ) else {
             panic!("a Page")
         };
         Self { workspace, page }
     }
 
     fn edit(&mut self, mutation: Mutation) -> Result<Applied, Error> {
-        self.workspace.apply(Request {
-            actor: Actor::Person(PersonId::new("benni")),
-            origin: Origin::Ui,
-            mutation,
-        })
+        apply(&mut self.workspace, mutation)
     }
 
     fn table(&mut self, name: &str, layout: Layout) -> (BlockId, ViewId) {
@@ -58,18 +49,33 @@ impl Home {
             name: name.into(),
             layout,
         };
-        match self.edit(add).unwrap().created {
-            Some(Created::Block { block, view }) => (block, view),
-            other => panic!("a Table, got {other:?}"),
-        }
+        let Created::Block { block, view } = created(&mut self.workspace, add) else {
+            panic!("a Table")
+        };
+        (block, view)
     }
 
     fn tabs(&mut self, view: &ViewId) -> Vec<Tab> {
-        self.workspace
-            .view(&self.page.clone(), view)
-            .unwrap()
-            .unwrap()
-            .tabs
+        self.workspace.view(&self.page, view).unwrap().unwrap().tabs
+    }
+
+    fn fields(&mut self, table: &BlockId) -> Vec<Field> {
+        self.workspace.database(table).unwrap().unwrap().fields
+    }
+
+    fn rows(&mut self, table: &BlockId, query: &RowQuery) -> Rows {
+        self.workspace.rows(table, query).unwrap()
+    }
+
+    fn groups(&mut self, table: &BlockId, query: &RowQuery, by: &FieldId) -> Vec<Group> {
+        self.workspace.groups(table, query, by).unwrap()
+    }
+
+    fn counts(&mut self, table: &BlockId, by: &FieldId) -> Vec<(Cell, usize)> {
+        self.groups(table, &all(), by)
+            .into_iter()
+            .map(|group| (group.value, group.count))
+            .collect()
     }
 
     fn field(&mut self, table: &BlockId, name: &str, kind: FieldKind) -> FieldId {
@@ -79,10 +85,10 @@ impl Home {
             name: name.into(),
             kind,
         };
-        match self.edit(add).unwrap().created {
-            Some(Created::Field(field)) => field,
-            other => panic!("a field, got {other:?}"),
-        }
+        let Created::Field(field) = created(&mut self.workspace, add) else {
+            panic!("a field")
+        };
+        field
     }
 
     fn option(&mut self, table: &BlockId, field: &FieldId, name: &str) -> OptionId {
@@ -92,10 +98,10 @@ impl Home {
             name: name.into(),
             color: 0,
         };
-        match self.edit(add).unwrap().created {
-            Some(Created::Option(option)) => option,
-            other => panic!("an option, got {other:?}"),
-        }
+        let Created::Option(option) = created(&mut self.workspace, add) else {
+            panic!("an option")
+        };
+        option
     }
 
     fn row(&mut self, table: &BlockId, cells: &[(&FieldId, Cell)]) -> RowId {
@@ -103,7 +109,7 @@ impl Home {
             block: table.clone(),
             place: Place::Last,
         };
-        let Some(Created::Row(row)) = self.edit(add).unwrap().created else {
+        let Created::Row(row) = created(&mut self.workspace, add) else {
             panic!("a row")
         };
         for (field, value) in cells {
@@ -125,27 +131,35 @@ impl Home {
             after,
             setup: Box::new(setup),
         };
-        match self.edit(add).unwrap().created {
-            Some(Created::Tab(tab)) => tab,
-            other => panic!("a tab, got {other:?}"),
-        }
+        let Created::Tab(tab) = created(&mut self.workspace, add) else {
+            panic!("a tab")
+        };
+        tab
     }
-}
 
-fn all() -> RowQuery {
-    RowQuery {
-        sort: None,
-        filter: None,
-        within: None,
-        start: 0,
-        limit: usize::MAX,
-        search: None,
-        totals: Vec::new(),
+    fn tab_edit(
+        &mut self,
+        view: &ViewId,
+        tab: &TabId,
+        change: impl FnOnce(PageId, ViewId, TabId) -> Mutation,
+    ) {
+        let mutation = change(self.page.clone(), view.clone(), tab.clone());
+        self.edit(mutation).unwrap();
     }
 }
 
 fn names(tabs: &[Tab]) -> Vec<&str> {
     tabs.iter().map(|tab| tab.setup.name.as_str()).collect()
+}
+
+fn within(field: &FieldId, value: Cell) -> RowQuery {
+    RowQuery {
+        within: Some(Filter {
+            field: field.clone(),
+            matches: Match::Is(value),
+        }),
+        ..all()
+    }
 }
 
 #[test]
@@ -154,11 +168,10 @@ fn a_new_table_starts_with_one_tab_of_the_chosen_layout() {
     let (expenses, view) = home.table("Expenses", Layout::Table);
     assert_eq!(home.tabs(&view)[0].setup, TabSetup::of(Layout::Table));
     assert_eq!(home.tabs(&view)[0].setup.name, "Table");
-    let fields = home.workspace.database(&expenses).unwrap().unwrap().fields;
-    assert_eq!(fields.len(), 1);
+    assert_eq!(home.fields(&expenses).len(), 1);
 
     let (tasks, view) = home.table("Tasks", Layout::Board);
-    let fields = home.workspace.database(&tasks).unwrap().unwrap().fields;
+    let fields = home.fields(&tasks);
     let status = &fields[1];
     assert_eq!(
         (status.name.as_str(), status.kind),
@@ -167,11 +180,14 @@ fn a_new_table_starts_with_one_tab_of_the_chosen_layout() {
     let options: Vec<_> = status.options.iter().map(|o| o.name.as_str()).collect();
     assert_eq!(options, ["Not started", "In progress", "Done"]);
     let tab = home.tabs(&view).remove(0).setup;
-    assert_eq!((tab.name.as_str(), tab.layout), ("Board", Layout::Board));
-    assert_eq!(tab.group, Some(status.id.clone()));
+    let group = Some(status.id.clone());
+    assert_eq!(
+        (tab.name.as_str(), tab.layout, tab.group),
+        ("Board", Layout::Board, group)
+    );
 
     let (events, view) = home.table("Events", Layout::Calendar);
-    let fields = home.workspace.database(&events).unwrap().unwrap().fields;
+    let fields = home.fields(&events);
     assert_eq!(
         (fields[1].name.as_str(), fields[1].kind),
         ("Date", FieldKind::Date)
@@ -190,60 +206,50 @@ fn a_view_s_tabs_keep_their_own_settings_and_order() {
     let category = home.field(&table, "Category", FieldKind::Select);
     let due = home.field(&table, "Due", FieldKind::Date);
     let first = home.tabs(&view)[0].id.clone();
-    let board = home.add_tab(&view, Some(first.clone()), TabSetup::of(Layout::Board));
-    let page = home.page.clone();
-    let tab = |tab: &TabId| (page.clone(), view.clone(), tab.clone());
-    let (p, v, t) = tab(&board);
-    for change in [
-        Mutation::RenameTab {
-            page: p.clone(),
-            view: v.clone(),
-            tab: t.clone(),
-            name: "By category".into(),
-        },
-        Mutation::SetTabGroup {
-            page: p.clone(),
-            view: v.clone(),
-            tab: t.clone(),
-            group: Some(category.clone()),
-        },
-        Mutation::SetTabSort {
-            page: p.clone(),
-            view: v.clone(),
-            tab: t.clone(),
-            sort: Some(Sort {
-                field: due.clone(),
-                descending: true,
-            }),
-        },
-        Mutation::SetTabFilter {
-            page: p.clone(),
-            view: v.clone(),
-            tab: t.clone(),
-            filter: Some(Filter {
-                field: due.clone(),
-                matches: Match::NotEmpty,
-            }),
-        },
-    ] {
-        home.edit(change).unwrap();
-    }
+    let board = home.add_tab(&view, Some(first), TabSetup::of(Layout::Board));
+    home.tab_edit(&view, &board, |page, view, tab| Mutation::RenameTab {
+        page,
+        view,
+        tab,
+        name: "By category".into(),
+    });
+    home.tab_edit(&view, &board, |page, view, tab| Mutation::SetTabGroup {
+        page,
+        view,
+        tab,
+        group: Some(category.clone()),
+    });
+    home.tab_edit(&view, &board, |page, view, tab| Mutation::SetTabSort {
+        page,
+        view,
+        tab,
+        sort: Some(Sort {
+            field: due.clone(),
+            descending: true,
+        }),
+    });
+    home.tab_edit(&view, &board, |page, view, tab| Mutation::SetTabFilter {
+        page,
+        view,
+        tab,
+        filter: Some(Filter {
+            field: due.clone(),
+            matches: Match::NotEmpty,
+        }),
+    });
     let calendar = home.add_tab(&view, None, TabSetup::of(Layout::Table));
-    let (p, v, t) = tab(&calendar);
-    home.edit(Mutation::SetTabLayout {
-        page: p.clone(),
-        view: v.clone(),
-        tab: t.clone(),
+    home.tab_edit(&view, &calendar, |page, view, tab| Mutation::SetTabLayout {
+        page,
+        view,
+        tab,
         layout: Layout::Calendar,
-    })
-    .unwrap();
-    home.edit(Mutation::SetTabDate {
-        page: p,
-        view: v,
-        tab: t,
+    });
+    home.tab_edit(&view, &calendar, |page, view, tab| Mutation::SetTabDate {
+        page,
+        view,
+        tab,
         date: Some(due.clone()),
-    })
-    .unwrap();
+    });
 
     home.workspace.close_page(&home.page);
     let tabs = home.tabs(&view);
@@ -261,21 +267,17 @@ fn a_view_s_tabs_keep_their_own_settings_and_order() {
     );
     assert_eq!(tabs[1].setup, TabSetup::of(Layout::Table));
 
-    let (p, v, t) = tab(&board);
-    home.edit(Mutation::MoveTab {
-        page: p,
-        view: v,
-        tab: t,
+    home.tab_edit(&view, &board, |page, view, tab| Mutation::MoveTab {
+        page,
+        view,
+        tab,
         after: None,
-    })
-    .unwrap();
-    let (p, v, t) = tab(&calendar);
-    home.edit(Mutation::RemoveTab {
-        page: p,
-        view: v,
-        tab: t,
-    })
-    .unwrap();
+    });
+    home.tab_edit(&view, &calendar, |page, view, tab| Mutation::RemoveTab {
+        page,
+        view,
+        tab,
+    });
     home.workspace.close_page(&home.page);
     assert_eq!(names(&home.tabs(&view)), ["By category", "Table"]);
 }
@@ -287,24 +289,24 @@ fn a_tab_groups_by_a_select_or_checkbox_and_dates_by_a_date_field() {
     let note = home.field(&table, "Note", FieldKind::Text);
     let paid = home.field(&table, "Paid", FieldKind::Checkbox);
     let tab = home.tabs(&view)[0].id.clone();
+    let page = home.page.clone();
     let group = |group: &FieldId| Mutation::SetTabGroup {
-        page: home.page.clone(),
+        page: page.clone(),
         view: view.clone(),
         tab: tab.clone(),
         group: Some(group.clone()),
     };
-    let (by_note, by_paid) = (group(&note), group(&paid));
     let by_date = Mutation::SetTabDate {
-        page: home.page.clone(),
+        page: page.clone(),
         view: view.clone(),
         tab: tab.clone(),
         date: Some(paid.clone()),
     };
-    assert_eq!(home.edit(by_note), Err(Error::WrongKind));
+    assert_eq!(home.edit(group(&note)), Err(Error::WrongKind));
     assert_eq!(home.edit(by_date), Err(Error::WrongKind));
-    home.edit(by_paid).unwrap();
+    home.edit(group(&paid)).unwrap();
     let missing = Mutation::RenameTab {
-        page: home.page.clone(),
+        page,
         view,
         tab: TabId::parse(&"0".repeat(32)).unwrap(),
         name: "Gone".into(),
@@ -353,47 +355,28 @@ fn groups_count_rows_per_value_with_the_empty_group_first_when_it_holds_rows() {
             (&paid, Cell::Checkbox(true)),
         ],
     );
-    let counts = |groups: Vec<Group>| -> Vec<(Cell, usize)> {
-        groups.into_iter().map(|g| (g.value, g.count)).collect()
-    };
-    let groups = home.workspace.groups(&table, &all(), &category).unwrap();
     assert_eq!(
-        counts(groups),
+        home.counts(&table, &category),
         [
-            (Cell::Select(food.clone()), 1),
+            (Cell::Select(food), 1),
             (Cell::Select(rent.clone()), 2),
             (Cell::Select(travel), 0),
         ]
     );
     let blank = home.row(&table, &[]);
-    let groups = home.workspace.groups(&table, &all(), &category).unwrap();
-    assert_eq!(groups[0].value, Cell::Empty);
-    assert_eq!(groups[0].count, 1);
-    let groups = home.workspace.groups(&table, &all(), &paid).unwrap();
+    let groups = home.groups(&table, &all(), &category);
+    assert_eq!((groups[0].value.clone(), groups[0].count), (Cell::Empty, 1));
     assert_eq!(
-        counts(groups),
+        home.counts(&table, &paid),
         [(Cell::Checkbox(false), 3), (Cell::Checkbox(true), 1)]
     );
 
-    let within = |field: &FieldId, value: Cell| RowQuery {
-        within: Some(Filter {
-            field: field.clone(),
-            matches: Match::Is(value),
-        }),
-        ..all()
-    };
-    let empty = home
-        .workspace
-        .rows(&table, &within(&category, Cell::Empty))
-        .unwrap();
+    let empty = home.rows(&table, &within(&category, Cell::Empty));
     assert_eq!(
         empty.rows.iter().map(|r| &r.id).collect::<Vec<_>>(),
         [&blank]
     );
-    let rent_rows = home
-        .workspace
-        .rows(&table, &within(&category, Cell::Select(rent)))
-        .unwrap();
+    let rent_rows = home.rows(&table, &within(&category, Cell::Select(rent)));
     assert_eq!(rent_rows.count, 2);
     let unpaid = RowQuery {
         filter: Some(Filter {
@@ -402,12 +385,13 @@ fn groups_count_rows_per_value_with_the_empty_group_first_when_it_holds_rows() {
         }),
         ..within(&paid, Cell::Checkbox(false))
     };
-    assert_eq!(home.workspace.rows(&table, &unpaid).unwrap().count, 2);
+    assert_eq!(home.rows(&table, &unpaid).count, 2);
     let note = home.field(&table, "Note", FieldKind::Text);
     assert_eq!(
         home.workspace.groups(&table, &all(), &note),
         Err(Error::WrongKind)
     );
+
     let first = RowQuery {
         limit: 1,
         sort: Some(Sort {
@@ -416,48 +400,39 @@ fn groups_count_rows_per_value_with_the_empty_group_first_when_it_holds_rows() {
         }),
         ..all()
     };
-    let groups = home.workspace.groups(&table, &first, &category).unwrap();
-    let shown: Vec<_> = groups
-        .iter()
-        .map(|group| {
-            (
-                group.count,
-                group.rows.iter().map(|r| r.id.clone()).collect::<Vec<_>>(),
-            )
-        })
-        .collect();
-    assert_eq!(shown[0], (1, vec![blank]), "the empty group");
-    assert_eq!(shown[2].0, 2);
-    assert_eq!(shown[2].1.len(), 1, "a group's first rows, up to the limit");
+    let groups = home.groups(&table, &first, &category);
+    assert_eq!(
+        (groups[0].count, &groups[0].rows[0].id),
+        (1, &blank),
+        "the empty group"
+    );
+    assert_eq!(
+        (groups[2].count, groups[2].rows.len()),
+        (2, 1),
+        "a group's first rows, up to the limit"
+    );
     assert_eq!(
         groups[2].rows[0].cell(&paid),
         Some(&Cell::Checkbox(true)),
         "in the query's sort"
     );
-    let second = RowQuery {
-        start: 1,
-        ..first.clone()
-    };
-    let groups = home.workspace.groups(&table, &second, &category).unwrap();
+    let second = RowQuery { start: 1, ..first };
+    let groups = home.groups(&table, &second, &category);
     assert_eq!(groups[2].count, 2, "the count stays whole");
     assert_eq!(
         groups[2].rows[0].cell(&paid),
         None,
         "the window starts inside each group"
     );
-    let counted = home
-        .workspace
-        .groups(&table, &RowQuery { limit: 0, ..all() }, &category);
-    assert!(counted.unwrap().iter().all(|group| group.rows.is_empty()));
+    let counted = home.groups(&table, &RowQuery { limit: 0, ..all() }, &category);
+    assert!(counted.iter().all(|group| group.rows.is_empty()));
 }
 
 #[test]
 fn a_date_range_keeps_the_rows_dated_within_it() {
     let mut home = Home::new();
     let (table, _) = home.table("Events", Layout::Calendar);
-    let date = home.workspace.database(&table).unwrap().unwrap().fields[1]
-        .id
-        .clone();
+    let date = home.fields(&table)[1].id.clone();
     for day in ["2026-10-31", "2026-11-01", "2026-11-30", "2026-12-01"] {
         home.row(&table, &[(&date, Cell::Date(day.into()))]);
     }
@@ -469,7 +444,7 @@ fn a_date_range_keeps_the_rows_dated_within_it() {
         }),
         ..all()
     };
-    let rows = home.workspace.rows(&table, &november).unwrap().rows;
+    let rows = home.rows(&table, &november).rows;
     let days: Vec<_> = rows.iter().map(|row| row.cell(&date).cloned()).collect();
     assert_eq!(
         days,
@@ -484,10 +459,8 @@ fn a_date_range_keeps_the_rows_dated_within_it() {
 fn duplicating_a_table_copies_its_fields_rows_and_tabs_into_an_independent_table() {
     let mut home = Home::new();
     let (table, view) = home.table("Expenses", Layout::Board);
-    let status = home.workspace.database(&table).unwrap().unwrap().fields[1].clone();
-    let name = home.workspace.database(&table).unwrap().unwrap().fields[0]
-        .id
-        .clone();
+    let fields = home.fields(&table);
+    let (name, status) = (fields[0].id.clone(), fields[1].clone());
     let done = status.options[2].id.clone();
     let rent = home.row(
         &table,
@@ -510,10 +483,10 @@ fn duplicating_a_table_copies_its_fields_rows_and_tabs_into_an_independent_table
         name: "Expenses (copy)".into(),
         tabs: tabs.clone(),
     };
-    let Some(Created::Block {
+    let Created::Block {
         block: copy,
         view: copied,
-    }) = home.edit(duplicate).unwrap().created
+    } = created(&mut home.workspace, duplicate)
     else {
         panic!("a View of a new Table")
     };
@@ -534,47 +507,21 @@ fn duplicating_a_table_copies_its_fields_rows_and_tabs_into_an_independent_table
         .map(|t| t.name)
         .collect();
     assert_eq!(tables, ["Expenses", "Expenses (copy)"]);
-    assert_eq!(
-        home.workspace.database(&copy).unwrap().unwrap().fields,
-        home.workspace.database(&table).unwrap().unwrap().fields
-    );
-    let rows = home.workspace.rows(&copy, &all()).unwrap().rows;
+    assert_eq!(home.fields(&copy), home.fields(&table));
+    let rows = home.rows(&copy, &all()).rows;
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].id, rent);
     assert_eq!(rows[0].cell(&status.id), Some(&Cell::Select(done)));
 
     home.edit(Mutation::SetCell {
-        block: copy.clone(),
-        row: rent.clone(),
+        block: copy,
+        row: rent,
         field: name.clone(),
         value: Cell::Text("Lease".into()),
     })
     .unwrap();
-    let original = home.workspace.rows(&table, &all()).unwrap().rows;
+    let original = home.rows(&table, &all()).rows;
     assert_eq!(original[0].cell(&name), Some(&Cell::Text("Rent".into())));
-}
-
-#[test]
-fn a_view_of_an_existing_table_starts_with_one_table_tab_or_copies_tabs() {
-    let mut home = Home::new();
-    let (table, view) = home.table("Expenses", Layout::Board);
-    let add = |tabs: Vec<TabSetup>| Mutation::AddTableView {
-        page: home.page.clone(),
-        after: None,
-        table: table.clone(),
-        title: "Expenses".into(),
-        tabs,
-    };
-    let (plain, copied) = (add(Vec::new()), add(vec![TabSetup::of(Layout::Calendar)]));
-    let Some(Created::Block { view: plain, .. }) = home.edit(plain).unwrap().created else {
-        panic!("a View")
-    };
-    assert_eq!(names(&home.tabs(&plain)), ["Table"]);
-    let Some(Created::Block { view: copied, .. }) = home.edit(copied).unwrap().created else {
-        panic!("a View")
-    };
-    assert_eq!(home.tabs(&copied)[0].setup.layout, Layout::Calendar);
-    assert_eq!(home.tabs(&view)[0].setup.layout, Layout::Board);
 }
 
 #[test]
@@ -594,7 +541,7 @@ fn actions_recorded_before_tabs_still_read() {
 fn a_tab_folds_groups_for_everyone_by_their_value() {
     let mut home = Home::new();
     let (table, view) = home.table("Tasks", Layout::Board);
-    let status = home.workspace.database(&table).unwrap().unwrap().fields[1].clone();
+    let status = home.fields(&table)[1].clone();
     let tab = home.tabs(&view)[0].id.clone();
     let fold = |folded: Vec<Cell>| Mutation::SetTabFolded {
         page: home.page.clone(),
@@ -615,42 +562,32 @@ fn a_tab_folds_groups_for_everyone_by_their_value() {
 
 #[test]
 fn a_device_value_stays_out_of_history_and_the_oldest_makes_room() {
-    let mut home = Home::new();
-    let before = home.workspace.history(None, 100).unwrap().len();
-    home.workspace.remember("tab/v", Some("t")).unwrap();
-    assert_eq!(
-        home.workspace.remembered("tab/v").unwrap().as_deref(),
-        Some("t")
-    );
-    assert_eq!(home.workspace.history(None, 100).unwrap().len(), before);
-    home.workspace.remember("tab/v", None).unwrap();
-    assert_eq!(home.workspace.remembered("tab/v").unwrap(), None);
+    let mut workspace = workspace();
+    let before = workspace.history(None, 100).unwrap().len();
+    workspace.remember("tab/v", Some("t")).unwrap();
+    assert_eq!(workspace.remembered("tab/v").unwrap().as_deref(), Some("t"));
+    assert_eq!(workspace.history(None, 100).unwrap().len(), before);
+    workspace.remember("tab/v", None).unwrap();
+    assert_eq!(workspace.remembered("tab/v").unwrap(), None);
     let long_key = "k".repeat(MAX_DEVICE_KEY + 1);
     let long_value = "v".repeat(MAX_DEVICE_VALUE + 1);
     assert_eq!(
-        home.workspace.remember(&long_key, Some("t")),
+        workspace.remember(&long_key, Some("t")),
         Err(Error::TooLong)
     );
     assert_eq!(
-        home.workspace.remember("k", Some(&long_value)),
+        workspace.remember("k", Some(&long_value)),
         Err(Error::TooLong)
     );
     for at in 0..MAX_DEVICE_VALUES {
-        home.workspace.remember(&at.to_string(), Some("t")).unwrap();
+        workspace.remember(&at.to_string(), Some("t")).unwrap();
     }
-    home.workspace.remember("0", Some("u")).unwrap();
-    home.workspace.remember("one more", Some("t")).unwrap();
+    workspace.remember("0", Some("u")).unwrap();
+    workspace.remember("one more", Some("t")).unwrap();
+    assert_eq!(workspace.remembered("1").unwrap(), None, "the oldest goes");
+    assert_eq!(workspace.remembered("0").unwrap().as_deref(), Some("u"));
     assert_eq!(
-        home.workspace.remembered("1").unwrap(),
-        None,
-        "the oldest goes"
-    );
-    assert_eq!(
-        home.workspace.remembered("0").unwrap().as_deref(),
-        Some("u")
-    );
-    assert_eq!(
-        home.workspace.remembered("one more").unwrap().as_deref(),
+        workspace.remembered("one more").unwrap().as_deref(),
         Some("t")
     );
 }
@@ -662,16 +599,15 @@ fn a_copied_tab_drops_what_refers_to_a_removed_field() {
     let due = home.field(&table, "Due", FieldKind::Date);
     let status = home.tabs(&view)[0].setup.group.clone().unwrap();
     let tab = home.tabs(&view)[0].id.clone();
-    home.edit(Mutation::SetTabSort {
-        page: home.page.clone(),
-        view: view.clone(),
+    home.tab_edit(&view, &tab, |page, view, tab| Mutation::SetTabSort {
+        page,
+        view,
         tab,
         sort: Some(Sort {
             field: due.clone(),
             descending: false,
         }),
-    })
-    .unwrap();
+    });
     let setup = home.tabs(&view)[0].setup.clone();
     assert!(setup.group.is_some() && setup.sort.is_some());
     for field in [due, status] {
@@ -700,9 +636,9 @@ fn a_copied_tab_drops_what_refers_to_a_removed_field() {
         after: Some(view),
         table,
         name: "Tasks (copy)".into(),
-        tabs: vec![setup.clone()],
+        tabs: vec![setup],
     };
-    let Some(Created::Block { view: copy, .. }) = home.edit(duplicate).unwrap().created else {
+    let Created::Block { view: copy, .. } = created(&mut home.workspace, duplicate) else {
         panic!("a View of the copy")
     };
     assert_eq!(home.tabs(&copy)[0].setup, kept.setup);

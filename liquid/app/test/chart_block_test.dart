@@ -15,6 +15,10 @@ void main() {
   Finder inPanel(Finder finder) => find.descendant(of: panel, matching: finder);
   Finder inChart(Finder finder) =>
       find.descendant(of: find.byType(ChartBlock), matching: finder);
+  const barCount = BridgeChartSetup(
+    kind: BridgeChartKind.bar,
+    value: BridgeChartValue.count,
+  );
 
   Future<void> tap(WidgetTester tester, Finder finder) async {
     await tester.tap(finder);
@@ -34,8 +38,7 @@ void main() {
   BridgeChartSetup lastSet() =>
       kit.applied(BridgeMutationKind.setChart).last.chart!;
 
-  testWidgets('/chart adds a Chart whose panel picks a Table, a group and a '
-      'value', (tester) async {
+  testWidgets('/chart adds a Chart; its panel picks the data', (tester) async {
     await kit.show(tester, [TablePart(expenses), const TextPart('')]);
     await tester.tap(block(0));
     await tester.pump();
@@ -67,22 +70,14 @@ void main() {
     );
   });
 
-  testWidgets('a Chart draws its points, and its chip changes the kind', (
-    tester,
-  ) async {
+  testWidgets('a Chart draws points; its chip changes kind', (tester) async {
     final semantics = tester.ensureSemantics();
     await kit.show(tester, [
       TablePart(expenses),
-      const ChartPart(
-        BridgeChartSetup(
-          kind: BridgeChartKind.bar,
-          value: BridgeChartValue.count,
-        ),
-        [
-          BridgeChartPoint(label: 'Home', value: 1046),
-          BridgeChartPoint(label: 'Food', value: 84),
-        ],
-      ),
+      const ChartPart(barCount, [
+        BridgeChartPoint(label: 'Home', value: 1046),
+        BridgeChartPoint(label: 'Food', value: 84),
+      ]),
     ]);
     final views = kit.fake.views[kit.page]!;
     await kit.workspace.apply(
@@ -108,9 +103,7 @@ void main() {
     semantics.dispose();
   });
 
-  testWidgets('a line drawn from one line of a Calculation asks for a second', (
-    tester,
-  ) async {
+  testWidgets('a line chart of one point asks for a second', (tester) async {
     await kit.show(tester, [
       const CalculationPart([
         BridgeLineSetup(
@@ -119,13 +112,7 @@ void main() {
           style: BridgeLineStyle.plain,
         ),
       ], title: 'Budget'),
-      const ChartPart(
-        BridgeChartSetup(
-          kind: BridgeChartKind.bar,
-          value: BridgeChartValue.count,
-        ),
-        [BridgeChartPoint(label: 'Rent', value: 900)],
-      ),
+      const ChartPart(barCount, [BridgeChartPoint(label: 'Rent', value: 900)]),
     ]);
     final views = kit.fake.views[kit.page]!;
     await kit.workspace.apply(

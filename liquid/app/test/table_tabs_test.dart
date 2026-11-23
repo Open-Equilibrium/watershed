@@ -11,6 +11,11 @@ import 'page_kit.dart';
 
 void main() {
   final kit = PageKit();
+  final bigCosts = tabOf(
+    BridgeLayout.table,
+    name: 'Big costs',
+    sort: const BridgeSort(field: 'amount', descending: true),
+  );
 
   Future<void> tap(WidgetTester tester, Finder target) async {
     await tester.tap(target);
@@ -47,13 +52,7 @@ void main() {
 
   testWidgets('a View shows its tabs, and a tab its own sort', (tester) async {
     await kit.show(tester, [TablePart(expenses)]);
-    await addTab(
-      tabOf(
-        BridgeLayout.table,
-        name: 'Big costs',
-        sort: const BridgeSort(field: 'amount', descending: true),
-      ),
-    );
+    await addTab(bigCosts);
     await tester.pumpAndSettle();
     expect(tab('Table'), findsOneWidget);
     expect(shows('table sort', 'Sort'), findsOneWidget);
@@ -66,13 +65,7 @@ void main() {
     tester,
   ) async {
     await kit.show(tester, [TablePart(expenses)]);
-    final big = await addTab(
-      tabOf(
-        BridgeLayout.table,
-        name: 'Big costs',
-        sort: const BridgeSort(field: 'amount', descending: true),
-      ),
-    );
+    final big = await addTab(bigCosts);
     final area = kit.workspace.open.value!.area;
     final other = await kit.workspace.apply(
       mutation(BridgeMutationKind.createPage, area: area, text: 'Other'),

@@ -1,6 +1,5 @@
-use super::workspace::{Folder, Memory, lisbon, mutation, query};
+use super::workspace::{lisbon, mutation, open, query};
 use crate::api::chart::{BridgeChartKind, BridgeChartSetup, BridgeChartValue};
-use crate::api::replica::LiquidWorkspace;
 use crate::api::source::{BridgeFileView, BridgeRead, BridgeSourceKind};
 use crate::api::workspace::{
     BridgeFound, BridgeMutation, BridgeMutationKind, BridgeQuery, BridgeQueryKind,
@@ -8,8 +7,7 @@ use crate::api::workspace::{
 
 #[test]
 fn a_source_crosses_the_bridge_and_feeds_a_chart() {
-    let folder = Folder::new("source");
-    let workspace = LiquidWorkspace::open_with(&folder.0, &Memory::default()).unwrap();
+    let (folder, workspace) = open("source");
     let (area, page, _, view) = lisbon(&workspace);
     let files = folder.0.join("files");
     std::fs::create_dir_all(files.join("drafts")).unwrap();

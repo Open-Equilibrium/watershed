@@ -60,6 +60,7 @@ Future<void> addFrom(WidgetTester tester, String key) async {
 void main() {
   late StreamController<void> changed;
 
+  final kit = PageKit();
   final watched = <String>[];
 
   setUp(() {
@@ -78,7 +79,6 @@ void main() {
 
   testWidgets('a CSV Source added from the area’s + opens as a table, '
       'follows its file and feeds a Chart on a Page', (tester) async {
-    final kit = PageKit();
     const path = '/Users/benni/Documents/bank-export.csv';
     SourcePlatform.pickFile = () async => path;
     await kit.show(tester, const [TextPart('October')]);
@@ -122,7 +122,6 @@ void main() {
 
   testWidgets('a folder Source unfolds in the Explorer, and its files open in '
       'the same view with the breadcrumb leading back', (tester) async {
-    final kit = PageKit();
     const path = '/Users/benni/docs';
     SourcePlatform.pickFolder = () async => path;
     await kit.show(tester, const [TextPart('October')]);
@@ -168,7 +167,6 @@ void main() {
 
   testWidgets('a missing file offers to choose another or to remove the '
       'Source, and any other file opens in its default app', (tester) async {
-    final kit = PageKit();
     const path = '/Users/benni/Documents/gone.csv';
     SourcePlatform.pickFile = () async => path;
     final opened = <List<String>>[];
@@ -212,7 +210,6 @@ void main() {
 
   testWidgets('a Chart offers CSV Sources as its data and their columns for '
       'Group by and Value', (tester) async {
-    final kit = PageKit();
     const path = '/Users/benni/Documents/bank-export.csv';
     SourcePlatform.pickFile = () async => path;
     await kit.show(tester, const [

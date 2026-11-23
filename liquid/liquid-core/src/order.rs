@@ -234,58 +234,43 @@ mod tests {
     use automerge::ActorId;
 
     use super::Order;
-    use crate::BlockKind;
     use crate::model::{self, BLOCK, BLOCKS, KIND, SORT, VIEWS};
 
-    #[test]
-    fn a_block_of_an_unknown_kind_keeps_its_view() {
+    fn ordered(blocks: &[(&str, &str, &str)]) -> Order {
         let mut doc = model::document(&ActorId::random());
         model::create_maps(&mut doc, &[BLOCKS, VIEWS]).unwrap();
-        for (block, kind, sort) in [("b1", "text", "a0"), ("b2", "app", "a1")] {
+        for &(block, kind, sort) in blocks {
             model::insert(&mut doc, BLOCKS, block, &[(KIND, kind)]).unwrap();
             let view = format!("v-{block}");
             model::insert(&mut doc, VIEWS, &view, &[(BLOCK, block), (SORT, sort)]).unwrap();
         }
-        let order = Order::read(&doc);
-        let shown: Vec<_> = order
+        Order::read(&doc)
+    }
+
+    fn blocks(order: &Order) -> Vec<&str> {
+        order
             .placed
             .iter()
-            .map(|placed| (placed.view.block.as_str(), placed.view.kind))
-            .collect();
-        assert_eq!(shown, [("b1", BlockKind::Text), ("b2", BlockKind::Unknown)]);
+            .map(|placed| placed.view.block.as_str())
+            .collect()
     }
 
     #[test]
-    fn a_stored_key_past_the_cap_orders_as_no_key() {
-        let mut doc = model::document(&ActorId::random());
-        model::create_maps(&mut doc, &[BLOCKS, VIEWS]).unwrap();
+    fn an_unknown_kind_keeps_its_view_and_an_unusable_key_orders_as_no_key() {
         let over = format!("a0{}", "z".repeat(crate::sort_key::MAX_KEY));
-        for (block, sort) in [("b1", "a0"), ("b2", over.as_str()), ("b3", "a1")] {
-            model::insert(&mut doc, BLOCKS, block, &[(KIND, "text")]).unwrap();
-            let view = format!("v-{block}");
-            model::insert(&mut doc, VIEWS, &view, &[(BLOCK, block), (SORT, sort)]).unwrap();
-        }
-        let mut order = Order::read(&doc);
-        let shown = |order: &Order| -> Vec<String> {
-            order
-                .placed
-                .iter()
-                .map(|placed| placed.view.block.as_str().to_owned())
-                .collect()
-        };
-        assert_eq!(shown(&order), ["b2", "b1", "b3"]);
+        let mut order = ordered(&[
+            ("b1", "text", "a0"),
+            ("b2", "app", "a1"),
+            ("b3", "text", &over),
+        ]);
+        assert_eq!(blocks(&order), ["b3", "b1", "b2"]);
+        assert_eq!(order.placed[1].view.kind, crate::BlockKind::Text);
+        assert_eq!(order.placed[2].view.kind, crate::BlockKind::Unknown);
         let first = order.placed[0].view.id.clone();
-        assert!(
-            matches!(order.key_before(&first), Err(crate::Error::TooLong)),
-            "nothing sorts before a View without a usable key"
-        );
+        assert_eq!(order.key_before(&first), Err(crate::Error::TooLong));
         let mut added = order.placed[1].view.clone();
         added.block = crate::BlockId::stored("b4");
         order.insert("a0V".to_owned(), added);
-        assert_eq!(
-            shown(&order),
-            ["b2", "b1", "b4", "b3"],
-            "an insert agrees with the read"
-        );
+        assert_eq!(blocks(&order), ["b3", "b1", "b4", "b2"]);
     }
 }

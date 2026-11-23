@@ -19,12 +19,11 @@ void main() {
     'the hook watches the manifest of every local crate the bridge builds',
     () {
       final app = Directory.current.uri;
-      final workspace = File('../../Cargo.toml').readAsStringSync();
       final crates = {
         for (final match in RegExp(
           r'^([\w-]+) = \{ path = "([^"]+)"',
           multiLine: true,
-        ).allMatches(workspace))
+        ).allMatches(File('../../Cargo.toml').readAsStringSync()))
           match[1]!: match[2]!,
       };
       final built = <String>{};

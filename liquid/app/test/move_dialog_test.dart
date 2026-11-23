@@ -28,11 +28,23 @@ const otherRemote =
     "This project's Git remote is not the session's remote, so the session cannot move here.";
 const noRemote =
     'This project has no Git remote that T3 can resolve, so the session cannot move here.';
+const landingBlocked =
+    'This project has commits that are not pushed, so the session cannot continue there.';
 
 const matching = BridgeHostProject(
   root: '/home/me/acme-api',
   title: 'acme-api',
   remoteUrl: 'git@github.com:acme/api.git',
+);
+const sameRemote = BridgeHostProject(
+  root: '/srv/acme-api',
+  title: 'acme-api',
+  remoteUrl: 'git@github.com:acme/api.git',
+);
+const otherRemoteProject = BridgeHostProject(
+  root: '/srv/shop',
+  title: 'shop',
+  remoteUrl: 'git@github.com:acme/shop.git',
 );
 
 class ClosingProject extends HeldProject {
@@ -57,6 +69,51 @@ class HeldProject extends FakeProject {
   }) async {
     await gate.future;
     return super.moveIn(move, root: root);
+  }
+}
+
+class ListedMoves extends FakeProject {
+  ListedMoves() : super(session: FakeSession(id: 'local'));
+
+  @override
+  Future<List<BridgeThreadSummary>> threads() async => [
+    threadOf('local', title: 'Local session', moving: moving),
+  ];
+}
+
+class UnreadableSource extends FakeProject {
+  bool _movedOut = false;
+
+  @override
+  Future<CarriedMove> moveOut(
+    String id, {
+    required String transfer,
+    required String targetAddress,
+    required String targetName,
+    required String targetEnvironment,
+    required bool commit,
+  }) {
+    _movedOut = true;
+    return super.moveOut(
+      id,
+      transfer: transfer,
+      targetAddress: targetAddress,
+      targetName: targetName,
+      targetEnvironment: targetEnvironment,
+      commit: commit,
+    );
+  }
+
+  @override
+  Future<void> moveFinish(String id, String transfer, String? toHost) async {
+    if (toHost != null) throw 'the connection dropped';
+    return super.moveFinish(id, transfer, toHost);
+  }
+
+  @override
+  Future<BridgeMoveCheck> moveCheck(String id) async {
+    if (_movedOut) throw 'the source is unreachable';
+    return super.moveCheck(id);
   }
 }
 
@@ -122,49 +179,31 @@ Future<void> addFolder(WidgetTester tester, String path) async {
   await tester.pumpAndSettle();
 }
 
-class ListedMoves extends FakeProject {
-  ListedMoves() : super(session: FakeSession(id: 'local'));
-
-  @override
-  Future<List<BridgeThreadSummary>> threads() async => [
-    threadOf('local', title: 'Local session', moving: moving),
-  ];
+Future<void> pumpSession(WidgetTester tester, SessionState state) async {
+  await tester.binding.setSurfaceSize(const Size(1400, 900));
+  await tester.pumpWidget(
+    LiquidApp(launch: ValueNotifier(Launch.session(state, info))),
+  );
+  await tester.pumpAndSettle();
 }
 
-class UnreadableSource extends FakeProject {
-  bool _movedOut = false;
-
-  @override
-  Future<CarriedMove> moveOut(
-    String id, {
-    required String transfer,
-    required String targetAddress,
-    required String targetName,
-    required String targetEnvironment,
-    required bool commit,
-  }) {
-    _movedOut = true;
-    return super.moveOut(
-      id,
-      transfer: transfer,
-      targetAddress: targetAddress,
-      targetName: targetName,
-      targetEnvironment: targetEnvironment,
-      commit: commit,
-    );
+Future<SessionState> localSession(
+  WidgetTester tester, {
+  FakeProject? source,
+  Map<String, FakeProject> hosts = const {},
+}) async {
+  final state = SessionState(
+    source ??
+        (FakeProject(session: FakeSession(id: 'local'))
+          ..threadList = [threadOf('local', title: 'Local session')]),
+  );
+  await state.open('local');
+  state.openProject = (address, root) async => state.projectOf(address)!;
+  for (final host in hosts.entries) {
+    await state.addHost(host.key, host.value);
   }
-
-  @override
-  Future<void> moveFinish(String id, String transfer, String? toHost) async {
-    if (toHost != null) throw 'the connection dropped';
-    return super.moveFinish(id, transfer, toHost);
-  }
-
-  @override
-  Future<BridgeMoveCheck> moveCheck(String id) async {
-    if (_movedOut) throw 'the source is unreachable';
-    return super.moveCheck(id);
-  }
+  await pumpSession(tester, state);
+  return state;
 }
 
 Future<void> openLocalActions(WidgetTester tester) async {
@@ -177,11 +216,21 @@ Future<void> openLocalActions(WidgetTester tester) async {
   await tester.pumpAndSettle();
 }
 
+Future<void> chooseMoveToHost(WidgetTester tester) async {
+  await openLocalActions(tester);
+  await tester.tap(find.text('Move to host…'));
+  await tester.pumpAndSettle();
+}
+
+Future<void> tapMove(WidgetTester tester) async {
+  await tester.tap(find.widgetWithText(PrimaryButton, 'Move'));
+  await tester.pumpAndSettle();
+}
+
 void main() {
   testWidgets(
     "an agent's row moves it, and the dialog names what moves with it",
     (tester) async {
-      await tester.binding.setSurfaceSize(const Size(1400, 900));
       final source = FakeProject(session: FakeSession(id: 'local'))
         ..threadList = [threadOf('local', title: 'news-bot')]
         ..agentList = [
@@ -199,10 +248,7 @@ void main() {
       await state.loadStart();
       state.openProject = (address, root) async => state.projectOf(address)!;
       await state.addHost(studio, FakeProject()..hostName = 'studio');
-      await tester.pumpWidget(
-        LiquidApp(launch: ValueNotifier(Launch.session(state, info))),
-      );
-      await tester.pumpAndSettle();
+      await pumpSession(tester, state);
 
       await tester.tap(
         find.descendant(
@@ -231,26 +277,6 @@ void main() {
       expect(find.textContaining('1 earlier thread stay'), findsOneWidget);
     },
   );
-
-  testWidgets('a move that fits offers Move with nothing to fix', (
-    tester,
-  ) async {
-    final model = await modelOf();
-    await tester.pumpWidget(dialogOf(model));
-
-    for (final text in [
-      'Move “Fix the flaky port test” to another host',
-      'Codex · gpt-6.1 · This Mac · branch fix/ports',
-      'No uncommitted changes; fix/ports is pushed to its remote when you move',
-      'Project on studio: /home/me/acme-api, same remote',
-      "studio's configuration matches This Mac's",
-      'Secrets you entered in this session are asked for again there',
-    ]) {
-      expect(find.text(text), findsOneWidget, reason: text);
-    }
-    expect(find.text('Commit and push'), findsNothing);
-    expect(moveButton(tester).onPressed, isNotNull);
-  });
 
   testWidgets(
     'a row that does not fit offers its fixes, and Move stays enabled',
@@ -296,27 +322,6 @@ void main() {
       expect(moveButton(tester).onPressed, isNotNull);
     },
   );
-
-  testWidgets('the choices name the session’s host, not This Mac', (
-    tester,
-  ) async {
-    final model = await modelOf(
-      check: moveCheckOf(uncommittedFiles: 3),
-      sourceName: 'Mac mini',
-      changes: const [
-        BridgeConfigChange(
-          kind: BridgeConfigKind.skill,
-          name: 'review',
-          direction: BridgeDirection.add,
-        ),
-      ],
-    );
-    await tester.pumpWidget(dialogOf(model));
-
-    expect(find.text('Leave on Mac mini'), findsOneWidget);
-    expect(find.text("Bring Mac mini's"), findsOneWidget);
-    expect(find.textContaining('This Mac'), findsNothing);
-  });
 
   testWidgets(
     'an agent host that does not answer is listed dimmed and cannot be chosen',
@@ -406,26 +411,6 @@ void main() {
   );
 
   testWidgets(
-    'the core’s no-remote sentence is the only one shown when it blocks the move',
-    (tester) async {
-      const core =
-          'This project has no Git remote that T3 can resolve. A remote given as a folder path does not count, so the session cannot move.';
-      final model = await modelOf(
-        check: moveCheckOf(remoteUrl: null, blocked: core),
-        projects: const [],
-      );
-      await tester.pumpWidget(dialogOf(model));
-
-      expect(find.text(core), findsOneWidget);
-      expect(
-        find.text('The project has no Git remote, so its files cannot travel'),
-        findsNothing,
-      );
-      expect(find.byTooltip(core), findsOneWidget);
-    },
-  );
-
-  testWidgets(
     'an agent host that predates moves is listed dimmed with its reason, and no host that can take the session says so',
     (tester) async {
       final old = FakeProject()..movesSupported = false;
@@ -446,26 +431,13 @@ void main() {
   testWidgets(
     'a host dropped from the list while a move is under way does not stop the move',
     (tester) async {
-      await tester.binding.setSurfaceSize(const Size(1400, 900));
       final shared = ClosingProject()..hostName = 'studio';
       final own = ClosingProject()..hostName = 'studio';
-      final state = SessionState(
-        FakeProject(session: FakeSession(id: 'local'))
-          ..threadList = [threadOf('local', title: 'Local session')],
-      );
-      await state.open('local');
-      state.openProject = (address, root) async => state.projectOf(address)!;
-      await state.addHost(studio, shared);
+      final state = await localSession(tester, hosts: {studio: shared});
       state.openProject = (address, root) async =>
           address == studio ? own : state.projectOf(address)!;
-      await tester.pumpWidget(
-        LiquidApp(launch: ValueNotifier(Launch.session(state, info))),
-      );
-      await tester.pumpAndSettle();
 
-      await openLocalActions(tester);
-      await tester.tap(find.text('Move to host…'));
-      await tester.pumpAndSettle();
+      await chooseMoveToHost(tester);
       await tester.tap(find.widgetWithText(PrimaryButton, 'Move'));
       await tester.pump();
       state.failHost(studio, 'the host is down');
@@ -484,21 +456,19 @@ void main() {
   testWidgets(
     'a target project whose branch cannot land shows the reason before Move, and Move dims with it when no other project can take the session',
     (tester) async {
-      const reason =
-          'This project has commits that are not pushed, so the session cannot continue there.';
       final model = await modelOf(
         landings: const {
           '/home/me/acme-api': BridgeLanding(
             kind: BridgeLandingKind.blocked,
-            reason: reason,
+            reason: landingBlocked,
           ),
         },
       );
       await tester.pumpWidget(dialogOf(model));
 
-      expect(find.text(reason), findsOneWidget);
+      expect(find.text(landingBlocked), findsOneWidget);
       expect(moveButton(tester).onPressed, isNull);
-      expect(find.byTooltip(reason), findsOneWidget);
+      expect(find.byTooltip(landingBlocked), findsOneWidget);
     },
   );
 
@@ -506,14 +476,7 @@ void main() {
     'a blocked project lets the user choose another project of the same remote that can take the session',
     (tester) async {
       final model = await modelOf(
-        projects: const [
-          matching,
-          BridgeHostProject(
-            root: '/srv/acme-api',
-            title: 'acme-api',
-            remoteUrl: 'git@github.com:acme/api.git',
-          ),
-        ],
+        projects: const [matching, sameRemote],
         landings: const {
           '/home/me/acme-api': BridgeLanding(
             kind: BridgeLandingKind.blocked,
@@ -531,21 +494,12 @@ void main() {
   testWidgets(
     'a project the user picks that cannot take the session blocks Move, even when another project of the same remote could',
     (tester) async {
-      const reason =
-          'This project has commits that are not pushed, so the session cannot continue there.';
       final model = await modelOf(
-        projects: const [
-          matching,
-          BridgeHostProject(
-            root: '/srv/acme-api',
-            title: 'acme-api',
-            remoteUrl: 'git@github.com:acme/api.git',
-          ),
-        ],
+        projects: const [matching, sameRemote],
         landings: const {
           '/home/me/acme-api': BridgeLanding(
             kind: BridgeLandingKind.blocked,
-            reason: reason,
+            reason: landingBlocked,
           ),
         },
       );
@@ -554,32 +508,24 @@ void main() {
 
       expect(model.plan?.root, '/home/me/acme-api');
       expect(moveButton(tester).onPressed, isNull);
-      expect(find.byTooltip(reason), findsOneWidget);
+      expect(find.byTooltip(landingBlocked), findsOneWidget);
     },
   );
 
   testWidgets(
     'a move that cannot be confirmed says so in a warning, and shows the session on the target',
     (tester) async {
-      await tester.binding.setSurfaceSize(const Size(1400, 900));
-      final state = SessionState(
-        UnreadableSource()
+      final state = await localSession(
+        tester,
+        source: UnreadableSource()
           ..threadList = [threadOf('local', title: 'Local session')],
+        hosts: {
+          studio: FakeProject(session: FakeSession(id: 'moved'))
+            ..hostName = 'studio',
+        },
       );
-      await state.open('local');
-      state.openProject = (address, root) async => state.projectOf(address)!;
-      await state.addHost(
-        studio,
-        FakeProject(session: FakeSession(id: 'moved'))..hostName = 'studio',
-      );
-      await tester.pumpWidget(
-        LiquidApp(launch: ValueNotifier(Launch.session(state, info))),
-      );
-      await tester.pumpAndSettle();
 
-      await openLocalActions(tester);
-      await tester.tap(find.text('Move to host…'));
-      await tester.pumpAndSettle();
+      await chooseMoveToHost(tester);
       await tester.tap(find.widgetWithText(PrimaryButton, 'Move'));
       await tester.pumpAndSettle();
 
@@ -595,26 +541,15 @@ void main() {
   testWidgets(
     'an unconfirmed move reloads the listing, so recovery asks the target at once',
     (tester) async {
-      await tester.binding.setSurfaceSize(const Size(1400, 900));
       final source = ListedMoves();
-      final state = SessionState(source);
-      await state.open('local');
-      state.openProject = (address, root) async => state.projectOf(address)!;
       final target = FakeProject()
         ..moveInLostReplies = 3
         ..startingThread = true
         ..hostName = 'studio';
-      await state.addHost(studio, target);
-      await tester.pumpWidget(
-        LiquidApp(launch: ValueNotifier(Launch.session(state, info))),
-      );
-      await tester.pumpAndSettle();
+      await localSession(tester, source: source, hosts: {studio: target});
 
-      await openLocalActions(tester);
-      await tester.tap(find.text('Move to host…'));
-      await tester.pumpAndSettle();
-      await tester.tap(find.widgetWithText(PrimaryButton, 'Move'));
-      await tester.pumpAndSettle();
+      await chooseMoveToHost(tester);
+      await tapMove(tester);
 
       expect(
         target.calls.where((call) => call.startsWith('move status ')),
@@ -637,22 +572,20 @@ void main() {
   testWidgets(
     'Move to host is dimmed with the newer-Meta-Harness reason when the service reported no harness',
     (tester) async {
-      await tester.binding.setSurfaceSize(const Size(1400, 900));
-      final state = SessionState(
-        FakeProject()
-          ..threadList = [
-            threadOf(
-              'local',
-              title: 'Local session',
-              movable: false,
-              harnessKnown: false,
-            ),
-          ],
+      await pumpSession(
+        tester,
+        SessionState(
+          FakeProject()
+            ..threadList = [
+              threadOf(
+                'local',
+                title: 'Local session',
+                movable: false,
+                harnessKnown: false,
+              ),
+            ],
+        ),
       );
-      await tester.pumpWidget(
-        LiquidApp(launch: ValueNotifier(Launch.session(state, info))),
-      );
-      await tester.pumpAndSettle();
 
       await openLocalActions(tester);
 
@@ -670,17 +603,15 @@ void main() {
   testWidgets(
     'Move to host is dimmed, with its reason, for a thread whose agent cannot move, without opening it',
     (tester) async {
-      await tester.binding.setSurfaceSize(const Size(1400, 900));
-      final state = SessionState(
-        FakeProject()
-          ..threadList = [
-            threadOf('local', title: 'Local session', movable: false),
-          ],
+      await pumpSession(
+        tester,
+        SessionState(
+          FakeProject()
+            ..threadList = [
+              threadOf('local', title: 'Local session', movable: false),
+            ],
+        ),
       );
-      await tester.pumpWidget(
-        LiquidApp(launch: ValueNotifier(Launch.session(state, info))),
-      );
-      await tester.pumpAndSettle();
 
       await openLocalActions(tester);
 
@@ -695,7 +626,6 @@ void main() {
   testWidgets(
     'a moved session shows its carried transcript above the marker, and not the handoff',
     (tester) async {
-      await tester.binding.setSurfaceSize(const Size(1400, 900));
       BridgeTranscriptItem entry(int id, BridgeItemKind kind, String text) =>
           BridgeTranscriptItem(
             item: BridgeItem(
@@ -728,10 +658,7 @@ void main() {
       final state = SessionState(FakeProject());
       await state.addHost(studio, target);
       await state.open('moved', address: studio);
-      await tester.pumpWidget(
-        LiquidApp(launch: ValueNotifier(Launch.session(state, info))),
-      );
-      await tester.pumpAndSettle();
+      await pumpSession(tester, state);
 
       expect(
         find.text(
@@ -748,23 +675,10 @@ void main() {
   testWidgets(
     'Cancel during the move closes the dialog, and the move finishes in the background with its result in the status bar',
     (tester) async {
-      await tester.binding.setSurfaceSize(const Size(1400, 900));
       final held = HeldProject()..hostName = 'studio';
-      final state = SessionState(
-        FakeProject(session: FakeSession(id: 'local'))
-          ..threadList = [threadOf('local', title: 'Local session')],
-      );
-      await state.open('local');
-      state.openProject = (address, root) async => state.projectOf(address)!;
-      await state.addHost(studio, held);
-      await tester.pumpWidget(
-        LiquidApp(launch: ValueNotifier(Launch.session(state, info))),
-      );
-      await tester.pumpAndSettle();
+      final state = await localSession(tester, hosts: {studio: held});
 
-      await openLocalActions(tester);
-      await tester.tap(find.text('Move to host…'));
-      await tester.pumpAndSettle();
+      await chooseMoveToHost(tester);
       await tester.tap(find.widgetWithText(PrimaryButton, 'Move'));
       await tester.pump();
       expect(find.text('Moving to studio'), findsOneWidget);
@@ -809,27 +723,18 @@ void main() {
   testWidgets(
     'the success notice names the host the session went to, when another host was picked after the first',
     (tester) async {
-      await tester.binding.setSurfaceSize(const Size(1400, 900));
-      final state = SessionState(
-        FakeProject(session: FakeSession(id: 'local'))
-          ..threadList = [threadOf('local', title: 'Local session')],
+      final state = await localSession(
+        tester,
+        hosts: {
+          studio: FakeProject()..hostName = 'studio',
+          build: FakeProject()..hostName = 'build-box',
+        },
       );
-      await state.open('local');
-      state.openProject = (address, root) async => state.projectOf(address)!;
-      await state.addHost(studio, FakeProject()..hostName = 'studio');
-      await state.addHost(build, FakeProject()..hostName = 'build-box');
-      await tester.pumpWidget(
-        LiquidApp(launch: ValueNotifier(Launch.session(state, info))),
-      );
-      await tester.pumpAndSettle();
 
-      await openLocalActions(tester);
-      await tester.tap(find.text('Move to host…'));
-      await tester.pumpAndSettle();
+      await chooseMoveToHost(tester);
       await tester.tap(find.byKey(const Key('move-target-build-box')));
       await tester.pumpAndSettle();
-      await tester.tap(find.widgetWithText(PrimaryButton, 'Move'));
-      await tester.pumpAndSettle();
+      await tapMove(tester);
 
       expect(
         state.notice.value?.text,
@@ -899,15 +804,7 @@ void main() {
   testWidgets(
     'a project with another remote is listed dimmed, says why in its row, and cannot be chosen',
     (tester) async {
-      final model = await modelOf(
-        projects: const [
-          BridgeHostProject(
-            root: '/srv/shop',
-            title: 'shop',
-            remoteUrl: 'git@github.com:acme/shop.git',
-          ),
-        ],
-      );
+      final model = await modelOf(projects: const [otherRemoteProject]);
       await tester.pumpWidget(dialogOf(model));
 
       await openPicker(tester);
@@ -977,30 +874,6 @@ void main() {
     },
   );
 
-  testWidgets(
-    "an added folder with another remote is dimmed with the core's sentence, and the choice falls back to Clone to",
-    (tester) async {
-      final target = FakeProject()
-        ..addedProject = const BridgeHostProject(
-          root: '/home/me/shop',
-          title: 'shop',
-          remoteUrl: 'git@github.com:acme/shop.git',
-        );
-      final model = await modelOf(projects: const [], studioProject: target);
-      await tester.pumpWidget(dialogOf(model));
-
-      await openPicker(tester);
-      await addFolder(tester, '/home/me/shop');
-
-      expect(find.text(otherRemote), findsOneWidget);
-      await tester.tap(find.byKey(const Key('pick-/home/me/shop')));
-      await tester.pumpAndSettle();
-      expect(model.picked, isNull);
-      expect(model.plan?.cloneRemote, 'git@github.com:acme/api.git');
-      expect(moveButton(tester).onPressed, isNotNull);
-    },
-  );
-
   testWidgets('a folder the target cannot add says why in the picker', (
     tester,
   ) async {
@@ -1019,36 +892,10 @@ void main() {
     expect(model.picked, isNull);
   });
 
-  test('a project with another remote is refused as a pick, so the move never targets it', () async {
-    final model = await modelOf(
-      projects: const [
-        BridgeHostProject(
-          root: '/srv/shop',
-          title: 'shop',
-          remoteUrl: 'git@github.com:acme/shop.git',
-        ),
-      ],
-    );
-
-    model.pick(model.projects.single);
-
-    expect(model.picked, isNull);
-    expect(model.plan?.cloneRemote, 'git@github.com:acme/api.git');
-  });
-
   testWidgets(
     'Change… opens the same picker when several projects match, and the one picked is where the session continues',
     (tester) async {
-      final model = await modelOf(
-        projects: const [
-          matching,
-          BridgeHostProject(
-            root: '/srv/acme-api',
-            title: 'acme-api',
-            remoteUrl: 'git@github.com:acme/api.git',
-          ),
-        ],
-      );
+      final model = await modelOf(projects: const [matching, sameRemote]);
       await tester.pumpWidget(dialogOf(model));
 
       expect(

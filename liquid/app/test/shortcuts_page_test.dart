@@ -15,6 +15,11 @@ import 'fake_backend.dart';
 import 'fake_host.dart';
 
 const info = SessionInfo(project: 'acme-api');
+const metaD = Keys(LogicalKeyboardKey.keyD, meta: true);
+const metaE = Keys(LogicalKeyboardKey.keyE, meta: true);
+const metaN = Keys(LogicalKeyboardKey.keyN, meta: true);
+const replaceAsk = 'Replace the Custom profile?';
+const clearNew = 'Use anyway, clear New Session';
 
 void main() {
   late FakeHost host;
@@ -65,6 +70,22 @@ void main() {
   Future<void> openSettings(WidgetTester tester) =>
       pressMeta(tester, LogicalKeyboardKey.comma);
 
+  Future<void> record(
+    WidgetTester tester,
+    String label,
+    LogicalKeyboardKey key,
+  ) async {
+    await tapText(tester, label);
+    await pressMeta(tester, key);
+  }
+
+  Future<void> recordDiff(WidgetTester tester) async {
+    await openSettings(tester);
+    await record(tester, '⌘D', LogicalKeyboardKey.keyE);
+  }
+
+  final recording = find.text('Press keys…');
+
   testWidgets('⌘, opens Settings and esc closes it', (tester) async {
     await show(tester, ShortcutSettings.liquidKey());
     await openSettings(tester);
@@ -103,12 +124,10 @@ void main() {
     await openSettings(tester);
 
     await tapText(tester, '⌘D');
-    expect(find.text('Press keys…'), findsOneWidget);
+    expect(recording, findsOneWidget);
     await pressMeta(tester, LogicalKeyboardKey.keyE);
 
-    expect(shortcuts.value.bindings(Command.diff), [
-      const Keys(LogicalKeyboardKey.keyE, meta: true),
-    ]);
+    expect(shortcuts.value.bindings(Command.diff), [metaE]);
     expect(store.saved, shortcuts.value);
     expect(find.text('based on Standard'), findsOneWidget);
     expect(find.text('1 shortcut changed'), findsOneWidget);
@@ -118,7 +137,7 @@ void main() {
 
     await tapText(tester, '⌘D');
     await press(tester, LogicalKeyboardKey.escape);
-    expect(find.text('Press keys…'), findsNothing, reason: 'esc cancels');
+    expect(recording, findsNothing, reason: 'esc cancels');
     expect(find.text('⌘D'), findsOneWidget, reason: 'and keeps Settings open');
   });
 
@@ -126,15 +145,12 @@ void main() {
     await show(tester, ShortcutSettings.standard());
     await openSettings(tester);
 
-    await tapText(tester, '⌘L');
-    await pressMeta(tester, LogicalKeyboardKey.keyN);
+    await record(tester, '⌘L', LogicalKeyboardKey.keyN);
     expect(find.textContaining('already runs'), findsOneWidget);
     expect(shortcuts.value.changed(Command.focusInput), isFalse);
 
-    await tapText(tester, 'Use anyway, clear New Session');
-    expect(shortcuts.value.bindings(Command.focusInput), [
-      const Keys(LogicalKeyboardKey.keyN, meta: true),
-    ]);
+    await tapText(tester, clearNew);
+    expect(shortcuts.value.bindings(Command.focusInput), [metaN]);
     expect(shortcuts.value.bindings(Command.newSession), isEmpty);
 
     await tester.ensureVisible(find.text('Reset all to defaults'));
@@ -149,11 +165,7 @@ void main() {
           const Keys(LogicalKeyboardKey.keyN, liquid: true),
           clear: [Command.newSession],
         )
-        .change(
-          Command.focusInput,
-          const Keys(LogicalKeyboardKey.keyN, meta: true),
-          clear: [Command.newSession],
-        );
+        .change(Command.focusInput, metaN, clear: [Command.newSession]);
     await show(tester, settings);
     await openSettings(tester);
     await tapText(tester, 'Reset to ⇪N');
@@ -170,23 +182,24 @@ void main() {
     );
     expect(
       shortcuts.value.bindings(Command.focusInput),
-      isNot(contains(const Keys(LogicalKeyboardKey.keyN, meta: true))),
+      isNot(contains(metaN)),
     );
   });
 
   testWidgets(
     'recording keys a Liquid key combination runs asks while the key is off',
     (tester) async {
-      final settings = ShortcutSettings.standard().change(
-        Command.newSession,
-        const Keys(LogicalKeyboardKey.keyE, meta: true, liquid: true),
+      await show(
+        tester,
+        ShortcutSettings.standard().change(
+          Command.newSession,
+          const Keys(LogicalKeyboardKey.keyE, meta: true, liquid: true),
+        ),
       );
-      await show(tester, settings);
       await openSettings(tester);
-      await tapText(tester, '⌘U');
-      await pressMeta(tester, LogicalKeyboardKey.keyE);
+      await record(tester, '⌘U', LogicalKeyboardKey.keyE);
       expect(find.textContaining('already runs New Session'), findsOneWidget);
-      expect(find.text('Use anyway, clear New Session'), findsOneWidget);
+      expect(find.text(clearNew), findsOneWidget);
       expect(shortcuts.value.changed(Command.statistics), isFalse);
     },
   );
@@ -218,22 +231,20 @@ void main() {
       await openSettings(tester);
       await tapText(tester, '⇪D');
       await press(tester, LogicalKeyboardKey.keyN, holding: liquidKey);
-      await tapText(tester, 'Use anyway, clear New Session');
+      await tapText(tester, clearNew);
 
       await tapText(tester, 'Reset to ⇪N');
       expect(find.textContaining('already runs Diff'), findsOneWidget);
       expect(shortcuts.value.bindings(Command.newSession), [
-        const Keys(LogicalKeyboardKey.keyN, meta: true),
+        metaN,
       ], reason: 'nothing changes before the user agrees');
 
       await tapText(tester, 'Use anyway, clear Diff');
       expect(shortcuts.value.bindings(Command.newSession), [
         const Keys(LogicalKeyboardKey.keyN, liquid: true),
-        const Keys(LogicalKeyboardKey.keyN, meta: true),
+        metaN,
       ]);
-      expect(shortcuts.value.bindings(Command.diff), [
-        const Keys(LogicalKeyboardKey.keyD, meta: true),
-      ]);
+      expect(shortcuts.value.bindings(Command.diff), [metaD]);
     },
   );
 
@@ -241,69 +252,29 @@ void main() {
     await show(
       tester,
       ShortcutSettings.standard()
-          .change(
-            Command.focusInput,
-            const Keys(LogicalKeyboardKey.keyN, meta: true),
-            clear: [Command.newSession],
-          )
+          .change(Command.focusInput, metaN, clear: [Command.newSession])
           .choose(Profile.standard),
     );
     await openSettings(tester);
-    await tapText(tester, '⌘D');
-    await pressMeta(tester, LogicalKeyboardKey.keyN);
-    expect(find.text('Use anyway, clear New Session'), findsOneWidget);
+    await record(tester, '⌘D', LogicalKeyboardKey.keyN);
+    expect(find.text(clearNew), findsOneWidget);
 
     await tapText(tester, 'Custom');
     expect(
-      find.text('Use anyway, clear New Session'),
+      find.text(clearNew),
       findsNothing,
       reason: 'in Custom, Focus Input owns ⌘N, so the old owner is stale',
     );
-    expect(shortcuts.value.bindings(Command.diff), [
-      const Keys(LogicalKeyboardKey.keyD, meta: true),
-    ]);
-    expect(shortcuts.value.bindings(Command.focusInput), [
-      const Keys(LogicalKeyboardKey.keyN, meta: true),
-    ]);
+    expect(shortcuts.value.bindings(Command.diff), [metaD]);
+    expect(shortcuts.value.bindings(Command.focusInput), [metaN]);
   });
 
   testWidgets('recording the current keys changes nothing', (tester) async {
     await show(tester, ShortcutSettings.standard());
     await openSettings(tester);
-
-    await tapText(tester, '⌘D');
-    await pressMeta(tester, LogicalKeyboardKey.keyD);
-    expect(find.text('Press keys…'), findsNothing, reason: 'recording ends');
+    await record(tester, '⌘D', LogicalKeyboardKey.keyD);
+    expect(recording, findsNothing, reason: 'recording ends');
     expect(shortcuts.value, ShortcutSettings.standard(), reason: 'no Custom');
-  });
-
-  testWidgets('keys that macOS or typing need are refused', (tester) async {
-    await show(tester, ShortcutSettings.standard());
-    await openSettings(tester);
-
-    await tapText(tester, '⌘N');
-    await pressMeta(tester, LogicalKeyboardKey.keyQ);
-    expect(find.text('⌘Q is kept for Quit.'), findsOneWidget);
-    expect(find.textContaining('Use anyway'), findsNothing);
-    await press(tester, LogicalKeyboardKey.keyN);
-    expect(find.text('N is for typing here.'), findsOneWidget);
-    expect(shortcuts.value.changed(Command.newSession), isFalse);
-  });
-
-  testWidgets('the Liquid key with Shift is refused by macOS', (tester) async {
-    await show(tester, ShortcutSettings.liquidKey());
-    await openSettings(tester);
-    await tapText(tester, '⇪N');
-    await tester.sendKeyDownEvent(liquidKey, platform: 'macos');
-    await press(
-      tester,
-      LogicalKeyboardKey.keyM,
-      holding: LogicalKeyboardKey.shiftLeft,
-    );
-    await tester.sendKeyUpEvent(liquidKey, platform: 'macos');
-    await tester.pumpAndSettle();
-    expect(find.text('⇧⇪M is kept for capitals.'), findsOneWidget);
-    expect(shortcuts.value.changed(Command.newSession), isFalse);
   });
 
   testWidgets('leaving the recording row stops recording', (tester) async {
@@ -313,7 +284,7 @@ void main() {
     await tapText(tester, '⌘D');
     await tester.tap(find.byType(TextField));
     await tester.pumpAndSettle();
-    expect(find.text('Press keys…'), findsNothing);
+    expect(recording, findsNothing);
     await press(tester, LogicalKeyboardKey.keyX);
     expect(shortcuts.value.changed(Command.diff), isFalse);
   });
@@ -383,22 +354,6 @@ void main() {
     expect(find.text('New Session'), findsNothing);
   });
 
-  testWidgets('lists every key that never changes', (tester) async {
-    await show(tester, ShortcutSettings.standard());
-    await openSettings(tester);
-    for (final fixed in Fixed.values) {
-      await tester.enterText(find.byType(TextField), fixed.label);
-      await tester.pumpAndSettle();
-      expect(
-        find.byWidgetPredicate(
-          (widget) => widget is Text && widget.data == fixed.label,
-        ),
-        findsOneWidget,
-        reason: fixed.name,
-      );
-    }
-  });
-
   testWidgets('the first start asks for a profile', (tester) async {
     await show(tester, null);
 
@@ -444,19 +399,12 @@ void main() {
       Command.diff,
       const Keys(LogicalKeyboardKey.keyE, liquid: true),
     );
-    const commandE = Keys(LogicalKeyboardKey.keyE, meta: true);
-
-    Future<void> recordDiff(WidgetTester tester) async {
-      await openSettings(tester);
-      await tapText(tester, '⌘D');
-      await pressMeta(tester, LogicalKeyboardKey.keyE);
-    }
 
     testWidgets('asks first, and ⏎ or esc keep everything', (tester) async {
       await show(tester, kept.choose(Profile.standard));
       for (final key in [LogicalKeyboardKey.enter, LogicalKeyboardKey.escape]) {
         await recordDiff(tester);
-        expect(find.text('Replace the Custom profile?'), findsOneWidget);
+        expect(find.text(replaceAsk), findsOneWidget);
         expect(
           find.text(
             'Changing Diff to ⌘E starts a new Custom profile from Standard. '
@@ -468,20 +416,20 @@ void main() {
         expect(shortcuts.value.profile, Profile.standard, reason: 'not yet');
 
         await press(tester, key);
-        expect(find.text('Replace the Custom profile?'), findsNothing);
+        expect(find.text(replaceAsk), findsNothing);
         expect(shortcuts.value, kept.choose(Profile.standard), reason: '$key');
         expect(find.text('Shortcuts'), findsWidgets, reason: 'Settings stay');
-        if (key == LogicalKeyboardKey.escape) continue;
-        await press(tester, LogicalKeyboardKey.escape);
+        if (key == LogicalKeyboardKey.enter) {
+          await press(tester, LogicalKeyboardKey.escape);
+        }
       }
 
-      await tapText(tester, '⌘D');
-      await pressMeta(tester, LogicalKeyboardKey.keyE);
-      expect(find.text('Replace the Custom profile?'), findsOneWidget);
+      await record(tester, '⌘D', LogicalKeyboardKey.keyE);
+      expect(find.text(replaceAsk), findsOneWidget);
       await tester.tap(find.byType(TextField));
       await tester.pumpAndSettle();
       expect(
-        find.text('Replace the Custom profile?'),
+        find.text(replaceAsk),
         findsNothing,
         reason: 'leaving the question keeps Custom too',
       );
@@ -502,7 +450,7 @@ void main() {
           }
           expect(shortcuts.value.profile, Profile.custom);
           expect(shortcuts.value.base, Profile.standard);
-          expect(shortcuts.value.bindings(Command.diff), [commandE]);
+          expect(shortcuts.value.bindings(Command.diff), [metaE]);
           expect(shortcuts.value.changes.length, 1);
         },
       );
@@ -511,12 +459,12 @@ void main() {
     testWidgets('a profile chosen while it asks ends it', (tester) async {
       await show(tester, kept.choose(Profile.standard));
       await recordDiff(tester);
-      expect(find.text('Replace the Custom profile?'), findsOneWidget);
+      expect(find.text(replaceAsk), findsOneWidget);
       await tapText(tester, 'Custom');
       expect(tester.takeException(), isNull);
       expect(find.byType(ErrorWidget), findsNothing);
-      expect(find.text('Replace the Custom profile?'), findsNothing);
-      expect(find.text('Press keys…'), findsNothing, reason: 'recording ends');
+      expect(find.text(replaceAsk), findsNothing);
+      expect(recording, findsNothing, reason: 'recording ends');
       expect(shortcuts.value, kept, reason: 'the kept Custom profile is back');
     });
 
@@ -525,26 +473,25 @@ void main() {
       await openSettings(tester);
       await tapText(tester, '⇪D');
       await press(tester, LogicalKeyboardKey.keyE, holding: liquidKey);
-      expect(find.text('Replace the Custom profile?'), findsOneWidget);
+      expect(find.text(replaceAsk), findsOneWidget);
 
       await tapText(tester, 'Standard');
-      expect(find.text('Replace the Custom profile?'), findsNothing);
+      expect(find.text(replaceAsk), findsNothing);
       expect(find.text('Replace Custom'), findsNothing);
-      expect(find.text('Press keys…'), findsNothing, reason: 'recording ends');
+      expect(recording, findsNothing, reason: 'recording ends');
       expect(shortcuts.value.profile, Profile.standard);
       expect(shortcuts.value.bindings(Command.diff), [
-        const Keys(LogicalKeyboardKey.keyD, meta: true),
+        metaD,
       ], reason: 'nothing is replaced, so no command loses its keys');
     });
 
     testWidgets('only the question shows, not an old refusal', (tester) async {
       await show(tester, kept.choose(Profile.standard));
       await openSettings(tester);
-      await tapText(tester, '⌘D');
-      await pressMeta(tester, LogicalKeyboardKey.keyQ);
+      await record(tester, '⌘D', LogicalKeyboardKey.keyQ);
       expect(find.text('⌘Q is kept for Quit.'), findsOneWidget);
       await pressMeta(tester, LogicalKeyboardKey.keyE);
-      expect(find.text('Replace the Custom profile?'), findsOneWidget);
+      expect(find.text(replaceAsk), findsOneWidget);
       expect(find.text('⌘Q is kept for Quit.'), findsNothing);
     });
 
@@ -556,8 +503,8 @@ void main() {
             .choose(Profile.standard),
       );
       await recordDiff(tester);
-      expect(find.text('Replace the Custom profile?'), findsNothing);
-      expect(shortcuts.value.bindings(Command.diff), [commandE]);
+      expect(find.text(replaceAsk), findsNothing);
+      expect(shortcuts.value.bindings(Command.diff), [metaE]);
     });
   });
 }

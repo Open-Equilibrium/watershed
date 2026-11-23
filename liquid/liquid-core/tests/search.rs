@@ -1,11 +1,11 @@
 #![allow(clippy::unwrap_used)]
 
-use liquid_core::{
-    Actor, Applied, AreaId, BlockId, Created, Document, Error, Found, Hit, MemoryStore, Mutation,
-    Origin, PageId, PersonId, Request, Store, ViewId,
-};
+mod common;
 
-type Workspace = liquid_core::Workspace<MemoryStore>;
+use common::*;
+use liquid_core::{
+    AreaId, BlockId, Created, Document, Error, Found, Hit, Layout, Mutation, PageId, Store, ViewId,
+};
 
 struct Home {
     workspace: Workspace,
@@ -14,54 +14,48 @@ struct Home {
 
 impl Home {
     fn new() -> Self {
-        let workspace = Workspace::create(PersonId::new("benni"), MemoryStore::default()).unwrap();
-        let mut home = Self {
-            workspace,
-            area: AreaId::parse(&"0".repeat(32)).unwrap(),
-        };
-        let Some(Created::Area(area)) = home
-            .edit(Mutation::CreateArea {
+        let mut workspace = workspace();
+        let Created::Area(area) = created(
+            &mut workspace,
+            Mutation::CreateArea {
                 name: "Private".into(),
-            })
-            .unwrap()
-            .created
-        else {
+            },
+        ) else {
             panic!("an area")
         };
-        home.area = area;
-        home
-    }
-
-    fn edit(&mut self, mutation: Mutation) -> Result<Applied, Error> {
-        self.workspace.apply(Request {
-            actor: Actor::Person(PersonId::new("benni")),
-            origin: Origin::Ui,
-            mutation,
-        })
+        Self { workspace, area }
     }
 
     fn page(&mut self, title: &str) -> PageId {
-        let create = Mutation::CreatePage {
-            area: self.area.clone(),
-            parent: None,
-            title: title.into(),
+        let Created::Page(page) = created(
+            &mut self.workspace,
+            Mutation::CreatePage {
+                area: self.area.clone(),
+                parent: None,
+                title: title.into(),
+            },
+        ) else {
+            panic!("a Page")
         };
-        match self.edit(create).unwrap().created {
-            Some(Created::Page(page)) => page,
-            other => panic!("a Page, got {other:?}"),
-        }
+        page
     }
 
     fn text(&mut self, page: &PageId, text: &str) -> (BlockId, ViewId) {
-        let add = Mutation::AddTextBlock {
-            page: page.clone(),
-            after: None,
-            text: text.into(),
+        let Created::Block { block, view } = created(
+            &mut self.workspace,
+            Mutation::AddTextBlock {
+                page: page.clone(),
+                after: None,
+                text: text.into(),
+            },
+        ) else {
+            panic!("a Text Block")
         };
-        match self.edit(add).unwrap().created {
-            Some(Created::Block { block, view }) => (block, view),
-            other => panic!("a Text Block, got {other:?}"),
-        }
+        (block, view)
+    }
+
+    fn edit(&mut self, mutation: Mutation) -> Result<(), Error> {
+        apply(&mut self.workspace, mutation).map(|_| ())
     }
 
     fn found(&mut self, query: &str, found: Found) -> Vec<Hit> {
@@ -82,13 +76,15 @@ fn titles_names_and_text_are_found_by_the_start_of_their_words() {
     let trip = home.page("Trip to Lisbon");
     let budget = home.page("Household budget");
     let (block, _) = home.text(&trip, "We expect rain on Tuesday.");
-    let add = Mutation::AddDatabaseBlock {
-        page: budget.clone(),
-        after: None,
-        name: "Expenses".into(),
-        layout: liquid_core::Layout::Table,
-    };
-    let Some(Created::Block { block: table, .. }) = home.edit(add).unwrap().created else {
+    let Created::Block { block: table, .. } = created(
+        &mut home.workspace,
+        Mutation::AddDatabaseBlock {
+            page: budget,
+            after: None,
+            name: "Expenses".into(),
+            layout: Layout::Table,
+        },
+    ) else {
         panic!("a Table")
     };
     assert_eq!(home.ids("lis", Found::Page), [trip.to_string()]);
@@ -131,11 +127,8 @@ fn edits_renames_and_removals_keep_the_index_current() {
     .unwrap();
     assert!(home.ids("lisbon", Found::Page).is_empty());
     assert_eq!(home.ids("porto", Found::Page), [trip.to_string()]);
-    home.edit(Mutation::RemoveView {
-        page: trip.clone(),
-        view,
-    })
-    .unwrap();
+    home.edit(Mutation::RemoveView { page: trip, view })
+        .unwrap();
     assert!(home.ids("alfama", Found::Text).is_empty());
 }
 
@@ -147,8 +140,7 @@ fn a_replica_without_its_index_builds_it_once_opened() {
     let mut store = home.workspace.into_store();
     store.drop_index();
     let mut workspace = Workspace::open(store).unwrap();
-    let hits = workspace.search("novem", Found::Text, 10).unwrap();
-    assert_eq!(hits.len(), 1);
+    assert_eq!(workspace.search("novem", Found::Text, 10).unwrap().len(), 1);
     assert_eq!(workspace.search("lisb", Found::Page, 10).unwrap().len(), 1);
     let long = "x".repeat(liquid_core::MAX_FILTER_TEXT + 1);
     assert_eq!(

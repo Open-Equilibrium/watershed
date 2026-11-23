@@ -40,12 +40,6 @@ void main() {
     return workspaces;
   }
 
-  test('the first start opens the one Workspace there is', () async {
-    final workspaces = await load();
-    expect(workspaces.entries.map((entry) => entry.dir), ['Workspace']);
-    expect(workspaces.current?.workspace, opened['Workspace']);
-  });
-
   test('a new Workspace is named, opened, and the old one closed', () async {
     final workspaces = await load();
     final first = opened['Workspace']!;

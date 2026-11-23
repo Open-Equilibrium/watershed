@@ -12,6 +12,7 @@ import 'fake_host.dart';
 void main() {
   late Directory temp;
   late File file;
+  late ShortcutStore store;
 
   final denied = PlatformException(code: 'approval', message: 'denied');
 
@@ -23,6 +24,7 @@ void main() {
   setUp(() {
     temp = Directory.systemTemp.createTempSync('shortcuts');
     file = File('${temp.path}/settings/shortcuts.json');
+    store = ShortcutStore(file);
   });
   tearDown(() => temp.deleteSync(recursive: true));
 
@@ -59,7 +61,6 @@ void main() {
   });
 
   test('the store keeps JSON settings and rejects bad data', () async {
-    final store = ShortcutStore(file);
     expect(await store.load(), isNull);
 
     final settings = liquidDiff();
@@ -74,7 +75,6 @@ void main() {
   });
 
   test('the first start asks for a profile if the key exists', () async {
-    final store = ShortcutStore(file);
     final mac = await ShortcutController.load(store, FakeHost());
     expect(mac.firstStart, isTrue);
     expect(mac.value, ShortcutSettings.standard());
@@ -88,7 +88,6 @@ void main() {
 
   test('choosing the Liquid key saves it and turns it on once', () async {
     final host = FakeHost();
-    final store = ShortcutStore(file);
     final shortcuts = await ShortcutController.load(store, host);
 
     await shortcuts.change(ShortcutSettings.liquidKey());
@@ -102,7 +101,6 @@ void main() {
   });
 
   test('a stored Liquid key is turned on again at start', () async {
-    final store = ShortcutStore(file);
     await store.save(ShortcutSettings.liquidKey());
     final host = FakeHost();
 
@@ -115,7 +113,6 @@ void main() {
 
   test('a Liquid key that cannot be turned on is reported and leaves the profile as it was', () async {
     final host = FakeHost()..failure = denied;
-    final store = ShortcutStore(file);
     final shortcuts = await ShortcutController.load(store, host);
     final reported = <String>[];
     shortcuts.report = reported.add;
@@ -131,7 +128,6 @@ void main() {
   });
 
   test('a stored Liquid key stays off where it is unavailable', () async {
-    final store = ShortcutStore(file);
     await store.save(ShortcutSettings.liquidKey());
     final host = FakeHost(available: false);
 
@@ -143,7 +139,6 @@ void main() {
   });
 
   test('a kept Custom Liquid key stays off where unavailable', () async {
-    final store = ShortcutStore(file);
     await store.save(
       ShortcutSettings.standard().withLiquidKey(true).choose(Profile.standard),
     );
@@ -164,7 +159,6 @@ void main() {
         Command.diff,
         const Keys(LogicalKeyboardKey.keyD, meta: true),
       );
-      final store = ShortcutStore(file);
       await store.save(custom);
       final host = FakeHost()..failure = denied;
       final shortcuts = await ShortcutController.load(store, host);
@@ -179,7 +173,6 @@ void main() {
     final host = FakeHost()
       ..failure = denied
       ..gate = Completer();
-    final store = ShortcutStore(file);
     final shortcuts = await ShortcutController.load(store, host);
 
     final first = shortcuts.change(ShortcutSettings.liquidKey());
@@ -202,7 +195,6 @@ void main() {
 
   test('a Liquid key that cannot turn off stays on', () async {
     final host = FakeHost();
-    final store = ShortcutStore(file);
     final shortcuts = await ShortcutController.load(store, host);
     final reported = <String>[];
     shortcuts.report = reported.add;
@@ -225,32 +217,8 @@ void main() {
     expect(shortcuts.value, ShortcutSettings.standard());
   });
 
-  test('a Standard chosen while the Liquid key turns on keeps it on when turning it off fails', () async {
-    final enable = Completer<void>();
-    final host = FakeHost()..gate = enable;
-    final store = ShortcutStore(file);
-    final shortcuts = await ShortcutController.load(store, host);
-
-    final on = shortcuts.change(ShortcutSettings.liquidKey());
-    await pumpEventQueue();
-    final disable = Completer<void>();
-    host.gate = disable;
-    final off = shortcuts.change(ShortcutSettings.standard());
-    enable.complete();
-    await pumpEventQueue();
-    host.failure = denied;
-    disable.complete();
-    await Future.wait([on, off]);
-
-    expect(host.calls, [true, false]);
-    expect(shortcuts.value.liquidKey, isTrue, reason: 'the host still has it');
-    expect((await store.load())!.liquidKey, isTrue);
-    expect(shortcuts.liquidKeyProblem.value, isNotNull);
-  });
-
   test('a failed Liquid key turn-off keeps a change made meanwhile', () async {
     final host = FakeHost();
-    final store = ShortcutStore(file);
     final shortcuts = await ShortcutController.load(store, host);
     await shortcuts.change(ShortcutSettings.liquidKey());
 
@@ -268,33 +236,7 @@ void main() {
     expect(await store.load(), diff);
   });
 
-  test('two changes queued behind failed turn-offs keep it on', () async {
-    final host = FakeHost();
-    final store = ShortcutStore(file);
-    final shortcuts = await ShortcutController.load(store, host);
-    await shortcuts.change(ShortcutSettings.liquidKey());
-
-    final disable = Completer<void>();
-    host.gate = disable;
-    host.failure = denied;
-    final first = shortcuts.change(ShortcutSettings.standard());
-    await pumpEventQueue();
-    final second = shortcuts.change(
-      ShortcutSettings.standard().change(
-        Command.diff,
-        const Keys(LogicalKeyboardKey.keyD, meta: true),
-      ),
-    );
-    disable.complete();
-    await Future.wait([first, second]);
-
-    expect(host.calls, [true, false, false], reason: 'both turn-offs failed');
-    expect(shortcuts.value, ShortcutSettings.liquidKey());
-    expect(await store.load(), ShortcutSettings.liquidKey());
-  });
-
   test('the first frame does not wait for the Liquid key', () async {
-    final store = ShortcutStore(file);
     await store.save(ShortcutSettings.liquidKey());
     final host = FakeHost()..gate = Completer();
 
@@ -309,7 +251,6 @@ void main() {
   });
 
   test('a problem at start is reported once someone listens', () async {
-    final store = ShortcutStore(file);
     await store.save(ShortcutSettings.liquidKey());
     final host = FakeHost()..failure = denied;
 

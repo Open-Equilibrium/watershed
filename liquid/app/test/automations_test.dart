@@ -43,6 +43,22 @@ BridgeAutomationSetup flagLarge(String table) => BridgeAutomationSetup(
   ],
 );
 
+BridgeWorkspaceAutomation automationOf(
+  String table,
+  BridgeAutomationSetup setup,
+) => BridgeWorkspaceAutomation(
+  id: 'a1',
+  setup: setup,
+  on_: true,
+  owner: table,
+  role: canEdit,
+);
+
+Future<void> tap(WidgetTester tester, Finder finder) async {
+  await tester.tap(finder);
+  await tester.pumpAndSettle();
+}
+
 Future<String> showBudget(
   WidgetTester tester,
   PageKit kit, {
@@ -52,38 +68,36 @@ Future<String> showBudget(
   return kit.fake.databases.keys.single;
 }
 
-Future<void> openAutomations(WidgetTester tester) async {
-  await tester.tap(find.byKey(const Key('sidebar automations')));
-  await tester.pumpAndSettle();
-}
+Future<void> openAutomations(WidgetTester tester) =>
+    tap(tester, find.byKey(const Key('sidebar automations')));
 
 Future<void> choose(WidgetTester tester, String token, String choice) async {
-  await tester.tap(find.byKey(Key('token $token')));
-  await tester.pumpAndSettle();
-  await tester.tap(find.text(choice).last);
+  await tap(tester, find.byKey(Key('token $token')));
+  await tap(tester, find.text(choice).last);
+}
+
+Future<void> turnOn(WidgetTester tester, PageKit kit) async {
+  await kit.workspace.apply(
+    mutation(BridgeMutationKind.setAutomationOn, automation: 'a1', on: true),
+  );
   await tester.pumpAndSettle();
 }
 
 BridgeAutomationSetup lastSetup(PageKit kit) =>
     kit.applied(BridgeMutationKind.setAutomation).last.automationSetup!;
 
+void expectOne(Finder finder) => expect(finder, findsOneWidget);
+void expectNone(Finder finder) => expect(finder, findsNothing);
+
 void main() {
-  testWidgets('the Automations dialog lists each one with its trigger, owner '
-      'and status, and the sidebar counts those that need attention', (
+  testWidgets('the Automations dialog lists each with its trigger, owner and '
+      'status, and the sidebar counts those that need attention', (
     tester,
   ) async {
     final kit = PageKit();
     final table = await showBudget(tester, kit);
     kit.fake.automations
-      ..add(
-        BridgeWorkspaceAutomation(
-          id: 'a1',
-          setup: flagLarge(table),
-          on_: true,
-          owner: table,
-          role: canEdit,
-        ),
-      )
+      ..add(automationOf(table, flagLarge(table)))
       ..add(
         const BridgeWorkspaceAutomation(
           id: 'a2',
@@ -100,16 +114,12 @@ void main() {
           ),
         ),
       );
-    await kit.workspace.apply(
-      mutation(BridgeMutationKind.setAutomationOn, automation: 'a1', on: true),
-    );
-    await tester.pumpAndSettle();
-    expect(
+    await turnOn(tester, kit);
+    expectOne(
       find.descendant(
         of: find.byKey(const Key('sidebar automations')),
         matching: find.text('1'),
       ),
-      findsOneWidget,
     );
 
     await openAutomations(tester);
@@ -129,25 +139,25 @@ void main() {
       expect(listed(shown), findsOneWidget, reason: shown);
     }
 
-    await tester.tap(find.text('Monthly summary'));
-    await tester.pumpAndSettle();
-    expect(
-      find.textContaining('Turned off: its Table “Bills” was deleted'),
-      findsOneWidget,
-    );
-    await tester.tap(find.byKey(const Key('automation on')));
-    await tester.pumpAndSettle();
+    await tap(tester, find.text('Monthly summary'));
+    expectOne(find.textContaining('Turned off: its Table “Bills” was deleted'));
+    await tap(tester, find.byKey(const Key('automation on')));
     expect(kit.applied(BridgeMutationKind.setAutomationOn).last.on_, isTrue);
   });
 
-  testWidgets('a new Automation is built as a sentence: when, if and then', (
-    tester,
-  ) async {
+  testWidgets('a new Automation is built as a sentence: when, if and '
+      'then', (tester) async {
     final kit = PageKit();
     final table = await showBudget(tester, kit);
     await openAutomations(tester);
-    await tester.tap(find.text('New Automation'));
-    await tester.pumpAndSettle();
+
+    kit.fake.refuseKinds = {BridgeMutationKind.createAutomation};
+    await tap(tester, find.text('New Automation'));
+    expectOne(find.textContaining('Liquid did not save this change'));
+    expectOne(find.text('New Automation'));
+
+    kit.fake.refuseKinds = {};
+    await tap(tester, find.text('New Automation'));
     expect(kit.applied(BridgeMutationKind.createAutomation), hasLength(1));
 
     await choose(tester, 'when', 'a field changes');
@@ -177,8 +187,8 @@ void main() {
       (paid.field, paid.matches, paid.value?.checked),
       ('paid', BridgeMatch.is_, true),
     );
-    expect(find.byKey(const Key('token test 0')), findsOneWidget);
-    expect(find.text('is checked'), findsOneWidget);
+    expectOne(find.byKey(const Key('token test 0')));
+    expectOne(find.text('is checked'));
     await choose(tester, 'condition field 0', 'Amount');
     await choose(tester, 'test 0', 'is more than');
     await tester.enterText(find.byKey(const Key('value 0')), '500');
@@ -218,19 +228,8 @@ void main() {
   ) async {
     final kit = PageKit();
     final table = await showBudget(tester, kit, rows: expenses);
-    kit.fake.automations.add(
-      BridgeWorkspaceAutomation(
-        id: 'a1',
-        setup: flagLarge(table),
-        on_: true,
-        owner: table,
-        role: canEdit,
-      ),
-    );
-    await kit.workspace.apply(
-      mutation(BridgeMutationKind.setAutomationOn, automation: 'a1', on: true),
-    );
-    await tester.pumpAndSettle();
+    kit.fake.automations.add(automationOf(table, flagLarge(table)));
+    await turnOn(tester, kit);
 
     kit.fake.ranNext = const [
       BridgeRan(
@@ -242,14 +241,13 @@ void main() {
     await tester.tap(kit.inTable(find.byType(CellButton)).first);
     await tester.pump();
     expect(kit.fake.pressed.single, (table, 'r1', 'flag'));
-    expect(find.text('Large expense: Groceries'), findsOneWidget);
+    expectOne(find.text('Large expense: Groceries'));
     await tester.pump(const Duration(seconds: 6));
     await tester.pumpAndSettle();
-    expect(find.text('Large expense: Groceries'), findsNothing);
+    expectNone(find.text('Large expense: Groceries'));
 
     await openAutomations(tester);
-    await tester.tap(find.text('Flag large expenses'));
-    await tester.pumpAndSettle();
+    await tap(tester, find.text('Flag large expenses'));
     kit.fake.ranNext = const [
       BridgeRan(
         automation: 'a1',
@@ -261,31 +259,11 @@ void main() {
     await tester.tap(find.text('Test'));
     await tester.pump();
     expect(kit.fake.tested, ['a1']);
-    expect(
-      find.text('“Flag large expenses” did not run: not found'),
-      findsOneWidget,
-    );
+    expectOne(find.text('“Flag large expenses” did not run: not found'));
 
-    await tester.tap(find.byKey(const Key('automation on')));
-    await tester.pumpAndSettle();
+    await tap(tester, find.byKey(const Key('automation on')));
     expect(kit.applied(BridgeMutationKind.setAutomationOn).last.on_, isFalse);
     await tester.pump(const Duration(seconds: 6));
-  });
-
-  testWidgets('a refused new Automation shows why and stays in the list', (
-    tester,
-  ) async {
-    final kit = PageKit();
-    await showBudget(tester, kit);
-    await openAutomations(tester);
-    kit.fake.refuseKinds = {BridgeMutationKind.createAutomation};
-    await tester.tap(find.text('New Automation'));
-    await tester.pumpAndSettle();
-    expect(
-      find.textContaining('Liquid did not save this change'),
-      findsOneWidget,
-    );
-    expect(find.text('New Automation'), findsOneWidget);
   });
 
   testWidgets('moving the trigger to another Table keeps a notification, '
@@ -300,9 +278,9 @@ void main() {
       ),
     );
     kit.fake.automations.add(
-      BridgeWorkspaceAutomation(
-        id: 'a1',
-        setup: BridgeAutomationSetup(
+      automationOf(
+        table,
+        BridgeAutomationSetup(
           name: 'Log',
           trigger: BridgeTrigger(
             kind: BridgeTriggerKind.rowAdded,
@@ -317,17 +295,11 @@ void main() {
             ),
           ],
         ),
-        on_: true,
-        owner: table,
-        role: canEdit,
       ),
     );
-    await kit.workspace.apply(
-      mutation(BridgeMutationKind.setAutomationOn, automation: 'a1', on: true),
-    );
+    await turnOn(tester, kit);
     await openAutomations(tester);
-    await tester.tap(find.text('Log'));
-    await tester.pumpAndSettle();
+    await tap(tester, find.text('Log'));
     await choose(tester, 'table', 'Bills');
     expect(lastSetup(kit).steps.single.message, '{Name} added');
   });

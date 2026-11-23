@@ -36,18 +36,20 @@ void main() {
     await tester.pumpAndSettle();
   }
 
-  Future<bool> liquid(WidgetTester tester, LogicalKeyboardKey key) async {
-    await tester.sendKeyDownEvent(liquidKey, platform: macos);
+  Future<bool> chord(
+    WidgetTester tester,
+    LogicalKeyboardKey modifier,
+    LogicalKeyboardKey key,
+  ) async {
+    await tester.sendKeyDownEvent(modifier, platform: macos);
     final handled = await tester.sendKeyEvent(key, platform: macos);
-    await tester.sendKeyUpEvent(liquidKey, platform: macos);
+    await tester.sendKeyUpEvent(modifier, platform: macos);
     await tester.pumpAndSettle();
     return handled;
   }
 
-  Future<void> command(WidgetTester tester, LogicalKeyboardKey key) async {
-    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft, platform: macos);
+  Future<void> press(WidgetTester tester, LogicalKeyboardKey key) async {
     await tester.sendKeyEvent(key, platform: macos);
-    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft, platform: macos);
     await tester.pumpAndSettle();
   }
 
@@ -68,9 +70,9 @@ void main() {
     (tester) async {
       await show(tester, ShortcutSettings.liquidKey());
 
-      expect(await liquid(tester, LogicalKeyboardKey.keyD), isTrue);
+      expect(await chord(tester, liquidKey, LogicalKeyboardKey.keyD), isTrue);
       expect(find.byType(DiffPanel), findsOneWidget);
-      await command(tester, LogicalKeyboardKey.keyD);
+      await chord(tester, LogicalKeyboardKey.metaLeft, LogicalKeyboardKey.keyD);
       expect(find.byType(DiffPanel), findsNothing);
     },
   );
@@ -105,10 +107,9 @@ void main() {
         const Keys(LogicalKeyboardKey.keyE, liquid: true),
       ),
     );
-
-    await liquid(tester, LogicalKeyboardKey.keyD);
+    await chord(tester, liquidKey, LogicalKeyboardKey.keyD);
     expect(find.byType(DiffPanel), findsNothing);
-    await liquid(tester, LogicalKeyboardKey.keyE);
+    await chord(tester, liquidKey, LogicalKeyboardKey.keyE);
     expect(find.byType(DiffPanel), findsOneWidget);
   });
 
@@ -117,7 +118,7 @@ void main() {
   ) async {
     await show(tester, ShortcutSettings.standard());
 
-    expect(await liquid(tester, LogicalKeyboardKey.keyD), isFalse);
+    expect(await chord(tester, liquidKey, LogicalKeyboardKey.keyD), isFalse);
     expect(find.byType(DiffPanel), findsNothing);
   });
 
@@ -126,8 +127,7 @@ void main() {
     await askInput(tester, 'Commit message');
 
     await tester.enterText(find.byKey(const Key('answer')), 'draft');
-    await tester.sendKeyEvent(LogicalKeyboardKey.enter, platform: macos);
-    await tester.pumpAndSettle();
+    await press(tester, LogicalKeyboardKey.enter);
     expect(project.session.calls, ['answer q1 name=draft']);
   });
 
@@ -143,12 +143,12 @@ void main() {
     );
     await askInput(tester, 'Your name');
     await tester.enterText(find.byKey(const Key('answer')), 'Bob');
-    await tester.sendKeyEvent(LogicalKeyboardKey.enter, platform: macos);
+    await press(tester, LogicalKeyboardKey.enter);
     await tester.testTextInput.receiveAction(TextInputAction.done);
     await tester.pumpAndSettle();
     expect(project.session.calls, isEmpty);
 
-    await command(tester, LogicalKeyboardKey.keyY);
+    await chord(tester, LogicalKeyboardKey.metaLeft, LogicalKeyboardKey.keyY);
     expect(project.session.calls, ['answer q1 name=Bob']);
   });
 }

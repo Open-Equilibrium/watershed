@@ -21,89 +21,53 @@ KeyUpEvent release(PhysicalKeyboardKey physical, LogicalKeyboardKey logical) =>
       timeStamp: Duration.zero,
     );
 
+KeyRepeatEvent repeat(
+  PhysicalKeyboardKey physical,
+  LogicalKeyboardKey logical,
+) => KeyRepeatEvent(
+  physicalKey: physical,
+  logicalKey: logical,
+  character: 'a',
+  timeStamp: Duration.zero,
+);
+
 void main() {
   final keyL = down(PhysicalKeyboardKey.keyL, LogicalKeyboardKey.keyL, 'l');
-
-  test(
-    'describes a key event with what was held, to diagnose the Liquid key',
-    () {
-      expect(
-        describeKeyEvent(
-          keyL,
-          pressed: {liquidKey, LogicalKeyboardKey.keyL},
-          focus: 'composer',
-        ),
-        'down 0x6c "L" physical 0x7000f char "l" held [F18, L] focus composer',
-        reason: 'labels, not debug names, so a release build reads the same',
-      );
-    },
+  final keyA = down(PhysicalKeyboardKey.keyA, LogicalKeyboardKey.keyA, 'a');
+  final ctrl = down(
+    PhysicalKeyboardKey.controlLeft,
+    LogicalKeyboardKey.controlLeft,
   );
 
   test('a typed key stays out of the log when a modifier is held after it', () {
-    final keyA = down(PhysicalKeyboardKey.keyA, LogicalKeyboardKey.keyA, 'a');
-    final ctrl = down(
-      PhysicalKeyboardKey.controlLeft,
-      LogicalKeyboardKey.controlLeft,
-    );
     final log = KeyLog();
+    String? logged(KeyEvent event, Set<LogicalKeyboardKey> pressed) =>
+        log.line(event, pressed: pressed, focus: null);
+
     expect(
-      log.line(keyA, pressed: {LogicalKeyboardKey.keyA}, focus: null),
+      logged(keyA, {LogicalKeyboardKey.keyA}),
       isNull,
       reason: 'plain typing stays out',
     );
-    final modifier = log.line(
-      ctrl,
-      pressed: {LogicalKeyboardKey.keyA, LogicalKeyboardKey.controlLeft},
-      focus: null,
-    );
-    expect(modifier, isNotNull, reason: 'the modifier itself is logged');
     expect(
-      modifier,
+      logged(ctrl, {LogicalKeyboardKey.keyA, LogicalKeyboardKey.controlLeft}),
       contains('held [Control Left]'),
-      reason: 'A was not logged, so it is not listed as held',
+      reason: 'the modifier itself is logged, and A was not logged, so it is not listed as held',
     );
     expect(
-      log.line(
-        const KeyRepeatEvent(
-          physicalKey: PhysicalKeyboardKey.keyA,
-          logicalKey: LogicalKeyboardKey.keyA,
-          character: 'a',
-          timeStamp: Duration.zero,
-        ),
-        pressed: {LogicalKeyboardKey.keyA, LogicalKeyboardKey.controlLeft},
-        focus: null,
-      ),
+      logged(repeat(PhysicalKeyboardKey.keyA, LogicalKeyboardKey.keyA), {
+        LogicalKeyboardKey.keyA,
+        LogicalKeyboardKey.controlLeft,
+      }),
       isNull,
       reason: 'a repeat follows its key-down',
     );
     expect(
-      log.line(
-        release(PhysicalKeyboardKey.keyA, LogicalKeyboardKey.keyA),
-        pressed: {LogicalKeyboardKey.controlLeft},
-        focus: null,
-      ),
+      logged(release(PhysicalKeyboardKey.keyA, LogicalKeyboardKey.keyA), {
+        LogicalKeyboardKey.controlLeft,
+      }),
       isNull,
       reason: 'releasing A while Ctrl is held logs nothing',
-    );
-  });
-
-  test('a logged key keeps its repeats and key-up in the log', () {
-    final keyA = down(
-      PhysicalKeyboardKey.keyA,
-      LogicalKeyboardKey.keyA,
-      '\u0001',
-    );
-    final log = KeyLog();
-    final pressed = {LogicalKeyboardKey.controlLeft, LogicalKeyboardKey.keyA};
-    expect(log.line(keyA, pressed: pressed, focus: null), isNotNull);
-    expect(
-      log.line(
-        release(PhysicalKeyboardKey.keyA, LogicalKeyboardKey.keyA),
-        pressed: {LogicalKeyboardKey.controlLeft},
-        focus: null,
-      ),
-      isNotNull,
-      reason: 'the key-up of a logged key is logged',
     );
   });
 

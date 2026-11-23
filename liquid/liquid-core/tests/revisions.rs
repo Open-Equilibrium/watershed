@@ -1,20 +1,16 @@
 #![allow(clippy::unwrap_used)]
 
+mod common;
+
+use common::*;
 use liquid_core::{
-    ActionId, Actor, Applied, AreaId, AutomationSetup, BlockId, Cell, Created, Entry, EntryQuery,
-    Error, FieldId, FieldKind, MemoryStore, Mutation, Operation, Origin, PageId, PersonId, Place,
-    Purge, Request, RevertKind, RowId, RowQuery, Step, Trigger,
+    Action, ActionId, Actor, Applied, AutomationSetup, BlockId, BlockKind, Cell, Changed, Created,
+    Entry, EntryQuery, Error, FieldId, FieldKind, Mutation, Operation, PageId, PersonId, Place,
+    Purge, RevertKind, RowId, RowQuery, Step, Trigger,
 };
-
-type Workspace = liquid_core::Workspace<MemoryStore>;
-
-fn owner() -> Actor {
-    Actor::Person(PersonId::new("benni"))
-}
 
 struct Budget {
     workspace: Workspace,
-    area: AreaId,
     page: PageId,
     text: BlockId,
     table: BlockId,
@@ -23,81 +19,68 @@ struct Budget {
 
 impl Budget {
     fn new() -> Self {
-        let workspace = Workspace::create(PersonId::new("benni"), MemoryStore::default()).unwrap();
-        let mut budget = Self {
+        let mut workspace = workspace();
+        let Created::Area(area) = created(
+            &mut workspace,
+            Mutation::CreateArea {
+                name: "Private".into(),
+            },
+        ) else {
+            panic!("an area")
+        };
+        let Created::Page(page) = created(
+            &mut workspace,
+            Mutation::CreatePage {
+                area,
+                parent: None,
+                title: "Household budget".into(),
+            },
+        ) else {
+            panic!("a Page")
+        };
+        let Created::Block { block: text, .. } = created(
+            &mut workspace,
+            Mutation::AddTextBlock {
+                page: page.clone(),
+                after: None,
+                text: String::new(),
+            },
+        ) else {
+            panic!("a Block")
+        };
+        let Created::Block { block: table, .. } = created(
+            &mut workspace,
+            Mutation::AddDatabaseBlock {
+                page: page.clone(),
+                after: None,
+                name: "Expenses".into(),
+                layout: liquid_core::Layout::Table,
+            },
+        ) else {
+            panic!("a Table")
+        };
+        let Created::Field(amount) = created(
+            &mut workspace,
+            Mutation::AddField {
+                block: table.clone(),
+                place: Place::Last,
+                name: "Amount".into(),
+                kind: FieldKind::Number,
+            },
+        ) else {
+            panic!("a field")
+        };
+        Self {
             workspace,
-            area: AreaId::parse(&"0".repeat(32)).unwrap(),
-            page: PageId::parse(&"0".repeat(32)).unwrap(),
-            text: BlockId::parse(&"0".repeat(32)).unwrap(),
-            table: BlockId::parse(&"0".repeat(32)).unwrap(),
-            amount: FieldId::parse(&"0".repeat(32)).unwrap(),
-        };
-        budget.area = match budget.edit(Mutation::CreateArea {
-            name: "Private".into(),
-        }) {
-            Applied {
-                created: Some(Created::Area(area)),
-                ..
-            } => area,
-            other => panic!("an area, got {other:?}"),
-        };
-        budget.page = match budget.edit(Mutation::CreatePage {
-            area: budget.area.clone(),
-            parent: None,
-            title: "Household budget".into(),
-        }) {
-            Applied {
-                created: Some(Created::Page(page)),
-                ..
-            } => page,
-            other => panic!("a Page, got {other:?}"),
-        };
-        budget.text = match budget.edit(Mutation::AddTextBlock {
-            page: budget.page.clone(),
-            after: None,
-            text: String::new(),
-        }) {
-            Applied {
-                created: Some(Created::Block { block, .. }),
-                ..
-            } => block,
-            other => panic!("a Block, got {other:?}"),
-        };
-        budget.table = match budget.edit(Mutation::AddDatabaseBlock {
-            page: budget.page.clone(),
-            after: None,
-            name: "Expenses".into(),
-            layout: liquid_core::Layout::Table,
-        }) {
-            Applied {
-                created: Some(Created::Block { block, .. }),
-                ..
-            } => block,
-            other => panic!("a Table, got {other:?}"),
-        };
-        budget.amount = match budget.edit(Mutation::AddField {
-            block: budget.table.clone(),
-            place: Place::Last,
-            name: "Amount".into(),
-            kind: FieldKind::Number,
-        }) {
-            Applied {
-                created: Some(Created::Field(field)),
-                ..
-            } => field,
-            other => panic!("a field, got {other:?}"),
-        };
-        budget
+            page,
+            text,
+            table,
+            amount,
+        }
     }
 
     fn edit(&mut self, mutation: Mutation) -> Applied {
-        self.workspace
-            .apply(Request {
-                actor: owner(),
-                origin: Origin::Ui,
-                mutation,
-            })
-            .unwrap()
+        apply(&mut self.workspace, mutation).unwrap()
     }
 
     fn typed(&mut self, at: usize, insert: &str) -> ActionId {
@@ -119,16 +102,16 @@ impl Budget {
     }
 
     fn row(&mut self) -> RowId {
-        match self.edit(Mutation::AddRow {
-            block: self.table.clone(),
-            place: Place::Last,
-        }) {
-            Applied {
-                created: Some(Created::Row(row)),
-                ..
-            } => row,
-            other => panic!("a row, got {other:?}"),
-        }
+        let Created::Row(row) = created(
+            &mut self.workspace,
+            Mutation::AddRow {
+                block: self.table.clone(),
+                place: Place::Last,
+            },
+        ) else {
+            panic!("a row")
+        };
+        row
     }
 
     fn set(&mut self, row: &RowId, value: f64) -> ActionId {
@@ -161,16 +144,52 @@ impl Budget {
     }
 
     fn entries(&mut self) -> Vec<Entry> {
+        self.entries_up_to(100)
+    }
+
+    fn entries_up_to(&mut self, limit: usize) -> Vec<Entry> {
         self.workspace
             .entries(&EntryQuery {
                 page: None,
                 actor: None,
                 origin: None,
                 before: None,
-                limit: 100,
+                limit,
             })
             .unwrap()
             .entries
+    }
+
+    fn entry_of(&mut self, action: &ActionId) -> Entry {
+        self.entries()
+            .into_iter()
+            .find(|entry| entry.actions.contains(action))
+            .unwrap()
+    }
+
+    fn newest(&mut self) -> Action {
+        self.workspace.history(None, 1).unwrap().remove(0)
+    }
+
+    fn automation(&self, name: &str, step: Step) -> Mutation {
+        Mutation::CreateAutomation {
+            setup: Box::new(AutomationSetup {
+                name: name.into(),
+                trigger: Some(Trigger::RowAdded(self.table.clone())),
+                conditions: Vec::new(),
+                steps: vec![step],
+            }),
+        }
+    }
+
+    fn zero_on_new_row(&self) -> Mutation {
+        self.automation(
+            "Zero",
+            Step::Set {
+                field: self.amount.clone(),
+                value: Cell::Number(0.0),
+            },
+        )
     }
 }
 
@@ -188,10 +207,10 @@ fn a_revert_records_a_new_action_that_undoes_only_the_one_it_reverts() {
     assert!(
         reverted
             .changed
-            .contains(&liquid_core::Changed::Table(budget.table.clone()))
+            .contains(&Changed::Table(budget.table.clone()))
     );
     assert_eq!(budget.amounts(), [Cell::Empty, Cell::Number(84.2)]);
-    let newest = budget.workspace.history(None, 1).unwrap().remove(0);
+    let newest = budget.newest();
     assert_eq!(newest.id, reverted.action);
     assert_eq!(
         newest.operation,
@@ -212,13 +231,26 @@ fn a_revert_records_a_new_action_that_undoes_only_the_one_it_reverts() {
 fn a_revert_that_a_later_change_would_hide_is_refused() {
     let mut budget = Budget::new();
     let rent = budget.row();
+    let food = budget.row();
     let first = budget.set(&rent, 950.0);
+    let second = budget.set(&food, 300.0);
     budget.set(&rent, 900.0);
     assert_eq!(
-        budget.workspace.revert(&owner(), &[first]).unwrap_err(),
+        budget
+            .workspace
+            .revert(&owner(), std::slice::from_ref(&first))
+            .unwrap_err(),
         Error::Conflict
     );
-    assert_eq!(budget.amounts(), [Cell::Number(900.0)]);
+    assert_eq!(
+        budget
+            .workspace
+            .revert(&owner(), &[second, first])
+            .unwrap_err(),
+        Error::Conflict,
+        "several actions are refused together"
+    );
+    assert_eq!(budget.amounts(), [Cell::Number(900.0), Cell::Number(300.0)]);
 }
 
 #[test]
@@ -226,17 +258,13 @@ fn reverting_a_deleted_table_brings_back_its_rows_views_and_automations() {
     let mut budget = Budget::new();
     let rent = budget.row();
     budget.set(&rent, 950.0);
-    let setup = AutomationSetup {
-        name: "Note".into(),
-        trigger: Some(Trigger::RowAdded(budget.table.clone())),
-        conditions: Vec::new(),
-        steps: vec![Step::Notify {
+    let setup = budget.automation(
+        "Note",
+        Step::Notify {
             message: "Added".into(),
-        }],
-    };
-    budget.edit(Mutation::CreateAutomation {
-        setup: Box::new(setup),
-    });
+        },
+    );
+    budget.edit(setup);
     let deleted = budget
         .edit(Mutation::DeleteTable {
             block: budget.table.clone(),
@@ -265,7 +293,7 @@ fn undo_takes_back_the_last_pause_of_typing_and_redo_brings_it_again() {
 
     let undone = budget.workspace.undo(&owner()).unwrap().unwrap();
     assert_eq!(budget.text(), "");
-    let newest = budget.workspace.history(None, 1).unwrap().remove(0);
+    let newest = budget.newest();
     assert_eq!(newest.id, undone.action);
     assert!(matches!(
         newest.operation,
@@ -301,18 +329,8 @@ fn restore_version_returns_the_page_and_its_tables_to_an_earlier_point() {
     let versions = budget.workspace.versions(&budget.page).unwrap();
     assert_eq!(versions.len(), 1);
     assert_eq!(versions[0].actor, owner());
-    let setup = AutomationSetup {
-        name: "Zero".into(),
-        trigger: Some(Trigger::RowAdded(budget.table.clone())),
-        conditions: Vec::new(),
-        steps: vec![Step::Set {
-            field: budget.amount.clone(),
-            value: Cell::Number(0.0),
-        }],
-    };
-    budget.edit(Mutation::CreateAutomation {
-        setup: Box::new(setup),
-    });
+    let zero = budget.zero_on_new_row();
+    budget.edit(zero);
     budget.row();
     let versions = budget.workspace.versions(&budget.page).unwrap();
     assert!(matches!(versions[0].actor, Actor::Automation(_)));
@@ -324,10 +342,9 @@ fn restore_version_returns_the_page_and_its_tables_to_an_earlier_point() {
         .unwrap();
     assert_eq!(budget.text(), "October");
     assert_eq!(budget.amounts(), [Cell::Number(950.0)]);
-    assert!(budget.workspace.automations().unwrap().len() == 1);
-    let newest = budget.workspace.history(None, 1).unwrap().remove(0);
+    assert_eq!(budget.workspace.automations().unwrap().len(), 1);
     assert_eq!(
-        newest.operation,
+        budget.newest().operation,
         Operation::Restore {
             page: budget.page.clone(),
             to: point.clone(),
@@ -387,6 +404,17 @@ fn deleting_earlier_versions_keeps_the_page_and_drops_what_only_they_held() {
             .any(|entry| entry.actions.contains(&secret) && entry.purged)
     );
     assert!(budget.workspace.versions(&budget.page).unwrap().len() <= 1);
+    let redone = budget.typed(4, "!");
+    budget.workspace.undo(&owner()).unwrap().unwrap();
+    budget.workspace.redo(&owner()).unwrap().unwrap();
+    budget
+        .workspace
+        .purge(&owner(), &Purge::Page(budget.page.clone()))
+        .unwrap();
+    assert_eq!(
+        budget.workspace.revert(&owner(), &[redone]).unwrap_err(),
+        Error::Purged
+    );
 
     let stranger = Actor::Person(PersonId::new("someone"));
     assert_eq!(
@@ -414,36 +442,24 @@ fn a_deleted_table_deleted_for_good_leaves_only_that_it_was() {
     budget.workspace.purge(&owner(), &live).unwrap();
     let records = serde_json::to_string(&budget.workspace.history(None, 100).unwrap()).unwrap();
     assert!(!records.contains("Expenses"));
+    let rows = RowQuery {
+        sort: None,
+        filter: None,
+        within: None,
+        start: 0,
+        limit: 1,
+        search: None,
+        totals: Vec::new(),
+    };
+    assert!(budget.workspace.rows(&budget.table, &rows).is_err());
+    let entries = budget.entries();
+    assert_eq!(entries[0].title, "Deleted a Table for good");
+    assert!(entries.iter().all(|entry| entry.deleted_table.is_none()));
     assert!(
-        budget
-            .workspace
-            .rows(
-                &budget.table,
-                &RowQuery {
-                    sort: None,
-                    filter: None,
-                    within: None,
-                    start: 0,
-                    limit: 1,
-                    search: None,
-                    totals: Vec::new(),
-                }
-            )
-            .is_err()
-    );
-    let titles: Vec<String> = budget
-        .entries()
-        .into_iter()
-        .map(|entry| entry.title)
-        .collect();
-    assert_eq!(titles[0], "Deleted a Table for good");
-    assert!(
-        budget
-            .entries()
+        entries
             .iter()
-            .all(|entry| entry.deleted_table.is_none())
+            .all(|entry| !entry.title.contains("Expenses"))
     );
-    assert!(titles.iter().all(|title| !title.contains("Expenses")));
 }
 
 #[test]
@@ -469,12 +485,7 @@ fn reverting_an_edit_that_was_undone_and_redone_reverts_what_now_carries_it() {
         .revert(&owner(), &[typed.clone(), first])
         .unwrap();
     assert_eq!(budget.text(), "");
-    let entry = budget
-        .entries()
-        .into_iter()
-        .find(|entry| entry.actions.contains(&typed))
-        .unwrap();
-    assert!(entry.undone);
+    assert!(budget.entry_of(&typed).undone);
 }
 
 #[test]
@@ -498,25 +509,6 @@ fn a_version_before_an_undo_and_a_revert_can_be_restored() {
 }
 
 #[test]
-fn an_undone_and_redone_edit_whose_page_was_purged_cannot_be_reverted() {
-    let mut budget = Budget::new();
-    let typed = budget.typed(0, "Rent");
-    budget.workspace.undo(&owner()).unwrap().unwrap();
-    budget.workspace.redo(&owner()).unwrap().unwrap();
-    budget
-        .workspace
-        .purge(&owner(), &Purge::Page(budget.page.clone()))
-        .unwrap();
-    assert_eq!(
-        budget
-            .workspace
-            .revert(&owner(), std::slice::from_ref(&typed))
-            .unwrap_err(),
-        Error::Purged
-    );
-}
-
-#[test]
 fn deleting_a_table_for_good_leaves_other_workspace_changes_revertable() {
     let mut budget = Budget::new();
     let other = budget
@@ -531,12 +523,7 @@ fn deleting_a_table_for_good_leaves_other_workspace_changes_revertable() {
         .workspace
         .purge(&owner(), &Purge::Table(budget.table.clone()))
         .unwrap();
-    let entry = budget
-        .entries()
-        .into_iter()
-        .find(|entry| entry.actions.contains(&other))
-        .unwrap();
-    assert!(entry.revertable);
+    assert!(budget.entry_of(&other).revertable);
     budget
         .workspace
         .revert(&owner(), std::slice::from_ref(&other))
@@ -552,48 +539,12 @@ fn an_action_older_than_ten_thousand_others_still_reverts() {
     for at in 0..10_001 {
         budget.typed(at, "x");
     }
-    let entry = budget
-        .workspace
-        .entries(&EntryQuery {
-            page: None,
-            actor: None,
-            origin: None,
-            before: None,
-            limit: 10,
-        })
-        .unwrap()
-        .entries;
-    assert!(!entry.is_empty());
+    assert!(!budget.entries_up_to(10).is_empty());
     budget
         .workspace
         .revert(&owner(), std::slice::from_ref(&early))
         .unwrap();
     assert_eq!(budget.amounts(), [Cell::Empty]);
-}
-
-#[test]
-fn history_reaches_past_a_long_stretch_of_typing() {
-    let mut budget = Budget::new();
-    for at in 0..5_000 {
-        budget.typed(at, "x");
-    }
-    let listed = budget
-        .workspace
-        .entries(&EntryQuery {
-            page: None,
-            actor: None,
-            origin: None,
-            before: None,
-            limit: 60,
-        })
-        .unwrap()
-        .entries;
-    assert_eq!(listed[0].actions.len(), 5_000);
-    assert!(
-        listed
-            .iter()
-            .any(|entry| entry.title == "Created the Page “Household budget”")
-    );
 }
 
 #[test]
@@ -610,74 +561,14 @@ fn after_deleting_earlier_versions_undo_passes_over_a_restore_it_cannot_take_bac
         .unwrap();
     budget.workspace.undo(&owner()).unwrap();
     assert_eq!(budget.text(), "Rent");
-    let entry = budget
-        .entries()
-        .into_iter()
-        .find(|entry| entry.actions.contains(&restored.action))
-        .unwrap();
-    assert!(!entry.revertable);
-}
-
-#[test]
-fn a_version_brings_back_a_table_the_page_showed_then_as_it_was() {
-    let mut budget = Budget::new();
-    let rent = budget.row();
-    let point = budget.set(&rent, 950.0);
-    let page = budget.page.clone();
-    let shown = budget
-        .workspace
-        .views(&page, 0, usize::MAX)
-        .unwrap()
-        .into_iter()
-        .find(|view| view.block == budget.table)
-        .unwrap();
-    budget.edit(Mutation::RemoveView {
-        page: page.clone(),
-        view: shown.id,
-    });
-    budget.set(&rent, 900.0);
-
-    let mut preview = budget.workspace.preview(&page, &point).unwrap();
-    std::mem::swap(&mut budget.workspace, &mut preview);
-    assert_eq!(budget.amounts(), [Cell::Number(950.0)]);
-    std::mem::swap(&mut budget.workspace, &mut preview);
-    budget.workspace.restore(&owner(), &page, &point).unwrap();
-    assert_eq!(budget.amounts(), [Cell::Number(950.0)]);
-}
-
-#[test]
-fn reverting_several_actions_together_is_refused_when_a_later_change_would_hide_one() {
-    let mut budget = Budget::new();
-    let rent = budget.row();
-    let food = budget.row();
-    let first = budget.set(&rent, 950.0);
-    let second = budget.set(&food, 300.0);
-    budget.set(&rent, 900.0);
-    assert_eq!(
-        budget
-            .workspace
-            .revert(&owner(), &[second, first])
-            .unwrap_err(),
-        Error::Conflict
-    );
-    assert_eq!(budget.amounts(), [Cell::Number(900.0), Cell::Number(300.0)]);
+    assert!(!budget.entry_of(&restored.action).revertable);
 }
 
 #[test]
 fn deleting_a_table_s_earlier_versions_keeps_the_page_s_own() {
     let mut budget = Budget::new();
-    let setup = AutomationSetup {
-        name: "Zero".into(),
-        trigger: Some(Trigger::RowAdded(budget.table.clone())),
-        conditions: Vec::new(),
-        steps: vec![Step::Set {
-            field: budget.amount.clone(),
-            value: Cell::Number(0.0),
-        }],
-    };
-    budget.edit(Mutation::CreateAutomation {
-        setup: Box::new(setup),
-    });
+    let zero = budget.zero_on_new_row();
+    budget.edit(zero);
     budget.typed(0, "October");
     budget.row();
     budget.typed(7, " is done");
@@ -751,7 +642,7 @@ fn restore_version_leaves_a_table_deleted_since_to_its_own_revert() {
             .views(&page, 0, usize::MAX)
             .unwrap()
             .into_iter()
-            .filter(|view| view.kind == liquid_core::BlockKind::Database)
+            .filter(|view| view.kind == BlockKind::Database)
             .count()
     };
     let mut preview = budget.workspace.preview(&page, &point).unwrap();
@@ -761,4 +652,55 @@ fn restore_version_leaves_a_table_deleted_since_to_its_own_revert() {
     assert_eq!(tables(&mut budget.workspace), 0);
     budget.workspace.revert(&owner(), &[deleted]).unwrap();
     assert_eq!(tables(&mut budget.workspace), 1);
+}
+#[test]
+fn a_version_brings_back_a_table_the_page_showed_then_as_it_was() {
+    let mut budget = Budget::new();
+    let rent = budget.row();
+    let point = budget.set(&rent, 950.0);
+    let page = budget.page.clone();
+    let shown = budget
+        .workspace
+        .views(&page, 0, usize::MAX)
+        .unwrap()
+        .into_iter()
+        .find(|view| view.block == budget.table)
+        .unwrap();
+    budget.edit(Mutation::RemoveView {
+        page: page.clone(),
+        view: shown.id,
+    });
+    budget.set(&rent, 900.0);
+
+    let mut preview = budget.workspace.preview(&page, &point).unwrap();
+    std::mem::swap(&mut budget.workspace, &mut preview);
+    assert_eq!(budget.amounts(), [Cell::Number(950.0)]);
+    std::mem::swap(&mut budget.workspace, &mut preview);
+    budget.workspace.restore(&owner(), &page, &point).unwrap();
+    assert_eq!(budget.amounts(), [Cell::Number(950.0)]);
+}
+
+#[test]
+fn history_reaches_past_a_long_stretch_of_typing() {
+    let mut budget = Budget::new();
+    for at in 0..5_000 {
+        budget.typed(at, "x");
+    }
+    let listed = budget
+        .workspace
+        .entries(&EntryQuery {
+            page: None,
+            actor: None,
+            origin: None,
+            before: None,
+            limit: 60,
+        })
+        .unwrap()
+        .entries;
+    assert_eq!(listed[0].actions.len(), 5_000);
+    assert!(
+        listed
+            .iter()
+            .any(|entry| entry.title == "Created the Page “Household budget”")
+    );
 }

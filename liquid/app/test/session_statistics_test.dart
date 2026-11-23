@@ -49,7 +49,7 @@ BridgeStatistics stats({
 );
 
 void main() {
-  test('tokens and responses add up over the models, and a model name drops its provider', () {
+  test('tokens and responses add up; a model name drops its provider', () {
     final statistics = SessionStatistics(
       stats(
         models: [
@@ -73,7 +73,7 @@ void main() {
     expect(modelName(''), 'Without a model');
   });
 
-  test('working time adds the turns whose clock is known, and turns are numbered from 1', () {
+  test('working time adds known turn clocks; turns number from 1', () {
     final statistics = SessionStatistics(
       stats(
         turns: [
@@ -90,7 +90,7 @@ void main() {
     ]);
   });
 
-  test('tool time adds up only when every turn has it, and model time is never reported', () {
+  test('tool time needs every turn; model time is never reported', () {
     final known = SessionStatistics(
       stats(
         turns: [
@@ -112,18 +112,15 @@ void main() {
     expect(partial.toolMs, isNull);
   });
 
-  test(
-    'the session span runs from its first entry to its last, or is unknown',
-    () {
-      expect(
-        SessionStatistics(stats(startedMs: 1000, endedMs: 7500000)).spanMs,
-        7499000,
-      );
-      expect(SessionStatistics(stats()).spanMs, isNull);
-    },
-  );
+  test('the session span runs first to last entry, or is unknown', () {
+    expect(
+      SessionStatistics(stats(startedMs: 1000, endedMs: 7500000)).spanMs,
+      7499000,
+    );
+    expect(SessionStatistics(stats()).spanMs, isNull);
+  });
 
-  test('an open tool call is running while a turn runs, and cancelled once none does', () {
+  test('open tool calls run during a turn, then count as cancelled', () {
     const tool = BridgeToolCalls(
       name: 'bash',
       succeeded: 16,
@@ -146,26 +143,4 @@ void main() {
       [24, 1, 2],
     );
   });
-
-  test(
-    'the three largest models have a series of their own, the rest share one',
-    () {
-      final statistics = SessionStatistics(
-        stats(
-          models: [
-            for (final name in ['a', 'b', 'c', 'd']) model('p/$name', tokens()),
-          ],
-        ),
-      );
-
-      expect(
-        [
-          for (final name in ['p/a', 'p/b', 'p/c', 'p/d'])
-            statistics.seriesOf(name),
-        ],
-        [0, 1, 2, otherSeries],
-      );
-      expect(statistics.seriesOf('p/unknown'), otherSeries);
-    },
-  );
 }

@@ -33,41 +33,57 @@ const nothing = BridgeAllows(
   manage: false,
 );
 
+BridgeRole _templateRole(
+  String id,
+  String name,
+  BridgeTemplate template,
+  BridgeAllows allows,
+) => BridgeRole(
+  id: id,
+  template: template,
+  setup: BridgeRoleSetup(
+    name: name,
+    grants: [BridgeGrant(kind: BridgeTargetKind.workspace, allows: allows)],
+  ),
+);
+
+BridgeAllows _allowing({bool apply = false}) => BridgeAllows(
+  read: true,
+  propose: false,
+  apply: apply,
+  approve: false,
+  manage: false,
+);
+
 class FakeWorkspace implements LiquidWorkspace {
   @override
   bool isDisposed = false;
 
   @override
   void dispose() => isDisposed = true;
-
   String name = '';
   String icon = '';
   final areas = <BridgeArea>[];
   final pages = <String, List<BridgePage>>{};
   final applied = <BridgeMutation>[];
-
   final views = <String, List<BridgeView>>{};
   final texts = <String, String>{};
   final styles = <String, BridgeTextStyle>{};
   final languages = <String, String>{};
-
   final files = <String, Uint8List>{};
   final attachments = <String, Uint8List>{};
   final media = <String, BridgeMedia>{};
   final saved = <String, Uint8List>{};
-
   Completer<void>? uploadGate;
-
   final databases = <String, BridgeDatabase>{};
   final rows = <String, List<BridgeRow>>{};
-
+  final tables = <BridgeTable>[];
   final whiteboards = <String, BridgeDrawing>{};
-
   final calculations = <String, List<BridgeLine>>{};
-
   final charts = <String, BridgeChartSetup>{};
-
   final chartPoints = <String, List<BridgeChartPoint>>{};
+  final computed = <String, String>{};
+  final referenceNames = <String, String>{};
 
   String? chartSource(BridgeChartSetup setup) => switch (setup) {
     BridgeChartSetup(:final table?) => databases[table]?.name,
@@ -78,10 +94,6 @@ class FakeWorkspace implements LiquidWorkspace {
     ].where((known) => known.id == source).firstOrNull?.name,
     _ => null,
   };
-
-  final computed = <String, String>{};
-
-  final referenceNames = <String, String>{};
 
   BridgeLine line(String id, BridgeLineSetup setup) {
     final formula = setup.formula.trim();
@@ -110,27 +122,17 @@ class FakeWorkspace implements LiquidWorkspace {
   }
 
   var readBudget = 1 << 30;
-
   String? refuse;
-
   int refuseNext = 0;
-
   Set<BridgeMutationKind> refuseKinds = {};
-
   Completer<void>? gate;
   Set<BridgeMutationKind>? gatedKinds;
-
   Duration Function()? delay;
-
   final asked = <BridgeQuery>[];
-
   String? refuseQueries;
-
   BridgeQueryKind? refuseNextQuery;
-
   List<Completer<void>>? deferred;
   Set<BridgeQueryKind> deferredKinds = BridgeQueryKind.values.toSet();
-
   final _followers = <int, (BridgeResource, StreamController<BridgeChange>)>{};
   final _seqs = <BridgeResource, int>{};
   int _ids = 0;
@@ -145,33 +147,19 @@ class FakeWorkspace implements LiquidWorkspace {
   Future<BridgeApplied> apply({required BridgeMutation mutation}) async {
     final applied = await _apply(mutation);
     await answered?.future;
-    final ran = ranNext;
-    if (ran.isEmpty) return applied;
-    ranNext = const [];
-    return BridgeApplied(
-      action: applied.action,
-      area: applied.area,
-      page: applied.page,
-      block: applied.block,
-      view: applied.view,
-      field: applied.field,
-      row: applied.row,
-      option: applied.option,
-      tab: applied.tab,
-      elements: applied.elements,
-      line: applied.line,
-      automation: applied.automation,
-      ran: ran,
-    );
+    return applied;
   }
 
   final automations = <BridgeWorkspaceAutomation>[];
-
   List<BridgeRan> ranNext = const [];
-
   final pressed = <(String, String, String)>[];
-
   final tested = <String>[];
+
+  List<BridgeRan> _takeRan() {
+    final ran = ranNext;
+    ranNext = const [];
+    return ran;
+  }
 
   @override
   Future<List<BridgeRan>> press({
@@ -180,67 +168,36 @@ class FakeWorkspace implements LiquidWorkspace {
     required String field,
   }) async {
     pressed.add((table, row, field));
-    final ran = ranNext;
-    ranNext = const [];
-    return ran;
+    return _takeRan();
   }
 
   @override
   Future<BridgeRan> test({required String automation}) async {
     tested.add(automation);
-    final ran = ranNext;
-    ranNext = const [];
-    return ran.firstOrNull ??
+    return _takeRan().firstOrNull ??
         BridgeRan(automation: automation, name: '', notices: const []);
   }
 
   final roles = <BridgeRole>[
-    for (final (index, (name, template, allows)) in const [
-      ('Can manage', BridgeTemplate.canManage, everything),
-      (
-        'Can edit',
-        BridgeTemplate.canEdit,
-        BridgeAllows(
-          read: true,
-          propose: false,
-          apply: true,
-          approve: false,
-          manage: false,
-        ),
-      ),
-      (
-        'Can view',
-        BridgeTemplate.canView,
-        BridgeAllows(
-          read: true,
-          propose: false,
-          apply: false,
-          approve: false,
-          manage: false,
-        ),
-      ),
-    ].indexed)
-      BridgeRole(
-        id: '${index + 1}'.padLeft(32, '0'),
-        template: template,
-        setup: BridgeRoleSetup(
-          name: name,
-          grants: [
-            BridgeGrant(kind: BridgeTargetKind.workspace, allows: allows),
-          ],
-        ),
-      ),
+    _templateRole(
+      canManage,
+      'Can manage',
+      BridgeTemplate.canManage,
+      everything,
+    ),
+    _templateRole(
+      canEdit,
+      'Can edit',
+      BridgeTemplate.canEdit,
+      _allowing(apply: true),
+    ),
+    _templateRole(canView, 'Can view', BridgeTemplate.canView, _allowing()),
   ];
-
   final allowances = <String, Map<String, BridgeAllows>>{};
-
   final entries = <BridgeEntry>[];
-
-  final asking = <BridgeEntryQuery>[];
 
   @override
   Future<BridgeHistory> history({required BridgeEntryQuery asked}) async {
-    asking.add(asked);
     final start = asked.before == null
         ? 0
         : entries.indexWhere((entry) => entry.actions.last == asked.before) + 1;
@@ -255,7 +212,6 @@ class FakeWorkspace implements LiquidWorkspace {
   }
 
   final reverted = <List<String>>[];
-
   BridgeReverted revertOutcome = const BridgeReverted(
     action: 'reverted',
     conflict: false,
@@ -292,20 +248,16 @@ class FakeWorkspace implements LiquidWorkspace {
   final restored = <(String, String)>[];
 
   @override
-  Future<void> restore({required String page, required String to}) async {
-    restored.add((page, to));
-  }
+  Future<void> restore({required String page, required String to}) async =>
+      restored.add((page, to));
 
   final purged = <(String?, String?)>[];
 
   @override
-  Future<void> purge({String? page, String? table}) async {
-    purged.add((page, table));
-  }
+  Future<void> purge({String? page, String? table}) async =>
+      purged.add((page, table));
 
-  FakeWorkspace? version;
   final versionAt = <String, FakeWorkspace>{};
-
   final previewed = <(String, String)>[];
 
   @override
@@ -315,7 +267,7 @@ class FakeWorkspace implements LiquidWorkspace {
   }) async {
     previewed.add((page, to));
     await Future<void>.delayed(const Duration(milliseconds: 250));
-    return versionAt[to] ?? version ?? this;
+    return versionAt[to] ?? this;
   }
 
   void _rolesChanged() =>
@@ -323,6 +275,9 @@ class FakeWorkspace implements LiquidWorkspace {
 
   void _automationsChanged() =>
       _changed(const BridgeResource(kind: BridgeResourceKind.automations));
+
+  void _tablesChanged() =>
+      _changed(const BridgeResource(kind: BridgeResourceKind.tables));
 
   void _replaceAutomation(
     String? id,
@@ -335,6 +290,61 @@ class FakeWorkspace implements LiquidWorkspace {
   }
 
   Completer<void>? answered;
+
+  BridgeApplied _done({
+    String? area,
+    String? page,
+    String? block,
+    String? view,
+    String? field,
+    String? row,
+    String? option,
+    String? tab,
+    List<String> elements = const [],
+    String? line,
+    String? automation,
+    String? role,
+  }) => BridgeApplied(
+    action: _id(),
+    area: area,
+    page: page,
+    block: block,
+    view: view,
+    field: field,
+    row: row,
+    option: option,
+    tab: tab,
+    elements: elements,
+    line: line,
+    automation: automation,
+    role: role,
+    ran: _takeRan(),
+  );
+
+  BridgeView _withView(
+    BridgeView view, {
+    String? title,
+    bool? boundary,
+    BridgeBlockKind? kind,
+    List<BridgeTab>? tabs,
+    (BridgeTile?,)? tile,
+    (BridgeTile?,)? inner,
+  }) => BridgeView(
+    id: view.id,
+    block: view.block,
+    title: title ?? view.title,
+    boundary: boundary ?? view.boundary,
+    kind: kind ?? view.kind,
+    tabs: tabs ?? view.tabs,
+    tile: tile == null ? view.tile : tile.$1,
+    inner: inner == null ? view.inner : inner.$1,
+  );
+
+  void _setFields(String? block, List<BridgeField> fields) =>
+      databases[block!] = BridgeDatabase(
+        name: databases[block]!.name,
+        fields: fields,
+      );
 
   Future<BridgeApplied> _apply(BridgeMutation mutation) async {
     if (gatedKinds?.contains(mutation.kind) ?? true) await gate?.future;
@@ -360,12 +370,7 @@ class FakeWorkspace implements LiquidWorkspace {
           ),
         );
         _automationsChanged();
-        return BridgeApplied(
-          ran: const [],
-          elements: const [],
-          action: _id(),
-          automation: id,
-        );
+        return _done(automation: id);
       case BridgeMutationKind.setAutomation:
         _replaceAutomation(
           mutation.automation,
@@ -378,7 +383,7 @@ class FakeWorkspace implements LiquidWorkspace {
             role: kept.role,
           ),
         );
-        return BridgeApplied(ran: const [], elements: const [], action: _id());
+        return _done();
       case BridgeMutationKind.setAutomationOn:
         _replaceAutomation(
           mutation.automation,
@@ -392,7 +397,7 @@ class FakeWorkspace implements LiquidWorkspace {
             role: kept.role,
           ),
         );
-        return BridgeApplied(ran: const [], elements: const [], action: _id());
+        return _done();
       case BridgeMutationKind.setAutomationRole:
         _replaceAutomation(
           mutation.automation,
@@ -406,17 +411,12 @@ class FakeWorkspace implements LiquidWorkspace {
             role: mutation.role!,
           ),
         );
-        return BridgeApplied(ran: const [], elements: const [], action: _id());
+        return _done();
       case BridgeMutationKind.createRole:
         final id = _id();
         roles.add(BridgeRole(id: id, setup: mutation.roleSetup!));
         _rolesChanged();
-        return BridgeApplied(
-          ran: const [],
-          elements: const [],
-          action: _id(),
-          role: id,
-        );
+        return _done(role: id);
       case BridgeMutationKind.setRole:
         final at = roles.indexWhere((role) => role.id == mutation.role);
         roles[at] = BridgeRole(
@@ -425,11 +425,11 @@ class FakeWorkspace implements LiquidWorkspace {
           template: roles[at].template,
         );
         _rolesChanged();
-        return BridgeApplied(ran: const [], elements: const [], action: _id());
+        return _done();
       case BridgeMutationKind.removeRole:
         roles.removeWhere((role) => role.id == mutation.role);
         _rolesChanged();
-        return BridgeApplied(ran: const [], elements: const [], action: _id());
+        return _done();
       case BridgeMutationKind.protectTable || BridgeMutationKind.unprotectTable:
         final at = tables.indexWhere((table) => table.id == mutation.block);
         tables[at] = BridgeTable(
@@ -438,31 +438,27 @@ class FakeWorkspace implements LiquidWorkspace {
           name: tables[at].name,
           protected: mutation.kind == BridgeMutationKind.protectTable,
         );
-        _changed(const BridgeResource(kind: BridgeResourceKind.tables));
-        return BridgeApplied(ran: const [], elements: const [], action: _id());
+        _tablesChanged();
+        return _done();
       case BridgeMutationKind.removeAutomation:
         automations.removeWhere((kept) => kept.id == mutation.automation);
         _automationsChanged();
-        return BridgeApplied(ran: const [], elements: const [], action: _id());
-      case BridgeMutationKind.renameWorkspace:
-        name = mutation.text!;
+        return _done();
+      case BridgeMutationKind.renameWorkspace ||
+          BridgeMutationKind.setWorkspaceIcon:
+        if (mutation.kind == BridgeMutationKind.renameWorkspace) {
+          name = mutation.text!;
+        } else {
+          icon = mutation.text!;
+        }
         _changed(const BridgeResource(kind: BridgeResourceKind.workspace));
-        return BridgeApplied(ran: const [], elements: const [], action: _id());
-      case BridgeMutationKind.setWorkspaceIcon:
-        icon = mutation.text!;
-        _changed(const BridgeResource(kind: BridgeResourceKind.workspace));
-        return BridgeApplied(ran: const [], elements: const [], action: _id());
+        return _done();
       case BridgeMutationKind.createArea:
         final area = BridgeArea(id: _id(), name: mutation.text!);
         areas.add(area);
         pages[area.id] = [];
         _changed(const BridgeResource(kind: BridgeResourceKind.areas));
-        return BridgeApplied(
-          ran: const [],
-          elements: const [],
-          action: _id(),
-          area: area.id,
-        );
+        return _done(area: area.id);
       case BridgeMutationKind.createPage:
         final tree = pages[mutation.area]!;
         final page = BridgePage(
@@ -482,12 +478,7 @@ class FakeWorkspace implements LiquidWorkspace {
         _changed(
           BridgeResource(kind: BridgeResourceKind.pages, area: mutation.area),
         );
-        return BridgeApplied(
-          ran: const [],
-          elements: const [],
-          action: _id(),
-          page: page.id,
-        );
+        return _done(page: page.id);
       case BridgeMutationKind.renamePage || BridgeMutationKind.setPageIcon:
         final icon = mutation.kind == BridgeMutationKind.setPageIcon;
         for (final MapEntry(key: area, value: tree) in pages.entries) {
@@ -502,7 +493,7 @@ class FakeWorkspace implements LiquidWorkspace {
           );
           _changed(BridgeResource(kind: BridgeResourceKind.pages, area: area));
         }
-        return BridgeApplied(ran: const [], elements: const [], action: _id());
+        return _done();
       case BridgeMutationKind.addTextBlock:
         final view = _newView(BridgeBlockKind.text);
         texts[view.block] = mutation.text!;
@@ -516,7 +507,7 @@ class FakeWorkspace implements LiquidWorkspace {
           mutation.text!,
         );
         _changed(_blockResource(mutation));
-        return BridgeApplied(ran: const [], elements: const [], action: _id());
+        return _done();
       case BridgeMutationKind.splitTextBlock:
         final page = views[mutation.page]!;
         final at = page.indexWhere((view) => view.id == mutation.view);
@@ -524,16 +515,7 @@ class FakeWorkspace implements LiquidWorkspace {
         final BridgeView created;
         if (mutation.at == 0) {
           final shown = page[at];
-          page[at] = BridgeView(
-            id: shown.id,
-            block: shown.block,
-            title: shown.title,
-            boundary: false,
-            kind: shown.kind,
-            tabs: shown.tabs,
-            tile: shown.tile,
-            inner: shown.inner,
-          );
+          page[at] = _withView(shown, boundary: false);
           created = _block(
             mutation.page!,
             at,
@@ -551,13 +533,7 @@ class FakeWorkspace implements LiquidWorkspace {
             mutation.style,
           );
         }
-        return BridgeApplied(
-          ran: const [],
-          elements: const [],
-          action: _id(),
-          block: created.block,
-          view: created.id,
-        );
+        return _done(block: created.block, view: created.id);
       case BridgeMutationKind.joinTextBlock:
         final page = views[mutation.page]!;
         final at = page.indexWhere((view) => view.id == mutation.view);
@@ -576,7 +552,7 @@ class FakeWorkspace implements LiquidWorkspace {
           ),
         );
         _viewsChanged(mutation.page);
-        return BridgeApplied(ran: const [], elements: const [], action: _id());
+        return _done();
       case BridgeMutationKind.turnIntoCode ||
           BridgeMutationKind.turnIntoMath ||
           BridgeMutationKind.turnIntoText:
@@ -596,16 +572,7 @@ class FakeWorkspace implements LiquidWorkspace {
         final page = views[mutation.page]!;
         for (final (at, shown) in page.indexed) {
           if (shown.block != mutation.block) continue;
-          page[at] = BridgeView(
-            id: shown.id,
-            block: shown.block,
-            title: shown.title,
-            boundary: shown.boundary,
-            kind: to,
-            tabs: shown.tabs,
-            tile: shown.tile,
-            inner: shown.inner,
-          );
+          page[at] = _withView(shown, kind: to);
         }
         languages.remove(mutation.block);
         if (to == BridgeBlockKind.text) {
@@ -613,7 +580,7 @@ class FakeWorkspace implements LiquidWorkspace {
         }
         _viewsChanged(mutation.page);
         _changed(_blockResource(mutation));
-        return BridgeApplied(ran: const [], elements: const [], action: _id());
+        return _done();
       case BridgeMutationKind.setCodeLanguage:
         if (_kindOf(mutation.page!, mutation.block!) != BridgeBlockKind.code) {
           throw 'not found';
@@ -624,27 +591,17 @@ class FakeWorkspace implements LiquidWorkspace {
           languages[mutation.block!] = mutation.text!;
         }
         _changed(_blockResource(mutation));
-        return BridgeApplied(ran: const [], elements: const [], action: _id());
+        return _done();
       case BridgeMutationKind.setTextStyle:
         styles[mutation.block!] = mutation.style;
         _changed(_blockResource(mutation));
-        return BridgeApplied(ran: const [], elements: const [], action: _id());
+        return _done();
       case BridgeMutationKind.setSectionBoundary:
         final page = views[mutation.page]!;
         final at = page.indexWhere((view) => view.id == mutation.view);
-        final shown = page[at];
-        page[at] = BridgeView(
-          id: shown.id,
-          block: shown.block,
-          title: shown.title,
-          boundary: mutation.boundary,
-          kind: shown.kind,
-          tabs: shown.tabs,
-          tile: shown.tile,
-          inner: shown.inner,
-        );
+        page[at] = _withView(page[at], boundary: mutation.boundary);
         _viewsChanged(mutation.page);
-        return BridgeApplied(ran: const [], elements: const [], action: _id());
+        return _done();
       case BridgeMutationKind.addTab ||
           BridgeMutationKind.renameTab ||
           BridgeMutationKind.setTabLayout ||
@@ -719,41 +676,21 @@ class FakeWorkspace implements LiquidWorkspace {
                 : null,
           );
         }
-        page[at] = BridgeView(
-          id: shown.id,
-          block: shown.block,
-          title: shown.title,
-          boundary: shown.boundary,
-          kind: shown.kind,
-          tabs: tabs,
-          tile: shown.tile,
-          inner: shown.inner,
-        );
+        page[at] = _withView(shown, tabs: tabs);
         _viewsChanged(mutation.page);
-        return BridgeApplied(
-          ran: const [],
-          elements: const [],
-          action: _id(),
-          tab: created,
-        );
+        return _done(tab: created);
       case BridgeMutationKind.setTile || BridgeMutationKind.setInnerTile:
         final page = views[mutation.page]!;
         final at = page.indexWhere((view) => view.id == mutation.view);
         if (at < 0) throw 'not found';
-        final shown = page[at];
         final inner = mutation.kind == BridgeMutationKind.setInnerTile;
-        page[at] = BridgeView(
-          id: shown.id,
-          block: shown.block,
-          title: shown.title,
-          boundary: shown.boundary,
-          kind: shown.kind,
-          tabs: shown.tabs,
-          tile: inner ? shown.tile : mutation.tile,
-          inner: inner ? mutation.tile : shown.inner,
+        page[at] = _withView(
+          page[at],
+          tile: inner ? null : (mutation.tile,),
+          inner: inner ? (mutation.tile,) : null,
         );
         _viewsChanged(mutation.page);
-        return BridgeApplied(ran: const [], elements: const [], action: _id());
+        return _done();
       case BridgeMutationKind.moveViews:
         final page = views[mutation.page]!;
         final from = page.indexWhere((view) => view.id == mutation.view);
@@ -771,11 +708,11 @@ class FakeWorkspace implements LiquidWorkspace {
           run,
         );
         _viewsChanged(mutation.page);
-        return BridgeApplied(ran: const [], elements: const [], action: _id());
+        return _done();
       case BridgeMutationKind.removeView:
         views[mutation.page]!.removeWhere((view) => view.id == mutation.view);
         _viewsChanged(mutation.page);
-        return BridgeApplied(ran: const [], elements: const [], action: _id());
+        return _done();
       case BridgeMutationKind.addRow:
         final table = rows[mutation.block]!;
         if (mutation.after case final after?
@@ -792,12 +729,7 @@ class FakeWorkspace implements LiquidWorkspace {
           row,
         );
         _changed(_tableResource(mutation.block));
-        return BridgeApplied(
-          ran: const [],
-          elements: const [],
-          action: _id(),
-          row: row.id,
-        );
+        return _done(row: row.id);
       case BridgeMutationKind.moveRow:
         final table = rows[mutation.block]!;
         final at = table.indexWhere((row) => row.id == mutation.row);
@@ -812,14 +744,14 @@ class FakeWorkspace implements LiquidWorkspace {
           moved,
         );
         _changed(_tableResource(mutation.block));
-        return BridgeApplied(ran: const [], elements: const [], action: _id());
+        return _done();
       case BridgeMutationKind.removeRow:
         final table = rows[mutation.block]!;
         final at = table.indexWhere((row) => row.id == mutation.row);
         if (at < 0) throw 'not found';
         table.removeAt(at);
         _changed(_tableResource(mutation.block));
-        return BridgeApplied(ran: const [], elements: const [], action: _id());
+        return _done();
       case BridgeMutationKind.addField:
         final database = databases[mutation.block]!;
         final fields = [...database.fields];
@@ -842,17 +774,9 @@ class FakeWorkspace implements LiquidWorkspace {
               : fields.indexWhere((field) => field.id == mutation.after) + 1,
           field,
         );
-        databases[mutation.block!] = BridgeDatabase(
-          name: database.name,
-          fields: fields,
-        );
+        _setFields(mutation.block, fields);
         _changed(_tableResource(mutation.block));
-        return BridgeApplied(
-          ran: const [],
-          elements: const [],
-          action: _id(),
-          field: field.id,
-        );
+        return _done(field: field.id);
       case BridgeMutationKind.setCell:
         final table = rows[mutation.block]!;
         final at = table.indexWhere((row) => row.id == mutation.row);
@@ -878,7 +802,7 @@ class FakeWorkspace implements LiquidWorkspace {
           computed: table[at].computed,
         );
         _changed(_tableResource(mutation.block));
-        return BridgeApplied(ran: const [], elements: const [], action: _id());
+        return _done();
       case BridgeMutationKind.addOption:
         final database = databases[mutation.block]!;
         final option = BridgeOption(
@@ -886,28 +810,20 @@ class FakeWorkspace implements LiquidWorkspace {
           name: mutation.text!,
           color: mutation.color,
         );
-        databases[mutation.block!] = BridgeDatabase(
-          name: database.name,
-          fields: [
-            for (final field in database.fields)
-              field.id == mutation.field
-                  ? BridgeField(
-                      id: field.id,
-                      name: field.name,
-                      kind: field.kind,
-                      options: [...field.options, option],
-                      formula: '',
-                    )
-                  : field,
-          ],
-        );
+        _setFields(mutation.block, [
+          for (final field in database.fields)
+            field.id == mutation.field
+                ? BridgeField(
+                    id: field.id,
+                    name: field.name,
+                    kind: field.kind,
+                    options: [...field.options, option],
+                    formula: '',
+                  )
+                : field,
+        ]);
         _changed(_tableResource(mutation.block));
-        return BridgeApplied(
-          ran: const [],
-          elements: const [],
-          action: _id(),
-          option: option.id,
-        );
+        return _done(option: option.id);
       case BridgeMutationKind.setFieldFormula:
         final database = databases[mutation.block]!;
         final at = database.fields.indexWhere(
@@ -918,45 +834,39 @@ class FakeWorkspace implements LiquidWorkspace {
         if (field.kind != BridgeFieldKind.formula) {
           throw 'the value is not of its kind or not valid';
         }
-        databases[mutation.block!] = BridgeDatabase(
-          name: database.name,
-          fields: [
-            for (final known in database.fields)
-              known.id == field.id
-                  ? BridgeField(
-                      id: field.id,
-                      name: field.name,
-                      kind: field.kind,
-                      options: field.options,
-                      formula: mutation.text!,
-                    )
-                  : known,
-          ],
-        );
+        _setFields(mutation.block, [
+          for (final known in database.fields)
+            known.id == field.id
+                ? BridgeField(
+                    id: field.id,
+                    name: field.name,
+                    kind: field.kind,
+                    options: field.options,
+                    formula: mutation.text!,
+                  )
+                : known,
+        ]);
         _changed(_tableResource(mutation.block));
-        return BridgeApplied(ran: const [], elements: const [], action: _id());
+        return _done();
       case BridgeMutationKind.renameField || BridgeMutationKind.removeField:
         final database = databases[mutation.block]!;
         if (!database.fields.any((field) => field.id == mutation.field)) {
           throw 'not found';
         }
         final rename = mutation.kind == BridgeMutationKind.renameField;
-        databases[mutation.block!] = BridgeDatabase(
-          name: database.name,
-          fields: [
-            for (final field in database.fields)
-              if (field.id != mutation.field)
-                field
-              else if (rename)
-                BridgeField(
-                  id: field.id,
-                  name: mutation.text!,
-                  kind: field.kind,
-                  options: field.options,
-                  formula: field.formula,
-                ),
-          ],
-        );
+        _setFields(mutation.block, [
+          for (final field in database.fields)
+            if (field.id != mutation.field)
+              field
+            else if (rename)
+              BridgeField(
+                id: field.id,
+                name: mutation.text!,
+                kind: field.kind,
+                options: field.options,
+                formula: field.formula,
+              ),
+        ]);
         if (!rename) {
           rows[mutation.block!] = [
             for (final row in rows[mutation.block]!)
@@ -971,7 +881,7 @@ class FakeWorkspace implements LiquidWorkspace {
           ];
         }
         _changed(_tableResource(mutation.block));
-        return BridgeApplied(ran: const [], elements: const [], action: _id());
+        return _done();
       case BridgeMutationKind.renameDatabase:
         final database = databases[mutation.block]!;
         databases[mutation.block!] = BridgeDatabase(
@@ -980,7 +890,7 @@ class FakeWorkspace implements LiquidWorkspace {
         );
         _renameTable(mutation.block!, mutation.text!);
         _changed(_tableResource(mutation.block));
-        return BridgeApplied(ran: const [], elements: const [], action: _id());
+        return _done();
       case BridgeMutationKind.addMediaBlock:
         final file = attachments[mutation.attachment]!;
         final view = _newView(BridgeBlockKind.media);
@@ -1022,7 +932,7 @@ class FakeWorkspace implements LiquidWorkspace {
         if (!charts.containsKey(mutation.block)) throw 'not found';
         charts[mutation.block!] = mutation.chart!;
         _changed(_blockResource(mutation));
-        return BridgeApplied(ran: const [], elements: const [], action: _id());
+        return _done();
       case BridgeMutationKind.addLine:
         final lines = calculations[mutation.block] ?? (throw 'not found');
         final at = mutation.after == null
@@ -1031,12 +941,7 @@ class FakeWorkspace implements LiquidWorkspace {
         final id = _id();
         lines.insert(at, line(id, mutation.lineSetup!));
         _changed(_blockResource(mutation));
-        return BridgeApplied(
-          ran: const [],
-          elements: const [],
-          action: _id(),
-          line: id,
-        );
+        return _done(line: id);
       case BridgeMutationKind.setLine:
         final lines = calculations[mutation.block] ?? (throw 'not found');
         final at = lines.indexWhere((line) => line.id == mutation.line);
@@ -1047,14 +952,14 @@ class FakeWorkspace implements LiquidWorkspace {
         }
         lines[at] = line(mutation.line!, mutation.lineSetup!);
         _changed(_blockResource(mutation));
-        return BridgeApplied(ran: const [], elements: const [], action: _id());
+        return _done();
       case BridgeMutationKind.removeLine:
         final lines = calculations[mutation.block] ?? (throw 'not found');
         final before = lines.length;
         lines.removeWhere((line) => line.id == mutation.line);
         if (lines.length == before) throw 'not found';
         _changed(_blockResource(mutation));
-        return BridgeApplied(ran: const [], elements: const [], action: _id());
+        return _done();
       case BridgeMutationKind.setDrawingStyle:
         final board = whiteboards[mutation.block] ?? (throw 'not found');
         if (board.style == mutation.drawingStyle) {
@@ -1065,7 +970,7 @@ class FakeWorkspace implements LiquidWorkspace {
           elements: board.elements,
         );
         _changed(_blockResource(mutation));
-        return BridgeApplied(ran: const [], elements: const [], action: _id());
+        return _done();
       case BridgeMutationKind.editDrawing:
         final board =
             whiteboards[mutation.block] ??
@@ -1096,7 +1001,7 @@ class FakeWorkspace implements LiquidWorkspace {
           elements: elements,
         );
         _changed(_blockResource(mutation));
-        return BridgeApplied(ran: const [], elements: ids, action: _id());
+        return _done(elements: ids);
       case BridgeMutationKind.addDatabaseBlock:
         final layout = mutation.layout;
         final extra = switch (layout) {
@@ -1181,12 +1086,7 @@ class FakeWorkspace implements LiquidWorkspace {
           ],
         );
         rows[table] = [];
-        return BridgeApplied(
-          ran: const [],
-          elements: const [],
-          action: _id(),
-          block: table,
-        );
+        return _done(block: table);
       case BridgeMutationKind.addTableView:
         if (!tables.any((table) => table.id == mutation.block)) {
           throw 'not found';
@@ -1208,16 +1108,7 @@ class FakeWorkspace implements LiquidWorkspace {
         final page = views[mutation.page]!;
         final at = page.indexWhere((view) => view.id == mutation.view);
         final shown = page[at];
-        page[at] = BridgeView(
-          id: shown.id,
-          block: shown.block,
-          title: mutation.text!,
-          boundary: shown.boundary,
-          kind: shown.kind,
-          tabs: shown.tabs,
-          tile: shown.tile,
-          inner: shown.inner,
-        );
+        page[at] = _withView(shown, title: mutation.text!);
         _viewsChanged(mutation.page);
         if (shown.kind == BridgeBlockKind.database &&
             tables.any(
@@ -1225,7 +1116,7 @@ class FakeWorkspace implements LiquidWorkspace {
             )) {
           _renameTable(shown.block, mutation.text!);
         }
-        return BridgeApplied(ran: const [], elements: const [], action: _id());
+        return _done();
       case BridgeMutationKind.deleteTable:
         if (!tables.any((table) => table.id == mutation.block)) {
           throw 'not found';
@@ -1241,17 +1132,15 @@ class FakeWorkspace implements LiquidWorkspace {
           );
           if (shown.length != before) _viewsChanged(page);
         }
-        _changed(const BridgeResource(kind: BridgeResourceKind.tables));
+        _tablesChanged();
         _changed(_tableResource(mutation.block));
-        return BridgeApplied(ran: const [], elements: const [], action: _id());
+        return _done();
     }
   }
 
-  final tables = <BridgeTable>[];
-
   void _newTable(String id, String area, String name) {
     tables.add(BridgeTable(id: id, area: area, name: name, protected: false));
-    _changed(const BridgeResource(kind: BridgeResourceKind.tables));
+    _tablesChanged();
   }
 
   void _renameTable(String id, String name) {
@@ -1267,7 +1156,7 @@ class FakeWorkspace implements LiquidWorkspace {
     if (database != null) {
       databases[id] = BridgeDatabase(name: name, fields: database.fields);
     }
-    _changed(const BridgeResource(kind: BridgeResourceKind.tables));
+    _tablesChanged();
   }
 
   String _areaOf(String page) => pages.entries
@@ -1302,11 +1191,8 @@ class FakeWorkspace implements LiquidWorkspace {
     kind: kind,
     tabs: tabs,
   );
-
   final device = <String, String>{};
-
   final recalled = <String>[];
-
   bool refuseRemembered = false;
 
   @override
@@ -1334,13 +1220,7 @@ class FakeWorkspace implements LiquidWorkspace {
       view,
     );
     _viewsChanged(mutation.page);
-    return BridgeApplied(
-      ran: const [],
-      elements: const [],
-      action: _id(),
-      block: view.block,
-      view: view.id,
-    );
+    return _done(block: view.block, view: view.id);
   }
 
   void _viewsChanged(String? page) =>
@@ -1384,7 +1264,7 @@ class FakeWorkspace implements LiquidWorkspace {
   void dropTable(String table) {
     tables.removeWhere((shown) => shown.id == table);
     databases.remove(table);
-    _changed(const BridgeResource(kind: BridgeResourceKind.tables));
+    _tablesChanged();
     _changed(_tableResource(table));
   }
 
@@ -1652,12 +1532,8 @@ class FakeWorkspace implements LiquidWorkspace {
     };
   }
 
-  BridgeView _decoded(BridgeView view) => BridgeView(
-    id: view.id,
-    block: view.block,
-    title: view.title,
-    boundary: view.boundary,
-    kind: view.kind,
+  BridgeView _decoded(BridgeView view) => _withView(
+    view,
     tabs: [
       for (final tab in view.tabs)
         changedTab(
@@ -1684,8 +1560,6 @@ class FakeWorkspace implements LiquidWorkspace {
           },
         ),
     ],
-    tile: view.tile,
-    inner: view.inner,
   );
 
   List<BridgeHit> _search(BridgeQuery query) {
@@ -1882,7 +1756,6 @@ class FakeWorkspace implements LiquidWorkspace {
   final sourcePaths = <String, String>{};
   final sourceFiles = <(String, String), BridgeSourceFile>{};
   final sourceFolders = <(String, String), List<BridgeFileEntry>>{};
-  final sourceUserList = <String, List<BridgeSourceUser>>{};
   final located = <(String, String)>[];
 
   static BridgeSourceFile missingFile = BridgeSourceFile(
@@ -2003,7 +1876,7 @@ class FakeWorkspace implements LiquidWorkspace {
   @override
   Future<List<BridgeSourceUser>> sourceUsers({
     required String sourceId,
-  }) async => sourceUserList[sourceId] ?? const [];
+  }) async => const [];
 
   @override
   Future<Uint8List> readAttachment({required String attachment}) async =>

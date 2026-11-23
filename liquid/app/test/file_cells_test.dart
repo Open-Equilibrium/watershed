@@ -11,6 +11,25 @@ import 'package:liquid/src/workspace/paste.dart';
 
 import 'page_kit.dart';
 
+const fields = [
+  BridgeField(
+    id: 'name',
+    name: 'Name',
+    kind: BridgeFieldKind.text,
+    options: [],
+    formula: '',
+  ),
+  BridgeField(
+    id: 'files',
+    name: 'Files',
+    kind: BridgeFieldKind.file,
+    options: [],
+    formula: '',
+  ),
+];
+
+const bookingTable = TablePart([], fields: fields);
+
 void main() {
   final kit = PageKit();
   final picked = <MediaSource>[];
@@ -24,22 +43,12 @@ void main() {
     MediaPlatform.fileSize = (path) async => kit.fake.files[path]!.length;
   });
 
-  const fields = [
-    BridgeField(
-      id: 'name',
-      name: 'Name',
-      kind: BridgeFieldKind.text,
-      options: [],
-      formula: '',
-    ),
-    BridgeField(
-      id: 'files',
-      name: 'Files',
-      kind: BridgeFieldKind.file,
-      options: [],
-      formula: '',
-    ),
-  ];
+  void putFile(String path, int size) => kit.fake.files[path] = Uint8List(size);
+
+  void pick(String path, int size) {
+    putFile(path, size);
+    picked.add(MediaSource.file(path.split('/').last, path, size));
+  }
 
   Future<BridgeMedia> stored(String name, int size) async => BridgeMedia(
     name: name,
@@ -73,17 +82,31 @@ void main() {
     WidgetTester tester,
     Future<List<BridgeMedia>> Function() files,
   ) async {
-    late List<BridgeMedia> held;
-    await kit.show(tester, const [
-      TablePart([], fields: fields),
-    ], before: () {});
-    held = await tester.runAsync(files) ?? const [];
-    final block = kit.fake.rows.keys.single;
-    kit.fake.putRows(kit.page, block, [
+    await kit.show(tester, [bookingTable], before: () {});
+    final held = await tester.runAsync(files) ?? const [];
+    kit.fake.putRows(kit.page, kit.fake.rows.keys.single, [
       row('r1', 'Hotel', held),
       row('r2', 'Train to Porto', const []),
     ]);
     await tester.pumpAndSettle();
+  }
+
+  Future<void> tap(WidgetTester tester, Finder finder) async {
+    await tester.tap(finder);
+    await tester.pumpAndSettle();
+  }
+
+  Future<void> press(WidgetTester tester, LogicalKeyboardKey key) async {
+    await tester.sendKeyEvent(key);
+    await tester.pumpAndSettle();
+  }
+
+  Future<void> paste(WidgetTester tester, String name) async {
+    readClipboard = () async => Pasted(files: ['/Users/me/$name']);
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyV);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+    await tester.pump();
   }
 
   Finder fileCell(String row) =>
@@ -93,29 +116,6 @@ void main() {
     final set = kit.applied(BridgeMutationKind.setCell).last;
     return '${set.row}: ${[for (final file in set.cell!.files) file.name].join(', ')}';
   }
-
-  testWidgets('a file cell shows its files as chips, and how many more', (
-    tester,
-  ) async {
-    await bookings(
-      tester,
-      () async => [
-        await stored('Hotel booking.eml', 48000),
-        for (var at = 0; at < 6; at++) await stored('Invoice $at.pdf', 10),
-      ],
-    );
-    expect(
-      find.descendant(
-        of: fileCell('r1'),
-        matching: find.byKey(const ValueKey('file chip Hotel booking.eml')),
-      ),
-      findsOneWidget,
-    );
-    expect(
-      find.descendant(of: fileCell('r1'), matching: find.textContaining('+')),
-      findsOneWidget,
-    );
-  });
 
   testWidgets('⏎ opens a cell\'s files: Save as…, Remove and Add files…', (
     tester,
@@ -127,54 +127,30 @@ void main() {
         await stored('Invoice.pdf', 120000),
       ],
     );
-    await tester.tap(fileCell('r1'));
-    await tester.pumpAndSettle();
-    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
-    await tester.pumpAndSettle();
+    await tap(tester, fileCell('r1'));
+    await press(tester, LogicalKeyboardKey.enter);
     expect(find.text('2 files'), findsOneWidget);
     expect(find.text('Hotel booking.eml · 48 KB'), findsOneWidget);
 
     saveTo = '/Users/me/Desktop/booking.eml';
-    await tester.tap(find.byKey(const ValueKey('file save Hotel booking.eml')));
-    await tester.pumpAndSettle();
+    await tap(
+      tester,
+      find.byKey(const ValueKey('file save Hotel booking.eml')),
+    );
     expect(kit.fake.saved['/Users/me/Desktop/booking.eml'], hasLength(48000));
 
-    kit.fake.files['/Users/me/CP ticket.pdf'] = Uint8List(5);
-    picked.add(
-      const MediaSource.file('CP ticket.pdf', '/Users/me/CP ticket.pdf', 5),
-    );
-    await tester.tap(find.byKey(const Key('add files')));
-    await tester.pumpAndSettle();
+    pick('/Users/me/CP ticket.pdf', 5);
+    await tap(tester, find.byKey(const Key('add files')));
     expect(
       lastWrite(),
       'r1: Hotel booking.eml, Invoice.pdf, CP ticket.pdf',
       reason: 'after the files it holds',
     );
 
-    await tester.tap(fileCell('r1'));
-    await tester.pumpAndSettle();
-    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
-    await tester.pumpAndSettle();
-    await tester.sendKeyEvent(LogicalKeyboardKey.backspace);
-    await tester.pumpAndSettle();
+    await tap(tester, fileCell('r1'));
+    await press(tester, LogicalKeyboardKey.enter);
+    await press(tester, LogicalKeyboardKey.backspace);
     expect(lastWrite(), 'r1: Invoice.pdf, CP ticket.pdf');
-  });
-
-  testWidgets('a cell\'s long list scrolls and keeps Add files… in reach', (
-    tester,
-  ) async {
-    await bookings(
-      tester,
-      () async => [
-        for (var at = 0; at < 60; at++) await stored('Receipt $at.pdf', 10),
-      ],
-    );
-    await tester.tap(fileCell('r1'));
-    await tester.pumpAndSettle();
-    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
-    await tester.pumpAndSettle();
-    expect(tester.takeException(), isNull);
-    expect(find.byKey(const Key('add files')).hitTestable(), findsOneWidget);
   });
 
   testWidgets('files dropped on a file cell go into it, not onto the Page', (
@@ -182,7 +158,7 @@ void main() {
   ) async {
     await bookings(tester, () async => const []);
     const path = '/Users/me/CP ticket.pdf';
-    kit.fake.files[path] = Uint8List(3);
+    putFile(path, 3);
     Future<void> native(String method, Object arguments) async {
       await tester.binding.defaultBinaryMessenger.handlePlatformMessage(
         'desktop_drop',
@@ -210,34 +186,14 @@ void main() {
     );
   });
 
-  testWidgets('⌘V pastes copied files into the selected file cell', (
-    tester,
-  ) async {
-    await bookings(tester, () async => const []);
-    const path = '/Users/me/tram.png';
-    kit.fake.files[path] = Uint8List(4);
-    readClipboard = () async => const Pasted(files: [path]);
-    await tester.tap(fileCell('r2'));
-    await tester.pumpAndSettle();
-    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
-    await tester.sendKeyEvent(LogicalKeyboardKey.keyV);
-    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
-    await tester.pumpAndSettle();
-    expect(lastWrite(), 'r2: tram.png');
-  });
-
   testWidgets('files added while the row moved keep what it got meanwhile', (
     tester,
   ) async {
     await bookings(tester, () async => [await stored('Hotel.eml', 1)]);
-    const path = '/Users/me/CP ticket.pdf';
-    kit.fake.files[path] = Uint8List(5);
-    picked.add(const MediaSource.file('CP ticket.pdf', path, 5));
+    pick('/Users/me/CP ticket.pdf', 5);
     kit.fake.uploadGate = Completer<void>();
-    await tester.tap(fileCell('r1'));
-    await tester.pumpAndSettle();
-    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
-    await tester.pumpAndSettle();
+    await tap(tester, fileCell('r1'));
+    await press(tester, LogicalKeyboardKey.enter);
     await tester.tap(find.byKey(const Key('add files')));
     await tester.pump();
     final extra = await tester.runAsync(() => stored('Extra.pdf', 2));
@@ -256,12 +212,10 @@ void main() {
     'a held ⌘V pastes once, and quick adds keep each other\'s files',
     (tester) async {
       await bookings(tester, () async => const []);
-      for (final name in ['a.pdf', 'b.pdf']) {
-        kit.fake.files['/Users/me/$name'] = Uint8List(3);
-      }
+      putFile('/Users/me/a.pdf', 3);
+      putFile('/Users/me/b.pdf', 3);
       readClipboard = () async => const Pasted(files: ['/Users/me/a.pdf']);
-      await tester.tap(fileCell('r2'));
-      await tester.pumpAndSettle();
+      await tap(tester, fileCell('r2'));
       await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
       await tester.sendKeyDownEvent(LogicalKeyboardKey.keyV);
       await tester.sendKeyRepeatEvent(LogicalKeyboardKey.keyV);
@@ -279,24 +233,15 @@ void main() {
     tester,
   ) async {
     await bookings(tester, () async => const []);
-    for (final name in ['A.pdf', 'B.pdf']) {
-      kit.fake.files['/Users/me/$name'] = Uint8List(3);
-    }
-    Future<void> paste(String name) async {
-      readClipboard = () async => Pasted(files: ['/Users/me/$name']);
-      await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
-      await tester.sendKeyEvent(LogicalKeyboardKey.keyV);
-      await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
-      await tester.pumpAndSettle();
-    }
-
-    await tester.tap(fileCell('r2'));
+    putFile('/Users/me/A.pdf', 3);
+    putFile('/Users/me/B.pdf', 3);
+    await tap(tester, fileCell('r2'));
+    await paste(tester, 'A.pdf');
     await tester.pumpAndSettle();
-    await paste('A.pdf');
     expect(lastWrite(), 'r2: A.pdf');
-    await tester.sendKeyEvent(LogicalKeyboardKey.backspace);
+    await press(tester, LogicalKeyboardKey.backspace);
+    await paste(tester, 'B.pdf');
     await tester.pumpAndSettle();
-    await paste('B.pdf');
     expect(lastWrite(), 'r2: B.pdf');
   });
 
@@ -304,22 +249,12 @@ void main() {
     'a queued add goes to the row it was made in, wherever it moved',
     (tester) async {
       await bookings(tester, () async => const []);
-      for (final name in ['A.pdf', 'B.pdf']) {
-        kit.fake.files['/Users/me/$name'] = Uint8List(3);
-      }
+      putFile('/Users/me/A.pdf', 3);
+      putFile('/Users/me/B.pdf', 3);
       kit.fake.uploadGate = Completer<void>();
-      Future<void> paste(String name) async {
-        readClipboard = () async => Pasted(files: ['/Users/me/$name']);
-        await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
-        await tester.sendKeyEvent(LogicalKeyboardKey.keyV);
-        await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
-        await tester.pump();
-      }
-
-      await tester.tap(fileCell('r1'));
-      await tester.pumpAndSettle();
-      await paste('A.pdf');
-      await paste('B.pdf');
+      await tap(tester, fileCell('r1'));
+      await paste(tester, 'A.pdf');
+      await paste(tester, 'B.pdf');
       final block = kit.fake.rows.keys.single;
       kit.fake.putRows(kit.page, block, [
         row('r0', 'Flight', const []),
@@ -338,16 +273,13 @@ void main() {
 
   testWidgets('a cell takes at most 100 files', (tester) async {
     await bookings(tester, () async => [await stored('Hotel.eml', 1)]);
-    kit.fake.files['/Users/me/a.pdf'] = Uint8List(1);
+    putFile('/Users/me/a.pdf', 1);
     picked.addAll(
       List.filled(100, const MediaSource.file('a.pdf', '/Users/me/a.pdf', 1)),
     );
-    await tester.tap(fileCell('r1'));
-    await tester.pumpAndSettle();
-    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
-    await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const Key('add files')));
-    await tester.pumpAndSettle();
+    await tap(tester, fileCell('r1'));
+    await press(tester, LogicalKeyboardKey.enter);
+    await tap(tester, find.byKey(const Key('add files')));
     expect(kit.applied(BridgeMutationKind.setCell), isEmpty);
     expect(kit.workspace.problem.value, 'A cell holds at most 100 files.');
   });

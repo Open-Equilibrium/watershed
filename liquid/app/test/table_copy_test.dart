@@ -35,6 +35,15 @@ void main() {
     await tap(tester, find.text(action));
   }
 
+  Future<void> pasteHere(WidgetTester tester) async {
+    await tester.tap(block(0));
+    await tester.pump();
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+    await key(tester, LogicalKeyboardKey.keyV);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+    await tester.pumpAndSettle();
+  }
+
   testWidgets('Duplicate puts a new Table with the same tabs right below', (
     tester,
   ) async {
@@ -61,12 +70,7 @@ void main() {
     final original = tables().single;
     await viewAction(tester, 'Copy');
     expect(copied, 'Expenses');
-    await tester.tap(block(0));
-    await tester.pump();
-    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
-    await key(tester, LogicalKeyboardKey.keyV);
-    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
-    await tester.pumpAndSettle();
+    await pasteHere(tester);
     final pasted = kit.applied(BridgeMutationKind.duplicateTable).single;
     expect(pasted.block, original.block);
     expect(find.text('Pasted as a copy'), findsOneWidget);
@@ -89,12 +93,7 @@ void main() {
     await viewAction(tester, 'Copy');
     copied = 'Expenses';
     change++;
-    await tester.tap(block(0));
-    await tester.pump();
-    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
-    await key(tester, LogicalKeyboardKey.keyV);
-    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
-    await tester.pumpAndSettle();
+    await pasteHere(tester);
     expect(kit.applied(BridgeMutationKind.duplicateTable), isEmpty);
     expect(field(tester, 0).controller!.text, 'Expenses');
   });
@@ -103,12 +102,7 @@ void main() {
     await kit.show(tester, [TablePart(expenses), const TextPart('')]);
     await viewAction(tester, 'Copy');
     kit.fake.dropTable(tables().single.block);
-    await tester.tap(block(0));
-    await tester.pump();
-    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
-    await key(tester, LogicalKeyboardKey.keyV);
-    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
-    await tester.pumpAndSettle();
+    await pasteHere(tester);
     expect(field(tester, 0).controller!.text, 'Expenses');
   });
 }

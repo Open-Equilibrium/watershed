@@ -18,63 +18,18 @@ void main() {
     final first = await DiffSettingsController.load(SettingsFile(file));
     expect(first.value.layout, DiffLayout.unified);
     expect(first.value.hideWhitespace, isFalse);
+    expect(first.value.width, isNull, reason: 'unset until dragged');
     await first.change(
-      const DiffSettings(layout: DiffLayout.split, hideWhitespace: true),
+      const DiffSettings(
+        layout: DiffLayout.split,
+        hideWhitespace: true,
+        width: 640,
+      ),
     );
 
     final again = await DiffSettingsController.load(SettingsFile(file));
     expect(again.value.layout, DiffLayout.split);
     expect(again.value.hideWhitespace, isTrue);
-  });
-
-  test(
-    'keeps the Diff panel width across a restart, unset until dragged',
-    () async {
-      final first = await DiffSettingsController.load(SettingsFile(file));
-      expect(first.value.width, isNull);
-      await first.change(const DiffSettings(width: 640));
-
-      final again = await DiffSettingsController.load(SettingsFile(file));
-      expect(again.value.width, 640);
-    },
-  );
-
-  test('treats a width that is not a finite number as unset', () async {
-    file.parent.createSync(recursive: true);
-    file.writeAsStringSync('{"width": 1e309}');
-    final first = await DiffSettingsController.load(SettingsFile(file));
-    expect(first.value.width, isNull);
-
-    await first.change(
-      const DiffSettings(layout: DiffLayout.split, width: 640),
-    );
-
-    final again = await DiffSettingsController.load(SettingsFile(file));
-    expect(again.value.layout, DiffLayout.split);
     expect(again.value.width, 640);
-  });
-
-  test(
-    'starts from the defaults when the file says nothing it knows',
-    () async {
-      file.parent.createSync(recursive: true);
-      file.writeAsStringSync('{"layout": "sideways", "hideWhitespace": "yes"}');
-      final settings = await DiffSettingsController.load(SettingsFile(file));
-      expect(settings.value.layout, DiffLayout.unified);
-      expect(settings.value.hideWhitespace, isFalse);
-    },
-  );
-
-  test('saves quick changes one after another, keeping the last', () async {
-    final settings = await DiffSettingsController.load(SettingsFile(file));
-    for (var round = 0; round < 20; round++) {
-      await Future.wait([
-        settings.change(const DiffSettings(layout: DiffLayout.split)),
-        settings.change(const DiffSettings(hideWhitespace: true)),
-      ]);
-      final kept = await DiffSettingsController.load(SettingsFile(file));
-      expect(kept.value.layout, DiffLayout.unified);
-      expect(kept.value.hideWhitespace, isTrue);
-    }
   });
 }

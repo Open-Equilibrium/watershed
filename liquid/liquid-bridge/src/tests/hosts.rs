@@ -246,7 +246,7 @@ fn remote_service(home: &Home) -> (Service, remote::Host, String) {
 }
 
 #[test]
-fn a_host_code_is_refused_and_saves_nothing() {
+fn a_host_pairing_is_refused_as_a_device_and_its_token_is_not_a_device_token() {
     let home = Home::new();
     let (service, local, url) = remote_service(&home);
     let tokens = Memory::default();
@@ -266,6 +266,18 @@ fn a_host_code_is_refused_and_saves_nothing() {
         tokens.read(&url).unwrap(),
         None,
         "a host's token is not kept"
+    );
+
+    let code = RUNTIME
+        .block_on(local.invite(ClientKind::Host, Access::Auto))
+        .expect("a code");
+    let pairing = RUNTIME
+        .block_on(remote::pair(&url, &code, "liquid-studio-s-token"))
+        .expect("the host pairs");
+    tokens.write(&url, &pairing.token).unwrap();
+    assert!(
+        reach_remote_with(&tokens, &url).is_err(),
+        "a token that may not make a device's call does not show as connected"
     );
     stop(service);
 }
@@ -291,26 +303,6 @@ fn a_revoked_device_is_told_to_pair_again_and_is_not_shown_offline() {
     assert_eq!(
         AgentHost::connect_remote_with(&tokens, &url).err(),
         Some(refusal)
-    );
-    stop(service);
-}
-
-#[test]
-fn a_host_token_is_not_reachable_as_a_device() {
-    let home = Home::new();
-    let (service, local, url) = remote_service(&home);
-    let tokens = Memory::default();
-    let code = RUNTIME
-        .block_on(local.invite(ClientKind::Host, Access::Auto))
-        .expect("a code");
-    let pairing = RUNTIME
-        .block_on(remote::pair(&url, &code, "liquid-studio-s-mac"))
-        .expect("the host pairs");
-    tokens.write(&url, &pairing.token).unwrap();
-
-    assert!(
-        reach_remote_with(&tokens, &url).is_err(),
-        "a token that may not make a device's call does not show as connected"
     );
     stop(service);
 }

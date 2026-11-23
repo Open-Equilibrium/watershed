@@ -55,8 +55,22 @@ void main() {
     await tester.pumpAndSettle();
   }
 
+  Future<void> resolve(WidgetTester tester, String id) async {
+    project.session.emit(
+      event(BridgeEventKind.requestResolved, ++sequence, requestId: id),
+    );
+    await tester.pumpAndSettle();
+  }
+
   Future<void> read(WidgetTester tester) =>
       tester.pump(const Duration(milliseconds: 500));
+
+  Future<void> openSettings(WidgetTester tester) async {
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.comma);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+    await tester.pumpAndSettle();
+  }
 
   bool focused(WidgetTester tester, Key key) =>
       tester.widget<TextField>(find.byKey(key)).focusNode?.hasFocus ?? false;
@@ -72,6 +86,9 @@ void main() {
     );
   }
 
+  Finder modelItem() =>
+      find.widgetWithText(PopupMenuItem<BridgeModelChoice>, 'Claude Opus 5.5');
+
   testWidgets(
     'a question takes the keys without a click, and esc dismisses it',
     (tester) async {
@@ -83,19 +100,22 @@ void main() {
     },
   );
 
-  testWidgets('a question takes no key pressed before it could be read', (
-    tester,
-  ) async {
-    await show(tester);
-    await ask(tester, 'q1', 'Your name');
-    await tester.enterText(find.byKey(const Key('answer')), 'draft');
-    await key(tester, LogicalKeyboardKey.enter);
-    expect(project.session.calls, isEmpty, reason: 'too early to answer');
+  testWidgets(
+    'a question takes no key before it can be read, and once answered the keys return to the composer',
+    (tester) async {
+      await show(tester);
+      await ask(tester, 'q1', 'Your name');
+      await tester.enterText(find.byKey(const Key('answer')), 'draft');
+      await key(tester, LogicalKeyboardKey.enter);
+      expect(project.session.calls, isEmpty, reason: 'too early to answer');
 
-    await read(tester);
-    await key(tester, LogicalKeyboardKey.enter);
-    expect(project.session.calls, ['answer q1 name=draft']);
-  });
+      await read(tester);
+      await key(tester, LogicalKeyboardKey.enter);
+      expect(project.session.calls, ['answer q1 name=draft']);
+      await resolve(tester, 'q1');
+      expect(focused(tester, const Key('composer')), isTrue);
+    },
+  );
 
   testWidgets('a key held from before a question does nothing in it', (
     tester,
@@ -138,22 +158,7 @@ void main() {
     expect(project.session.calls, ['answer q1 name=draft']);
   });
 
-  testWidgets('once answered, the keys go back to the composer', (
-    tester,
-  ) async {
-    await show(tester);
-    await ask(tester, 'q1', 'Your name');
-    await tester.enterText(find.byKey(const Key('answer')), 'draft');
-    await read(tester);
-    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
-    project.session.emit(
-      event(BridgeEventKind.requestResolved, ++sequence, requestId: 'q1'),
-    );
-    await tester.pumpAndSettle();
-    expect(focused(tester, const Key('composer')), isTrue);
-  });
-
-  testWidgets('a key in a composition answers and sends nothing', (
+  testWidgets('an input method\'s Enter commits its text and sends nothing', (
     tester,
   ) async {
     await show(tester);
@@ -166,12 +171,8 @@ void main() {
       isEmpty,
       reason: 'the Enter commits the input method\'s text first',
     );
-  });
 
-  testWidgets('Enter that ends a composition in the composer sends nothing', (
-    tester,
-  ) async {
-    await show(tester);
+    await resolve(tester, 'q1');
     await tester.tap(find.byKey(const Key('composer')));
     compose(tester, const Key('composer'), 'nihon');
     await key(tester, LogicalKeyboardKey.enter);
@@ -198,14 +199,11 @@ void main() {
     await show(tester);
     await tester.tap(find.byTooltip('Model'));
     await tester.pumpAndSettle();
-    expect(
-      find.widgetWithText(PopupMenuItem<BridgeModelChoice>, 'Claude Opus 5.5'),
-      findsOneWidget,
-    );
+    expect(modelItem(), findsOneWidget);
 
     await ask(tester, 'q1', 'Your name');
     expect(
-      find.widgetWithText(PopupMenuItem<BridgeModelChoice>, 'Claude Opus 5.5'),
+      modelItem(),
       findsNothing,
       reason: 'the menu would hide the question',
     );
@@ -219,20 +217,14 @@ void main() {
     tester,
   ) async {
     await show(tester);
-    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
-    await tester.sendKeyEvent(LogicalKeyboardKey.comma);
-    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
-    await tester.pumpAndSettle();
+    await openSettings(tester);
     expect(find.byType(SettingsPage), findsOneWidget);
 
     await ask(tester, 'q1', 'Your name');
     expect(find.byType(SettingsPage), findsNothing);
     await read(tester);
     await tester.sendKeyEvent(LogicalKeyboardKey.escape);
-    project.session.emit(
-      event(BridgeEventKind.requestResolved, ++sequence, requestId: 'q1'),
-    );
-    await tester.pumpAndSettle();
+    await resolve(tester, 'q1');
     expect(focused(tester, const Key('composer')), isTrue);
   });
 
@@ -249,10 +241,7 @@ void main() {
 
   testWidgets('focus and hover show in the Settings sections', (tester) async {
     await show(tester);
-    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
-    await tester.sendKeyEvent(LogicalKeyboardKey.comma);
-    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
-    await tester.pumpAndSettle();
+    await openSettings(tester);
     final context = tester.element(find.byType(SettingsPage));
     final theme = Theme.of(context);
     Finder section(String label) => find.ancestor(

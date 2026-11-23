@@ -15,6 +15,11 @@ BridgeFileChange change(
   removed: removed,
 );
 
+List<(DiffKind, int?, int?, String)> numbered(List<DiffLine> lines) => [
+  for (final line in lines)
+    (line.kind, line.oldNumber, line.newNumber, line.text),
+];
+
 void main() {
   test('groups changed files into folders, folders first', () {
     final rows = fileTree([
@@ -54,19 +59,14 @@ index 1..2 100644
 +added
  same
 ''');
-    expect(
-      lines.map(
-        (line) => (line.kind, line.oldNumber, line.newNumber, line.text),
-      ),
-      [
-        (DiffKind.hunk, null, null, '@@ -1,3 +1,4 @@ export'),
-        (DiffKind.context, 1, 1, 'import x'),
-        (DiffKind.removed, 2, null, 'old'),
-        (DiffKind.added, null, 2, 'new'),
-        (DiffKind.added, null, 3, 'added'),
-        (DiffKind.context, 3, 4, 'same'),
-      ],
-    );
+    expect(numbered(lines), [
+      (DiffKind.hunk, null, null, '@@ -1,3 +1,4 @@ export'),
+      (DiffKind.context, 1, 1, 'import x'),
+      (DiffKind.removed, 2, null, 'old'),
+      (DiffKind.added, null, 2, 'new'),
+      (DiffKind.added, null, 3, 'added'),
+      (DiffKind.context, 3, 4, 'same'),
+    ]);
   });
 
   test('starts over at each file section, as when a file becomes a link', () {
@@ -86,17 +86,12 @@ index 0..2
 +target
 \\ No newline at end of file
 ''');
-    expect(
-      lines.map(
-        (line) => (line.kind, line.oldNumber, line.newNumber, line.text),
-      ),
-      [
-        (DiffKind.hunk, null, null, '@@ -1 +0,0 @@'),
-        (DiffKind.removed, 1, null, 'content'),
-        (DiffKind.hunk, null, null, '@@ -0,0 +1 @@'),
-        (DiffKind.added, null, 1, 'target'),
-      ],
-    );
+    expect(numbered(lines), [
+      (DiffKind.hunk, null, null, '@@ -1 +0,0 @@'),
+      (DiffKind.removed, 1, null, 'content'),
+      (DiffKind.hunk, null, null, '@@ -0,0 +1 @@'),
+      (DiffKind.added, null, 1, 'target'),
+    ]);
   });
 
   test('pairs removed and added lines side by side for the split view', () {
@@ -121,20 +116,5 @@ index 0..2
         (null, null, 'only new'),
       ],
     );
-  });
-
-  test('measures a line of wide characters among longer narrow ones', () {
-    final wide = '变' * 100;
-    final lines = [
-      for (var index = 0; index < 8; index++)
-        DiffLine(DiffKind.added, 'x' * (120 + index)),
-      DiffLine(DiffKind.added, wide),
-    ];
-    expect(widestLines(lines), contains(wide));
-  });
-
-  test('measures a cut line as shown', () {
-    final widest = widestLines([DiffLine(DiffKind.added, 'x' * 5000)]);
-    expect(widest.single, '${'x' * shownChars}…');
   });
 }

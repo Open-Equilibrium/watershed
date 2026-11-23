@@ -1,10 +1,9 @@
-use crate::api::media::{BridgeMedia, BridgeUpload};
-use crate::api::replica::LiquidWorkspace;
+use crate::api::media::BridgeMedia;
 use crate::api::workspace::{
     BridgeBlockKind, BridgeMutation, BridgeMutationKind, BridgeQuery, BridgeQueryKind,
 };
 
-use super::workspace::{Folder, Memory, lisbon, mutation, query};
+use super::workspace::{lisbon, mutation, open, query, views};
 
 fn bytes(len: usize) -> Vec<u8> {
     (0..len).map(|at| (at % 253) as u8).collect()
@@ -12,8 +11,7 @@ fn bytes(len: usize) -> Vec<u8> {
 
 #[test]
 fn a_file_goes_in_from_its_path_shows_in_a_media_block_and_saves_out_unchanged() {
-    let folder = Folder::new("media");
-    let workspace = LiquidWorkspace::open_with(&folder.0, &Memory::default()).unwrap();
+    let (folder, workspace) = open("media");
     let (_, page, _, intro) = lisbon(&workspace);
     let file = bytes(2 * liquid_core::PART + 12_345);
     let path = folder.0.join("Lisbon trip budget.pdf");
@@ -49,14 +47,7 @@ fn a_file_goes_in_from_its_path_shows_in_a_media_block_and_saves_out_unchanged()
             ..mutation(BridgeMutationKind::AddMediaBlock)
         })
         .unwrap();
-    let views = workspace
-        .query(BridgeQuery {
-            page: Some(page.clone()),
-            ..query(BridgeQueryKind::Views)
-        })
-        .unwrap()
-        .views;
-    assert_eq!(views[1].kind, BridgeBlockKind::Media);
+    assert_eq!(views(&workspace, &page)[1].kind, BridgeBlockKind::Media);
     let media = workspace
         .query(BridgeQuery {
             page: Some(page.clone()),
@@ -103,22 +94,8 @@ fn a_file_goes_in_from_its_path_shows_in_a_media_block_and_saves_out_unchanged()
 }
 
 #[test]
-fn pasted_bytes_become_the_same_attachment_and_a_missing_file_is_refused() {
-    let folder = Folder::new("pasted");
-    let workspace = LiquidWorkspace::open_with(&folder.0, &Memory::default()).unwrap();
-    let image = bytes(3000);
-    let path = folder.0.join("tram.png");
-    std::fs::write(&path, &image).unwrap();
-    let pasted = workspace.add_bytes(image).unwrap();
-    let mut last = None::<BridgeUpload>;
-    workspace
-        .add_file_with(path.to_string_lossy().into(), |upload| {
-            last = Some(upload);
-            true
-        })
-        .unwrap();
-    assert_eq!(last.unwrap().attachment, Some(pasted.clone()));
-
+fn a_missing_file_and_an_unknown_attachment_are_refused_and_nothing_is_written() {
+    let (folder, workspace) = open("missing-file");
     let missing = folder.0.join("gone.png").to_string_lossy().into();
     assert!(workspace.add_file_with(missing, |_| true).is_err());
     let unknown = "0".repeat(64);

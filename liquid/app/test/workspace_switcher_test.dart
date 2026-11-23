@@ -15,7 +15,7 @@ void main() {
     await tester.binding.setSurfaceSize(const Size(1400, 900));
     opened = {};
     final workspaces = await Workspaces.load('/workspaces', (path) async {
-      if (failNew && path.endsWith('/Workspace') == false) {
+      if (failNew && !path.endsWith('/Workspace')) {
         return (null, 'The Workspace did not open: no key');
       }
       final fake = opened.putIfAbsent(path.split('/').last, FakeWorkspace.new);
@@ -34,8 +34,7 @@ void main() {
     return workspaces;
   }
 
-  Future<void> tap(WidgetTester tester, Finder target) async {
-    await tester.tap(target);
+  Future<void> settle(WidgetTester tester) async {
     for (var turn = 0; turn < 20; turn++) {
       await tester.runAsync(
         () => Future<void>.delayed(const Duration(milliseconds: 2)),
@@ -43,6 +42,11 @@ void main() {
       await tester.pump(const Duration(milliseconds: 50));
     }
     await tester.pumpAndSettle();
+  }
+
+  Future<void> tap(WidgetTester tester, Finder target) async {
+    await tester.tap(target);
+    await settle(tester);
   }
 
   testWidgets('the Workspace you are in is renamed and given an icon', (
@@ -98,12 +102,7 @@ void main() {
     await tester.sendKeyEvent(LogicalKeyboardKey.digit2);
     await tester.sendKeyUpEvent(LogicalKeyboardKey.alt);
     await tester.sendKeyUpEvent(LogicalKeyboardKey.meta);
-    for (var turn = 0; turn < 20; turn++) {
-      await tester.runAsync(
-        () => Future<void>.delayed(const Duration(milliseconds: 2)),
-      );
-      await tester.pump(const Duration(milliseconds: 50));
-    }
+    await settle(tester);
     expect(workspaces.at, 1);
   });
 

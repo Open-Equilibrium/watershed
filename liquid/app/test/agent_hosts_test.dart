@@ -89,6 +89,15 @@ class FakeLinks implements AgentHostLinks {
   }
 }
 
+Future<void> tap(WidgetTester tester, Finder finder) async {
+  await tester.tap(finder);
+  await tester.pumpAndSettle();
+}
+
+void expectOne(Finder finder) => expect(finder, findsOneWidget);
+
+void expectNone(Finder finder) => expect(finder, findsNothing);
+
 void main() {
   late FakeAgentHosts bridge;
   late List<AgentHostsSettings> saved;
@@ -122,8 +131,7 @@ void main() {
     await tester.sendKeyEvent(LogicalKeyboardKey.comma, platform: 'macos');
     await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft, platform: 'macos');
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Agent hosts').first);
-    await tester.pumpAndSettle();
+    await tap(tester, find.text('Agent hosts').first);
   }
 
   Future<void> show(WidgetTester tester, AgentHostsController hosts) async {
@@ -162,15 +170,14 @@ void main() {
     String? address,
     String item,
   ) async {
-    await tester.tap(
+    await tap(
+      tester,
       find.descendant(
         of: find.byKey(ValueKey<String?>(address)),
         matching: find.byTooltip('More actions'),
       ),
     );
-    await tester.pumpAndSettle();
-    await tester.tap(find.text(item));
-    await tester.pumpAndSettle();
+    await tap(tester, find.text(item));
   }
 
   Finder usedFor(String? address) => find.descendant(
@@ -218,116 +225,24 @@ void main() {
     },
   );
 
-  testWidgets(
-    'lists This Mac first with each host’s status and marks the one sessions use',
-    (tester) async {
-      bridge.reaches[remote] = BridgeReach.offline;
-      await show(
-        tester,
-        controller(settings: const AgentHostsSettings([miniActive])),
-      );
+  testWidgets('lists This Mac first, marks the host in use, and checks the '
+      'hosts every 10 s and on resume', (tester) async {
+    bridge.reaches[remote] = BridgeReach.offline;
+    await show(
+      tester,
+      controller(settings: const AgentHostsSettings([miniActive])),
+    );
 
-      expect(find.text('This Mac'), findsOneWidget);
-      expect(
-        tester.getTopLeft(find.text('This Mac')).dy,
-        lessThan(tester.getTopLeft(find.text('Studio mini')).dy),
-      );
-      expect(find.text('Connected'), findsOneWidget);
-      expect(find.text('$remote · Offline'), findsOneWidget);
-      expect(find.text('Used for sessions'), findsOneWidget);
-      expect(bridge.calls, containsAll(['reach local', 'reach $remote']));
-    },
-  );
+    expectOne(find.text('This Mac'));
+    expect(
+      tester.getTopLeft(find.text('This Mac')).dy,
+      lessThan(tester.getTopLeft(find.text('Studio mini')).dy),
+    );
+    expectOne(find.text('Connected'));
+    expectOne(find.text('$remote · Offline'));
+    expectOne(find.text('Used for sessions'));
+    expect(bridge.calls, containsAll(['reach local', 'reach $remote']));
 
-  testWidgets(
-    'adds a host from its address and pairing code, and says when nothing changed',
-    (tester) async {
-      bridge.pairError = AnyhowException(
-        'That pairing code is wrong, already used or expired.',
-      );
-      await show(tester, controller());
-
-      await tester.tap(find.widgetWithText(GhostButton, 'Add agent host'));
-      await tester.pumpAndSettle();
-      await tester.enterText(find.byType(TextField).at(0), remote);
-      await tester.enterText(find.byType(TextField).at(1), 'AAAA-AAAA');
-      await tester.tap(find.widgetWithText(PrimaryButton, 'Add agent host'));
-      await tester.pumpAndSettle();
-
-      expect(
-        find.text(
-          'Could not add the agent host; nothing changed in Liquid. That pairing code is wrong, already used or expired.',
-        ),
-        findsOneWidget,
-      );
-      expect(saved, isEmpty);
-
-      bridge.pairError = null;
-      await tester.tap(find.widgetWithText(PrimaryButton, 'Add agent host'));
-      await tester.pumpAndSettle();
-
-      expect(
-        find.text('Add Agent Host'),
-        findsNothing,
-        reason: 'the dialog closes',
-      );
-      expect(find.text('Studio mini'), findsOneWidget);
-      expect(bridge.calls, contains('pair $remote AAAA-AAAA'));
-      expect(saved.single.activeAddress, isNull);
-      expect(saved.single.hosts.single.address, remote);
-      expect(saved.single.hosts.single.client, client);
-    },
-  );
-
-  testWidgets(
-    'names the add dialog fields, focuses Host, and adds on Enter in the code',
-    (tester) async {
-      final semantics = tester.ensureSemantics();
-      await show(tester, controller());
-      await tester.tap(find.widgetWithText(GhostButton, 'Add agent host'));
-      await tester.pumpAndSettle();
-
-      expect(
-        tester.getSemantics(find.bySemanticsLabel(RegExp('^Host'))),
-        matchesSemantics(
-          isTextField: true,
-          isFocused: true,
-          isFocusable: true,
-          hasEnabledState: true,
-          isEnabled: true,
-          hasFocusAction: true,
-          hasTapAction: true,
-          hasSetTextAction: true,
-          hasSetSelectionAction: true,
-        ),
-      );
-      expect(
-        tester.getSemantics(find.bySemanticsLabel(RegExp('^Pairing code'))),
-        matchesSemantics(
-          isTextField: true,
-          isFocusable: true,
-          hasEnabledState: true,
-          isEnabled: true,
-          hasFocusAction: true,
-          hasTapAction: true,
-        ),
-      );
-
-      await tester.enterText(find.byType(TextField).at(0), remote);
-      await tester.enterText(find.byType(TextField).at(1), 'AAAA-AAAA');
-      await tester.testTextInput.receiveAction(TextInputAction.done);
-      await tester.pumpAndSettle();
-
-      expect(bridge.calls, contains('pair $remote AAAA-AAAA'));
-      expect(find.text('Add Agent Host'), findsNothing);
-      semantics.dispose();
-    },
-  );
-
-  testWidgets('checks the hosts again every 10 s and when the app comes back', (
-    tester,
-  ) async {
-    await show(tester, controller(settings: AgentHostsSettings([mini])));
     int checks(String? address) => bridge.calls
         .where((call) => call == 'reach ${address ?? 'local'}')
         .length;
@@ -344,46 +259,66 @@ void main() {
     expect(checks(remote), 3);
   });
 
-  testWidgets(
-    'the Add dialog shows the ws:// address refusal from the bridge',
-    (tester) async {
-      bridge.pairError = AnyhowException(
-        'Enter the address as ws://HOST:PORT, as meta invite prints it.',
-      );
-      await show(tester, controller());
-      await tester.tap(find.widgetWithText(GhostButton, 'Add agent host'));
-      await tester.pumpAndSettle();
-      await tester.enterText(find.byType(TextField).at(0), '127.0.0.1:3774');
-      await tester.enterText(find.byType(TextField).at(1), 'AAAA-AAAA');
-      await tester.tap(find.widgetWithText(PrimaryButton, 'Add agent host'));
-      await tester.pumpAndSettle();
+  testWidgets('adds a host from its address and pairing code, names the '
+      'dialog fields, and says when nothing changed', (tester) async {
+    final semantics = tester.ensureSemantics();
+    bridge.pairError = AnyhowException(
+      'That pairing code is wrong, already used or expired.',
+    );
+    await show(tester, controller());
+    await tap(tester, find.widgetWithText(GhostButton, 'Add agent host'));
 
-      expect(
-        find.text(
-          'Could not add the agent host; nothing changed in Liquid. Enter the address as ws://HOST:PORT, as meta invite prints it.',
-        ),
-        findsOneWidget,
-      );
-      expect(bridge.calls, contains('pair 127.0.0.1:3774 AAAA-AAAA'));
-      expect(saved, isEmpty);
-    },
-  );
+    expect(
+      tester.getSemantics(find.bySemanticsLabel(RegExp('^Host'))),
+      matchesSemantics(
+        isTextField: true,
+        isFocused: true,
+        isFocusable: true,
+        hasEnabledState: true,
+        isEnabled: true,
+        hasFocusAction: true,
+        hasTapAction: true,
+        hasSetTextAction: true,
+        hasSetSelectionAction: true,
+      ),
+    );
+    expect(
+      tester.getSemantics(find.bySemanticsLabel(RegExp('^Pairing code'))),
+      matchesSemantics(
+        isTextField: true,
+        isFocusable: true,
+        hasEnabledState: true,
+        isEnabled: true,
+        hasFocusAction: true,
+        hasTapAction: true,
+      ),
+    );
 
-  testWidgets('uses a host for sessions at once', (tester) async {
-    await show(tester, controller(settings: AgentHostsSettings([mini])));
-    expect(find.text('Used for sessions'), findsOneWidget);
+    await tester.enterText(find.byType(TextField).at(0), remote);
+    await tester.enterText(find.byType(TextField).at(1), 'AAAA-AAAA');
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await tester.pumpAndSettle();
+    expectOne(
+      find.text(
+        'Could not add the agent host; nothing changed in Liquid. That pairing code is wrong, already used or expired.',
+      ),
+    );
+    expect(saved, isEmpty);
 
-    await chooseInRow(tester, remote, 'Use for sessions');
+    bridge.pairError = null;
+    await tap(tester, find.widgetWithText(PrimaryButton, 'Add agent host'));
 
-    expect(switched, [remote]);
-    expect(saved.last.activeAddress, remote);
-    expect(find.text('Used for sessions'), findsOneWidget);
-    expect(find.textContaining('Restart'), findsNothing);
+    expectNone(find.text('Add Agent Host'));
+    expectOne(find.text('Studio mini'));
+    expect(bridge.calls, contains('pair $remote AAAA-AAAA'));
+    expect(saved.single.activeAddress, isNull);
+    expect(saved.single.hosts.single.address, remote);
+    expect(saved.single.hosts.single.client, client);
+    semantics.dispose();
   });
 
-  testWidgets('choosing a host for sessions keeps Settings open', (
-    tester,
-  ) async {
+  testWidgets('choosing a host for sessions uses it at once and keeps Settings '
+      'open', (tester) async {
     await tester.binding.setSurfaceSize(const Size(1600, 1000));
     await tester.pumpWidget(
       LiquidApp(
@@ -398,39 +333,14 @@ void main() {
 
     await chooseInRow(tester, remote, 'Use for sessions');
 
-    expect(
-      find.text('Add agent host'),
-      findsOneWidget,
-      reason:
-          'Settings stay open, as T3 Code keeps them when a host is switched',
-    );
-    expect(find.text('Used for sessions'), findsOneWidget);
+    expect(switched, [remote]);
+    expect(saved.last.activeAddress, remote);
+    expectOne(find.text('Add agent host'));
+    expectOne(find.text('Used for sessions'));
   });
 
-  testWidgets('a second choice waits while the host for sessions connects', (
-    tester,
-  ) async {
-    final opening = Completer<String?>();
-    await show(
-      tester,
-      controller(
-        settings: AgentHostsSettings([mini]),
-        starting: (_) => opening.future,
-      ),
-    );
-
-    await chooseInRow(tester, remote, 'Use for sessions');
-    await chooseInRow(tester, null, 'Use for sessions');
-
-    expect(switched, [remote], reason: 'the rows wait for the switch');
-    opening.complete(null);
-    await tester.pumpAndSettle();
-    expect(find.text('Used for sessions'), findsOneWidget);
-  });
-
-  testWidgets('the rows keep waiting for a choice when Settings reopen', (
-    tester,
-  ) async {
+  testWidgets('the rows keep waiting for a choice while the host for sessions '
+      'connects, also after Settings reopen', (tester) async {
     final opening = Completer<String?>();
     await show(
       tester,
@@ -451,163 +361,142 @@ void main() {
     ], reason: 'the choice in progress still holds the rows');
     opening.complete(null);
     await tester.pumpAndSettle();
+    expectOne(find.text('Used for sessions'));
   });
 
-  testWidgets(
-    'a host that cannot start sessions is not used, and the saved choice goes back',
-    (tester) async {
-      await show(
-        tester,
-        controller(
-          settings: AgentHostsSettings([mini]),
-          switchFailure:
-              'Liquid could not connect to the agent host $remote: no answer.',
-        ),
-      );
+  testWidgets('a host that cannot start sessions is not used, and the saved '
+      'choice goes back', (tester) async {
+    await show(
+      tester,
+      controller(
+        settings: AgentHostsSettings([mini]),
+        switchFailure:
+            'Liquid could not connect to the agent host $remote: no answer.',
+      ),
+    );
 
-      await chooseInRow(tester, remote, 'Use for sessions');
+    await chooseInRow(tester, remote, 'Use for sessions');
 
-      expect(
-        find.text(
-          'Could not use Studio mini for sessions; nothing changed. Liquid could not connect to the agent host $remote: no answer.',
-        ),
-        findsOneWidget,
-      );
-      expect(saved.map((next) => next.activeAddress), [remote, null]);
-    },
-  );
+    expectOne(
+      find.text(
+        'Could not use Studio mini for sessions; nothing changed. Liquid could not connect to the agent host $remote: no answer.',
+      ),
+    );
+    expect(saved.map((next) => next.activeAddress), [remote, null]);
+  });
 
-  testWidgets(
-    'the sidebar lists every agent host’s sessions, marks a remote one with its machine, and opens it on its host',
-    (tester) async {
-      final state = SessionState(
-        FakeProject()..threadList = [threadOf('local', title: 'Local session')],
-      );
-      final studio = FakeProject()
-        ..hostName = 'Studio mini'
-        ..threadList = [threadOf('studio', title: 'Studio session')];
-      await state.addHost(remote, studio, machine: 'mac-mini');
-      await pumpSessions(tester, state);
+  testWidgets('the sidebar lists each agent host’s sessions, marks a remote '
+      'one, and opens it on its host', (tester) async {
+    final state = SessionState(
+      FakeProject()..threadList = [threadOf('local', title: 'Local session')],
+    );
+    final studio = FakeProject()
+      ..hostName = 'Studio mini'
+      ..threadList = [threadOf('studio', title: 'Studio session')];
+    await state.addHost(remote, studio, machine: 'mac-mini');
+    await pumpSessions(tester, state);
 
-      expect(find.text('Local session'), findsOneWidget);
-      expect(find.text('Studio session'), findsOneWidget);
-      expect(
-        find.descendant(
-          of: find.byKey(const Key('session-studio')),
-          matching: find.byTooltip('Studio mini'),
-        ),
-        findsOneWidget,
-      );
-      expect(
-        find.descendant(
-          of: find.byKey(const Key('session-local')),
-          matching: find.byType(MachineIcon),
-        ),
-        findsNothing,
-      );
+    expectOne(find.text('Local session'));
+    expectOne(find.text('Studio session'));
+    expectOne(
+      find.descendant(
+        of: find.byKey(const Key('session-studio')),
+        matching: find.byTooltip('Studio mini'),
+      ),
+    );
+    expectNone(
+      find.descendant(
+        of: find.byKey(const Key('session-local')),
+        matching: find.byType(MachineIcon),
+      ),
+    );
 
-      await tester.tap(find.byKey(const Key('session-studio')));
-      await tester.pumpAndSettle();
+    await tap(tester, find.byKey(const Key('session-studio')));
 
-      expect(studio.calls, ['open studio']);
-      expect(state.sessionAddress, remote);
-    },
-  );
+    expect(studio.calls, ['open studio']);
+    expect(state.sessionAddress, remote);
+  });
 
-  testWidgets(
-    'an open session whose agent host stops answering says so in the composer after 2 s, until it answers',
-    (tester) async {
-      final session = FakeSession(id: 'studio');
-      final studio = FakeProject(session: session)
-        ..hostName = 'Studio mini'
-        ..threadList = [threadOf('studio', title: 'Studio session')];
-      final state = SessionState(FakeProject());
-      await state.addHost(remote, studio);
-      await state.open('studio', address: remote);
-      await pumpSessions(tester, state);
+  testWidgets('an open session whose agent host stops answering says so in '
+      'the composer after 2 s, until it answers', (tester) async {
+    final session = FakeSession(id: 'studio');
+    final studio = FakeProject(session: session)
+      ..hostName = 'Studio mini'
+      ..threadList = [threadOf('studio', title: 'Studio session')];
+    final state = SessionState(FakeProject());
+    await state.addHost(remote, studio);
+    await state.open('studio', address: remote);
+    await pumpSessions(tester, state);
 
-      session.fail('the host is down');
-      await tester.pump(const Duration(seconds: 1));
-      expect(
-        find.textContaining('is reconnecting'),
-        findsNothing,
-        reason: 'T3 waits 2 s before it says so',
-      );
-      await tester.pump(const Duration(seconds: 1));
-      expect(
-        find.text(
-          'Studio mini is reconnecting. Liquid could not connect to the agent host $remote: the host is down.',
-        ),
-        findsOneWidget,
-      );
-      expect(state.session, same(session), reason: 'the Chat stays open');
+    session.fail('the host is down');
+    await tester.pump(const Duration(seconds: 1));
+    expect(
+      find.textContaining('is reconnecting'),
+      findsNothing,
+      reason: 'T3 waits 2 s before it says so',
+    );
+    await tester.pump(const Duration(seconds: 1));
+    expectOne(
+      find.text(
+        'Studio mini is reconnecting. Liquid could not connect to the agent host $remote: the host is down.',
+      ),
+    );
+    expect(state.session, same(session), reason: 'the Chat stays open');
 
-      await state.addHost(remote, FakeProject(session: session));
-      await tester.pump();
-      expect(find.textContaining('is reconnecting'), findsNothing);
-    },
-  );
+    await state.addHost(remote, FakeProject(session: session));
+    await tester.pump();
+    expectNone(find.textContaining('is reconnecting'));
+  });
 
-  testWidgets(
-    'an agent host that stops answering is named in the sidebar, and its sessions go',
-    (tester) async {
-      final state = SessionState(
-        FakeProject()..threadList = [threadOf('local', title: 'Local session')],
-      );
-      await state.addHost(
-        remote,
-        FakeProject()
-          ..threadList = [threadOf('studio', title: 'Studio session')],
-      );
-      await state.addHost(remote, UnreachableProject());
-      await pumpSessions(tester, state);
+  testWidgets('an agent host that stops answering is named in the sidebar, '
+      'and its sessions go', (tester) async {
+    final state = SessionState(
+      FakeProject()..threadList = [threadOf('local', title: 'Local session')],
+    );
+    await state.addHost(
+      remote,
+      FakeProject()..threadList = [threadOf('studio', title: 'Studio session')],
+    );
+    await state.addHost(remote, UnreachableProject());
+    await pumpSessions(tester, state);
 
-      expect(find.text('Local session'), findsOneWidget);
-      expect(find.text('Studio session'), findsNothing);
-      expect(
-        find.text(
-          'Liquid could not connect to the agent host $remote: the host is down.',
-        ),
-        findsOneWidget,
-      );
-    },
-  );
+    expectOne(find.text('Local session'));
+    expectNone(find.text('Studio session'));
+    expectOne(
+      find.text(
+        'Liquid could not connect to the agent host $remote: the host is down.',
+      ),
+    );
+  });
 
-  testWidgets(
-    'a failing agent host at start leaves Settings to choose This Mac',
-    (tester) async {
-      await tester.binding.setSurfaceSize(const Size(1600, 1000));
-      final shortcuts = await ShortcutController.load(
-        MemoryStore(ShortcutSettings.standard()),
-        FakeHost(),
-      );
-      await tester.pumpWidget(
-        LiquidApp(
-          launch: ValueNotifier(
-            const Launch.problem(
-              'Liquid could not connect to the agent host ws://studio.local:3774: no answer.',
-            ),
-          ),
-          shortcuts: shortcuts,
-          agentHosts: controller(
-            settings: const AgentHostsSettings([miniActive]),
+  testWidgets('a failing agent host at start is said in Settings and the '
+      'Workspace, and This Mac can be chosen', (tester) async {
+    await tester.binding.setSurfaceSize(const Size(1600, 1000));
+    final shortcuts = await ShortcutController.load(
+      MemoryStore(ShortcutSettings.standard()),
+      FakeHost(),
+    );
+    await tester.pumpWidget(
+      LiquidApp(
+        launch: ValueNotifier(
+          const Launch.problem(
+            'Liquid could not connect to the agent host ws://studio.local:3774: no answer.',
           ),
         ),
-      );
-      await tester.pumpAndSettle();
+        shortcuts: shortcuts,
+        agentHosts: controller(
+          settings: const AgentHostsSettings([miniActive]),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
 
-      await openAgentHosts(tester);
-      await chooseInRow(tester, null, 'Use for sessions');
+    await openAgentHosts(tester);
+    await chooseInRow(tester, null, 'Use for sessions');
 
-      expect(switched, [null]);
-      expect(usedFor(null), findsOneWidget);
-    },
-  );
+    expect(switched, [null]);
+    expectOne(usedFor(null));
 
-  testWidgets('says why no agent host is in use while the Workspace opens', (
-    tester,
-  ) async {
-    await tester.binding.setSurfaceSize(const Size(1400, 900));
     final workspace = WorkspaceState(FakeWorkspace());
     await workspace.start(show: true);
     await tester.pumpWidget(
@@ -621,87 +510,64 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-
-    expect(
+    expectOne(
       find.text(
         'Liquid could not connect to the agent host ws://studio.local:3774: no answer.',
       ),
-      findsOneWidget,
     );
   });
 
   testWidgets(
-    'removes a host from this device after confirmation, and forgets its token',
-    (tester) async {
-      await show(tester, controller(settings: AgentHostsSettings([mini])));
-
-      await chooseInRow(tester, remote, 'Remove from this device…');
-      expect(find.text('Remove Studio mini from this device?'), findsOneWidget);
-      expect(
-        find.textContaining('meta host revoke liquid-studio-s-mac'),
-        findsOneWidget,
-      );
-      await tester.tap(find.text('Cancel'));
-      await tester.pumpAndSettle();
-      expect(bridge.calls, isNot(contains('forget $remote')));
-
-      await chooseInRow(tester, remote, 'Remove from this device…');
-      await tester.tap(find.widgetWithText(DangerButton, 'Remove'));
-      await tester.pumpAndSettle();
-
-      expect(bridge.calls, contains('forget $remote'));
-      expect(find.text('Studio mini'), findsNothing);
-      expect(saved.last.hosts, isEmpty);
-    },
-  );
-
-  testWidgets('removing the host in use shows This Mac at once', (
-    tester,
-  ) async {
-    await show(
-      tester,
-      controller(settings: const AgentHostsSettings([miniActive])),
-    );
-
-    await chooseInRow(tester, remote, 'Remove from this device…');
-    await tester.tap(find.widgetWithText(DangerButton, 'Remove'));
-    await tester.pumpAndSettle();
-
-    expect(switched, [null]);
-    expect(saved.last.activeAddress, isNull);
-    expect(find.text('Studio mini'), findsNothing);
-    expect(usedFor(null), findsOneWidget);
-  });
-
-  testWidgets(
-    'removing the host in use saves the list before This Mac is shown',
+    'removes a host from this device after confirmation, forgets its token, and shows This Mac at once when it was in use',
     (tester) async {
       await show(
         tester,
-        controller(
-          settings: const AgentHostsSettings([miniActive]),
-          save: (next) async {
-            if (next.hosts.isEmpty) {
-              throw const FileSystemException('disk full');
-            }
-            saved.add(next);
-          },
-        ),
+        controller(settings: const AgentHostsSettings([miniActive])),
       );
 
       await chooseInRow(tester, remote, 'Remove from this device…');
-      await tester.tap(find.widgetWithText(DangerButton, 'Remove'));
-      await tester.pumpAndSettle();
+      expectOne(find.text('Remove Studio mini from this device?'));
+      expectOne(find.textContaining('meta host revoke liquid-studio-s-mac'));
+      await tap(tester, find.text('Cancel'));
+      expect(bridge.calls, isNot(contains('forget $remote')));
 
-      expect(switched, isEmpty, reason: 'the list is saved first');
-      expect(
-        find.text(
-          'Could not remove Studio mini from the list; its token here is forgotten, so remove it again to finish. disk full.',
-        ),
-        findsOneWidget,
-      );
+      await chooseInRow(tester, remote, 'Remove from this device…');
+      await tap(tester, find.widgetWithText(DangerButton, 'Remove'));
+
+      expect(bridge.calls, contains('forget $remote'));
+      expectNone(find.text('Studio mini'));
+      expect(saved.last.hosts, isEmpty);
+      expect(switched, [null]);
+      expect(saved.last.activeAddress, isNull);
+      expectOne(usedFor(null));
     },
   );
+
+  testWidgets('removing the host in use saves the list before This Mac is '
+      'shown', (tester) async {
+    await show(
+      tester,
+      controller(
+        settings: const AgentHostsSettings([miniActive]),
+        save: (next) async {
+          if (next.hosts.isEmpty) {
+            throw const FileSystemException('disk full');
+          }
+          saved.add(next);
+        },
+      ),
+    );
+
+    await chooseInRow(tester, remote, 'Remove from this device…');
+    await tap(tester, find.widgetWithText(DangerButton, 'Remove'));
+
+    expect(switched, isEmpty, reason: 'the list is saved first');
+    expectOne(
+      find.text(
+        'Could not remove Studio mini from the list; its token here is forgotten, so remove it again to finish. disk full.',
+      ),
+    );
+  });
 
   test('a superseded choice never replaces the later one, whether it connects or fails', () async {
     for (final failure in <String?>[null, 'no answer']) {

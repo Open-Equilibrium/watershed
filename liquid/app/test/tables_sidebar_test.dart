@@ -60,11 +60,10 @@ void main() {
     await tap(tester, inSidebar(find.text('Expenses')));
     final written = kit.fake.applied.length;
     await tap(tester, onTablePage(find.text('Amount')));
-    final top = {
-      for (final name in ['Groceries', 'Rent'])
-        name: tester.getTopLeft(onTablePage(find.text(name))).dy,
-    };
-    expect(top['Groceries']! < top['Rent']!, isTrue);
+    expect(
+      tester.getTopLeft(onTablePage(find.text('Groceries'))).dy,
+      lessThan(tester.getTopLeft(onTablePage(find.text('Rent'))).dy),
+    );
     await tester.enterText(find.byKey(const Key('table search field')), 'rent');
     await tester.pump(const Duration(milliseconds: 200));
     await tester.pumpAndSettle();

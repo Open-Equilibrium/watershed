@@ -1,6 +1,6 @@
 use std::sync::{Arc, Mutex};
 
-use super::workspace::{Folder, Memory, lisbon, mutation, query, resource};
+use super::workspace::{lisbon, mutation, open, query, resource};
 use crate::api::automation::{
     BridgeAttentionKind, BridgeAutomationSetup, BridgeStep, BridgeStepKind, BridgeTrigger,
     BridgeTriggerKind,
@@ -8,7 +8,6 @@ use crate::api::automation::{
 use crate::api::database::{
     BridgeCell, BridgeCellKind, BridgeFieldKind, BridgeFilter, BridgeMatch,
 };
-use crate::api::replica::LiquidWorkspace;
 use crate::api::workspace::{
     BridgeMutation, BridgeMutationKind, BridgeQueryKind, BridgeResourceKind,
 };
@@ -44,8 +43,7 @@ fn step(kind: BridgeStepKind) -> BridgeStep {
 
 #[test]
 fn automations_cross_the_bridge_and_report_their_runs() {
-    let folder = Folder::new("automation");
-    let workspace = LiquidWorkspace::open_with(&folder.0, &Memory::default()).unwrap();
+    let (_folder, workspace) = open("automation");
     let (_, page, _, view) = lisbon(&workspace);
     let table = workspace
         .apply(BridgeMutation {

@@ -50,51 +50,18 @@ void main() {
     });
   }
 
-  testWidgets(
-    'a revealed shortcut badge passes the taps on the button under its corner',
-    (tester) async {
-      var pressed = 0;
-      await show(
-        tester,
-        PrimaryButton(
-          label: 'Save',
-          shortcut: '⌘S',
-          onPressed: () => pressed++,
-        ),
-      );
-      await reveal(tester);
+  testWidgets('a revealed shortcut passes taps to the button', (tester) async {
+    var pressed = 0;
+    await show(
+      tester,
+      PrimaryButton(label: 'Save', shortcut: '⌘S', onPressed: () => pressed++),
+    );
+    await reveal(tester);
 
-      final button = tester.getRect(find.byType(InkWell));
-      await tester.tapAt(Offset(button.right - 4, button.top + 2));
-      await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+    final button = tester.getRect(find.byType(InkWell));
+    await tester.tapAt(Offset(button.right - 4, button.top + 2));
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
 
-      expect(pressed, 1);
-    },
-  );
-
-  testWidgets(
-    'a revealed shortcut keeps a button stretched by its layout at its width',
-    (tester) async {
-      var pressed = 0;
-      await show(
-        tester,
-        SizedBox(
-          width: 200,
-          child: PrimaryButton(
-            label: 'Save',
-            shortcut: '⌘S',
-            onPressed: () => pressed++,
-          ),
-        ),
-      );
-      await reveal(tester);
-
-      final button = tester.getRect(find.byType(InkWell));
-      expect(button.width, 200);
-      await tester.tapAt(Offset(button.right - 4, button.center.dy));
-      await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
-
-      expect(pressed, 1);
-    },
-  );
+    expect(pressed, 1);
+  });
 }

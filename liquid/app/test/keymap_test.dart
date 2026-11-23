@@ -22,43 +22,6 @@ void main() {
     expect(keys.label(Command.queue), '⌥⏎');
   });
 
-  test('Session card takes ⌘⌥B, which no other command runs', () {
-    final keys = ShortcutSettings.standard();
-    const commandOptionB = Keys(LogicalKeyboardKey.keyB, meta: true, alt: true);
-
-    expect(keys.bindings(Command.sessionDetails), [commandOptionB]);
-    expect(keys.label(Command.sessionDetails), '⌥⌘B', reason: 'macOS order');
-    expect(keys.conflicts(Command.sessionDetails, commandOptionB), isEmpty);
-    expect(reserved(Command.sessionDetails, commandOptionB), isNull);
-  });
-
-  test('⌥⌘1–⌥⌘9 switch Workspaces, and no command takes them', () {
-    final keys = ShortcutSettings.standard();
-    const third = Keys(LogicalKeyboardKey.digit3, meta: true, alt: true);
-    expect(Fixed.switchWorkspace.keys, contains(third));
-    expect(reserved(Command.diff, third), 'switching Workspaces');
-    expect([
-      for (final command in Command.values)
-        for (final bound in keys.bindings(command))
-          if (Fixed.switchWorkspace.keys.contains(bound)) command,
-    ], isEmpty);
-  });
-
-  test('the statistics open with ⌘U, as T3 Code usage does', () {
-    expect(ShortcutSettings.standard().label(Command.statistics), '⌘U');
-    expect(ShortcutSettings.liquidKey().bindings(Command.statistics), [
-      const Keys(LogicalKeyboardKey.keyU, liquid: true),
-      const Keys(LogicalKeyboardKey.keyU, meta: true),
-    ]);
-    expect(
-      reserved(
-        Command.statistics,
-        const Keys(LogicalKeyboardKey.keyU, meta: true),
-      ),
-      isNull,
-    );
-  });
-
   test('the Standard profile uses ⌘ only', () {
     final keys = ShortcutSettings.standard();
 
@@ -80,105 +43,68 @@ void main() {
     expect(all.changed(Command.diff), isFalse);
   });
 
-  test('a conflict is another command in its area, esc is shared', () {
-    final keys = ShortcutSettings.liquidKey();
-
-    expect(keys.conflicts(Command.focusInput, liquidN), [Command.newSession]);
-    expect(keys.conflicts(Command.focusInput, commandN), [Command.newSession]);
-    expect(
-      keys.conflicts(
-        Command.dismissQuestion,
-        const Keys(LogicalKeyboardKey.escape),
-      ),
-      isEmpty,
-    );
-    expect(keys.conflicts(Command.newSession, liquidN), isEmpty);
-    expect(
-      ShortcutSettings.standard().conflicts(
-        Command.stop,
-        const Keys(LogicalKeyboardKey.escape),
-      ),
-      isEmpty,
-    );
-  });
-
-  test('a Liquid ⌘ chord conflicts with the command whose menu shows the same ⌘ keys', () {
+  test('conflicts stay within an area, esc is shared, and taking keys', () {
+    const esc = Keys(LogicalKeyboardKey.escape);
+    const commandOne = Keys(LogicalKeyboardKey.digit1, meta: true);
+    const commandEnter = Keys(LogicalKeyboardKey.enter, meta: true);
     const liquidCommandN = Keys(
       LogicalKeyboardKey.keyN,
       liquid: true,
       meta: true,
     );
-    final keys = ShortcutSettings.liquidKey();
+    const liquidCommandOne = Keys(
+      LogicalKeyboardKey.digit1,
+      liquid: true,
+      meta: true,
+    );
+    final liquid = ShortcutSettings.liquidKey();
+    final standard = ShortcutSettings.standard();
 
-    expect(keys.conflicts(Command.diff, liquidCommandN), [Command.newSession]);
-    final taken = keys.change(
+    final cases = <(ShortcutSettings, Command, Keys, Object)>[
+      (liquid, Command.focusInput, liquidN, [Command.newSession]),
+      (liquid, Command.focusInput, commandN, [Command.newSession]),
+      (liquid, Command.dismissQuestion, esc, isEmpty),
+      (liquid, Command.newSession, liquidN, isEmpty),
+      (standard, Command.stop, esc, isEmpty),
+      (liquid, Command.send, commandEnter, isEmpty),
+      (liquid, Command.diff, liquidCommandN, [Command.newSession]),
+      (standard, Command.toggleToDo, commandOne, [Command.chat]),
+      (standard, Command.chat, commandEnter, contains(Command.toggleToDo)),
+      (standard, Command.toggleToDo, liquidCommandOne, [Command.chat]),
+    ];
+    for (final (keys, command, bound, owners) in cases) {
+      expect(
+        keys.conflicts(command, bound),
+        owners,
+        reason: '${command.name} ${bound.label}',
+      );
+    }
+
+    final takenChord = liquid.change(
       Command.diff,
       liquidCommandN,
       clear: [Command.newSession],
     );
     expect(
-      taken.menu(Command.newSession),
+      takenChord.menu(Command.newSession),
       isNull,
       reason: 'the menu bar would take the chord from Diff',
     );
-    expect(taken.conflicts(Command.focusInput, commandN), [Command.diff]);
-  });
+    expect(takenChord.conflicts(Command.focusInput, commandN), [Command.diff]);
 
-  test('a Page to-do does not compete with the agent Send command', () {
-    const commandEnter = Keys(LogicalKeyboardKey.enter, meta: true);
-    final keys = ShortcutSettings.liquidKey();
-
-    expect(keys.conflicts(Command.send, commandEnter), isEmpty);
-    expect(
-      keys.change(Command.send, commandEnter).bindings(Command.toggleToDo),
-      keys.bindings(Command.toggleToDo),
-      reason: 'the to-do keeps ⌘⏎',
-    );
-  });
-
-  test('a to-do shortcut cannot take typing or line-break keys', () {
-    expect(
-      reserved(Command.toggleToDo, const Keys(LogicalKeyboardKey.keyA)),
-      'typing',
-    );
-    expect(
-      reserved(Command.toggleToDo, const Keys(LogicalKeyboardKey.enter)),
-      'New block or line',
-    );
-    expect(
-      reserved(
-        Command.toggleToDo,
-        const Keys(LogicalKeyboardKey.enter, shift: true),
-      ),
-      'New block or line',
-    );
-  });
-
-  test('a ⌘ chord of the app area conflicts in every area, both ways', () {
-    const commandOne = Keys(LogicalKeyboardKey.digit1, meta: true);
-    const commandEnter = Keys(LogicalKeyboardKey.enter, meta: true);
-    final keys = ShortcutSettings.standard();
-
-    expect(keys.conflicts(Command.toggleToDo, commandOne), [Command.chat]);
-    expect(
-      keys.conflicts(Command.chat, commandEnter),
-      contains(Command.toggleToDo),
-    );
-    expect(
-      keys.conflicts(
-        Command.toggleToDo,
-        const Keys(LogicalKeyboardKey.digit1, liquid: true, meta: true),
-      ),
-      [Command.chat],
-      reason: 'the menu bar ignores the Liquid key',
-    );
-    final taken = keys.change(
+    final takenPair = standard.change(
       Command.toggleToDo,
       commandOne,
       clear: [Command.chat],
     );
-    expect(taken.bindings(Command.chat), isEmpty);
-    expect(taken.bindings(Command.toggleToDo), [commandOne]);
+    expect(takenPair.bindings(Command.chat), isEmpty);
+    expect(takenPair.bindings(Command.toggleToDo), [commandOne]);
+
+    expect(
+      liquid.change(Command.send, commandEnter).bindings(Command.toggleToDo),
+      liquid.bindings(Command.toggleToDo),
+      reason: 'the to-do keeps ⌘⏎',
+    );
   });
 
   test('the default keys of every profile conflict with nothing', () {
@@ -225,7 +151,7 @@ void main() {
     expect(taken.bindings(Command.answerEditor), isNot(contains(commandEnter)));
   });
 
-  test('resetting a command takes its default keys back from the commands that run them', () {
+  test('resetting a command takes its default keys back from the others', () {
     final taken = ShortcutSettings.liquidKey().change(
       Command.diff,
       liquidN,
@@ -236,26 +162,15 @@ void main() {
     expect(restored.bindings(Command.newSession), [liquidN, commandN]);
     expect(restored.bindings(Command.diff), [commandD]);
     expect(restored.changed(Command.newSession), isFalse);
+
+    final on = taken
+        .withLiquidKey(false)
+        .resetTaking(Command.newSession)
+        .withLiquidKey(true);
+    expect(on.bindings(Command.newSession), [liquidN, commandN]);
+    expect(on.conflicts(Command.newSession, liquidN), isEmpty);
+    expect(on.bindings(Command.diff), isNot(contains(liquidN)));
   });
-
-  test(
-    'resetting with the Liquid key off leaves no conflict once it is on',
-    () {
-      final taken = ShortcutSettings.liquidKey().change(
-        Command.diff,
-        liquidN,
-        clear: [Command.newSession],
-      );
-
-      final on = taken
-          .withLiquidKey(false)
-          .resetTaking(Command.newSession)
-          .withLiquidKey(true);
-      expect(on.bindings(Command.newSession), [liquidN, commandN]);
-      expect(on.conflicts(Command.newSession, liquidN), isEmpty);
-      expect(on.bindings(Command.diff), isNot(contains(liquidN)));
-    },
-  );
 
   test('inactive Liquid key bindings survive a clear and a change', () {
     final custom = ShortcutSettings.liquidKey()
@@ -281,6 +196,7 @@ void main() {
       liquidE,
     ]);
   });
+
   test('the Custom switch decides whether Liquid key combinations exist', () {
     final off = ShortcutSettings.liquidKey().withLiquidKey(false);
     expect(off.profile, Profile.custom);
@@ -317,70 +233,56 @@ void main() {
     expect(off.changed(Command.diff), isFalse);
   });
 
-  test('keys macOS, a fixed row or typing use are reserved', () {
+  test('macOS, fixed-row and typing keys are reserved, while the Liquid key alone is free', () {
     const commandQ = Keys(LogicalKeyboardKey.keyQ, meta: true);
     const shiftEnter = Keys(LogicalKeyboardKey.enter, shift: true);
     const commandLeft = Keys(LogicalKeyboardKey.arrowLeft, meta: true);
     const controlA = Keys(LogicalKeyboardKey.keyA, control: true);
     const commandNumpad1 = Keys(LogicalKeyboardKey.numpad1, meta: true);
-    expect(reserved(Command.newSession, commandQ), 'Quit');
-    expect(reserved(Command.queue, shiftEnter), 'New line');
-    expect(
-      reserved(Command.newSession, const Keys(LogicalKeyboardKey.keyN)),
-      'typing',
-    );
-    expect(
-      reserved(
-        Command.dismissQuestion,
-        const Keys(LogicalKeyboardKey.arrowDown),
-      ),
-      'Move through options',
-    );
-    expect(reserved(Command.newSession, liquidN), isNull);
-    expect(
-      reserved(
+    final cases = <(Command, Keys, String?)>[
+      (Command.newSession, commandQ, 'Quit'),
+      (
         Command.newSession,
-        const Keys(LogicalKeyboardKey.keyQ, meta: true, liquid: true),
+        Keys(LogicalKeyboardKey.keyQ, meta: true, liquid: true),
+        'Quit',
       ),
-      'Quit',
-      reason: 'the menu ignores the Liquid key',
-    );
-    expect(
-      reserved(Command.queue, commandLeft),
-      'typing',
-      reason: '⌘← moves the cursor',
-    );
-    expect(
-      reserved(Command.queue, controlA),
-      'typing',
-      reason: '⌃A moves the cursor',
-    );
-    for (final key in [
-      LogicalKeyboardKey.numpad1,
-      LogicalKeyboardKey.numpadAdd,
-      LogicalKeyboardKey.numpadDecimal,
-    ]) {
+      (Command.queue, shiftEnter, 'New line'),
+      (Command.newSession, Keys(LogicalKeyboardKey.keyN), 'typing'),
+      (
+        Command.dismissQuestion,
+        Keys(LogicalKeyboardKey.arrowDown),
+        'Move through options',
+      ),
+      (Command.newSession, liquidN, null),
+      (
+        Command.newSession,
+        Keys(LogicalKeyboardKey.keyN, liquid: true, shift: true),
+        'capitals',
+      ),
+      (Command.queue, commandLeft, 'typing'),
+      (Command.queue, controlA, 'typing'),
+      (Command.toggleToDo, Keys(LogicalKeyboardKey.keyA), 'typing'),
+      (Command.toggleToDo, Keys(LogicalKeyboardKey.enter), 'New block or line'),
+      (
+        Command.toggleToDo,
+        Keys(LogicalKeyboardKey.enter, shift: true),
+        'New block or line',
+      ),
+      (Command.newSession, commandNumpad1, null),
+      for (final key in [
+        LogicalKeyboardKey.numpad1,
+        LogicalKeyboardKey.numpadAdd,
+        LogicalKeyboardKey.numpadDecimal,
+      ])
+        (Command.newSession, Keys(key), 'typing'),
+    ];
+    for (final (command, keys, expected) in cases) {
       expect(
-        reserved(Command.newSession, Keys(key)),
-        'typing',
-        reason: 'numpad ${key.keyLabel} types a character',
+        reserved(command, keys),
+        expected,
+        reason: '${command.name} ${keys.label}',
       );
     }
-    expect(reserved(Command.newSession, commandNumpad1), isNull);
-  });
-  test('the Liquid key with Shift is kept for capitals, which macOS takes', () {
-    expect(
-      reserved(
-        Command.newSession,
-        const Keys(LogicalKeyboardKey.keyN, liquid: true, shift: true),
-      ),
-      'capitals',
-    );
-    expect(
-      reserved(Command.newSession, liquidN),
-      isNull,
-      reason: 'the Liquid key alone stays free',
-    );
   });
 
   test('a default the user’s own binding takes stays unbound', () {

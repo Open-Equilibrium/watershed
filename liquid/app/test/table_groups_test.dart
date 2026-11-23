@@ -46,26 +46,16 @@ void main() {
     await kit.show(tester, [TablePart(rows)]);
     await groupBy(tester, 'category');
     expect(find.byKey(const Key('group header')), findsNWidgets(3));
-    expect(
-      shownTop(tester, [
-        'No Category',
-        'Row 4',
-        'Food',
-        'Groceries',
-        'Home',
-        'Electricity',
-        'Rent',
-      ]),
-      [
-        'No Category',
-        'Row 4',
-        'Food',
-        'Groceries',
-        'Home',
-        'Electricity',
-        'Rent',
-      ],
-    );
+    const order = [
+      'No Category',
+      'Row 4',
+      'Food',
+      'Groceries',
+      'Home',
+      'Electricity',
+      'Rent',
+    ];
+    expect(shownTop(tester, order), order);
     expect(kit.inTable(find.text('4 rows')), findsOneWidget);
   });
 
@@ -79,8 +69,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    final folded = view().tabs.first.folded;
-    expect([for (final cell in folded) cell.text], ['home']);
+    expect([for (final cell in view().tabs.first.folded) cell.text], ['home']);
     expect(kit.inTable(find.text('Rent')), findsNothing);
     expect(kit.inTable(find.text('Groceries')), findsOneWidget);
     expect(kit.inTable(find.text('4 rows')), findsOneWidget);
@@ -89,11 +78,7 @@ void main() {
   testWidgets('a Checkbox groups into unticked, then ticked', (tester) async {
     await kit.show(tester, [TablePart(rows)]);
     await groupBy(tester, 'paid');
-    expect(shownTop(tester, ['Electricity', 'Row 4', 'Groceries', 'Rent']), [
-      'Electricity',
-      'Row 4',
-      'Groceries',
-      'Rent',
-    ]);
+    const order = ['Electricity', 'Row 4', 'Groceries', 'Rent'];
+    expect(shownTop(tester, order), order);
   });
 }

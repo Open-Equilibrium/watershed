@@ -91,8 +91,7 @@ void main() {
       'typing', (tester) async {
     final kit = PageKit();
     await kit.show(tester, const [TextPart('October')]);
-    await tester.tap(block(0));
-    await tester.pumpAndSettle();
+    await tap(tester, block(0));
     await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
     await tester.sendKeyEvent(LogicalKeyboardKey.keyZ);
     await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);

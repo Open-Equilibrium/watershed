@@ -9,7 +9,6 @@ import 'package:liquid/src/agent/session_menus.dart' show runOpener;
 import 'package:liquid/src/diff/turn_scope.dart';
 import 'package:liquid/src/session/session_state.dart';
 import 'package:liquid/src/theme/theme.dart';
-import 'package:liquid/src/theme/tokens.g.dart';
 
 import 'fake_backend.dart';
 
@@ -85,6 +84,3 @@ List<String> recordOpens() {
   addTearDown(() => runOpener = original);
   return opened;
 }
-
-Color toneOf(Color Function(WsPalette palette) pick) =>
-    pick(liquidTheme(Brightness.light).extension<WsTheme>()!.palette);

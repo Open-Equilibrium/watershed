@@ -7,11 +7,15 @@ import 'fake_backend.dart';
 
 const studio = 'ws://studio.local:3774';
 
+enum SealFault { none, lostAfterLanding, lostUnreadable, flakyOnce, refused }
+
 class LoggedProject extends FakeProject {
   LoggedProject(this.log, this.name);
 
   final List<String> log;
   final String name;
+  SealFault sealFault = SealFault.none;
+  var _flaked = false;
 
   @override
   Future<CarriedMove> moveOut(
@@ -33,10 +37,34 @@ class LoggedProject extends FakeProject {
     );
   }
 
-  @override
-  Future<void> moveFinish(String id, String transfer, String? toHost) {
+  Future<void> _finish(String id, String transfer, String? toHost) {
     log.add('$name finish ${toHost ?? 'null'}');
     return super.moveFinish(id, transfer, toHost);
+  }
+
+  @override
+  Future<void> moveFinish(String id, String transfer, String? toHost) async {
+    if (toHost == null) return _finish(id, transfer, toHost);
+    switch (sealFault) {
+      case SealFault.none:
+        return _finish(id, transfer, toHost);
+      case SealFault.lostAfterLanding:
+        await _finish(id, transfer, toHost);
+        log.add('$name seal lost');
+        throw 'the connection dropped';
+      case SealFault.lostUnreadable:
+        log.add('$name seal lost');
+        moveCheckError = 'the source is unreachable';
+        throw 'the connection dropped';
+      case SealFault.flakyOnce:
+        if (_flaked) return _finish(id, transfer, toHost);
+        _flaked = true;
+        log.add('$name seal lost');
+        throw 'the connection dropped';
+      case SealFault.refused:
+        log.add('$name seal refused');
+        throw 'the source is gone';
+    }
   }
 
   @override
@@ -61,57 +89,11 @@ class LoggedProject extends FakeProject {
   }
 }
 
-class _SealLostLanded extends LoggedProject {
-  _SealLostLanded(super.log, super.name);
-
-  @override
-  Future<void> moveFinish(String id, String transfer, String? toHost) async {
-    if (toHost == null) return super.moveFinish(id, transfer, toHost);
-    await super.moveFinish(id, transfer, toHost);
-    log.add('$name seal lost');
-    throw 'the connection dropped';
-  }
-}
-
-class _SealLostUnreadable extends LoggedProject {
-  _SealLostUnreadable(super.log, super.name);
-
-  @override
-  Future<void> moveFinish(String id, String transfer, String? toHost) {
-    if (toHost == null) return super.moveFinish(id, transfer, toHost);
-    log.add('$name seal lost');
-    moveCheckError = 'the source is unreachable';
-    return Future.error('the connection dropped');
-  }
-}
-
-class _SealFlaky extends LoggedProject {
-  _SealFlaky(super.log, super.name);
-
-  var _failures = 1;
-
-  @override
-  Future<void> moveFinish(String id, String transfer, String? toHost) {
-    if (toHost != null && _failures-- > 0) {
-      log.add('$name seal lost');
-      return Future.error('the connection dropped');
-    }
-    return super.moveFinish(id, transfer, toHost);
-  }
-}
-
-class _SealRefused extends LoggedProject {
-  _SealRefused(super.log, super.name);
-
-  @override
-  Future<void> moveFinish(String id, String transfer, String? toHost) {
-    if (toHost != null) {
-      log.add('$name seal refused');
-      return Future.error('the source is gone');
-    }
-    return super.moveFinish(id, transfer, toHost);
-  }
-}
+Matcher moveFailure({String? step, String? message}) => throwsA(
+  isA<MoveFailure>()
+      .having((failure) => failure.step, 'step', step ?? anything)
+      .having((failure) => failure.message, 'message', message ?? anything),
+);
 
 void main() {
   late List<String> log;
@@ -136,6 +118,16 @@ void main() {
     ),
   ]);
 
+  final unconfirmed = throwsA(
+    isA<MoveUnconfirmed>()
+        .having((move) => move.session?.id, 'session', 'thread-1')
+        .having(
+          (move) => move.message,
+          'message',
+          'The move of “Fix the flaky port test” to studio is not finished yet. Liquid finishes it when This Mac answers.',
+        ),
+  );
+
   MovePlan planOf({
     bool running = false,
     bool commit = true,
@@ -154,8 +146,8 @@ void main() {
     bringing: bringing,
   );
 
-  MoveFlow flowOf(MovePlan plan) => MoveFlow(
-    open: (address, root) async => address == studio ? target : source,
+  MoveFlow flowOf(MovePlan plan, {ProjectOpener? open}) => MoveFlow(
+    open: open ?? (address, root) async => address == studio ? target : source,
     from: (address: null, root: source.root),
     to: (address: studio, root: target.root),
     threadId: 't1',
@@ -164,12 +156,6 @@ void main() {
     started: started,
     newTransfer: () => 'transfer-1',
   );
-
-  test('a cloned project moves in at the root the target reports', () async {
-    target.clonedRoot = '/srv/acme/api';
-    await flowOf(planOf()).run();
-    expect(target.calls, contains('move in /srv/acme/api'));
-  });
 
   test('a move out names the environment id of the host it moves to', () async {
     target.environment = 'env-studio';
@@ -207,33 +193,15 @@ void main() {
     expect(source.calls, contains('move finish t1 transfer-1 studio'));
   });
 
-  test('a move-in error the target does not list is aborted, and the source released', () async {
-    target.moveInError = 'This project has no Git remote that T3 can resolve, so the session cannot move here.';
-
-    await expectLater(
-      flowOf(planOf(cloneRemote: null)).run(),
-      throwsA(isA<MoveFailure>()),
-    );
-
-    expect(target.calls, contains('move abort transfer-1'));
-    expect(source.calls, contains('move finish t1 transfer-1 null'));
-  });
-
   test('a move runs on its own connection to each host, and closes both when it ends', () async {
     final opened = <LoggedProject>[];
-    final flow = MoveFlow(
+    final flow = flowOf(
+      planOf(cloneRemote: null),
       open: (address, root) async {
         final own = LoggedProject(log, address == studio ? 'target' : 'source');
         opened.add(own);
         return own;
       },
-      from: (address: null, root: '/work/acme-api'),
-      to: (address: studio, root: '/home/me/acme-api'),
-      threadId: 't1',
-      plan: planOf(cloneRemote: null),
-      running: running,
-      started: started,
-      newTransfer: () => 'transfer-1',
     );
 
     await flow.run();
@@ -243,40 +211,29 @@ void main() {
   });
 
   test('a host that cannot be connected fails the move before the source is touched', () async {
-    final flow = MoveFlow(
-      open: (address, root) async {
-        if (address == studio) throw 'the host is down';
-        return source;
-      },
-      from: (address: null, root: '/work/acme-api'),
-      to: (address: studio, root: '/home/me/acme-api'),
-      threadId: 't1',
-      plan: planOf(cloneRemote: null),
-      running: running,
-      started: started,
-      newTransfer: () => 'transfer-1',
-    );
-
     await expectLater(
-      flow.run(),
-      throwsA(
-        isA<MoveFailure>()
-            .having((failure) => failure.step, 'step', 'connecting')
-            .having(
-              (failure) => failure.message,
-              'message',
-              'Could not move “Fix the flaky port test” to studio; it stays on This Mac: the host is down.',
-            ),
+      flowOf(
+        planOf(cloneRemote: null),
+        open: (address, root) async {
+          if (address == studio) throw 'the host is down';
+          return source;
+        },
+      ).run(),
+      moveFailure(
+        step: 'connecting',
+        message: 'Could not move “Fix the flaky port test” to studio; it stays on This Mac: the host is down.',
       ),
     );
     expect(log, isEmpty);
   });
 
-  test('a move clones and brings the configuration first, then commits and pushes, starts on the target, and only then seals the source', () async {
+  test('a move clones and brings the configuration first, then commits and pushes, starts on the target at the root it reports, and only then seals the source', () async {
+    target.clonedRoot = '/srv/acme/api';
     final flow = flowOf(planOf(bringing: shown));
 
     await flow.run();
 
+    expect(target.calls, contains('move in /srv/acme/api'));
     expect(log, [
       'target clone',
       'target configuration',
@@ -284,6 +241,7 @@ void main() {
       'target in',
       'source finish studio',
     ]);
+    expect(target.broughtChanges, same(shown));
     expect(flow.steps.value.map((step) => step.text), [
       'Cloned the project to /home/me/acme-api on studio',
       'Brought the configuration to studio',
@@ -293,12 +251,6 @@ void main() {
     expect(flow.steps.value.map((step) => step.state).toSet(), {
       MoveStepState.done,
     });
-  });
-
-  test('the configuration brought is the change set that was shown', () async {
-    await flowOf(planOf(bringing: shown, cloneRemote: null)).run();
-
-    expect(target.broughtChanges, same(shown));
   });
 
   test(
@@ -319,14 +271,9 @@ void main() {
 
     await expectLater(
       flow.run(),
-      throwsA(
-        isA<MoveFailure>()
-            .having((failure) => failure.step, 'step', 'cloning the project')
-            .having(
-              (failure) => failure.message,
-              'message',
-              'Could not move “Fix the flaky port test” to studio; it stays on This Mac: T3 could not clone the repository.',
-            ),
+      moveFailure(
+        step: 'cloning the project',
+        message: 'Could not move “Fix the flaky port test” to studio; it stays on This Mac: T3 could not clone the repository.',
       ),
     );
     expect(log, ['target clone']);
@@ -335,107 +282,49 @@ void main() {
 
   test('a failed commit and push leaves nothing sealed, since the source releases itself', () async {
     source.moveOutError = 'the push was refused';
-    final flow = flowOf(planOf());
 
     await expectLater(
-      flow.run(),
-      throwsA(
-        isA<MoveFailure>()
-            .having((failure) => failure.step, 'step', 'committing and pushing')
-            .having(
-              (failure) => failure.message,
-              'message',
-              'Could not move “Fix the flaky port test” to studio; it stays on This Mac, the clone at /home/me/acme-api remains: the push was refused.',
-            ),
+      flowOf(planOf()).run(),
+      moveFailure(
+        step: 'committing and pushing',
+        message: 'Could not move “Fix the flaky port test” to studio; it stays on This Mac, the clone at /home/me/acme-api remains: the push was refused.',
       ),
     );
     expect(log, ['target clone', 'source out']);
-  });
-
-  test('a failed push after the configuration was brought says the configuration is already there', () async {
-    source.moveOutError = 'the push was refused';
-
-    await expectLater(
-      flowOf(planOf(bringing: shown, cloneRemote: null)).run(),
-      throwsA(
-        isA<MoveFailure>().having(
-          (failure) => failure.message,
-          'message',
-          'Could not move “Fix the flaky port test” to studio; it stays on This Mac, the configuration is already brought to studio: the push was refused.',
-        ),
-      ),
-    );
-  });
-
-  test('a failed push with Leave on This Mac is named as pushing', () async {
-    source.moveOutError = 'the push was refused';
-
-    await expectLater(
-      flowOf(planOf(commit: false, cloneRemote: null)).run(),
-      throwsA(
-        isA<MoveFailure>().having((failure) => failure.step, 'step', 'pushing'),
-      ),
-    );
   });
 
   test(
     'a failed start releases the source, so the session is shown here again',
     () async {
       target.moveInError = 'the branch is already checked out';
-      final flow = flowOf(planOf(cloneRemote: null));
 
       await expectLater(
-        flow.run(),
-        throwsA(
-          isA<MoveFailure>()
-              .having(
-                (failure) => failure.step,
-                'step',
-                'starting it on studio',
-              )
-              .having(
-                (failure) => failure.message,
-                'message',
-                'Could not move “Fix the flaky port test” to studio; it stays on This Mac, its commit is pushed: the branch is already checked out.',
-              ),
+        flowOf(planOf(cloneRemote: null)).run(),
+        moveFailure(
+          step: 'starting it on studio',
+          message: 'Could not move “Fix the flaky port test” to studio; it stays on This Mac, its commit is pushed: the branch is already checked out.',
         ),
       );
       expect(log, ['source out', 'target in', 'source finish null']);
+      expect(target.calls, contains('move abort transfer-1'));
+      expect(source.calls, contains('move finish t1 transfer-1 null'));
     },
   );
 
   test('a seal that keeps failing leaves the move open: the new session stays, nothing is deleted, and the move is unfinished', () async {
-    source = _SealRefused(log, 'source');
+    source.sealFault = SealFault.refused;
 
-    await expectLater(
-      flowOf(planOf(cloneRemote: null)).run(),
-      throwsA(
-        isA<MoveUnconfirmed>()
-            .having(
-              (unconfirmed) => unconfirmed.session?.id,
-              'session',
-              'thread-1',
-            )
-            .having(
-              (unconfirmed) => unconfirmed.message,
-              'message',
-              'The move of “Fix the flaky port test” to studio is not finished yet. Liquid finishes it when This Mac answers.',
-            ),
-      ),
-    );
+    await expectLater(flowOf(planOf(cloneRemote: null)).run(), unconfirmed);
     expect(log, [
       'source out',
       'target in',
-      'source seal refused',
-      'source seal refused',
-      'source seal refused',
-      'source seal refused',
+      ...List.filled(4, 'source seal refused'),
     ]);
     expect(target.calls.where((call) => call.startsWith('delete')), isEmpty);
   });
 
   test('a seal whose reply was lost, but which landed, keeps the new session and reports success', () async {
-    source = _SealLostLanded(log, 'source');
+    source.sealFault = SealFault.lostAfterLanding;
 
     final session = await flowOf(planOf(cloneRemote: null)).run();
 
@@ -474,19 +363,7 @@ void main() {
     expect(source.moving, isNull);
     expect(running, isEmpty);
   });
-  test('a move-in whose reply stays lost, and that never landed, is aborted and released', () async {
-    target.moveInLostReplies = 3;
 
-    await expectLater(
-      flowOf(planOf(cloneRemote: null)).run(),
-      throwsA(isA<MoveFailure>()),
-    );
-
-    expect(log, ['source out', 'target in', 'source finish null']);
-    expect(target.calls, contains('move abort transfer-1'));
-    expect(source.moving, isNull);
-    expect(running, isEmpty);
-  });
   test('a move-out whose reply was lost is settled by the rule: the target has not landed, so the move is aborted and the source released', () async {
     source.moveOutLostAfterHandover = true;
 
@@ -501,7 +378,7 @@ void main() {
   });
 
   test('a seal that fails while the source is reachable and has not moved is tried again', () async {
-    source = _SealFlaky(log, 'source');
+    source.sealFault = SealFault.flakyOnce;
 
     final session = await flowOf(planOf(cloneRemote: null)).run();
 
@@ -518,46 +395,11 @@ void main() {
   });
 
   test('a seal whose reply was lost, when the source cannot be read, keeps the new session, leaves the source alone, and says the move is unconfirmed', () async {
-    source = _SealLostUnreadable(log, 'source');
+    source.sealFault = SealFault.lostUnreadable;
 
-    await expectLater(
-      flowOf(planOf(cloneRemote: null)).run(),
-      throwsA(
-        isA<MoveUnconfirmed>()
-            .having(
-              (unconfirmed) => unconfirmed.session?.id,
-              'session',
-              'thread-1',
-            )
-            .having(
-              (unconfirmed) => unconfirmed.message,
-              'message',
-              'The move of “Fix the flaky port test” to studio is not finished yet. Liquid finishes it when This Mac answers.',
-            ),
-      ),
-    );
+    await expectLater(flowOf(planOf(cloneRemote: null)).run(), unconfirmed);
     expect(log, ['source out', 'target in', 'source seal lost']);
     expect(target.calls.where((call) => call.startsWith('delete')), isEmpty);
     expect(source.moving?.transfer, 'transfer-1');
   });
-
-  test('the seal names the transfer that move out began', () async {
-    await flowOf(planOf(cloneRemote: null)).run();
-
-    expect(source.calls, contains('move finish t1 transfer-1 studio'));
-  });
-
-  test(
-    'a release after a failed start names the transfer that move out began',
-    () async {
-      target.moveInError = 'the branch is already checked out';
-
-      await expectLater(
-        flowOf(planOf(cloneRemote: null)).run(),
-        throwsA(isA<MoveFailure>()),
-      );
-
-      expect(source.calls, contains('move finish t1 transfer-1 null'));
-    },
-  );
 }

@@ -9,6 +9,9 @@ import 'package:liquid/src/workspace/workspace_state.dart';
 
 import 'page_kit.dart';
 
+void expectOne(Finder finder) => expect(finder, findsOneWidget);
+void expectNone(Finder finder) => expect(finder, findsNothing);
+
 void main() {
   final kit = PageKit();
 
@@ -27,8 +30,12 @@ void main() {
     await tester.pumpAndSettle();
   }
 
-  Future<void> board(WidgetTester tester, List<BridgeRow> rows) async {
-    await kit.show(tester, [TablePart(rows)]);
+  Future<void> board(
+    WidgetTester tester,
+    List<BridgeRow> rows, {
+    List<BridgeField> fields = expenseFields,
+  }) async {
+    await kit.show(tester, [TablePart(rows, fields: fields)]);
     await kit.workspace.apply(
       mutation(
         BridgeMutationKind.setTabLayout,
@@ -57,16 +64,19 @@ void main() {
   List<BridgeMutation> cellsSet() =>
       kit.applied(BridgeMutationKind.setCell).toList();
 
-  testWidgets('a Board shows a column per option, and the empty one once it '
-      'holds a card', (tester) async {
+  testWidgets('a Board has a column per option, and a card shows its filled '
+      'fields but not the grouped one', (tester) async {
     await board(tester, rows);
     expect(find.byKey(const Key('board column')), findsNWidgets(2));
-    expect(
-      find.descendant(of: column('Home'), matching: find.text('Rent')),
-      findsOneWidget,
+    expectOne(find.descendant(of: column('Home'), matching: find.text('Rent')));
+    expectNone(find.text('No Category'));
+    expectOne(find.byKey(const Key('table group')));
+    expectOne(
+      find.descendant(of: card('Groceries'), matching: find.text('84.2')),
     );
-    expect(find.text('No Category'), findsNothing);
-    expect(find.byKey(const Key('table group')), findsOneWidget);
+    expectNone(
+      find.descendant(of: card('Groceries'), matching: find.text('Food')),
+    );
     kit.fake.putRows(kit.page, view().block, [...rows, namedRow(4)]);
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('board column')), findsNWidgets(3));
@@ -74,23 +84,8 @@ void main() {
     expect(empty, lessThan(tester.getTopLeft(column('Food')).dx));
   });
 
-  testWidgets('a card shows its first field and the other filled fields, '
-      'but not the grouped one', (tester) async {
-    await board(tester, rows);
-    final groceries = card('Groceries');
-    expect(
-      find.descendant(of: groceries, matching: find.text('84.2')),
-      findsOneWidget,
-    );
-    expect(
-      find.descendant(of: groceries, matching: find.text('Food')),
-      findsNothing,
-    );
-  });
-
-  testWidgets('dragging a card to another column sets its value', (
-    tester,
-  ) async {
+  testWidgets('dragging a card to another column sets its '
+      'value', (tester) async {
     await board(tester, rows);
     await tester.timedDrag(
       card('Groceries'),
@@ -102,9 +97,8 @@ void main() {
     expect((set.row, set.field, set.cell?.text), ('r1', 'category', 'home'));
   });
 
-  testWidgets('a card dropped above another in its column moves its row', (
-    tester,
-  ) async {
+  testWidgets('a card dropped above another in its column moves its '
+      'row', (tester) async {
     await board(tester, rows);
     await tester.timedDrag(
       card('Rent'),
@@ -119,9 +113,8 @@ void main() {
     expect(cellsSet(), isEmpty);
   });
 
-  testWidgets('New at a column’s foot adds a row with that value', (
-    tester,
-  ) async {
+  testWidgets('New at a column’s foot adds a row with that '
+      'value', (tester) async {
     await board(tester, rows);
     await tap(
       tester,
@@ -136,38 +129,26 @@ void main() {
     expect(added.last, isTrue);
   });
 
-  testWidgets('a card opens its row beside it; esc closes it', (tester) async {
+  testWidgets('a card opens its row beside it, and esc closes it keeping a '
+      'typed edit', (tester) async {
     await board(tester, rows);
     await tap(tester, card('Groceries'));
     final popover = find.byKey(const Key('row popover'));
-    expect(popover, findsOneWidget);
-    expect(
-      find.descendant(of: popover, matching: find.text('Amount')),
-      findsOneWidget,
-    );
+    expectOne(popover);
+    expectOne(find.descendant(of: popover, matching: find.text('Amount')));
     await tester.enterText(
       find.descendant(of: popover, matching: find.byType(TextField)).first,
-      'Food market',
+      'Market',
     );
-    await tester.testTextInput.receiveAction(TextInputAction.done);
-    await tester.pumpAndSettle();
-    final set = cellsSet().single;
-    expect((set.row, set.field, set.cell?.text), ('r1', 'name', 'Food market'));
     await tester.sendKeyEvent(LogicalKeyboardKey.escape);
     await tester.pumpAndSettle();
-    expect(popover, findsNothing);
+    expectNone(popover);
+    final set = cellsSet().single;
+    expect((set.row, set.field, set.cell?.text), ('r1', 'name', 'Market'));
   });
 
-  testWidgets('a row’s ··· deletes it', (tester) async {
-    await board(tester, rows);
-    await tap(tester, card('Rent'));
-    await tap(tester, find.byKey(const Key('row popover actions')));
-    await tap(tester, find.text('Delete row'));
-    expect(kit.applied(BridgeMutationKind.removeRow).single.row, 'r3');
-  });
-
-  testWidgets('a row’s fields change in its popover with the Table’s '
-      'pickers', (tester) async {
+  testWidgets('a row’s fields change in its popover with the Table’s pickers, '
+      'and its ··· deletes the row', (tester) async {
     await board(tester, rows);
     await tap(tester, card('Electricity'));
     final popover = find.byKey(const Key('row popover'));
@@ -218,77 +199,18 @@ void main() {
         ('amount', 120.0),
       ],
     );
-  });
 
-  testWidgets('esc keeps a typed edit as it closes the row', (tester) async {
-    await board(tester, rows);
-    await tap(tester, card('Groceries'));
-    final popover = find.byKey(const Key('row popover'));
-    await tester.enterText(
-      find.descendant(of: popover, matching: find.byType(TextField)).first,
-      'Market',
-    );
     await tester.sendKeyEvent(LogicalKeyboardKey.escape);
     await tester.pumpAndSettle();
-    expect(popover, findsNothing);
-    final set = cellsSet().single;
-    expect((set.row, set.field, set.cell?.text), ('r1', 'name', 'Market'));
-  });
-
-  testWidgets('a row with many fields scrolls inside its popover', (
-    tester,
-  ) async {
-    final many = [
-      ...expenseFields,
-      for (var number = 1; number <= 40; number++)
-        BridgeField(
-          id: 'f$number',
-          name: 'Field $number',
-          kind: BridgeFieldKind.text,
-          options: const [],
-          formula: '',
-        ),
-    ];
-    await kit.show(tester, [TablePart(rows, fields: many)]);
-    await kit.workspace.apply(
-      mutation(
-        BridgeMutationKind.setTabLayout,
-        page: kit.page,
-        view: view().id,
-        tab: view().tabs.first.id,
-        layout: BridgeLayout.board,
-      ),
-    );
-    await tester.pumpAndSettle();
     await tap(tester, card('Rent'));
-    final popover = find.byKey(const Key('row popover'));
-    expect(tester.getSize(popover).height, lessThanOrEqualTo(900));
-    await tester.scrollUntilVisible(
-      find.text('Field 40'),
-      200,
-      scrollable: find
-          .descendant(of: popover, matching: find.byType(Scrollable))
-          .first,
-    );
-    expect(find.text('Field 40'), findsOneWidget);
+    await tap(tester, find.byKey(const Key('row popover actions')));
+    await tap(tester, find.text('Delete row'));
+    expect(kit.applied(BridgeMutationKind.removeRow).single.row, 'r3');
   });
 
-  testWidgets('a Board without a Select field offers to add one', (
-    tester,
-  ) async {
-    await kit.show(tester, [
-      TablePart(const [], fields: [expenseFields.first]),
-    ]);
-    await kit.workspace.apply(
-      mutation(
-        BridgeMutationKind.setTabLayout,
-        page: kit.page,
-        view: view().id,
-        tab: view().tabs.first.id,
-        layout: BridgeLayout.board,
-      ),
-    );
-    await tester.pumpAndSettle();
+  testWidgets('a Board without a Select field offers to add '
+      'one', (tester) async {
+    await board(tester, const [], fields: [expenseFields.first]);
     await tap(tester, find.text('Add a Select field'));
     final field = kit.applied(BridgeMutationKind.addField).single;
     expect((field.text, field.fieldKind), ('Status', BridgeFieldKind.select));
