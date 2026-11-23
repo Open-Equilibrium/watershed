@@ -35,7 +35,7 @@ keyring = "=4.2.0"
 liquid-core = { path = "liquid/liquid-core", version = "0.0.0" }
 liquid-storage = { path = "liquid/liquid-storage", version = "0.0.0" }
 meta-harness-core = { path = "meta-harness/meta-harness-core", version = "0.0.0" }
-noyalib = { version = "=0.0.53", default-features = false, features = ["std"] }
+noyalib = { version = "=0.0.63", default-features = false, features = ["std"] }
 proto = { path = "proto/proto", version = "0.0.0" }
 serde = { version = "=1.0.229", features = ["derive"] }
 serde_ignored = "=0.1.14"

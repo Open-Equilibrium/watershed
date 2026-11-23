@@ -1,4 +1,5 @@
 {
+  "alias-chain.yaml": "refused anchor",
   "alias.yaml": "refused anchor",
   "anchor.yaml": "refused anchor",
   "billion-laughs.yaml": "refused anchor",
@@ -21,6 +22,7 @@
   "leading-zero-integer-quoted.yaml": "refused integer-form",
   "leading-zero-prompt.yaml": "refused type",
   "lf-line-endings.yaml": "accepted",
+  "long-flow-line.yaml": "refused type",
   "map-key-at-limit.yaml": "accepted",
   "map-key-beyond-limit.yaml": "refused key-length",
   "members-at-limit.yaml": "accepted",
