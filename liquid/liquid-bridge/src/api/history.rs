@@ -46,6 +46,7 @@ pub struct BridgeEntry {
     pub undone: bool,
     pub revertable: bool,
     pub purged: bool,
+    pub deleted_table: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -147,6 +148,7 @@ impl LiquidWorkspace {
                 undone: entry.undone,
                 revertable: entry.revertable,
                 purged: entry.purged,
+                deleted_table: entry.deleted_table.map(|table| table.to_string()),
             })
             .collect())
     }

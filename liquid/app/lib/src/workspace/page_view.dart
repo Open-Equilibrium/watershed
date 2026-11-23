@@ -551,6 +551,12 @@ class _Breadcrumb extends StatelessWidget {
                 ),
               ),
               const Spacer(),
+              IconButton(
+                tooltip: 'Page history',
+                visualDensity: VisualDensity.compact,
+                icon: Icon(LucideIcons.clock, size: 14, color: ws.textMuted),
+                onPressed: () => state.pageHistory.value = open.page,
+              ),
               InkWell(
                 key: const Key('arrange'),
                 borderRadius: BorderRadius.circular(WsMetrics.radiusMd),

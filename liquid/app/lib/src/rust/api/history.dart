@@ -41,6 +41,7 @@ class BridgeEntry {
   final bool undone;
   final bool revertable;
   final bool purged;
+  final String? deletedTable;
 
   const BridgeEntry({
     required this.actions,
@@ -53,6 +54,7 @@ class BridgeEntry {
     required this.undone,
     required this.revertable,
     required this.purged,
+    this.deletedTable,
   });
 
   @override
@@ -66,7 +68,8 @@ class BridgeEntry {
       page.hashCode ^
       undone.hashCode ^
       revertable.hashCode ^
-      purged.hashCode;
+      purged.hashCode ^
+      deletedTable.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -82,7 +85,8 @@ class BridgeEntry {
           page == other.page &&
           undone == other.undone &&
           revertable == other.revertable &&
-          purged == other.purged;
+          purged == other.purged &&
+          deletedTable == other.deletedTable;
 }
 
 class BridgeEntryQuery {

@@ -397,6 +397,10 @@ fn a_deleted_table_deleted_for_good_leaves_only_that_it_was() {
     budget.edit(Mutation::DeleteTable {
         block: budget.table.clone(),
     });
+    assert_eq!(
+        budget.entries()[0].deleted_table,
+        Some(budget.table.clone())
+    );
     budget.workspace.purge(&owner(), &live).unwrap();
     let records = serde_json::to_string(&budget.workspace.history(None, 100).unwrap()).unwrap();
     assert!(!records.contains("Expenses"));
@@ -423,6 +427,12 @@ fn a_deleted_table_deleted_for_good_leaves_only_that_it_was() {
         .map(|entry| entry.title)
         .collect();
     assert_eq!(titles[0], "Deleted a Table for good");
+    assert!(
+        budget
+            .entries()
+            .iter()
+            .all(|entry| entry.deleted_table.is_none())
+    );
     assert!(titles.iter().all(|title| !title.contains("Expenses")));
 }
 

@@ -36,6 +36,7 @@ pub struct Entry {
     pub undone: bool,
     pub revertable: bool,
     pub purged: bool,
+    pub deleted_table: Option<BlockId>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -371,6 +372,17 @@ impl<S: Store> Workspace<S> {
                 break;
             }
             let purged = matches!(action.operation, Operation::Purged { .. });
+            let deleted_table = match &action.operation {
+                Operation::Mutation(Mutation::DeleteTable { block })
+                    if self.table_name(block)?.is_none()
+                        && self
+                            .any_table_name(block)
+                            .is_some_and(|name| !name.is_empty()) =>
+                {
+                    Some(block.clone())
+                }
+                _ => None,
+            };
             entries.push(Entry {
                 actions: vec![action.id.clone()],
                 at: action.at,
@@ -384,6 +396,7 @@ impl<S: Store> Workspace<S> {
                     && !action.changes.is_empty()
                     && !undone.contains(&action.id),
                 purged,
+                deleted_table,
             });
             last = Some(action);
         }

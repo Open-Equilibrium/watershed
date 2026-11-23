@@ -117,6 +117,32 @@ class _TablePageState extends State<TablePage> {
     return (null, '');
   }
 
+  Future<void> _purge() async {
+    final name = _named(_table?.name ?? '');
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (_) => DangerDialog(
+        title: 'Delete the earlier versions of “$name”?',
+        action: 'Delete earlier versions',
+        children: [
+          Text(
+            'The Table stays as it is now. Its earlier versions, and the '
+            'rows and values only they still hold, leave this device for '
+            'good. History keeps its entries without their content, and none '
+            'of them can be reverted afterwards.',
+            style: DangerDialog.text(context),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    try {
+      await widget.state.workspace.purge(table: widget.table);
+    } on Object catch (error) {
+      widget.state.report('Liquid did not delete the earlier versions: $error');
+    }
+  }
+
   Future<void> _delete() async {
     final name = _table?.name ?? '';
     final pages = {for (final shown in _shown) _named(shown.pageTitle)};
@@ -276,6 +302,11 @@ class _TablePageState extends State<TablePage> {
                                 ),
                             ],
                             items: [
+                              (
+                                LucideIcons.trash,
+                                'Delete earlier versions…',
+                                () => unawaited(_purge()),
+                              ),
                               (LucideIcons.trash, 'Delete Table…', _delete),
                             ],
                           ),
