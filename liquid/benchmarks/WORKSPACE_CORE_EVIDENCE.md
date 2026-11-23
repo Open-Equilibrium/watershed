@@ -66,6 +66,22 @@ Reopening is mostly Automerge loading the Page's snapshot.
 
 Each of the 1,000 Text Blocks is placed after the previous one and before the typing Block's View, so fractional indexing lengthens their sort keys by about one character per five placements: the longest has 204 characters, and all keys together take 104 KB.
 
+### SQLCipher's crypto library
+
+The replica workloads compared on 2026-11-23 at `ddcaa376` (Rust 1.99.1, `rusqlite` 0.42.0 with SQLCipher 4.20.0), alternating Apple's CommonCrypto, which macOS builds now use (ADR-0319), with the vendored OpenSSL 3.6.3 they used before (`--features rusqlite/bundled-sqlcipher-vendored-openssl`), three rounds each. The machine was slower that day than for the rows above under either library, so only the two columns compare.
+
+| Workload | CommonCrypto | Vendored OpenSSL |
+| --- | --- | --- |
+| Durable typing, per keystroke, median | 3.77, 3.96, 4.12 ms | 3.97, 3.99, 4.13 ms |
+| … p99 | 8.87, 9.04, 17.0 ms | 9.94, 11.0, 15.5 ms |
+| Reopening the long Page | 42.4, 42.8, 46.2 ms | 39.8, 42.3, 52.6 ms |
+| Adding the 256 MiB file whole | 2.51, 2.43, 3.19 s | 3.80, 2.90, 3.69 s |
+| Reading it back part by part | 0.31, 0.30, 0.32 s | 0.34, 0.34, 0.33 s |
+| Drawing a stroke of 150 points, median | 6.94, 7.98, 8.08 ms | 7.99, 8.67, 9.01 ms |
+| Loading the Page and reading its 2,000 strokes | 28.2, 30.7, 32.1 ms | 32.0, 27.0, 27.4 ms |
+
+CommonCrypto is as fast or faster in every workload; peak memory differs by less than 1 MB.
+
 ### Raw output
 
 Pipeline at `6aa3f03`, the Database part, per round:
