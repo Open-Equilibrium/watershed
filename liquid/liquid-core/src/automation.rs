@@ -412,20 +412,32 @@ impl<S: Store> Workspace<S> {
         &mut self,
         trigger: &Trigger,
         row: &RowId,
-        cause: &ActionId,
-    ) -> Result<Vec<Ran>, Error> {
+        cause: Option<&ActionId>,
+    ) -> Vec<Ran> {
+        let Ok(automations) = self.automations() else {
+            return Vec::new();
+        };
         let mut ran = Vec::new();
-        for automation in self.automations()? {
+        for automation in automations {
             if !automation.on
                 || automation.attention.is_some()
                 || automation.setup.trigger.as_ref() != Some(trigger)
-                || !self.meets(&automation.setup, row)?
             {
                 continue;
             }
-            ran.push(self.run(&automation, row, Some(cause.clone())));
+            match self.meets(&automation.setup, row) {
+                Ok(true) => ran.push(self.run(&automation, row, cause.cloned())),
+                Ok(false) => {}
+                Err(error) => ran.push(Ran {
+                    automation: automation.id,
+                    name: automation.setup.name,
+                    notices: Vec::new(),
+                    changed: Vec::new(),
+                    outcome: Err(error),
+                }),
+            }
         }
-        Ok(ran)
+        ran
     }
 
     fn meets(&mut self, setup: &AutomationSetup, row: &RowId) -> Result<bool, Error> {
@@ -455,17 +467,7 @@ impl<S: Store> Workspace<S> {
         let (_, index) = self.database_index(table)?;
         index.cells(row).ok_or(Error::NotFound)?;
         let trigger = Trigger::Clicked(table.clone(), field.clone());
-        let mut ran = Vec::new();
-        for automation in self.automations()? {
-            if automation.on
-                && automation.attention.is_none()
-                && automation.setup.trigger.as_ref() == Some(&trigger)
-                && self.meets(&automation.setup, row)?
-            {
-                ran.push(self.run(&automation, row, None));
-            }
-        }
-        Ok(ran)
+        Ok(self.run_triggered(&trigger, row, None))
     }
 
     pub fn test(&mut self, actor: &Actor, automation: &AutomationId) -> Result<Ran, Error> {

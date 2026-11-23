@@ -279,9 +279,9 @@ impl<S: Store> Workspace<S> {
         };
         self.record(action, &written.touched, written.new, index)?;
         let ran = match (trigger, &written.created) {
-            (Some((trigger, Some(row))), _) => self.run_triggered(&trigger, &row, &id)?,
+            (Some((trigger, Some(row))), _) => self.run_triggered(&trigger, &row, Some(&id)),
             (Some((trigger, None)), Some(Created::Row(row))) => {
-                self.run_triggered(&trigger, row, &id)?
+                self.run_triggered(&trigger, row, Some(&id))
             }
             _ => Vec::new(),
         };
