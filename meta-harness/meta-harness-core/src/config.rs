@@ -154,17 +154,28 @@ impl Store {
     pub fn propose(&self, client: &str, summary: &str, proposed: Proposed) -> Result<u64, String> {
         check_text("The summary", summary, MAX_SUMMARY)?;
         let mut db = self.db();
-        match &proposed {
+        let base = current(&db)?;
+        let next = match &proposed {
             Proposed::Changes(changes) => {
                 if changes.len() > MAX_ENTRIES {
                     return Err(format!("A proposal holds at most {MAX_ENTRIES} changes."));
                 }
                 changes.iter().try_for_each(check_change)?;
+                let mut blocks = base.blocks.clone();
+                changes
+                    .iter()
+                    .cloned()
+                    .for_each(|change| apply(&mut blocks, change));
+                blocks
             }
-            Proposed::Restore(revision) => {
-                blocks_of(&db, *revision)?
-                    .ok_or_else(|| format!("There is no revision {revision}."))?;
-            }
+            Proposed::Restore(revision) => blocks_of(&db, *revision)?
+                .ok_or_else(|| format!("There is no revision {revision}."))?,
+        };
+        if next == base.blocks {
+            return Err(format!(
+                "The proposal would not change revision {}.",
+                base.revision
+            ));
         }
         let tx = db.transaction().map_err(failed)?;
         let at = now_ms();

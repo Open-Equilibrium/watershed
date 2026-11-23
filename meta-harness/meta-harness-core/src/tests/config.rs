@@ -456,6 +456,40 @@ fn a_diff_names_each_change_with_its_direction_and_identical_blocks_need_none() 
 }
 
 #[test]
+fn a_proposal_that_would_change_nothing_is_refused() {
+    let fixture = Fixture::new();
+    let store = &fixture.store;
+    let rules = propose(store, vec![instruction("rules", "x")]);
+    store.approve("cli", rules, |_| Ok(())).unwrap();
+    for changes in [
+        vec![],
+        vec![instruction("rules", "x")],
+        vec![Change::Instruction {
+            name: "ghost".to_owned(),
+            text: None,
+        }],
+        vec![Change::Skill {
+            name: "ghost".to_owned(),
+            files: None,
+        }],
+        vec![Change::McpServer {
+            name: "ghost".to_owned(),
+            server: None,
+        }],
+    ] {
+        let error = store
+            .propose("cli", "nothing", Proposed::Changes(changes.clone()))
+            .expect_err(&format!("{changes:?}"));
+        assert!(error.contains("would not change revision 1"), "{error}");
+    }
+    let error = store
+        .propose("cli", "back", Proposed::Restore(1))
+        .unwrap_err();
+    assert!(error.contains("would not change revision 1"), "{error}");
+    assert!(store.pending().unwrap().is_empty());
+}
+
+#[test]
 fn a_change_with_an_unknown_field_is_refused_instead_of_read_as_a_removal() {
     for text in [
         r#"{"instruction":{"name":"style","txt":"Be verbose."}}"#,
