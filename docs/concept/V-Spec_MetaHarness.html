@@ -144,7 +144,7 @@ meta metrics ...</code></pre>
         <div class="card"><h3>CLI surface</h3><pre><code>meta serve | status
 meta config show | log
 meta config pending
-meta config propose FILE
+meta config propose FILE [SUMMARY]
 meta config approve N
 meta config reject N
 meta config revert N
@@ -154,9 +154,15 @@ meta host add ADDRESS CODE
 meta host list | remove NAME
 meta host revoke NAME
 meta host agents on | off
+meta agent create NAME --project PATH --model INSTANCE/MODEL
+meta agent list | remove NAME | routines NAME
+meta agent routine add NAME (--every | --at | --once | --webhook) --prompt TEXT
+meta agent routine remove NAME ID
+meta install (Windows)
 meta service install
 meta service uninstall
-meta uninstall</code></pre>
+meta uninstall
+meta help</code></pre>
           <p class="muted">Implemented (ADR-0296, ADR-0299); <code>meta help</code> describes each command, and remote access and host links are in the <a href="../../meta-harness/README.md#remote-access-and-host-links">README</a>; the config commands print JSON. Target, not yet built: <code>meta sessions</code>, <code>attach</code>, <code>run</code>, <code>schedule</code>, <code>metrics</code>.</p></div>
         <div class="card"><h3>API / protocol surface</h3><ul>
           <li>session registry;</li>

@@ -18,7 +18,8 @@ usage: meta <command>
   status                    show whether Meta-Harness runs, its T3 Code release and revision
   config show               print the current configuration revision as JSON
   config propose FILE [SUMMARY]
-                            propose the changes in FILE, a JSON array of changes
+                            propose the changes in FILE, a JSON array of changes (format:
+                            docs/concept/V-Spec_MetaHarness.html#config)
   config revert REVISION    propose going back to an earlier revision
   config pending            list the proposals that wait for a decision
   config approve NUMBER     approve a proposal; new harness sessions use the new revision
