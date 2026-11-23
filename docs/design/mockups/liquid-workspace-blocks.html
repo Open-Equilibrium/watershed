@@ -30,21 +30,6 @@
 .bcol .h{display:flex;gap:6px;align-items:center;color:var(--ws-text-muted);font-size:12px}
 .bcard{background:var(--ws-canvas);border-radius:6px;box-shadow:0 0 0 1px var(--ws-border);padding:6px 8px;line-height:18px}
 .bcard span{display:block;color:var(--ws-text-faint);font-size:12px;font-variant-numeric:tabular-nums}
-.alist .tr{--cols:1.4fr 1fr 1.2fr 1fr 150px;font-size:14px}
-.st{display:inline-flex;gap:6px;align-items:center;font-size:13px}
-.st.on{color:var(--ws-success)}.st.off{color:var(--ws-text-faint)}.st.warn{color:var(--ws-warning)}
-.sent{display:flex;flex-direction:column;gap:10px;font-size:16px;line-height:24px}
-.sent .ln{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
-.sent .kw{color:var(--ws-text-muted);font-weight:600;width:56px}
-.tok{display:inline-flex;align-items:center;gap:6px;height:30px;padding:0 10px;border-radius:6px;background:var(--ws-subtle);box-shadow:inset 0 0 0 1px var(--ws-border);font-size:15px;white-space:nowrap}
-.tok.ref{background:var(--ws-accent-subtle);color:var(--ws-accent);box-shadow:none;font-weight:500}
-.tok.bad{background:var(--ws-danger-subtle);color:var(--ws-danger);box-shadow:none;text-decoration:line-through}
-.tok.add{background:transparent;box-shadow:inset 0 0 0 1px dashed var(--ws-border-strong);color:var(--ws-text-faint);border:1px dashed var(--ws-border-strong)}
-.banner{display:flex;gap:10px;align-items:flex-start;padding:10px 12px;border-radius:8px;background:var(--ws-warning-subtle);color:var(--ws-warning);font-size:14px;line-height:20px}
-.banner .acts{margin-left:auto;display:flex;gap:8px;flex:none}
-.sw{width:30px;height:18px;border-radius:9px;background:var(--ws-success);position:relative;display:inline-block;flex:none}
-.sw::after{content:"";position:absolute;right:2px;top:2px;width:14px;height:14px;border-radius:50%;background:var(--ws-canvas)}
-.sw.off{background:var(--ws-border-strong)}.sw.off::after{right:auto;left:2px}
 </style></head><body class="theme-light chrome">
 <div class="page">
   <div class="toolbar">
@@ -53,7 +38,7 @@
   </div>
   <section>
     <h1>Liquid Workspace: Blocks</h1>
-    <p class="sub">Mockups for the M3a slice in <a href="../../../PLAN.md#m3a--local-workspace-foundation">PLAN.md</a>, approved by the maintainer on 2026-11-01: synchronized Views over one Block, copying, the deletion cascade and Automations. Connections and formulas are built; the <a href="../../concept/V-Spec_Liquid.html#logic">V-Spec</a> holds their rules. They follow the <a href="../../concept/V-Spec_Liquid.html#model">V-Spec</a>, ADR-0235 and <a href="../guidelines.md">guidelines.md</a>; the shell is the one in the <a href="liquid-workspace-pages.html">Pages mockups</a>.</p>
+    <p class="sub">Mockups for the M3a slice in <a href="../../../PLAN.md#m3a--local-workspace-foundation">PLAN.md</a>, approved by the maintainer on 2026-11-01: synchronized Views over one Block, copying and the deletion cascade. Connections, formulas and Automations are built; the <a href="../../concept/V-Spec_Liquid.html#logic">V-Spec</a> holds their rules. They follow the <a href="../../concept/V-Spec_Liquid.html#model">V-Spec</a>, ADR-0235 and <a href="../guidelines.md">guidelines.md</a>; the shell is the one in the <a href="liquid-workspace-pages.html">Pages mockups</a>.</p>
     <p class="sub"><b>Revised by ADR-0239 and ADR-0241:</b> the rail with the Workspace switcher, Inbox and Settings, tabs side by side, Chats in place of agent sessions and Notion's scale are in <a href="liquid-app-concept.html">the app's structure</a>; this file keeps its slice's content, and the shell is redrawn as each slice is built.</p>
   </section>
   <section>
@@ -73,38 +58,17 @@
     <div class="stage" style="margin-top:16px"><div class="scaler"><div class="win bare" id="w-del2" data-w="1240"></div></div></div>
   </section>
   <section>
-    <h3 class="sec">4 · Automations</h3>
-    <p class="sub">"Automations" at the Explorer's foot opens a dialog over the current Page that lists every Automation; closing it shows the Page again. It lists those that belong to a Block and are deleted with it, and those of the Workspace. M3a Automations start when a row is added, a field changes or a button is clicked (ADR-0235); each runs as the Role it is assigned.</p>
-    <div class="stage"><div class="scaler"><div class="win" id="w-alist" data-w="1240"></div></div></div>
-  </section>
-  <section>
-    <h3 class="sec">5 · An Automation reads as a sentence</h3>
-    <p class="sub">The editor builds a sentence, as Trello's Butler rules read: When, If, Then. Each part is a token that opens a short list. The Role it runs as shows whether it allows every action; Test runs it once on the last row and records the result in History like any run.</p>
-    <div class="stage"><div class="scaler"><div class="win" id="w-aed" data-w="1240"></div></div></div>
-  </section>
-  <section>
-    <h3 class="sec">6 · Needs attention</h3>
-    <p class="sub">An Automation of the Workspace whose Block was deleted turns off and says why. Choosing another Block repairs it; reverting the deletion in History turns it back on.</p>
-    <div class="stage"><div class="scaler"><div class="win" id="w-att" data-w="1240"></div></div></div>
-  </section>
-  <section>
     <h3 class="sec">Decisions</h3>
     <h4 class="qh">Decided (V-Spec, ADR-0235)</h4>
     <ol class="qs">
       <li>Removing the last View deletes the Block, its Connections and its own Automations in one revertible Action; Automations of the Workspace that use it turn off and need attention. There is no Trash.</li>
       <li>Pasting a copied Block creates a copy; a View is always explicit.</li>
-      <li>Automations read as sentences and start on events and buttons.</li>
     </ol>
     <h4 class="qh">Approved with these mockups (2026-11-01)</h4>
     <ol class="qs">
       <li>The synced marker "Synced · on 2 Pages" with the other Pages on hover.</li>
       <li>Block menu: Add to Page, Duplicate, Copy, Copy link to Block, Move to, Protect, Block history, Remove from this Page (Delete when it is the last View) and Delete everywhere.</li>
       <li>Deleting without dependents needs no dialog and offers Undo; with dependents a dialog lists them.</li>
-      <li>M3a Automation actions: change a field, add a row, create a Page from a template and show a notification.</li>
-    </ol>
-    <h4 class="qh">Added on request, approved the same day</h4>
-    <ol class="qs">
-      <li>Automations open as a dialog over the current Page or Source, with the editor inside it; closing it returns there.</li>
     </ol>
   </section>
 </div>
@@ -138,7 +102,6 @@ back:sv('<path d="M10 3.5L5.5 8l4.5 4.5"/>'),
 };
 const E={budget:'💰',review:'📊',trip:'🧳',road:'🗺️',api:'🧩',plan:'🗓️'};
 const em=e=>`<span class="em">${e}</span>`;
-const modal=(title,body,o={})=>`<div class="scrim"></div><div class="modal" style="width:${o.w||1000}px"><div class="mh">${title}<span class="end">${o.right||''}<span class="ib">✕</span></span></div><div class="mb">${body}</div></div>`;
 const nav=(d,ic,label,o={})=>`<div class="nav ${o.on?'on':''}" style="--d:${d}"><span class="tw">${o.tw||''}</span><span class="ico">${ic}</span><span>${label}</span>${o.r?`<span class="r ${o.warn?'warn':''}">${o.r}</span>`:''}</div>`;
 function side(o={}){const s=o.sel||'budget';const e=(k)=>s==k;
 return `<div class="side"><div class="wsw"><span class="av">B</span>Benni's Workspace<span style="margin-left:auto;color:var(--ws-text-faint)">⌄</span></div>
@@ -174,7 +137,6 @@ bell:sv('<path d="M4 11V7a4 4 0 018 0v4l1 1.5H3z"/><path d="M6.5 14h3"/>'),
 warn:sv('<path d="M8 2l6.5 11.5h-13z"/><path d="M8 6.5v3.5M8 12v.1"/>'),
 dup:sv('<rect x="5" y="5" width="8.5" height="8.5" rx="1.5"/><path d="M11 5V3.5c0-.6-.4-1-1-1H3.5c-.6 0-1 .4-1 1V10c0 .6.4 1 1 1H5"/>'),
 move:sv('<path d="M3 8h10M10 5l3 3-3 3"/>'),
-play:sv('<path d="M5 3.5l7 4.5-7 4.5z"/>'),
 });
 const boardHead=`<div class="bh"><span class="ico">${I.db}</span><b>Expenses</b><span class="chip">Board ⌄</span><span class="end"><span class="cap">Synced · on 2 Pages</span><span class="ib on">${I.more}</span></span></div>`;
 const board=`<div class="board">${[['Home','t2',[['Electricity','96.00'],['Rent','950.00']]],['Food','t1',[['Groceries','84.20']]],['Travel','t3',[['Train to Porto','42.50']]],['Leisure','t4',[['Cinema','111.80']]]].map(([c,t,cs])=>`<div class="bcol"><div class="h"><span class="tag ${t}">${c}</span>${cs.length}</div>${cs.map(([n,v])=>`<div class="bcard">${n}<span>€ ${v}</span></div>`).join('')}</div>`).join('')}</div>`;
@@ -240,39 +202,6 @@ const removed=`<div class="win" style="width:440px;flex:none;padding:20px 24px;b
 <div class="cap">The board View is gone from this Page; Expenses stays on Household budget.</div>
 <div class="toast" style="bottom:16px"><span>Removed from Monthly review</span><span class="u">Undo ⌘Z</span></div></div>`;
 document.getElementById('w-del2').innerHTML=`<div style="display:flex;gap:40px;align-items:flex-start">${removed}${after}</div>`;
-
-// 4 · Automations list (dialog over the prior Page)
-const bgPage=`<div class="pg"><div class="col"><div class="ttl"><span class="tic">💰</span>Household budget</div><div class="prose"><p>October is almost done.</p></div>${dbHead({synced:true})}${dbTable()}</div></div>`;
-const bgHead=head('Private <span>›</span> <b>💰 Household budget</b>');
-const mbody=c=>`<div style="flex:1;min-width:0;padding:20px 28px;display:flex;flex-direction:column;gap:14px;overflow:hidden">${c}</div>`;
-const arow=(n,owner,when,role,st)=>`<div class="tr"><span>${n}</span><span>${owner}</span><span>${when}</span><span>${role}</span><span>${st}</span></div>`;
-frame('w-alist',{h:520,side:{sel:'auto',att:true},head:bgHead,main:bgPage,over:modal('Automations',mbody(`
-<div class="tbl alist"><div class="tr hd"><span>Name</span><span>Belongs to</span><span>When</span><span>Runs as</span><span>Status</span></div>
-${arow('Flag large expenses',`${I.db} Expenses`,'a row is added','Budget editor','<span class="st on">● On</span>')}
-${arow('Monthly summary','Workspace','“Summarize” in Months is clicked','Can edit','<span class="st warn">⚠ Needs attention</span>')}
-${arow('Archive paid bills',`${I.db} Bills`,'“Paid” changes','Can edit','<span class="st off">○ Off</span>')}</div>
-<div class="cap">Last runs and their changes are in History, filtered by the Automation. Closing this dialog shows 💰 Household budget again.</div>`),{right:`<span class="btn pri">${I.plus}New Automation</span>`})});
-
-// 5 · Editor
-frame('w-aed',{h:640,side:{sel:'auto'},head:bgHead,main:bgPage,over:modal(`<span class="ib">${I.back}</span><span style="font-weight:400;color:var(--ws-text-muted)">Automations ›</span> Flag large expenses`,mbody(`
-<div class="sent">
-<div class="ln"><span class="kw">When</span><span class="tok">a row is added</span>to<span class="tok ref">${I.db} Expenses</span></div>
-<div class="ln"><span class="kw">If</span><span class="tok ref">Amount</span><span class="tok">is more than</span><span class="tok">500</span><span class="tok add">＋ and</span></div>
-<div class="ln"><span class="kw">Then</span><span class="tok">set</span><span class="tok ref">Category</span>to<span class="tok"><span class="tag t4">Review</span></span></div>
-<div class="ln"><span class="kw">and</span><span class="tok">${I.bell} show a notification</span><span class="tok">“Large expense: <span class="ref">Item</span>”</span></div>
-<div class="ln"><span class="kw"></span><span class="tok add">＋ action</span></div></div>
-<div class="fld" style="grid-template-columns:120px 1fr;margin-top:12px;font-size:14px">
-<span class="l">Runs as</span><span style="display:flex;gap:10px;align-items:center"><span class="sel" style="width:200px">Budget editor<span class="c">⌄</span></span><span class="st on">✓ allows Apply on Expenses</span></span>
-<span class="l">Belongs to</span><span>${I.db} Expenses <span class="cap">· deleted together with it</span></span>
-<span class="l">Last run</span><span>today 10:42 · set 1 row · <span style="color:var(--ws-accent)">Show in History</span></span></div>`),{right:`<span class="ib">${I.play}Test</span><span class="ib">On <span class="sw"></span></span>`})});
-
-// 6 · Needs attention
-frame('w-att',{h:560,side:{sel:'auto',att:true},head:bgHead,main:bgPage,over:modal(`<span class="ib">${I.back}</span><span style="font-weight:400;color:var(--ws-text-muted)">Automations ›</span> Monthly summary`,mbody(`
-<div class="banner"><span>⚠</span><span>Turned off: its Database “Expenses” was deleted today at 11:02. Choose another Database, or revert the deletion in History.</span><span class="acts"><span class="btn">Show in History</span></span></div>
-<div class="sent">
-<div class="ln"><span class="kw">When</span><span class="tok">the button</span><span class="tok ref">Summarize</span>in<span class="tok ref">${I.db} Months</span>is clicked</div>
-<div class="ln"><span class="kw">Then</span><span class="tok">create a Page from</span><span class="tok ref">${I.tpl} Month summary</span>with the total of<span class="tok bad">${I.db} Expenses › Amount</span></div></div>
-<div class="fld" style="grid-template-columns:120px 1fr;margin-top:12px;font-size:14px"><span class="l">Runs as</span><span class="sel" style="width:200px">Can edit<span class="c">⌄</span></span><span class="l">Belongs to</span><span>Workspace <span class="cap">· stays when Blocks it uses are deleted</span></span></div>`),{right:`<span class="ib">${I.play}Test</span><span class="ib">Off <span class="sw off"></span></span>`})});
 
 let mode='system',fit=true;const mq=matchMedia('(prefers-color-scheme: dark)');
 function hostDark(){const v=getComputedStyle(document.documentElement).getPropertyValue('--background').trim();if(!v)return mq.matches;const c=document.createElement('canvas');c.width=c.height=1;const x=c.getContext('2d');x.fillStyle='#808080';x.fillStyle=v;x.fillRect(0,0,1,1);const d=x.getImageData(0,0,1,1).data;return .2126*d[0]+.7152*d[1]+.0722*d[2]<128}

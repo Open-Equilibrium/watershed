@@ -205,6 +205,7 @@ Canonical terms. Use these exactly; do not introduce synonyms. Tool names are fi
 - **Math Block** — A Block that shows one LaTeX formula typeset and never computes it; `$…$` in a Text Block typesets one inside a sentence (ADR-0316).
 - **Chart Block** — A Block that draws a Table's groups or a Calculation Block's lines as bars, a line or a pie, through a Connection (ADR-0315).
 - **Formula field** — A Table field whose formula computes each row's value from the row's other fields or a Table's columns; it takes no typing (ADR-0244).
+- **Button field** — A Table field that shows a button in each row and holds no value; clicking it runs the Automations it starts (ADR-0317).
 - **Total row** — A Table tab's footer: its row count and, per field, a total over the rows the tab shows (ADR-0244).
 - **Calculation Block** — A Block of lines that each pair a label with a value or formula, laid out as labels left and values right, for reports in Excel's layout (ADR-0244).
 - **Section** — Consecutive Text Blocks up to `---`, a Block of another type or the Page's edge; Arrange mode places it as one tile, inside which its Text Blocks can be arranged in columns. It is layout only and owns no content, rights or Views (ADR-0235).

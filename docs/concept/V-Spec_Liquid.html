@@ -130,10 +130,21 @@
       <ul>
         <li><b>Calculation Block:</b> lines of a label and a value or formula, values right-aligned; a line is plain, a heading, a subtotal or the total, and <code>SUM(ABOVE)</code> adds the plain lines up to the heading above. A value typed without <code>=</code> stays a number or text. Typing a formula suggests the Block's lines, the fields of up to 50 Tables and the functions; a chosen one becomes a chip. "Add a line" grows one value into a report, up to 500 lines.</li>
         <li><b>Formula field:</b> computes each row from its fields and is edited in the field menu; it takes no typing and is not sorted, filtered or grouped by.</li>
+        <li><b>Button field:</b> each row shows a button with the field's name, in the grid and the row's popover, that runs the Automations it starts; it holds no value, has no total and is not sorted or filtered by.</li>
         <li><b>Total row:</b> a Table's footer shows its row count and, per field, Sum, Average, Count, Min, Max, Empty or Filled over the rows the tab shows, so a filter or search changes it; a sum, an average, a minimum or a maximum needs a number or formula field. Each tab keeps its own.</li>
         <li><b>Chart Block:</b> bars, a line or a pie, drawn by Liquid itself, from a Table, grouped by a select, checkbox or text field and counting rows or adding or averaging a number, or from a Calculation Block's plain lines in their order. A line needs two points, and a Chart draws at most 100. Its panel picks the data and lists what it uses and what uses it; the data list offers the Tables and this Page's Calculation Blocks.</li>
       </ul>
-      <p>The Automation editor reads as sentences, as Trello's Butler rules do. M3a Automations start on events and buttons only; schedules follow the headless replica, so no two devices run one (ADR-0235).</p>
+      <p>The Automation editor reads as sentences, as Trello's Butler rules do: When, If, Then, each part a token that opens a short list. M3a Automations start on events and buttons only; schedules follow the headless replica, so no two devices run one (ADR-0235, ADR-0317).</p>
+      <ul>
+        <li><b>Where:</b> "Automations" at the Explorer's foot opens a dialog over the current Page listing each one with what it belongs to, when it runs, the Role it runs as and its status; the foot counts those that need attention. The editor opens in the same dialog.</li>
+        <li><b>When:</b> a row is added to a Table, a field of a Table changes, or a button field is clicked. Only a person's change or click starts one: what an Automation changes starts no other, so no chain or loop can form.</li>
+        <li><b>If:</b> conditions on the row's fields, all of which must hold, use the Table filters' tests plus is not, more than and less than (before and after for dates); a formula or button field takes none.</li>
+        <li><b>Then:</b> set a field of the row, add a row to a Table, or show a notification, whose text shows a field's value where it names <code>{Field}</code>; the notification is a toast at the window's foot. A run is one Action, by the Automation, in History; a step that fails undoes the run and the toast says why.</li>
+        <li><b>Test</b> runs the steps once on the trigger Table's last row, without the conditions, as a run like any other. An Automation starts on, and its switch turns it off.</li>
+        <li><b>Belongs to:</b> an Automation that uses only its trigger's Table belongs to it and is deleted with it; one that uses other Tables belongs to the Workspace. Deleting a Table it uses, or removing a field it uses, turns it off and marks it <em>Needs attention</em> with the reason, in the same Action; choosing another Table or field repairs it.</li>
+        <li><b>Runs as:</b> the Workspace owner's access until Roles are built, shown as Can manage.</li>
+        <li><b>Bounds:</b> 500 Automations per Workspace, 20 conditions and 20 steps each, a name or message of 1,000 characters.</li>
+      </ul>
     </div></section>
 
     <section id="apps" class="section"><h2>5. Apps, extensions and MCP</h2><div class="body">
