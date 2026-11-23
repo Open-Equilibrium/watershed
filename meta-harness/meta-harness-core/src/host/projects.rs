@@ -31,10 +31,8 @@ impl Host {
 
     pub async fn add_project(&self, root: &str) -> Result<HostProject, String> {
         self.project(Path::new(root)).await?;
-        projects(&self.client, Some(root))
+        listed(&self.client, root)
             .await?
-            .into_iter()
-            .find(|project| project.root == root)
             .ok_or_else(|| format!("T3 has no project at {root} after it was added."))
     }
 
@@ -59,10 +57,8 @@ impl Host {
             .await?;
         let root = text(&started["cwd"]);
         await_clone(&self.client, &id).await?;
-        projects(&self.client, Some(&root))
+        listed(&self.client, &root)
             .await?
-            .into_iter()
-            .find(|project| project.root == root)
             .ok_or_else(|| format!("T3 has no project at {root} after the clone."))
     }
 }
@@ -104,6 +100,14 @@ impl Host {
 }
 
 impl Project {
+    fn git_at(&self, path: &Path) -> crate::Git {
+        crate::Git::new(
+            self.client.clone(),
+            path.to_string_lossy().into_owned(),
+            None,
+        )
+    }
+
     pub(crate) async fn landing(
         &self,
         branch: &str,
@@ -130,9 +134,7 @@ impl Project {
             !sealed.contains(&thread.id)
                 && thread.worktree.as_deref().unwrap_or(Path::new(&self.root)) == checkout.as_path()
         });
-        let status = crate::Git::new(self.client.clone(), path.clone(), None)
-            .status()
-            .await?;
+        let status = self.git_at(checkout).status().await?;
         let reason = if in_use {
             format!(
                 "{branch} is checked out at {path} by a session that has not moved, so the session cannot move there."
@@ -190,24 +192,12 @@ impl Project {
         };
         if let Workspace::Worktree { path } = &workspace {
             if attached {
-                let status = crate::Git::new(
-                    self.client.clone(),
-                    path.to_string_lossy().into_owned(),
-                    None,
-                )
-                .status()
-                .await?;
+                let status = self.git_at(path).status().await?;
                 if status.ahead > 0 {
                     return Err(unpushed_reason(branch));
                 }
             }
-            let pulled = crate::Git::new(
-                self.client.clone(),
-                path.to_string_lossy().into_owned(),
-                None,
-            )
-            .pull()
-            .await;
+            let pulled = self.git_at(path).pull().await;
             if let Err(error) = pulled {
                 return Err(format!(
                     "{branch} could not be fast-forwarded to the moved session's pushed head, so the session did not move: {error}"
@@ -307,11 +297,16 @@ pub(crate) async fn projects(
 }
 
 pub(crate) async fn remote_url(client: &Client, root: &str) -> Result<Option<String>, String> {
+    Ok(listed(client, root)
+        .await?
+        .and_then(|project| project.remote_url))
+}
+
+async fn listed(client: &Client, root: &str) -> Result<Option<HostProject>, String> {
     Ok(projects(client, Some(root))
         .await?
         .into_iter()
-        .find(|project| project.root == root)
-        .and_then(|project| project.remote_url))
+        .find(|project| project.root == root))
 }
 
 async fn read_projects(client: &Client) -> Result<Vec<HostProject>, String> {

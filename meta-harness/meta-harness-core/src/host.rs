@@ -4,6 +4,7 @@ use serde_json::{Value, json};
 
 pub(crate) mod projects;
 
+use crate::git::text;
 use crate::host_move::Harness;
 use crate::t3::{Client, Server};
 use crate::thread::Thread;
@@ -47,21 +48,27 @@ impl Host {
         self.origin.trim_start_matches("http://")
     }
 
+    async fn config(&self) -> Result<Value, String> {
+        self.client.call("server.getConfig", json!({})).await
+    }
+
+    async fn update_settings(&self, patch: Value) -> Result<(), String> {
+        self.client
+            .call("server.updateSettings", json!({"patch": patch}))
+            .await
+            .map(|_| ())
+    }
+
     pub(crate) async fn linked_environments(&self) -> Result<bool, String> {
-        let config = self.client.call("server.getConfig", json!({})).await?;
+        let config = self.config().await?;
         Ok(config["settings"]["linkedEnvironmentsEnabled"]
             .as_bool()
             .unwrap_or(false))
     }
 
     pub(crate) async fn set_linked_environments(&self, on: bool) -> Result<(), String> {
-        self.client
-            .call(
-                "server.updateSettings",
-                json!({"patch": {"linkedEnvironmentsEnabled": on}}),
-            )
+        self.update_settings(json!({"linkedEnvironmentsEnabled": on}))
             .await
-            .map(|_| ())
     }
 
     pub async fn project(&self, root: &Path) -> Result<Project, String> {
@@ -107,7 +114,7 @@ impl Host {
     }
 
     pub async fn providers(&self) -> Result<Vec<Provider>, String> {
-        let config = self.client.call("server.getConfig", json!({})).await?;
+        let config = self.config().await?;
         Ok(config["providers"]
             .as_array()
             .into_iter()
@@ -155,7 +162,7 @@ impl Host {
     }
 
     pub async fn environment_name(&self) -> Result<String, String> {
-        let config = self.client.call("server.getConfig", json!({})).await?;
+        let config = self.config().await?;
         Ok(config["environment"]["label"]
             .as_str()
             .unwrap_or_default()
@@ -174,7 +181,7 @@ impl Host {
     }
 
     pub async fn environment_id(&self) -> Result<String, String> {
-        let config = self.client.call("server.getConfig", json!({})).await?;
+        let config = self.config().await?;
         match config["environment"]["environmentId"].as_str() {
             Some(id) if !id.is_empty() => Ok(id.to_owned()),
             _ => Err("T3 reports no environment id.".to_owned()),
@@ -182,7 +189,7 @@ impl Host {
     }
 
     pub async fn environment_machine(&self) -> Result<String, String> {
-        let config = self.client.call("server.getConfig", json!({})).await?;
+        let config = self.config().await?;
         Ok(config["settings"]["environmentIcon"]
             .as_str()
             .or_else(|| config["environment"]["platform"]["machine"].as_str())
@@ -191,38 +198,28 @@ impl Host {
     }
 
     pub async fn writer_model(&self) -> Result<Option<ModelChoice>, String> {
-        let config = self.client.call("server.getConfig", json!({})).await?;
+        let config = self.config().await?;
         Ok(ModelChoice::from_t3(
             &config["settings"]["textGenerationModelSelection"],
         ))
     }
 
     pub async fn set_writer_model(&self, choice: &ModelChoice) -> Result<(), String> {
-        self.client
-            .call(
-                "server.updateSettings",
-                json!({"patch": {
-                    "textGenerationModelSelection": choice.to_t3(),
-                    "sourceControlWriterModelSelection": null,
-                }}),
-            )
-            .await
-            .map(|_| ())
+        self.update_settings(json!({
+            "textGenerationModelSelection": choice.to_t3(),
+            "sourceControlWriterModelSelection": null,
+        }))
+        .await
     }
 
     pub(crate) async fn provider_instances(&self) -> Result<Value, String> {
-        let config = self.client.call("server.getConfig", json!({})).await?;
+        let config = self.config().await?;
         Ok(config["settings"]["providerInstances"].clone())
     }
 
     pub(crate) async fn set_provider_instances(&self, instances: Value) -> Result<(), String> {
-        self.client
-            .call(
-                "server.updateSettings",
-                json!({"patch": {"providerInstances": instances}}),
-            )
+        self.update_settings(json!({"providerInstances": instances}))
             .await
-            .map(|_| ())
     }
 
     pub async fn shutdown(&self) {
@@ -372,10 +369,6 @@ pub struct Project {
 impl Project {
     pub async fn start(&self, start: StartThread) -> Result<Thread, String> {
         let title = start.text.lines().next().unwrap_or_default().to_owned();
-        self.launch(start, title).await
-    }
-
-    pub(crate) async fn launch(&self, start: StartThread, title: String) -> Result<Thread, String> {
         self.launch_as(crate::t3::fresh_id("thread"), start, title)
             .await
     }
@@ -507,10 +500,6 @@ impl Project {
     pub async fn open(&self, id: &str) -> Result<Thread, String> {
         Thread::follow(self.client.clone(), id.to_owned(), self.root.clone()).await
     }
-}
-
-fn text(value: &Value) -> String {
-    value.as_str().unwrap_or_default().to_owned()
 }
 
 pub(crate) fn write_settings(home: &Path, agents: &[AcpAgent]) -> Result<(), String> {
