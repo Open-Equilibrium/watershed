@@ -1,6 +1,10 @@
+use std::num::IntErrorKind;
+
 use meta_harness_core::{Access, ClientKind, DEFAULT_REMOTE_PORT, remote};
 
 use crate::{USAGE, print};
+
+const PORT_RANGE: &str = "The port must be 1-65535.";
 
 pub async fn remote(host: &remote::Host, args: &[&str]) -> Result<(), String> {
     match args {
@@ -28,15 +32,20 @@ pub async fn remote(host: &remote::Host, args: &[&str]) -> Result<(), String> {
     }
 }
 
-pub async fn invite(host: &remote::Host, args: &[&str]) -> Result<(), String> {
-    let (kind, access) = match args {
-        ["--device"] => (ClientKind::Device, Access::default()),
-        ["--host", rest @ ..] => (
+fn invite_request(args: &[&str]) -> Result<(ClientKind, Access), String> {
+    match args {
+        ["--device"] => Ok((ClientKind::Device, Access::default())),
+        ["--host", rest @ ..] => Ok((
             ClientKind::Host,
             access("meta invite", rest)?.unwrap_or_default(),
-        ),
-        _ => return Err("meta invite needs --device or --host".to_owned()),
-    };
+        )),
+        ["--device", "--access", ..] => Err("--access goes only with --host.".to_owned()),
+        _ => Err("meta invite needs --device or --host".to_owned()),
+    }
+}
+
+pub async fn invite(host: &remote::Host, args: &[&str]) -> Result<(), String> {
+    let (kind, access) = invite_request(args)?;
     let status = host
         .remote_status()
         .await?
@@ -91,9 +100,14 @@ pub async fn host(host: &remote::Host, args: &[&str]) -> Result<(), String> {
 pub(crate) fn port(args: &[&str]) -> Result<u16, String> {
     match args {
         [] => Ok(DEFAULT_REMOTE_PORT),
-        ["--port", text] => text
-            .parse()
-            .map_err(|_| format!("{text:?} is not a number.")),
+        ["--port", text] => match text.parse::<u16>() {
+            Ok(0) => Err(PORT_RANGE.to_owned()),
+            Ok(port) => Ok(port),
+            Err(error) if matches!(error.kind(), IntErrorKind::PosOverflow) => {
+                Err(PORT_RANGE.to_owned())
+            }
+            Err(_) => Err(format!("{text:?} is not a number.")),
+        },
         _ => Err("meta remote on takes --port N".to_owned()),
     }
 }
@@ -123,7 +137,22 @@ mod tests {
             port(&["--port", "many"]),
             Err("\"many\" is not a number.".to_owned())
         );
+        for out_of_range in ["0", "65536", "99999", "99999999999999999999"] {
+            assert_eq!(
+                port(&["--port", out_of_range]),
+                Err("The port must be 1-65535.".to_owned()),
+                "{out_of_range}"
+            );
+        }
         assert!(port(&["--prot", "4000"]).is_err());
+        assert_eq!(
+            invite_request(&["--device", "--access", "auto"]).err(),
+            Some("--access goes only with --host.".to_owned())
+        );
+        assert_eq!(
+            invite_request(&["--bogus"]).err(),
+            Some("meta invite needs --device or --host".to_owned())
+        );
         assert_eq!(access("meta host add", &[]), Ok(None));
         assert_eq!(
             access("meta host add", &["--access", "read-only"]),
