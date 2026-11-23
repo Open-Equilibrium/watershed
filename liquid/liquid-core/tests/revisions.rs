@@ -660,8 +660,36 @@ fn reverting_several_actions_together_is_refused_when_a_later_change_would_hide_
             .unwrap_err(),
         Error::Conflict
     );
-    assert_eq!(
-        budget.amounts(),
-        [Cell::Number(900.0), Cell::Number(300.0)]
-    );
+    assert_eq!(budget.amounts(), [Cell::Number(900.0), Cell::Number(300.0)]);
+}
+
+#[test]
+fn deleting_a_table_s_earlier_versions_keeps_the_page_s_own() {
+    let mut budget = Budget::new();
+    let setup = AutomationSetup {
+        name: "Zero".into(),
+        trigger: Some(Trigger::RowAdded(budget.table.clone())),
+        conditions: Vec::new(),
+        steps: vec![Step::Set {
+            field: budget.amount.clone(),
+            value: Cell::Number(0.0),
+        }],
+    };
+    budget.edit(Mutation::CreateAutomation {
+        setup: Box::new(setup),
+    });
+    budget.typed(0, "October");
+    budget.row();
+    budget.typed(7, " is done");
+    let page = budget.page.clone();
+    let before = budget.workspace.versions(&page).unwrap();
+    budget
+        .workspace
+        .purge(&owner(), &Purge::Table(budget.table.clone()))
+        .unwrap();
+    let after = budget.workspace.versions(&page).unwrap();
+    assert_eq!(after.len(), before.len());
+    let older = after.last().unwrap().after.clone();
+    budget.workspace.restore(&owner(), &page, &older).unwrap();
+    assert_eq!(budget.text(), "October");
 }

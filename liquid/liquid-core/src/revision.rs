@@ -801,6 +801,7 @@ impl<S: Store> Workspace<S> {
 
     pub fn versions(&mut self, page: &PageId) -> Result<Vec<Version>, Error> {
         let documents = self.page_documents(page)?;
+        let shown = Document::Page(page.clone());
         let mut versions = Vec::new();
         let mut newer: Option<Action> = None;
         let mut before: Option<ActionId> = None;
@@ -811,7 +812,7 @@ impl<S: Store> Workspace<S> {
             };
             before = Some(last.id.clone());
             for action in listed {
-                if !self.present(&action, &documents) {
+                if !self.present(&action, std::slice::from_ref(&shown)) {
                     break 'pages;
                 }
                 let gap = newer
@@ -828,7 +829,10 @@ impl<S: Store> Workspace<S> {
                         save_point: gap,
                     });
                 }
-                let stops = matches!(action.operation, Operation::Purge { .. });
+                let stops = matches!(
+                    &action.operation,
+                    Operation::Purge { target: Purge::Page(purged) } if purged == page
+                );
                 newer = Some(action);
                 if stops {
                     break 'pages;
@@ -896,13 +900,15 @@ impl<S: Store> Workspace<S> {
     ) -> Result<Applied, Error> {
         self.permit(actor)?;
         let documents = self.page_documents_at(page, to)?;
-        let targets = self.heads_at(&documents, to)?;
-        for (document, target) in &targets {
-            let doc = self.doc(document)?;
+        let mut targets = Vec::new();
+        for (document, target) in self.heads_at(&documents, to)? {
+            let doc = self.doc(&document)?;
             if target
                 .iter()
-                .any(|hash| doc.get_change_by_hash(hash).is_none())
+                .all(|hash| doc.get_change_by_hash(hash).is_some())
             {
+                targets.push((document, target));
+            } else if document == Document::Page(page.clone()) {
                 return Err(Error::Purged);
             }
         }
