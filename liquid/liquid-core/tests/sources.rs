@@ -380,3 +380,47 @@ fn a_chart_draws_a_csv_source_and_follows_its_file() {
         Shown::Table(_)
     ));
 }
+
+#[test]
+fn a_semicolon_csv_reads_commas_as_decimal_marks() {
+    let folder = Folder::new("semicolon");
+    let path = folder.write(
+        "konto.csv",
+        "Datum;Text;Betrag\n2026-11-01;REWE;-84,20\n2026-10-24;GEHALT;3.200,00\n",
+    );
+    let mut private = Private::new();
+    let source = private.add(&path);
+    let Shown::Table(table) = private.workspace.source_file(&source, "").unwrap().shown else {
+        panic!("a table")
+    };
+    assert!(table.columns[2].number);
+    let page = private.page.clone();
+    let Some(Created::Block { block, .. }) = private
+        .edit(Mutation::AddChartBlock {
+            page: page.clone(),
+            after: None,
+        })
+        .unwrap()
+        .created
+    else {
+        panic!("a Chart")
+    };
+    private
+        .edit(Mutation::SetChart {
+            page: page.clone(),
+            block: block.clone(),
+            setup: ChartSetup {
+                kind: ChartKind::Bar,
+                source: Some(ChartSource::Source(source)),
+                group: None,
+                value: ChartValue::Sum(table.columns[2].id.clone()),
+            },
+        })
+        .unwrap();
+    let chart = private.workspace.chart(&page, &block).unwrap().unwrap();
+    assert!(
+        (chart.points[0].value - 3115.8).abs() < 1e-9,
+        "{:?}",
+        chart.points
+    );
+}

@@ -64,7 +64,7 @@ pub use role::{
 pub use search::{Found, Hit, INDEX_VERSION, IndexEntry, IndexWrite, search_words};
 pub use source::{
     Column, FileEntry, MAX_SOURCE_FILE, Shown, SourceEntry, SourceFile, SourceKind, SourceTable,
-    SourceUser,
+    SourceUser, list_source, read_source,
 };
 pub use store::{Commit, MemoryStore, Store, Write};
 pub use tab::{Layout, MAX_TABS, Tab, TabSetup};

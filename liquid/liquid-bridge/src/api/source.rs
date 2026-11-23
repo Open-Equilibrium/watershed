@@ -190,8 +190,8 @@ impl LiquidWorkspace {
 
     pub fn source_folder(&self, source_id: String, inside: String) -> Result<BridgeFolder, String> {
         let source = source(source_id)?;
-        let mut inner = self.state()?;
-        match inner.workspace.source_entries(&source, &inside) {
+        let root = self.state()?.workspace.source_root(&source);
+        match root.and_then(|root| liquid_core::list_source(&root, &inside)) {
             Ok(entries) => Ok(BridgeFolder {
                 read: BridgeRead::Read,
                 entries: entries.into_iter().map(BridgeFileEntry::of).collect(),
@@ -212,7 +212,7 @@ impl LiquidWorkspace {
         inside: String,
     ) -> Result<BridgeSourceFile, String> {
         let source = source(source_id)?;
-        let mut inner = self.state()?;
+        let root = self.state()?.workspace.source_root(&source);
         let mut answer = BridgeSourceFile {
             read: BridgeRead::Read,
             name: String::new(),
@@ -224,7 +224,7 @@ impl LiquidWorkspace {
             rows: Vec::new(),
             text: None,
         };
-        let file = match inner.workspace.source_file(&source, &inside) {
+        let file = match root.and_then(|root| liquid_core::read_source(&root, &inside)) {
             Ok(file) => file,
             Err(error) => {
                 answer.read = read_of(&error).ok_or_else(|| message(error))?;

@@ -1902,9 +1902,13 @@ class FakeWorkspace implements LiquidWorkspace {
   void _sourcesChanged(String area) =>
       _changed(BridgeResource(kind: BridgeResourceKind.pages, area: area));
 
+  Duration sourcesDelay = Duration.zero;
+
   @override
-  Future<List<BridgeSource>> sources({required String area}) async =>
-      sourceList[area] ?? const [];
+  Future<List<BridgeSource>> sources({required String area}) async {
+    await Future<void>.delayed(sourcesDelay);
+    return sourceList[area] ?? const [];
+  }
 
   @override
   Future<String?> sourcePath({required String sourceId}) async =>

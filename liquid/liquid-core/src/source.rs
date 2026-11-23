@@ -62,6 +62,7 @@ pub struct Column {
 pub struct SourceTable {
     pub columns: Vec<Column>,
     pub rows: Vec<Vec<String>>,
+    pub comma: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -108,8 +109,19 @@ pub(crate) fn column_id(name: &str) -> FieldId {
     FieldId::stored(&hex)
 }
 
-pub(crate) fn number(text: &str) -> Option<f64> {
+pub(crate) fn number(text: &str, comma: bool) -> Option<f64> {
     let text = text.trim();
+    if comma {
+        let swapped: String = text
+            .chars()
+            .map(|char| match char {
+                ',' => '.',
+                '.' => ',',
+                other => other,
+            })
+            .collect();
+        return number(&swapped, false);
+    }
     let digits = text.strip_prefix(['+', '-']).unwrap_or(text);
     let (whole, fraction) = digits.split_once('.').unwrap_or((digits, ""));
     let grouped = whole.contains(',');
@@ -173,6 +185,7 @@ pub(crate) fn table(text: &str, tab: bool) -> SourceTable {
     } else {
         ','
     };
+    let comma = separator == ';';
     let mut rows = parse_csv(text.strip_prefix('\u{feff}').unwrap_or(text), separator);
     let header = if rows.is_empty() {
         Vec::new()
@@ -195,8 +208,8 @@ pub(crate) fn table(text: &str, tab: bool) -> SourceTable {
                 .map(|row| row[at].trim())
                 .filter(|cell| !cell.is_empty());
             let first = filled.next();
-            let number = first.is_some_and(|cell| number(cell).is_some())
-                && filled.all(|cell| number(cell).is_some());
+            let number = first.is_some_and(|cell| number(cell, comma).is_some())
+                && filled.all(|cell| number(cell, comma).is_some());
             Column {
                 id: column_id(&name),
                 name,
@@ -204,7 +217,11 @@ pub(crate) fn table(text: &str, tab: bool) -> SourceTable {
             }
         })
         .collect();
-    SourceTable { columns, rows }
+    SourceTable {
+        columns,
+        rows,
+        comma,
+    }
 }
 
 fn extension(path: &Path) -> String {
@@ -267,6 +284,51 @@ fn within(root: &Path, inside: &str) -> Result<PathBuf, Error> {
         return Err(Error::NotFound);
     }
     Ok(path)
+}
+
+pub fn list_source(root: &Path, inside: &str) -> Result<Vec<FileEntry>, Error> {
+    let folder = within(root, inside)?;
+    let mut listed = Vec::new();
+    for item in std::fs::read_dir(&folder).map_err(|_| Error::NotFound)? {
+        let Ok(item) = item else { continue };
+        let name = item.file_name().to_string_lossy().into_owned();
+        if name.starts_with('.') {
+            continue;
+        }
+        let Ok(metadata) = item.metadata() else {
+            continue;
+        };
+        listed.push(FileEntry {
+            folder: metadata.is_dir(),
+            size: if metadata.is_dir() { 0 } else { metadata.len() },
+            modified: modified(&metadata),
+            name,
+        });
+    }
+    listed.sort_by(|a, b| {
+        b.folder
+            .cmp(&a.folder)
+            .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
+    });
+    Ok(listed)
+}
+
+pub fn read_source(root: &Path, inside: &str) -> Result<SourceFile, Error> {
+    let path = within(root, inside)?;
+    let metadata = std::fs::metadata(&path).map_err(|_| Error::NotFound)?;
+    if metadata.is_dir() {
+        return Err(Error::WrongKind);
+    }
+    Ok(SourceFile {
+        name: path
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_default(),
+        path: path.to_string_lossy().into_owned(),
+        size: metadata.len(),
+        modified: modified(&metadata),
+        shown: shown(&path, metadata.len())?,
+    })
 }
 
 fn sources_map(doc: &mut AutoCommit) -> Result<automerge::ObjId, Error> {
@@ -355,7 +417,7 @@ impl<S: Store> Workspace<S> {
         self.store.locate(source, Some(path))
     }
 
-    fn root(&mut self, source: &SourceId) -> Result<PathBuf, Error> {
+    pub fn source_root(&mut self, source: &SourceId) -> Result<PathBuf, Error> {
         self.area_of_source(source)?;
         let path = self.store.source_path(source)?.ok_or(Error::NotFound)?;
         Ok(PathBuf::from(path))
@@ -366,49 +428,11 @@ impl<S: Store> Workspace<S> {
         source: &SourceId,
         inside: &str,
     ) -> Result<Vec<FileEntry>, Error> {
-        let folder = within(&self.root(source)?, inside)?;
-        let mut listed = Vec::new();
-        for item in std::fs::read_dir(&folder).map_err(|_| Error::NotFound)? {
-            let Ok(item) = item else { continue };
-            let name = item.file_name().to_string_lossy().into_owned();
-            if name.starts_with('.') {
-                continue;
-            }
-            let Ok(metadata) = item.metadata() else {
-                continue;
-            };
-            listed.push(FileEntry {
-                folder: metadata.is_dir(),
-                size: if metadata.is_dir() { 0 } else { metadata.len() },
-                modified: modified(&metadata),
-                name,
-            });
-        }
-        listed.sort_by(|a, b| {
-            b.folder
-                .cmp(&a.folder)
-                .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
-        });
-        Ok(listed)
+        list_source(&self.source_root(source)?, inside)
     }
 
     pub fn source_file(&mut self, source: &SourceId, inside: &str) -> Result<SourceFile, Error> {
-        let root = self.root(source)?;
-        let path = within(&root, inside)?;
-        let metadata = std::fs::metadata(&path).map_err(|_| Error::NotFound)?;
-        if metadata.is_dir() {
-            return Err(Error::WrongKind);
-        }
-        Ok(SourceFile {
-            name: path
-                .file_name()
-                .map(|name| name.to_string_lossy().into_owned())
-                .unwrap_or_default(),
-            path: path.to_string_lossy().into_owned(),
-            size: metadata.len(),
-            modified: modified(&metadata),
-            shown: shown(&path, metadata.len())?,
-        })
+        read_source(&self.source_root(source)?, inside)
     }
 
     pub(crate) fn source_table(

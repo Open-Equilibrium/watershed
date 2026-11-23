@@ -136,7 +136,10 @@ void main() {
       '# Packing list',
     );
     kit.fake.sourceFiles[(path, 'drafts/idea.md')] = text('idea.md', 'Later');
+    kit.fake.sourcesDelay = const Duration(milliseconds: 300);
     await addFrom(tester, 'add source folder');
+    await tester.pump(const Duration(milliseconds: 400));
+    await settle(tester);
     expect(inSource(find.byKey(const Key('source listing'))), findsOneWidget);
 
     await tester.tap(find.byKey(const Key('source disclosure')).first);

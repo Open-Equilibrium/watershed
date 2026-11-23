@@ -131,14 +131,18 @@ class _SourcePageState extends State<SourcePage> {
     super.dispose();
   }
 
+  BridgeSourceKind? _kind;
+
   void _renamed() {
-    final name = _entry?.name;
-    if (name != null && !_nameFocus.hasFocus) _name.show(name);
+    final entry = _entry;
+    if (entry != null && !_nameFocus.hasFocus) _name.show(entry.name);
+    if (entry != null && entry.kind != _kind) unawaited(_read());
     if (mounted) setState(() {});
   }
 
   Future<void> _read() async {
     final read = ++_reads;
+    _kind = _entry?.kind;
     final workspace = _state.workspace;
     try {
       final path = await workspace.sourcePath(sourceId: _source);

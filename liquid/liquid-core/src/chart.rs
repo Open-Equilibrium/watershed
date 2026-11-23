@@ -353,7 +353,7 @@ fn source_points(name: &str, table: &SourceTable, setup: &ChartSetup) -> Vec<Cha
         };
         let number = match value {
             None => Some(1.0),
-            Some(at) => crate::source::number(&row[at]),
+            Some(at) => crate::source::number(&row[at], table.comma),
         };
         if let Some(number) = number {
             sums[slot].0 += number;
