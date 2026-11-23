@@ -7,6 +7,7 @@ pub mod details;
 pub mod drawing;
 pub mod events;
 pub mod git;
+pub mod history;
 pub mod hosts;
 pub mod media;
 pub mod moves;

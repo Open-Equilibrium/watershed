@@ -390,3 +390,178 @@ fn a_replica_written_by_the_openssl_build_still_opens() {
         .unwrap();
     assert!(problems.is_empty(), "{problems:?}");
 }
+
+#[test]
+fn a_page_s_earlier_versions_deleted_for_good_stay_gone_after_a_reopen() {
+    let scratch = Scratch::new("purge");
+    let (mut workspace, page, block) = lisbon(&scratch.db());
+    let secret = apply(
+        &mut workspace,
+        Mutation::EditText {
+            page: page.clone(),
+            block: block.clone(),
+            at: 0,
+            delete: 0,
+            insert: "hunter2 ".into(),
+        },
+    );
+    assert!(secret.is_none());
+    let typed = workspace.history(None, 1).unwrap().remove(0).id;
+    apply(
+        &mut workspace,
+        Mutation::EditText {
+            page: page.clone(),
+            block: block.clone(),
+            at: 0,
+            delete: 8,
+            insert: String::new(),
+        },
+    );
+    let Some(Created::Block {
+        view: typed_view, ..
+    }) = apply(
+        &mut workspace,
+        Mutation::AddTextBlock {
+            page: page.clone(),
+            after: None,
+            text: "hunter3".into(),
+        },
+    )
+    else {
+        panic!("a Text Block")
+    };
+    let receipt = b"the receipt";
+    let mut upload = workspace
+        .begin_upload(&owner(), receipt.len() as u64)
+        .unwrap();
+    workspace.upload(&mut upload, receipt).unwrap();
+    let attachment = workspace.finish_upload(upload).unwrap().id;
+    let Some(Created::Block {
+        view: media_view, ..
+    }) = apply(
+        &mut workspace,
+        Mutation::AddMediaBlock {
+            page: page.clone(),
+            after: None,
+            name: "Receipt.pdf".into(),
+            media_type: "application/pdf".into(),
+            attachment,
+        },
+    )
+    else {
+        panic!("a Media Block")
+    };
+    for view in [typed_view, media_view] {
+        apply(
+            &mut workspace,
+            Mutation::RemoveView {
+                page: page.clone(),
+                view,
+            },
+        );
+    }
+    workspace
+        .purge(&owner(), &liquid_core::Purge::Page(page.clone()))
+        .unwrap();
+    let wal = std::fs::metadata(scratch.0.join("replica.db-wal")).map_or(0, |file| file.len());
+    assert_eq!(wal, 0);
+    drop(workspace);
+
+    let mut store = Sqlite::open(&scratch.db(), &KEY).unwrap();
+    let touching = store
+        .history_of(&[Document::Page(page.clone())], None, 100)
+        .unwrap();
+    assert!(matches!(touching[0].operation, Operation::Purge { .. }));
+    let mut workspace = Workspace::open(store).unwrap();
+    assert_eq!(
+        workspace.text(&page, &block).unwrap().unwrap(),
+        "Five days in Lisbon"
+    );
+    let records = serde_json::to_string(&workspace.history(None, 100).unwrap()).unwrap();
+    assert!(!records.contains("hunter2"));
+    assert_eq!(
+        workspace.revert(&owner(), &[typed]).unwrap_err(),
+        Error::Purged
+    );
+    drop(workspace);
+    let connection = keyed(&scratch.db());
+    let count = |sql: &str| -> i64 { connection.query_row(sql, [], |row| row.get(0)).unwrap() };
+    assert_eq!(
+        count("SELECT count(*) FROM search_data WHERE instr(block, CAST('hunter2' AS BLOB)) > 0"),
+        0
+    );
+    assert_eq!(
+        count("SELECT count(*) FROM chunks WHERE instr(bytes, CAST('hunter3' AS BLOB)) > 0"),
+        0
+    );
+    assert_eq!(count("SELECT count(*) FROM attachments"), 0);
+    assert_eq!(count("SELECT count(*) FROM parts"), 0);
+}
+
+#[test]
+fn a_version_before_an_undo_restores_from_the_disk() {
+    let scratch = Scratch::new("restore");
+    let (mut workspace, page, block) = lisbon(&scratch.db());
+    apply(
+        &mut workspace,
+        Mutation::EditText {
+            page: page.clone(),
+            block: block.clone(),
+            at: 0,
+            delete: 0,
+            insert: "Ours: ".into(),
+        },
+    );
+    let typed = workspace.history(None, 1).unwrap().remove(0).id;
+    workspace.undo(&owner()).unwrap().unwrap();
+    workspace.redo(&owner()).unwrap().unwrap();
+    workspace
+        .revert(&owner(), std::slice::from_ref(&typed))
+        .unwrap();
+    workspace.close_page(&page);
+    workspace.restore(&owner(), &page, &typed).unwrap();
+    assert_eq!(
+        workspace.text(&page, &block).unwrap().unwrap(),
+        "Ours: Five days in Lisbon"
+    );
+}
+
+#[test]
+fn an_upgrade_that_cannot_index_its_actions_is_retried_on_the_next_open() {
+    let scratch = Scratch::new("upgrade");
+    let (workspace, page, _) = lisbon(&scratch.db());
+    drop(workspace);
+    let connection = keyed(&scratch.db());
+    let (seq, record): (i64, String) = connection
+        .query_row(
+            "SELECT seq, record FROM actions ORDER BY seq LIMIT 1",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    connection
+        .execute_batch("DROP TABLE action_documents; PRAGMA user_version = 2;")
+        .unwrap();
+    connection
+        .execute("UPDATE actions SET record = 'torn' WHERE seq = ?1", [seq])
+        .unwrap();
+    drop(connection);
+    assert!(matches!(
+        Sqlite::open(&scratch.db(), &KEY),
+        Err(Error::Storage(_))
+    ));
+
+    keyed(&scratch.db())
+        .execute(
+            "UPDATE actions SET record = ?1 WHERE seq = ?2",
+            rusqlite::params![record, seq],
+        )
+        .unwrap();
+    let mut store = Sqlite::open(&scratch.db(), &KEY).unwrap();
+    assert!(
+        !store
+            .history_of(&[Document::Page(page)], None, 100)
+            .unwrap()
+            .is_empty()
+    );
+}

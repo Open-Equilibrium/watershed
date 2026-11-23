@@ -5,6 +5,7 @@ import 'package:liquid/src/rust/api/automation.dart';
 import 'package:liquid/src/rust/api/calculation.dart';
 import 'package:liquid/src/rust/api/chart.dart';
 import 'package:liquid/src/rust/api/database.dart';
+import 'package:liquid/src/rust/api/history.dart';
 import 'package:liquid/src/rust/api/media.dart';
 import 'package:liquid/src/rust/api/replica.dart';
 import 'package:liquid/src/rust/api/role.dart';
@@ -228,6 +229,90 @@ class FakeWorkspace implements LiquidWorkspace {
   ];
 
   final allowances = <String, Map<String, BridgeAllows>>{};
+
+  final entries = <BridgeEntry>[];
+
+  final asking = <BridgeEntryQuery>[];
+
+  @override
+  Future<BridgeHistory> history({required BridgeEntryQuery asked}) async {
+    asking.add(asked);
+    final start = asked.before == null
+        ? 0
+        : entries.indexWhere((entry) => entry.actions.last == asked.before) + 1;
+    final shown = entries
+        .skip(start)
+        .where((entry) => asked.page == null || entry.page == asked.page)
+        .toList();
+    return BridgeHistory(
+      entries: shown.take(asked.limit.toInt()).toList(),
+      more: shown.length > asked.limit.toInt(),
+    );
+  }
+
+  final reverted = <List<String>>[];
+
+  BridgeReverted revertOutcome = const BridgeReverted(
+    action: 'reverted',
+    conflict: false,
+    purged: false,
+  );
+
+  @override
+  Future<BridgeReverted> revert({required List<String> actions}) async {
+    reverted.add(actions);
+    return revertOutcome;
+  }
+
+  int undos = 0;
+  int redos = 0;
+
+  @override
+  Future<bool> undo() async {
+    undos++;
+    return true;
+  }
+
+  @override
+  Future<bool> redo() async {
+    redos++;
+    return true;
+  }
+
+  final versionsOf = <String, List<BridgeVersion>>{};
+
+  @override
+  Future<List<BridgeVersion>> versions({required String page}) async =>
+      versionsOf[page] ?? const [];
+
+  final restored = <(String, String)>[];
+
+  @override
+  Future<void> restore({required String page, required String to}) async {
+    restored.add((page, to));
+  }
+
+  final purged = <(String?, String?)>[];
+
+  @override
+  Future<void> purge({String? page, String? table}) async {
+    purged.add((page, table));
+  }
+
+  FakeWorkspace? version;
+  final versionAt = <String, FakeWorkspace>{};
+
+  final previewed = <(String, String)>[];
+
+  @override
+  Future<LiquidWorkspace> preview({
+    required String page,
+    required String to,
+  }) async {
+    previewed.add((page, to));
+    await Future<void>.delayed(const Duration(milliseconds: 250));
+    return versionAt[to] ?? version ?? this;
+  }
 
   void _rolesChanged() =>
       _changed(const BridgeResource(kind: BridgeResourceKind.roles));

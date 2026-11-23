@@ -509,6 +509,8 @@ pub enum Error {
         table: String,
     },
     Changed,
+    Conflict,
+    Purged,
     Random,
     Document(String),
     Storage(String),

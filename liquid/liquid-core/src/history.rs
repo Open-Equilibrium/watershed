@@ -17,6 +17,33 @@ pub enum Operation {
         automation: AutomationId,
         cause: Option<ActionId>,
     },
+    Revert {
+        reverted: Vec<ActionId>,
+        kind: RevertKind,
+    },
+    Restore {
+        page: PageId,
+        to: ActionId,
+    },
+    Purge {
+        target: Purge,
+    },
+    Purged {
+        kind: String,
+    },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum RevertKind {
+    Revert,
+    Undo,
+    Redo,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Purge {
+    Page(PageId),
+    Table(BlockId),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -46,6 +73,10 @@ pub struct Action {
     pub permission: Permission,
     pub operation: Operation,
     pub changes: Vec<(Document, ChangeHash)>,
+    #[serde(default)]
+    pub heads: Vec<(Document, Vec<ChangeHash>)>,
+    #[serde(default)]
+    pub at: i64,
 }
 
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]

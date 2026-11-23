@@ -1,6 +1,6 @@
 # Liquid Workspace core evidence
 
-Observational evidence for `liquid-core`'s mutation pipeline and `liquid-storage`'s local replica, kept under the [evidence convention](../../PERFORMANCE.md#evidence-convention).
+Observational evidence for `liquid-core`'s mutation pipeline, `liquid-storage`'s local replica and typing in the macOS app, kept under the [evidence convention](../../PERFORMANCE.md#evidence-convention).
 
 ## Environment
 
@@ -18,8 +18,11 @@ Observational evidence for `liquid-core`'s mutation pipeline and `liquid-storage
 | Reopening a long Page | `/usr/bin/time -l target/release/examples/replica_observe <path>` with the path that run printed | A new process opens the replica, finds the Page through its area and reads all its 1,001 Views in order | the same |
 | Attachment | `/usr/bin/time -l target/release/examples/replica_observe --attachment` | A 256 MiB file added to a new encrypted replica in 1 MiB parts, each its own durable commit, with its SHA-256; then read back part by part (ADR-0305) | Reading the file from disk, bridge and UI |
 | Whiteboard | `/usr/bin/time -l target/release/examples/replica_observe --whiteboard` | 2,000 strokes of 150 points drawn on a Whiteboard in an encrypted replica, each its own edit and durable commit; the Page closed and the board read whole; then a second board filled to its cap of 1,000,000 points, 100 strokes of 10,000, and read whole (ADR-0306) | Outlining and drawing strokes, bridge and UI |
+| Typing in the app | `flutter drive --driver=test_driver/integration_test.dart --target=integration_test/typing_latency_test.dart -d macos --profile` in `liquid/app` | A new encrypted replica with a Page of 1,000 Text Blocks, shown by the app; 300 characters typed into its first Block, one every 30 ms, each delivered as the system's text input delivers it; per keystroke the time until its frame is built, and each frame's raster time | The keyboard and the system's text input before the app gets the text, and compositing and presenting the frame |
 
 ## Observations
+
+Typing in the app, on 2026-11-23 at `0d373b92`, one run of 300 keystrokes, profile build (Flutter 3.47.9): a keystroke's frame was built after a median 17.1 ms, p99 33.5 ms and max 33.8 ms, which includes waiting for the next 60 Hz vsync, so the text showed in the next or the second frame; rasterizing a frame took a median 0.27 ms, p99 0.81 ms and max 4.6 ms over 1,076 frames.
 
 | Workload | Round 1 | Round 2 | Round 3 |
 | --- | --- | --- | --- |

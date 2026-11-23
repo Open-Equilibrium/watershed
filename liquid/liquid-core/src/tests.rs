@@ -106,6 +106,7 @@ struct Flaky {
     inner: MemoryStore,
     failing: bool,
     index_failing: bool,
+    history_failing: bool,
 }
 
 impl Store for Flaky {
@@ -122,6 +123,18 @@ impl Store for Flaky {
 
     fn history(&mut self, before: Option<&ActionId>, limit: usize) -> Result<Vec<Action>, Error> {
         self.inner.history(before, limit)
+    }
+
+    fn history_of(
+        &mut self,
+        documents: &[Document],
+        before: Option<&ActionId>,
+        limit: usize,
+    ) -> Result<Vec<Action>, Error> {
+        if self.history_failing {
+            return Err(Error::Storage("disk full".into()));
+        }
+        self.inner.history_of(documents, before, limit)
     }
 
     fn put_part(&mut self, upload: &str, index: u64, bytes: &[u8]) -> Result<(), Error> {
@@ -684,4 +697,116 @@ fn a_run_whose_later_step_fails_leaves_no_row_of_an_earlier_one() {
         )
         .unwrap();
     assert_eq!(rows.count, 1);
+}
+
+#[test]
+fn an_undo_the_store_refuses_leaves_the_text_as_it_was() {
+    let owner = Actor::Person(PersonId::new("benni"));
+    let mut workspace = Workspace::create(PersonId::new("benni"), Flaky::default()).unwrap();
+    let mut apply = |mutation| {
+        workspace
+            .apply(Request {
+                actor: owner.clone(),
+                origin: Origin::Ui,
+                mutation,
+            })
+            .unwrap()
+            .created
+    };
+    let Some(Created::Area(area)) = apply(Mutation::CreateArea {
+        name: "Trips".into(),
+    }) else {
+        panic!("an area")
+    };
+    let Some(Created::Page(page)) = apply(Mutation::CreatePage {
+        area,
+        parent: None,
+        title: "Lisbon".into(),
+    }) else {
+        panic!("a Page")
+    };
+    let Some(Created::Block { block, .. }) = apply(Mutation::AddTextBlock {
+        page: page.clone(),
+        after: None,
+        text: "Five days".into(),
+    }) else {
+        panic!("a Block")
+    };
+    apply(Mutation::EditText {
+        page: page.clone(),
+        block: block.clone(),
+        at: 0,
+        delete: 0,
+        insert: "Our ".into(),
+    });
+
+    workspace.store.failing = true;
+    let owner = Actor::Person(PersonId::new("benni"));
+    assert_eq!(
+        workspace.undo(&owner).unwrap_err(),
+        Error::Storage("disk full".into())
+    );
+    assert_eq!(
+        workspace.text(&page, &block).unwrap().unwrap(),
+        "Our Five days"
+    );
+}
+
+#[test]
+fn a_purge_that_fails_keeps_the_page_s_history() {
+    let owner = Actor::Person(PersonId::new("benni"));
+    let mut workspace = Workspace::create(PersonId::new("benni"), Flaky::default()).unwrap();
+    let mut apply = |mutation| {
+        workspace
+            .apply(Request {
+                actor: owner.clone(),
+                origin: Origin::Ui,
+                mutation,
+            })
+            .unwrap()
+    };
+    let Some(Created::Area(area)) = apply(Mutation::CreateArea {
+        name: "Trips".into(),
+    })
+    .created
+    else {
+        panic!("an area")
+    };
+    let Some(Created::Page(page)) = apply(Mutation::CreatePage {
+        area,
+        parent: None,
+        title: "Lisbon".into(),
+    })
+    .created
+    else {
+        panic!("a Page")
+    };
+    let Some(Created::Block { block, .. }) = apply(Mutation::AddTextBlock {
+        page: page.clone(),
+        after: None,
+        text: "Five days".into(),
+    })
+    .created
+    else {
+        panic!("a Block")
+    };
+    let typed = apply(Mutation::EditText {
+        page: page.clone(),
+        block: block.clone(),
+        at: 0,
+        delete: 0,
+        insert: "Our ".into(),
+    })
+    .action;
+
+    workspace.store.history_failing = true;
+    let owner = Actor::Person(PersonId::new("benni"));
+    assert!(
+        workspace
+            .purge(&owner, &crate::Purge::Page(page.clone()))
+            .is_err()
+    );
+    workspace.store.history_failing = false;
+    workspace.revert(&owner, &[typed]).unwrap();
+    assert_eq!(workspace.text(&page, &block).unwrap().unwrap(), "Five days");
 }

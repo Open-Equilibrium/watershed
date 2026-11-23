@@ -6,6 +6,7 @@ pub struct Commit<'a> {
     pub action: &'a Action,
     pub writes: Vec<Write>,
     pub index: Vec<IndexWrite>,
+    pub redact: Vec<Action>,
 }
 
 pub enum Write {
@@ -17,12 +18,24 @@ pub enum Write {
         document: Document,
         snapshot: Vec<u8>,
     },
+    Remove {
+        document: Document,
+    },
+    Forget {
+        attachment: AttachmentId,
+    },
 }
 
 pub trait Store {
     fn chunks(&mut self, document: &Document) -> Result<Vec<Vec<u8>>, Error>;
     fn commit(&mut self, commit: &Commit<'_>) -> Result<(), Error>;
     fn history(&mut self, before: Option<&ActionId>, limit: usize) -> Result<Vec<Action>, Error>;
+    fn history_of(
+        &mut self,
+        documents: &[Document],
+        before: Option<&ActionId>,
+        limit: usize,
+    ) -> Result<Vec<Action>, Error>;
     fn put_part(&mut self, upload: &str, index: u64, bytes: &[u8]) -> Result<(), Error>;
     fn finish_upload(
         &mut self,
@@ -53,6 +66,17 @@ pub struct MemoryStore {
 }
 
 impl MemoryStore {
+    pub fn holding(documents: Vec<(Document, Vec<u8>)>) -> Self {
+        Self {
+            chunks: documents
+                .into_iter()
+                .map(|(document, bytes)| (document, vec![bytes]))
+                .collect(),
+            version: crate::INDEX_VERSION,
+            ..Self::default()
+        }
+    }
+
     pub fn drop_index(&mut self) {
         self.search.clear();
         self.version = 0;
@@ -92,6 +116,17 @@ impl Store for MemoryStore {
                 Write::Replace { document, snapshot } => {
                     self.chunks.insert(document.clone(), vec![snapshot.clone()]);
                 }
+                Write::Remove { document } => {
+                    self.chunks.remove(document);
+                }
+                Write::Forget { attachment } => {
+                    self.attachments.remove(attachment);
+                }
+            }
+        }
+        for redacted in &commit.redact {
+            if let Some(kept) = self.actions.iter_mut().find(|kept| kept.id == redacted.id) {
+                *kept = redacted.clone();
             }
         }
         self.actions.push(commit.action.clone());
@@ -111,6 +146,34 @@ impl Store for MemoryStore {
         Ok(self.actions[..end]
             .iter()
             .rev()
+            .take(limit)
+            .cloned()
+            .collect())
+    }
+
+    fn history_of(
+        &mut self,
+        documents: &[Document],
+        before: Option<&ActionId>,
+        limit: usize,
+    ) -> Result<Vec<Action>, Error> {
+        let end = match before {
+            None => self.actions.len(),
+            Some(id) => self
+                .actions
+                .iter()
+                .position(|action| &action.id == id)
+                .ok_or(Error::NotFound)?,
+        };
+        Ok(self.actions[..end]
+            .iter()
+            .rev()
+            .filter(|action| {
+                action
+                    .changes
+                    .iter()
+                    .any(|(document, _)| documents.contains(document))
+            })
             .take(limit)
             .cloned()
             .collect())

@@ -7,7 +7,7 @@ use liquid_core::{
 };
 use rusqlite::{Connection, ErrorCode, OptionalExtension, params};
 
-const VERSION: i64 = 2;
+const VERSION: i64 = 3;
 
 const SCHEMA: &str = "
     CREATE TABLE chunks (
@@ -21,6 +21,14 @@ const SCHEMA: &str = "
         id TEXT NOT NULL UNIQUE,
         record TEXT NOT NULL
     );
+";
+
+const ACTION_DOCUMENTS: &str = "
+    CREATE TABLE action_documents (
+        seq INTEGER NOT NULL,
+        document TEXT NOT NULL
+    );
+    CREATE INDEX action_documents_by_document ON action_documents (document, seq);
 ";
 
 const ATTACHMENTS: &str = "
@@ -76,7 +84,7 @@ fn held() -> Error {
 
 impl Sqlite {
     pub fn open(path: &Path, key: &[u8; 32]) -> Result<Self, Error> {
-        let connection = Connection::open(path).map_err(failed)?;
+        let mut connection = Connection::open(path).map_err(failed)?;
         let mut hex = String::with_capacity(64);
         for byte in key {
             let _ = write!(hex, "{byte:02x}");
@@ -106,12 +114,14 @@ impl Sqlite {
         }
         connection
             .execute_batch(
-                "PRAGMA synchronous = FULL; PRAGMA fullfsync = ON; PRAGMA checkpoint_fullfsync = ON;",
+                "PRAGMA synchronous = FULL; PRAGMA fullfsync = ON; PRAGMA checkpoint_fullfsync = ON; \
+                 PRAGMA secure_delete = ON;",
             )
             .map_err(failed)?;
         let create = match version {
-            0 => format!("{SCHEMA} {ATTACHMENTS}"),
-            1 => ATTACHMENTS.to_string(),
+            0 => format!("{SCHEMA} {ATTACHMENTS} {ACTION_DOCUMENTS}"),
+            1 => format!("{ATTACHMENTS} {ACTION_DOCUMENTS}"),
+            2 => ACTION_DOCUMENTS.to_string(),
             VERSION => String::new(),
             newer => {
                 return Err(Error::Storage(format!(
@@ -119,14 +129,59 @@ impl Sqlite {
                 )));
             }
         };
-        connection
+        let transaction = connection.transaction().map_err(failed)?;
+        transaction
             .execute_batch(&format!(
-                "BEGIN; {create} {DEVICE} PRAGMA user_version = {VERSION}; \
-                 DELETE FROM parts WHERE upload NOT IN (SELECT upload FROM attachments); COMMIT;"
+                "{create} {DEVICE} \
+                 DELETE FROM parts WHERE upload NOT IN (SELECT upload FROM attachments);"
             ))
             .map_err(failed)?;
+        if (1..VERSION).contains(&version) {
+            index_actions(&transaction)?;
+        }
+        transaction
+            .execute_batch(&format!("PRAGMA user_version = {VERSION};"))
+            .map_err(failed)?;
+        transaction.commit().map_err(failed)?;
         Ok(Self { connection })
     }
+}
+
+fn index_actions(transaction: &rusqlite::Transaction<'_>) -> Result<(), Error> {
+    let actions: Vec<(i64, String)> = transaction
+        .prepare("SELECT seq, record FROM actions")
+        .and_then(|mut query| {
+            query
+                .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+                .collect()
+        })
+        .map_err(failed)?;
+    for (seq, record) in actions {
+        let action: Action = serde_json::from_str(&record).map_err(failed)?;
+        index_documents(transaction, seq, &action)?;
+    }
+    Ok(())
+}
+
+fn index_documents(
+    transaction: &rusqlite::Transaction<'_>,
+    seq: i64,
+    action: &Action,
+) -> Result<(), Error> {
+    let mut documents: Vec<String> = action
+        .changes
+        .iter()
+        .map(|(document, _)| document.key())
+        .collect();
+    documents.sort();
+    documents.dedup();
+    for document in documents {
+        transaction
+            .prepare_cached("INSERT INTO action_documents (seq, document) VALUES (?1, ?2)")
+            .and_then(|mut insert| insert.execute(params![seq, document]))
+            .map_err(failed)?;
+    }
+    Ok(())
 }
 
 impl Store for Sqlite {
@@ -164,14 +219,72 @@ impl Store for Sqlite {
                         })
                         .map_err(failed)?;
                 }
+                Write::Remove { document } => {
+                    transaction
+                        .execute("DELETE FROM chunks WHERE document = ?1", [document.key()])
+                        .map_err(failed)?;
+                }
+                Write::Forget { attachment } => {
+                    transaction
+                        .execute(
+                            "DELETE FROM parts WHERE upload IN \
+                             (SELECT upload FROM attachments WHERE id = ?1)",
+                            [attachment.as_str()],
+                        )
+                        .and_then(|_| {
+                            transaction.execute(
+                                "DELETE FROM attachments WHERE id = ?1",
+                                [attachment.as_str()],
+                            )
+                        })
+                        .map_err(failed)?;
+                }
             }
+        }
+        for redacted in &commit.redact {
+            let seq: i64 = transaction
+                .query_row(
+                    "SELECT seq FROM actions WHERE id = ?1",
+                    [redacted.id.as_str()],
+                    |row| row.get(0),
+                )
+                .map_err(failed)?;
+            let record = serde_json::to_string(redacted).map_err(failed)?;
+            transaction
+                .execute(
+                    "UPDATE actions SET record = ?1 WHERE seq = ?2",
+                    params![record, seq],
+                )
+                .and_then(|_| {
+                    transaction.execute("DELETE FROM action_documents WHERE seq = ?1", [seq])
+                })
+                .map_err(failed)?;
+            index_documents(&transaction, seq, redacted)?;
         }
         write_index(&transaction, &commit.index)?;
         transaction
             .prepare_cached("INSERT INTO actions (id, record) VALUES (?1, ?2)")
             .and_then(|mut insert| insert.execute(params![commit.action.id.as_str(), record]))
             .map_err(failed)?;
-        transaction.commit().map_err(failed)
+        let seq = transaction.last_insert_rowid();
+        index_documents(&transaction, seq, commit.action)?;
+        let erased = !commit.redact.is_empty()
+            || commit
+                .writes
+                .iter()
+                .any(|write| matches!(write, Write::Remove { .. } | Write::Forget { .. }));
+        if erased {
+            transaction
+                .execute("INSERT INTO search(search) VALUES('optimize')", [])
+                .map_err(failed)?;
+        }
+        transaction.commit().map_err(failed)?;
+        if erased {
+            self.connection
+                .query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |_| Ok(()))
+                .ok();
+        }
+        Ok(())
     }
 
     fn history(&mut self, before: Option<&ActionId>, limit: usize) -> Result<Vec<Action>, Error> {
@@ -195,6 +308,49 @@ impl Store for Sqlite {
             .map_err(failed)?;
         let records = query
             .query_map(params![end, limit], |row| row.get::<_, String>(0))
+            .map_err(failed)?;
+        records
+            .map(|record| serde_json::from_str(&record.map_err(failed)?).map_err(failed))
+            .collect()
+    }
+
+    fn history_of(
+        &mut self,
+        documents: &[Document],
+        before: Option<&ActionId>,
+        limit: usize,
+    ) -> Result<Vec<Action>, Error> {
+        let end: i64 = match before {
+            None => i64::MAX,
+            Some(id) => self
+                .connection
+                .query_row(
+                    "SELECT seq FROM actions WHERE id = ?1",
+                    [id.as_str()],
+                    |row| row.get(0),
+                )
+                .optional()
+                .map_err(failed)?
+                .ok_or(Error::NotFound)?,
+        };
+        let keys: Vec<String> = documents.iter().map(Document::key).collect();
+        let marks = vec!["?"; keys.len()].join(", ");
+        let limit = i64::try_from(limit).unwrap_or(i64::MAX);
+        let mut query = self
+            .connection
+            .prepare(&format!(
+                "SELECT record FROM actions WHERE seq IN (SELECT seq FROM action_documents \
+                 WHERE document IN ({marks}) AND seq < ?) ORDER BY seq DESC LIMIT ?"
+            ))
+            .map_err(failed)?;
+        let mut values: Vec<rusqlite::types::Value> =
+            keys.into_iter().map(rusqlite::types::Value::Text).collect();
+        values.push(rusqlite::types::Value::Integer(end));
+        values.push(rusqlite::types::Value::Integer(limit));
+        let records = query
+            .query_map(rusqlite::params_from_iter(values), |row| {
+                row.get::<_, String>(0)
+            })
             .map_err(failed)?;
         records
             .map(|record| serde_json::from_str(&record.map_err(failed)?).map_err(failed))

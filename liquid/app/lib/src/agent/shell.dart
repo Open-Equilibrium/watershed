@@ -25,7 +25,9 @@ import '../theme/icons.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
 import '../workspace/automations.dart';
+import '../workspace/history_dialog.dart';
 import '../workspace/notices.dart';
+import '../workspace/page_history.dart';
 import '../workspace/power_bar.dart';
 import '../workspace/roles.dart';
 import '../workspace/page_view.dart';
@@ -247,6 +249,7 @@ class _AgentShellState extends State<AgentShell> {
     _liquidAlone?.cancel();
     _powerBar.dispose();
     _automations.dispose();
+    _history.dispose();
     widget.workspace?.open.removeListener(_pageOpened);
     _lifecycle.dispose();
     widget.state?.draft.removeListener(_applyDraft);
@@ -366,6 +369,8 @@ class _AgentShellState extends State<AgentShell> {
   final _powerBar = ValueNotifier(false);
 
   final _automations = ValueNotifier(false);
+
+  final _history = ValueNotifier(false);
 
   Timer? _liquidAlone;
 
@@ -494,6 +499,9 @@ class _AgentShellState extends State<AgentShell> {
                       onAutomations: widget.workspace == null
                           ? null
                           : () => _automations.value = true,
+                      onHistory: widget.workspace == null
+                          ? null
+                          : () => _history.value = true,
                       onSearch: widget.workspace == null
                           ? null
                           : () => _powerBar.value = true,
@@ -553,16 +561,22 @@ class _AgentShellState extends State<AgentShell> {
                             children: [
                               agent ?? const SizedBox.shrink(),
                               if (open?.table case final table?)
-                                TablePage(
-                                  key: ValueKey(table),
+                                UndoScope(
                                   state: widget.workspace!,
-                                  table: table,
+                                  child: TablePage(
+                                    key: ValueKey(table),
+                                    state: widget.workspace!,
+                                    table: table,
+                                  ),
                                 )
                               else if (open != null)
-                                WorkspacePage(
-                                  key: ValueKey(open.page),
+                                UndoScope(
                                   state: widget.workspace!,
-                                  open: open,
+                                  child: WorkspacePage(
+                                    key: ValueKey(open.page),
+                                    state: widget.workspace!,
+                                    open: open,
+                                  ),
                                 )
                               else
                                 const SizedBox.shrink(),
@@ -593,10 +607,37 @@ class _AgentShellState extends State<AgentShell> {
     final workspace = widget.workspace;
     if (workspace == null) return child;
     return ListenableBuilder(
-      listenable: Listenable.merge([_powerBar, _automations]),
+      listenable: Listenable.merge([
+        _powerBar,
+        _automations,
+        _history,
+        workspace.pageHistory,
+      ]),
       builder: (context, _) => Stack(
         children: [
           child,
+          if (_history.value)
+            Positioned.fill(
+              child: HistoryDialog(
+                state: workspace,
+                onClose: () {
+                  _history.value = false;
+                  _focus.requestFocus();
+                },
+              ),
+            ),
+          if (workspace.pageHistory.value case final page?)
+            Positioned.fill(
+              child: PageHistoryDialog(
+                key: ValueKey(page),
+                state: workspace,
+                page: page,
+                onClose: () {
+                  workspace.pageHistory.value = null;
+                  _focus.requestFocus();
+                },
+              ),
+            ),
           if (_automations.value)
             Positioned.fill(
               child: AutomationsDialog(

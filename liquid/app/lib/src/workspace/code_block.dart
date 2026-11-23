@@ -1,3 +1,5 @@
+import 'history_dialog.dart' show LiveFocusNode;
+
 import 'dart:async';
 import 'dart:math' as math;
 
@@ -140,7 +142,7 @@ class CodeBlock extends StatefulWidget {
 
 class _CodeBlockState extends State<CodeBlock> {
   TextEditingController _text = _CodeText.fromValue(TextEditingValue.empty);
-  late final _focus = FocusNode(
+  late final _focus = LiveFocusNode(
     debugLabel: 'Code Block',
     onKeyEvent: (_, event) => _key(event),
   );

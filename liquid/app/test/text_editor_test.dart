@@ -184,7 +184,9 @@ void main() {
     expect(field(tester, 0).controller!.text, 'Title');
   }, variant: TargetPlatformVariant.only(TargetPlatform.macOS));
 
-  testWidgets('⌘Z after a join undoes only the typing', (tester) async {
+  testWidgets('⌘Z in a Text Block undoes through History, not the field', (
+    tester,
+  ) async {
     await show(tester, ['Hello', ' world']);
     await caret(tester, 1, 0);
     await tester.pump(const Duration(milliseconds: 600));
@@ -193,9 +195,8 @@ void main() {
     await type(tester, 0, 'x');
     await tester.pump(const Duration(milliseconds: 600));
     await undo(tester);
-    expect(kit.fake.textsOf(kit.page), ['Hello world']);
-    await undo(tester);
-    expect(kit.fake.textsOf(kit.page), ['Hello world']);
+    expect(kit.fake.undos, 1);
+    expect(kit.fake.textsOf(kit.page), ['Hellox world']);
   }, variant: TargetPlatformVariant.only(TargetPlatform.macOS));
 
   testWidgets(
@@ -211,18 +212,6 @@ void main() {
       expect(field(tester, 0).controller!.text, 'P');
     },
   );
-
-  testWidgets('⌘Z still undoes typing without a replacement', (tester) async {
-    await show(tester, ['']);
-    await caret(tester, 0, 0);
-    for (final typed in ['a', 'b', 'c']) {
-      await type(tester, 0, typed);
-      await tester.pump(const Duration(milliseconds: 600));
-    }
-    await undo(tester);
-    expect(kit.fake.textsOf(kit.page), ['ab']);
-    expect(field(tester, 0).controller!.text, 'ab');
-  }, variant: TargetPlatformVariant.only(TargetPlatform.macOS));
 
   testWidgets('Markdown shortcuts; lists end when left empty', (tester) async {
     await show(tester, ['']);

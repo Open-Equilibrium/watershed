@@ -60,6 +60,7 @@ class Sidebar extends StatelessWidget {
     this.agentProblem,
     this.onSettings,
     this.onAutomations,
+    this.onHistory,
     this.onSearch,
     this.onNewSession,
     this.onShowSession,
@@ -78,6 +79,8 @@ class Sidebar extends StatelessWidget {
   final VoidCallback? onSettings;
 
   final VoidCallback? onAutomations;
+
+  final VoidCallback? onHistory;
 
   final VoidCallback? onSearch;
 
@@ -282,6 +285,13 @@ class Sidebar extends StatelessWidget {
                         ),
                 );
               },
+            ),
+          if (onHistory case final onHistory?)
+            _FootRow(
+              key: const Key('sidebar history'),
+              icon: LucideIcons.clock,
+              label: 'History',
+              onTap: onHistory,
             ),
           if (onSettings case final onSettings?)
             _FootRow(

@@ -235,6 +235,21 @@ class WorkspaceState {
 
   final roles = ValueNotifier<List<BridgeRole>>(const []);
 
+  final pageHistory = ValueNotifier<String?>(null);
+
+  Future<void> undo() => _revise(workspace.undo, 'undo');
+
+  Future<void> redo() => _revise(workspace.redo, 'redo');
+
+  Future<void> _revise(Future<bool> Function() revise, String what) async {
+    await _applied;
+    try {
+      await revise();
+    } on Object catch (error) {
+      report('Liquid did not $what this: $error');
+    }
+  }
+
   final notices = ValueNotifier<List<Notice>>(const []);
 
   Future<Map<String, BridgeAllows>> allowsOn(String table) async {
@@ -625,6 +640,7 @@ class WorkspaceState {
     tables.dispose();
     automations.dispose();
     roles.dispose();
+    pageHistory.dispose();
     notices.dispose();
     named.dispose();
     folded.dispose();
