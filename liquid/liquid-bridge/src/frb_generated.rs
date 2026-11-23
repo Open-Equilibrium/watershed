@@ -43,7 +43,7 @@ flutter_rust_bridge::frb_generated_boilerplate!(
     default_rust_auto_opaque = RustAutoOpaqueMoi,
 );
 pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_VERSION: &str = "2.13.0";
-pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = 1733187744;
+pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = 431681053;
 
 // Section: executor
 
@@ -97,6 +97,61 @@ fn wire__crate__api__session__AgentHost_add_host_project_impl(
                     let output_ok = crate::api::session::AgentHost::add_host_project(
                         &*api_that_guard,
                         api_root,
+                    )?;
+                    std::result::Result::Ok(output_ok)
+                })())
+            }
+        },
+    )
+}
+fn wire__crate__api__session__AgentHost_agent_apply_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "AgentHost_agent_apply",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_that = <RustOpaqueMoi<
+                flutter_rust_bridge::for_generated::RustAutoOpaqueInner<AgentHost>,
+            >>::sse_decode(&mut deserializer);
+            let api_name = <String>::sse_decode(&mut deserializer);
+            let api_change = <i64>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, String>((move || {
+                    let mut api_that_guard = None;
+                    let decode_indices_ =
+                        flutter_rust_bridge::for_generated::lockable_compute_decode_order(vec![
+                            flutter_rust_bridge::for_generated::LockableOrderInfo::new(
+                                &api_that, 0, false,
+                            ),
+                        ]);
+                    for i in decode_indices_ {
+                        match i {
+                            0 => api_that_guard = Some(api_that.lockable_decode_sync_ref()),
+                            _ => unreachable!(),
+                        }
+                    }
+                    let api_that_guard = api_that_guard.unwrap();
+                    let output_ok = crate::api::session::AgentHost::agent_apply(
+                        &*api_that_guard,
+                        api_name,
+                        api_change,
                     )?;
                     std::result::Result::Ok(output_ok)
                 })())
@@ -7020,6 +7075,7 @@ impl SseDecode for crate::api::agents::BridgeAgentChange {
         let mut var_routine =
             <Option<crate::api::details::BridgeAutomation>>::sse_decode(deserializer);
         let mut var_undone = <bool>::sse_decode(deserializer);
+        let mut var_held = <bool>::sse_decode(deserializer);
         return crate::api::agents::BridgeAgentChange {
             id: var_id,
             thread: var_thread,
@@ -7029,6 +7085,7 @@ impl SseDecode for crate::api::agents::BridgeAgentChange {
             after: var_after,
             routine: var_routine,
             undone: var_undone,
+            held: var_held,
         };
     }
 }
@@ -11008,540 +11065,543 @@ fn pde_ffi_dispatcher_primary_impl(
             rust_vec_len,
             data_len,
         ),
-        2 => wire__crate__api__session__AgentHost_agent_changes_impl(
+        2 => {
+            wire__crate__api__session__AgentHost_agent_apply_impl(port, ptr, rust_vec_len, data_len)
+        }
+        3 => wire__crate__api__session__AgentHost_agent_changes_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        3 => wire__crate__api__session__AgentHost_agent_instructions_impl(
+        4 => wire__crate__api__session__AgentHost_agent_instructions_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        4 => wire__crate__api__session__AgentHost_agent_mention_impl(
+        5 => wire__crate__api__session__AgentHost_agent_mention_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        5 => wire__crate__api__session__AgentHost_agent_mentions_impl(
+        6 => wire__crate__api__session__AgentHost_agent_mentions_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        6 => wire__crate__api__session__AgentHost_agent_remove_impl(
+        7 => wire__crate__api__session__AgentHost_agent_remove_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        7 => wire__crate__api__session__AgentHost_agent_routine_add_impl(
+        8 => wire__crate__api__session__AgentHost_agent_routine_add_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        8 => wire__crate__api__session__AgentHost_agent_routine_remove_impl(
+        9 => wire__crate__api__session__AgentHost_agent_routine_remove_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        9 => wire__crate__api__session__AgentHost_agent_set_instructions_impl(
+        10 => wire__crate__api__session__AgentHost_agent_set_instructions_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        10 => {
+        11 => {
             wire__crate__api__session__AgentHost_agent_start_impl(port, ptr, rust_vec_len, data_len)
         }
-        11 => {
+        12 => {
             wire__crate__api__session__AgentHost_agent_undo_impl(port, ptr, rust_vec_len, data_len)
         }
-        12 => wire__crate__api__session__AgentHost_agent_update_impl(
+        13 => wire__crate__api__session__AgentHost_agent_update_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        13 => wire__crate__api__session__AgentHost_agents_impl(port, ptr, rust_vec_len, data_len),
-        14 => wire__crate__api__session__AgentHost_bring_configuration_impl(
+        14 => wire__crate__api__session__AgentHost_agents_impl(port, ptr, rust_vec_len, data_len),
+        15 => wire__crate__api__session__AgentHost_bring_configuration_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        15 => wire__crate__api__session__AgentHost_clone_host_project_impl(
+        16 => wire__crate__api__session__AgentHost_clone_host_project_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        16 => wire__crate__api__session__AgentHost_configuration_changes_impl(
+        17 => wire__crate__api__session__AgentHost_configuration_changes_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        17 => wire__crate__api__session__AgentHost_connect_impl(port, ptr, rust_vec_len, data_len),
-        18 => wire__crate__api__session__AgentHost_connect_remote_impl(
+        18 => wire__crate__api__session__AgentHost_connect_impl(port, ptr, rust_vec_len, data_len),
+        19 => wire__crate__api__session__AgentHost_connect_remote_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        19 => wire__crate__api__session__AgentHost_environment_id_impl(
+        20 => wire__crate__api__session__AgentHost_environment_id_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        20 => wire__crate__api__session__AgentHost_environment_machine_impl(
+        21 => wire__crate__api__session__AgentHost_environment_machine_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        21 => wire__crate__api__session__AgentHost_environment_name_impl(
+        22 => wire__crate__api__session__AgentHost_environment_name_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        22 => wire__crate__api__session__AgentHost_host_projects_impl(
+        23 => wire__crate__api__session__AgentHost_host_projects_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        23 => {
+        24 => {
             wire__crate__api__session__AgentHost_move_abort_impl(port, ptr, rust_vec_len, data_len)
         }
-        24 => wire__crate__api__session__AgentHost_move_in_impl(port, ptr, rust_vec_len, data_len),
-        25 => {
+        25 => wire__crate__api__session__AgentHost_move_in_impl(port, ptr, rust_vec_len, data_len),
+        26 => {
             wire__crate__api__session__AgentHost_move_status_impl(port, ptr, rust_vec_len, data_len)
         }
-        26 => {
+        27 => {
             wire__crate__api__session__AgentHost_preflight_impl(port, ptr, rust_vec_len, data_len)
         }
-        27 => wire__crate__api__session__AgentHost_project_impl(port, ptr, rust_vec_len, data_len),
-        28 => {
+        28 => wire__crate__api__session__AgentHost_project_impl(port, ptr, rust_vec_len, data_len),
+        29 => {
             wire__crate__api__session__AgentHost_providers_impl(port, ptr, rust_vec_len, data_len)
         }
-        29 => wire__crate__api__session__AgentHost_set_writer_model_impl(
+        30 => wire__crate__api__session__AgentHost_set_writer_model_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        30 => wire__crate__api__session__AgentHost_supports_moves_impl(
+        31 => wire__crate__api__session__AgentHost_supports_moves_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        31 => wire__crate__api__session__AgentHost_writer_model_impl(
+        32 => wire__crate__api__session__AgentHost_writer_model_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        32 => {
+        33 => {
             wire__crate__api__session__AgentProject_archive_impl(port, ptr, rust_vec_len, data_len)
         }
-        33 => {
+        34 => {
             wire__crate__api__session__AgentProject_delete_impl(port, ptr, rust_vec_len, data_len)
         }
-        34 => wire__crate__api__session__AgentProject_git_impl(port, ptr, rust_vec_len, data_len),
-        35 => wire__crate__api__session__AgentProject_only_session_in_worktree_impl(
+        35 => wire__crate__api__session__AgentProject_git_impl(port, ptr, rust_vec_len, data_len),
+        36 => wire__crate__api__session__AgentProject_only_session_in_worktree_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        36 => wire__crate__api__session__AgentProject_open_impl(port, ptr, rust_vec_len, data_len),
-        37 => wire__crate__api__session__AgentProject_start_impl(port, ptr, rust_vec_len, data_len),
-        38 => {
+        37 => wire__crate__api__session__AgentProject_open_impl(port, ptr, rust_vec_len, data_len),
+        38 => wire__crate__api__session__AgentProject_start_impl(port, ptr, rust_vec_len, data_len),
+        39 => {
             wire__crate__api__session__AgentProject_threads_impl(port, ptr, rust_vec_len, data_len)
         }
-        39 => {
+        40 => {
             wire__crate__api__session__AgentSession_answer_impl(port, ptr, rust_vec_len, data_len)
         }
-        40 => wire__crate__api__session__AgentSession_automations_events_impl(
+        41 => wire__crate__api__session__AgentSession_automations_events_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        41 => wire__crate__api__session__AgentSession_automations_stop_impl(
+        42 => wire__crate__api__session__AgentSession_automations_stop_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        42 => wire__crate__api__session__AgentSession_automations_subscribe_impl(
+        43 => wire__crate__api__session__AgentSession_automations_subscribe_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        43 => wire__crate__api__session__AgentSession_cancel_queued_impl(
+        44 => wire__crate__api__session__AgentSession_cancel_queued_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        44 => wire__crate__api__session__AgentSession_confirm_applied_impl(
+        45 => wire__crate__api__session__AgentSession_confirm_applied_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        45 => {
+        46 => {
             wire__crate__api__session__AgentSession_context_impl(port, ptr, rust_vec_len, data_len)
         }
-        46 => wire__crate__api__session__AgentSession_disconnect_impl(
+        47 => wire__crate__api__session__AgentSession_disconnect_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        47 => {
+        48 => {
             wire__crate__api__session__AgentSession_dismiss_impl(port, ptr, rust_vec_len, data_len)
         }
-        48 => wire__crate__api__session__AgentSession_edit_queued_impl(
+        49 => wire__crate__api__session__AgentSession_edit_queued_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        49 => {
+        50 => {
             wire__crate__api__session__AgentSession_events_impl(port, ptr, rust_vec_len, data_len)
         }
-        50 => wire__crate__api__session__AgentSession_events_stop_impl(
+        51 => wire__crate__api__session__AgentSession_events_stop_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        51 => wire__crate__api__session__AgentSession_export_record_impl(
+        52 => wire__crate__api__session__AgentSession_export_record_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        52 => wire__crate__api__session__AgentSession_fork_impl(port, ptr, rust_vec_len, data_len),
-        53 => wire__crate__api__session__AgentSession_git_impl(port, ptr, rust_vec_len, data_len),
-        54 => wire__crate__api__session__AgentSession_id_impl(port, ptr, rust_vec_len, data_len),
-        55 => wire__crate__api__session__AgentSession_lineage_events_impl(
+        53 => wire__crate__api__session__AgentSession_fork_impl(port, ptr, rust_vec_len, data_len),
+        54 => wire__crate__api__session__AgentSession_git_impl(port, ptr, rust_vec_len, data_len),
+        55 => wire__crate__api__session__AgentSession_id_impl(port, ptr, rust_vec_len, data_len),
+        56 => wire__crate__api__session__AgentSession_lineage_events_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        56 => wire__crate__api__session__AgentSession_lineage_stop_impl(
+        57 => wire__crate__api__session__AgentSession_lineage_stop_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        57 => wire__crate__api__session__AgentSession_lineage_subscribe_impl(
+        58 => wire__crate__api__session__AgentSession_lineage_subscribe_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        58 => wire__crate__api__session__AgentSession_merge_back_impl(
+        59 => wire__crate__api__session__AgentSession_merge_back_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        59 => wire__crate__api__session__AgentSession_model_impl(port, ptr, rust_vec_len, data_len),
-        60 => wire__crate__api__session__AgentSession_move_check_impl(
+        60 => wire__crate__api__session__AgentSession_model_impl(port, ptr, rust_vec_len, data_len),
+        61 => wire__crate__api__session__AgentSession_move_check_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        61 => wire__crate__api__session__AgentSession_move_finish_impl(
+        62 => wire__crate__api__session__AgentSession_move_finish_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        62 => {
+        63 => {
             wire__crate__api__session__AgentSession_move_out_impl(port, ptr, rust_vec_len, data_len)
         }
-        63 => wire__crate__api__session__AgentSession_move_record_impl(
+        64 => wire__crate__api__session__AgentSession_move_record_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        64 => {
+        65 => {
             wire__crate__api__session__AgentSession_respond_impl(port, ptr, rust_vec_len, data_len)
         }
-        65 => {
+        66 => {
             wire__crate__api__session__AgentSession_revert_impl(port, ptr, rust_vec_len, data_len)
         }
-        66 => wire__crate__api__session__AgentSession_run_automation_now_impl(
+        67 => wire__crate__api__session__AgentSession_run_automation_now_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        67 => wire__crate__api__session__AgentSession_send_impl(port, ptr, rust_vec_len, data_len),
-        68 => wire__crate__api__session__AgentSession_send_queued_now_impl(
+        68 => wire__crate__api__session__AgentSession_send_impl(port, ptr, rust_vec_len, data_len),
+        69 => wire__crate__api__session__AgentSession_send_queued_now_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        69 => wire__crate__api__session__AgentSession_servers_events_impl(
+        70 => wire__crate__api__session__AgentSession_servers_events_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        70 => wire__crate__api__session__AgentSession_servers_stop_impl(
+        71 => wire__crate__api__session__AgentSession_servers_stop_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        71 => wire__crate__api__session__AgentSession_servers_subscribe_impl(
+        72 => wire__crate__api__session__AgentSession_servers_subscribe_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        72 => wire__crate__api__session__AgentSession_set_automation_enabled_impl(
+        73 => wire__crate__api__session__AgentSession_set_automation_enabled_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        73 => wire__crate__api__session__AgentSession_set_branch_impl(
+        74 => wire__crate__api__session__AgentSession_set_branch_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        74 => wire__crate__api__session__AgentSession_set_model_impl(
+        75 => wire__crate__api__session__AgentSession_set_model_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        75 => wire__crate__api__session__AgentSession_set_permissions_impl(
+        76 => wire__crate__api__session__AgentSession_set_permissions_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        76 => {
+        77 => {
             wire__crate__api__session__AgentSession_snapshot_impl(port, ptr, rust_vec_len, data_len)
         }
-        77 => wire__crate__api__session__AgentSession_statistics_impl(
+        78 => wire__crate__api__session__AgentSession_statistics_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        78 => wire__crate__api__session__AgentSession_stop_impl(port, ptr, rust_vec_len, data_len),
-        79 => wire__crate__api__session__AgentSession_stop_server_impl(
+        79 => wire__crate__api__session__AgentSession_stop_impl(port, ptr, rust_vec_len, data_len),
+        80 => wire__crate__api__session__AgentSession_stop_server_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        80 => wire__crate__api__session__AgentSession_stop_subagent_impl(
+        81 => wire__crate__api__session__AgentSession_stop_subagent_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        81 => wire__crate__api__session__AgentSession_subscribe_impl(
+        82 => wire__crate__api__session__AgentSession_subscribe_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        82 => wire__crate__api__session__AgentSession_title_impl(port, ptr, rust_vec_len, data_len),
-        83 => wire__crate__api__session__AgentSession_turn_changes_impl(
+        83 => wire__crate__api__session__AgentSession_title_impl(port, ptr, rust_vec_len, data_len),
+        84 => wire__crate__api__session__AgentSession_turn_changes_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        84 => wire__crate__api__session__AgentSession_turn_patch_impl(
+        85 => wire__crate__api__session__AgentSession_turn_patch_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        85 => wire__crate__api__session__AgentSession_turns_impl(port, ptr, rust_vec_len, data_len),
-        86 => wire__crate__api__session__AgentSession_usage_limits_impl(
+        86 => wire__crate__api__session__AgentSession_turns_impl(port, ptr, rust_vec_len, data_len),
+        87 => wire__crate__api__session__AgentSession_usage_limits_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        87 => wire__crate__api__session__AgentSession_visit_impl(port, ptr, rust_vec_len, data_len),
-        88 => {
+        88 => wire__crate__api__session__AgentSession_visit_impl(port, ptr, rust_vec_len, data_len),
+        89 => {
             wire__crate__api__session__AgentSession_worktree_impl(port, ptr, rust_vec_len, data_len)
         }
-        89 => wire__crate__api__moves__BridgeConfigChanges_changes_impl(
+        90 => wire__crate__api__moves__BridgeConfigChanges_changes_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        90 => wire__crate__api__moves__BridgeMovePackage_transfer_impl(
+        91 => wire__crate__api__moves__BridgeMovePackage_transfer_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        91 => {
+        92 => {
             wire__crate__api__git__GitCheckout_branch_files_impl(port, ptr, rust_vec_len, data_len)
         }
-        92 => {
+        93 => {
             wire__crate__api__git__GitCheckout_branch_patch_impl(port, ptr, rust_vec_len, data_len)
         }
-        93 => wire__crate__api__git__GitCheckout_check_out_pull_request_impl(
+        94 => wire__crate__api__git__GitCheckout_check_out_pull_request_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        94 => {
+        95 => {
             wire__crate__api__git__GitCheckout_create_branch_impl(port, ptr, rust_vec_len, data_len)
         }
-        95 => wire__crate__api__git__GitCheckout_init_impl(port, ptr, rust_vec_len, data_len),
-        96 => wire__crate__api__git__GitCheckout_publish_impl(port, ptr, rust_vec_len, data_len),
-        97 => wire__crate__api__git__GitCheckout_pull_impl(port, ptr, rust_vec_len, data_len),
-        98 => {
+        96 => wire__crate__api__git__GitCheckout_init_impl(port, ptr, rust_vec_len, data_len),
+        97 => wire__crate__api__git__GitCheckout_publish_impl(port, ptr, rust_vec_len, data_len),
+        98 => wire__crate__api__git__GitCheckout_pull_impl(port, ptr, rust_vec_len, data_len),
+        99 => {
             wire__crate__api__git__GitCheckout_pull_request_impl(port, ptr, rust_vec_len, data_len)
         }
-        99 => wire__crate__api__git__GitCheckout_pull_request_worktree_impl(
+        100 => wire__crate__api__git__GitCheckout_pull_request_worktree_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        100 => wire__crate__api__git__GitCheckout_refs_impl(port, ptr, rust_vec_len, data_len),
-        101 => wire__crate__api__git__GitCheckout_resolve_pull_request_impl(
+        101 => wire__crate__api__git__GitCheckout_refs_impl(port, ptr, rust_vec_len, data_len),
+        102 => wire__crate__api__git__GitCheckout_resolve_pull_request_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        102 => wire__crate__api__git__GitCheckout_run_impl(port, ptr, rust_vec_len, data_len),
-        103 => wire__crate__api__git__GitCheckout_run_pull_request_action_impl(
+        103 => wire__crate__api__git__GitCheckout_run_impl(port, ptr, rust_vec_len, data_len),
+        104 => wire__crate__api__git__GitCheckout_run_pull_request_action_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        104 => wire__crate__api__git__GitCheckout_status_impl(port, ptr, rust_vec_len, data_len),
-        105 => wire__crate__api__git__GitCheckout_switch_impl(port, ptr, rust_vec_len, data_len),
-        106 => wire__crate__api__git__GitCheckout_uncommitted_changes_impl(
+        105 => wire__crate__api__git__GitCheckout_status_impl(port, ptr, rust_vec_len, data_len),
+        106 => wire__crate__api__git__GitCheckout_switch_impl(port, ptr, rust_vec_len, data_len),
+        107 => wire__crate__api__git__GitCheckout_uncommitted_changes_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        107 => wire__crate__api__git__GitCheckout_uncommitted_patch_impl(
+        108 => wire__crate__api__git__GitCheckout_uncommitted_patch_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        108 => wire__crate__api__git__GitCheckout_watch_impl(port, ptr, rust_vec_len, data_len),
-        109 => {
+        109 => wire__crate__api__git__GitCheckout_watch_impl(port, ptr, rust_vec_len, data_len),
+        110 => {
             wire__crate__api__git__GitCheckout_watch_stop_impl(port, ptr, rust_vec_len, data_len)
         }
-        110 => wire__crate__api__replica__LiquidWorkspace_add_bytes_impl(
+        111 => wire__crate__api__replica__LiquidWorkspace_add_bytes_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        111 => wire__crate__api__replica__LiquidWorkspace_add_file_impl(
+        112 => wire__crate__api__replica__LiquidWorkspace_add_file_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        112 => {
+        113 => {
             wire__crate__api__replica__LiquidWorkspace_apply_impl(port, ptr, rust_vec_len, data_len)
         }
-        113 => {
+        114 => {
             wire__crate__api__replica__LiquidWorkspace_close_impl(port, ptr, rust_vec_len, data_len)
         }
-        114 => {
+        115 => {
             wire__crate__api__replica__LiquidWorkspace_open_impl(port, ptr, rust_vec_len, data_len)
         }
-        115 => {
+        116 => {
             wire__crate__api__replica__LiquidWorkspace_press_impl(port, ptr, rust_vec_len, data_len)
         }
-        116 => {
+        117 => {
             wire__crate__api__replica__LiquidWorkspace_query_impl(port, ptr, rust_vec_len, data_len)
         }
-        117 => wire__crate__api__replica__LiquidWorkspace_read_attachment_impl(
+        118 => wire__crate__api__replica__LiquidWorkspace_read_attachment_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        118 => wire__crate__api__replica__LiquidWorkspace_remember_impl(
+        119 => wire__crate__api__replica__LiquidWorkspace_remember_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        119 => wire__crate__api__replica__LiquidWorkspace_remembered_impl(
+        120 => wire__crate__api__replica__LiquidWorkspace_remembered_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        120 => wire__crate__api__replica__LiquidWorkspace_save_attachment_impl(
+        121 => wire__crate__api__replica__LiquidWorkspace_save_attachment_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        121 => wire__crate__api__replica__LiquidWorkspace_subscribe_impl(
+        122 => wire__crate__api__replica__LiquidWorkspace_subscribe_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        122 => {
+        123 => {
             wire__crate__api__replica__LiquidWorkspace_test_impl(port, ptr, rust_vec_len, data_len)
         }
-        123 => wire__crate__api__drawing__bridge_drawing_edit_default_impl(
+        124 => wire__crate__api__drawing__bridge_drawing_edit_default_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        124 => {
+        125 => {
             wire__crate__api__events__bridge_usage_default_impl(port, ptr, rust_vec_len, data_len)
         }
-        125 => wire__crate__api__hosts__forget_agent_host_impl(port, ptr, rust_vec_len, data_len),
-        126 => wire__crate__api__hosts__pair_agent_host_impl(port, ptr, rust_vec_len, data_len),
-        127 => {
+        126 => wire__crate__api__hosts__forget_agent_host_impl(port, ptr, rust_vec_len, data_len),
+        127 => wire__crate__api__hosts__pair_agent_host_impl(port, ptr, rust_vec_len, data_len),
+        128 => {
             wire__crate__api__hosts__reach_local_agent_host_impl(port, ptr, rust_vec_len, data_len)
         }
-        128 => {
+        129 => {
             wire__crate__api__hosts__reach_remote_agent_host_impl(port, ptr, rust_vec_len, data_len)
         }
         _ => unreachable!(),
@@ -11732,6 +11792,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::agents::BridgeAgentChange {
             self.after.into_into_dart().into_dart(),
             self.routine.into_into_dart().into_dart(),
             self.undone.into_into_dart().into_dart(),
+            self.held.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -15571,6 +15632,7 @@ impl SseEncode for crate::api::agents::BridgeAgentChange {
         <Option<String>>::sse_encode(self.after, serializer);
         <Option<crate::api::details::BridgeAutomation>>::sse_encode(self.routine, serializer);
         <bool>::sse_encode(self.undone, serializer);
+        <bool>::sse_encode(self.held, serializer);
     }
 }
 

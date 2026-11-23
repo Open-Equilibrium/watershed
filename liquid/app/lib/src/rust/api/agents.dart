@@ -95,6 +95,7 @@ class BridgeAgentChange {
   final String? after;
   final BridgeAutomation? routine;
   final bool undone;
+  final bool held;
 
   const BridgeAgentChange({
     required this.id,
@@ -105,6 +106,7 @@ class BridgeAgentChange {
     this.after,
     this.routine,
     required this.undone,
+    required this.held,
   });
 
   @override
@@ -116,7 +118,8 @@ class BridgeAgentChange {
       before.hashCode ^
       after.hashCode ^
       routine.hashCode ^
-      undone.hashCode;
+      undone.hashCode ^
+      held.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -130,7 +133,8 @@ class BridgeAgentChange {
           before == other.before &&
           after == other.after &&
           routine == other.routine &&
-          undone == other.undone;
+          undone == other.undone &&
+          held == other.held;
 }
 
 enum BridgeAgentChangeKind {

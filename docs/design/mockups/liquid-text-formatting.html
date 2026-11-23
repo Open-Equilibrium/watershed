@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en"><head><title>Liquid: Text formatting mockups</title>
+<link rel="stylesheet" href="mockup.css"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+.card{background:var(--ws-canvas);border:1px solid var(--ws-border);border-radius:var(--ws-radius-xl);padding:8px 20px;max-width:900px;color:var(--ws-text)}
+.row{display:flex;align-items:center;gap:20px;padding:10px 0;border-top:1px solid var(--ws-border)}
+.row:first-child{border-top:0}
+.label{width:180px;flex:none;color:var(--ws-text-faint);font-size:var(--ws-fs-compact)}
+.label b{display:block;color:var(--ws-text);font-weight:var(--ws-fw-medium)}
+.text{flex:1;font-size:var(--ws-fs-prose);line-height:var(--ws-lh-prose);white-space:nowrap}
+.note{width:200px;flex:none;text-align:right;font-size:var(--ws-fs-compact);color:var(--ws-success)}
+.mk{color:var(--ws-text-faint);font-weight:var(--ws-fw-regular)}
+.caret{display:inline-block;width:2px;height:20px;margin:0 -1px;background:var(--ws-accent);vertical-align:-4px}
+.sel{background:var(--ws-selected)}
+.typed{background:var(--ws-warning-subtle);border-radius:2px}
+.card code{font:var(--ws-fs-mono)/var(--ws-lh-mono) var(--ws-font-mono);background:var(--ws-code);border:1px solid var(--ws-border);border-radius:var(--ws-radius-sm);padding:0 4px}
+.link{color:var(--ws-accent);text-decoration:underline;text-underline-offset:3px}
+.link::before{content:"↗";font-size:12px;margin-right:3px;display:inline-block}
+.plain{flex:1;font:var(--ws-fs-mono)/var(--ws-lh-mono) var(--ws-font-mono);background:var(--ws-code);border:1px solid var(--ws-border);border-radius:var(--ws-radius-md);padding:8px 12px;white-space:pre}
+.box{display:inline-block;width:14px;height:14px;border:1px solid var(--ws-border-strong);border-radius:3px;vertical-align:-2px;margin-right:8px}
+kbd{font:var(--ws-fs-small)/var(--ws-lh-small) var(--ws-font-ui);border:1px solid var(--ws-border-strong);border-bottom-width:2px;border-radius:var(--ws-radius-sm);padding:1px 6px;background:var(--ws-surface);color:var(--ws-text)}
+table.keys{border-collapse:collapse;font-size:var(--ws-fs-ui);width:100%}
+table.keys th{text-align:left;font-weight:var(--ws-fw-medium);color:var(--ws-text-faint);font-size:var(--ws-fs-compact);padding:8px 0}
+table.keys td{padding:8px 0;border-top:1px solid var(--ws-border)}
+ol.qs{margin:0;padding-left:20px;font-size:13px;line-height:1.5;color:var(--muted-foreground);max-width:900px}
+</style>
+</head><body class="theme-light chrome">
+<div class="page">
+  <div class="toolbar">
+    <div>Theme <span class="seg" id="theme"><button data-v="light">Light</button><button data-v="dark">Dark</button><button data-v="system" class="on">System</button></span></div>
+  </div>
+  <section>
+    <h1>Liquid Workspace: Text formatting</h1>
+    <p class="sub">Approved by the maintainer on 2026-11-22 (ADR-0322). Formatting marks in a <a href="../../../GLOSSARY.md#liquid-primitives">Section</a> never hide state: the word holding the caret shows its Markdown, as T3 Code's composer does, and every mark can be seen, ended and removed. Sections and Paragraphs are in the <a href="liquid-workspace-text-sections.html">Section mockups</a>.</p>
+  </section>
+  <section>
+    <h3 class="sec">1 · The caret shows where it stands</h3>
+    <p class="sub">Only the styled word holding the caret shows its Markdown characters; the rest of the line stays formatted.</p>
+    <div class="card">
+      <div class="row"><div class="label"><b>Caret elsewhere</b>everything formatted</div><div class="text">This is <strong>important</strong> for everyone.<span class="caret"></span></div><div class="note">nothing hidden</div></div>
+      <div class="row"><div class="label"><b>Caret in the word</b>as in T3 Code</div><div class="text">This is <strong><span class="mk">**</span>impor<span class="caret"></span>tant<span class="mk">**</span></strong> for everyone.</div><div class="note">only this word</div></div>
+    </div>
+  </section>
+  <section>
+    <h3 class="sec">2 · Bold does not stick</h3>
+    <p class="sub">At a styled word's edge the caret has two stops, before and after the <span class="mk">**</span>; one more → moves from inside to outside. Typing continues what the person sees.</p>
+    <div class="card">
+      <div class="row"><div class="label"><b>Caret before **</b>types bold</div><div class="text">This is <strong><span class="mk">**</span>important<span class="typed">!</span><span class="caret"></span><span class="mk">**</span></strong></div><div class="note">visibly inside</div></div>
+      <div class="row"><div class="label"><b>Caret after **</b>after one →</div><div class="text">This is <strong><span class="mk">**</span>important<span class="mk">**</span></strong><span class="typed"> and plain</span><span class="caret"></span></div><div class="note">visibly outside</div></div>
+    </div>
+  </section>
+  <section>
+    <h3 class="sec">3 · Links and code do not grow</h3>
+    <p class="sub">Bold, italic and strike grow when the person types inside them. A link or code always ends at its edge, so text typed after a link never becomes part of it.</p>
+    <div class="card">
+      <div class="row"><div class="label"><b>Link</b>ends at its edge</div><div class="text">See <span class="link">Notion blog</span><span class="typed"> and more</span><span class="caret"></span></div><div class="note">only the link is a link</div></div>
+      <div class="row"><div class="label"><b>Code</b>ends at its edge</div><div class="text">Start <code>meta serve</code><span class="typed"> and wait</span><span class="caret"></span></div><div class="note">code ends at `</div></div>
+    </div>
+  </section>
+  <section>
+    <h3 class="sec">4 · One action clears everything</h3>
+    <p class="sub">⌘\ (Ctrl+\ on Windows and Linux) removes every mark in the selection, as in Google Docs; Clear formatting in the selection's context menu does the same, and Settings → Shortcuts can move the shortcut, since keyboards such as German ones reach \ only with ⌥ or AltGr. An empty mark, such as a link without text, is removed on its own.</p>
+    <div class="card">
+      <div class="row"><div class="label"><b>Selected</b>mixed marks</div><div class="text"><span class="sel">A <strong>bold</strong>, <em>italic</em> and <s>old</s> sentence.</span></div><div class="note"><kbd>⌘</kbd> <kbd>\</kbd></div></div>
+      <div class="row"><div class="label"><b>After</b>plain text</div><div class="text"><span class="sel">A bold, italic and old sentence.</span></div><div class="note">nothing left behind</div></div>
+    </div>
+  </section>
+  <section>
+    <h3 class="sec">5 · Copy and paste speak Markdown</h3>
+    <p class="sub">Text copied from Liquid arrives as Markdown in a terminal, a mail or a chat; Markdown pasted into Liquid, such as an agent's answer, becomes formatted text.</p>
+    <div class="card">
+      <div class="row"><div class="label"><b>Copied from Liquid</b>in a terminal</div><div class="plain">This is **important** for everyone.
+- [ ] start `meta serve`</div></div>
+      <div class="row"><div class="label"><b>Pasted into Liquid</b>formatted</div><div class="text">This is <strong>important</strong> for everyone.<br><span class="box"></span>start <code>meta serve</code></div></div>
+    </div>
+  </section>
+  <section>
+    <h3 class="sec">6 · Shortcuts as in T3 Code</h3>
+    <p class="sub">The keys of T3 Code's composer, with Ctrl in place of ⌘ on Windows and Linux; typing Markdown works the same. There is no underline, which Markdown cannot carry.</p>
+    <div class="card"><table class="keys">
+      <tr><th>Action</th><th>macOS</th><th>Windows and Linux</th></tr>
+      <tr><td><strong>Bold</strong></td><td><kbd>⌘</kbd> <kbd>B</kbd></td><td><kbd>Ctrl</kbd> <kbd>B</kbd></td></tr>
+      <tr><td><em>Italic</em></td><td><kbd>⌘</kbd> <kbd>I</kbd></td><td><kbd>Ctrl</kbd> <kbd>I</kbd></td></tr>
+      <tr><td><code>Code</code></td><td><kbd>⌘</kbd> <kbd>E</kbd></td><td><kbd>Ctrl</kbd> <kbd>E</kbd></td></tr>
+      <tr><td>Clear formatting</td><td><kbd>⌘</kbd> <kbd>\</kbd></td><td><kbd>Ctrl</kbd> <kbd>\</kbd></td></tr>
+      <tr><td>Typed Markdown</td><td colspan="2"><span class="mk">**text**</span> → <strong>text</strong></td></tr>
+    </table></div>
+  </section>
+  <section>
+    <h3 class="sec">Decisions</h3>
+    <h4 class="qh">Approved (2026-11-22)</h4>
+    <ol class="qs">
+      <li><b>Visible marks.</b> Only the styled word holding the caret shows its Markdown, as in T3 Code, never the whole line as in Obsidian.</li>
+      <li><b>Edges.</b> Two caret stops at a styled edge; bold, italic and strike grow inside, links and code never.</li>
+      <li><b>Clearing.</b> ⌘\ or Ctrl+\, Clear formatting in the context menu and a movable shortcut; empty marks go on their own.</li>
+      <li><b>Markdown in and out.</b> Copy writes Markdown as plain text; pasted Markdown becomes Paragraphs and marks. A selection that crosses another Block takes it whole, and a Table copies as a Markdown table.</li>
+      <li><b>No underline.</b> Markdown has none, as T3 Code leaves it out.</li>
+    </ol>
+  </section>
+</div>
+<script>
+let mode='system';
+const hostDark=()=>matchMedia('(prefers-color-scheme: dark)').matches;
+function applyTheme(){const dark=mode=='dark'||(mode=='system'&&hostDark());document.body.classList.toggle('theme-dark',dark);document.body.classList.toggle('theme-light',!dark);document.querySelectorAll('#theme button').forEach(b=>b.classList.toggle('on',b.dataset.v==mode))}
+document.querySelectorAll('#theme button').forEach(b=>b.onclick=()=>{mode=b.dataset.v;applyTheme()});
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change',applyTheme);
+applyTheme();
+</script>
+</body></html>

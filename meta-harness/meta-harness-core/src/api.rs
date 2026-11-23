@@ -81,6 +81,10 @@ pub(crate) enum AgentsCall {
         name: String,
         change: i64,
     },
+    Apply {
+        name: String,
+        change: i64,
+    },
     Mention {
         name: String,
         root: String,

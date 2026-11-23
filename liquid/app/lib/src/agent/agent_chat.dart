@@ -230,7 +230,9 @@ class _ChangeLine extends StatelessWidget {
       onTap: onTap,
       child: Text(label, style: link),
     );
+    final waiting = change.held && !change.undone;
     final live =
+        !change.held &&
         change.kind == BridgeAgentChangeKind.routineAdded &&
         routine != null &&
         state.automations.value.any((task) => task.id == routine.id);
@@ -242,22 +244,26 @@ class _ChangeLine extends StatelessWidget {
       decoration: BoxDecoration(
         color: ws.subtle,
         borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
+        border: waiting ? Border.all(color: ws.warning) : null,
       ),
       child: Row(
         spacing: WsMetrics.space3,
         children: [
-          Icon(icon, size: 14, color: ws.textFaint),
+          Icon(icon, size: 14, color: waiting ? ws.warning : ws.textFaint),
           Expanded(
             child: Text(
-              text,
+              waiting ? 'Waiting for you · $text' : text,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: TextStyle(fontSize: WsMetrics.fsCompact, color: ws.text),
             ),
           ),
-          if (change.undone)
+          if (waiting) ...[
+            action('Discard', () => unawaited(agents.undo(change))),
+            action('Apply', () => unawaited(agents.apply(change))),
+          ] else if (change.undone)
             Text(
-              'Undone',
+              change.held ? 'Discarded' : 'Undone',
               style: TextStyle(
                 color: ws.textFaint,
                 fontSize: WsMetrics.fsSmall,

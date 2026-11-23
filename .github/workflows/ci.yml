@@ -50,7 +50,7 @@ jobs:
 
       - &node
         name: Install pinned Node
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .node-version
 
@@ -100,7 +100,7 @@ jobs:
           }
 
       - name: Install check tools
-        uses: taiki-e/install-action@83ac0ad63c0167e6f06796fab0fce28db1bf3db0 # v2.87.22
+        uses: taiki-e/install-action@75a7c0f87bd666af3cdb75c5b9e9d03ab6044e6f # v2.90.6
         with:
           tool: cargo-audit@0.22.2,cargo-deny@0.20.2
 
@@ -192,7 +192,7 @@ jobs:
 
       - name: Install minimum Node
         if: needs.scope.outputs.product == 'true' && matrix.os == 'ubuntu-24.04'
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: ${{ steps.minimum-node.outputs.version }}
 
@@ -231,7 +231,7 @@ jobs:
 
       - &test-tools
         name: Install test tools
-        uses: taiki-e/install-action@83ac0ad63c0167e6f06796fab0fce28db1bf3db0 # v2.87.22
+        uses: taiki-e/install-action@75a7c0f87bd666af3cdb75c5b9e9d03ab6044e6f # v2.90.6
         with:
           tool: cargo-nextest@0.9.146,cargo-llvm-cov@0.9.1
 
@@ -357,7 +357,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Install acceptance tools
-        uses: taiki-e/install-action@83ac0ad63c0167e6f06796fab0fce28db1bf3db0 # v2.87.22
+        uses: taiki-e/install-action@75a7c0f87bd666af3cdb75c5b9e9d03ab6044e6f # v2.90.6
         with:
           tool: cargo-nextest@0.9.146,cargo-llvm-cov@0.9.1
 
@@ -411,7 +411,7 @@ jobs:
 
       - name: Upload M1.2 executor startup evidence
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: m12-executor-startup-evidence-${{ matrix.os }}
           path: target/m12-startup/m12-executor-startup.jsonl
@@ -476,7 +476,7 @@ jobs:
             --ignore-filename-regex "$COVERAGE_EXCLUSIONS" --show-missing-lines
 
       - name: Retain tested native download
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: flow-agent-download-${{ matrix.os }}
           path: target/m12-download/
@@ -504,7 +504,7 @@ jobs:
 
       - name: Upload M1.1 performance evidence
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: m11-performance-evidence
           path: target/m11-performance/m11-performance-evidence.jsonl
