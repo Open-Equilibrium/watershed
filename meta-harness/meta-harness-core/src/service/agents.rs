@@ -310,22 +310,22 @@ pub(super) async fn adopt(
 ) -> Result<(), String> {
     let _serial = shared.agents.serial.lock().await;
     let known = agents::of_thread(&shared.store.db(), &shared.home, thread.id())?;
-    if known.is_some() {
-        return Ok(());
-    }
-    let agent = agents::create(
-        &shared.store.db(),
-        &shared.home,
-        &agents::NewAgent {
-            name: Some(carry.name.clone()),
-            root: root.to_owned(),
-            model: carry.model.clone(),
-            permissions: carry.permissions,
-            instructions: String::new(),
-            request: None,
-        },
-        thread.id(),
-    )?;
+    let agent = match known {
+        Some(agent) => agent,
+        None => agents::create(
+            &shared.store.db(),
+            &shared.home,
+            &agents::NewAgent {
+                name: Some(carry.name.clone()),
+                root: root.to_owned(),
+                model: carry.model.clone(),
+                permissions: carry.permissions,
+                instructions: String::new(),
+                request: None,
+            },
+            thread.id(),
+        )?,
+    };
     agents::unpack(&agent.memory, &carry.files)?;
     let mut routines = Vec::new();
     for routine in &carry.routines {
