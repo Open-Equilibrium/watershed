@@ -32,6 +32,11 @@ def prompt(mid, sid, script):
             f.write(f"# news-bot\n\nRead the feeds{twice}.\n")
         say(sid, "Saved.")
         reason = "end_turn"
+    elif script == "rewrite-wait":
+        with open(instructions[sid], "w", encoding="utf-8") as f:
+            f.write("# news-bot\n\nRead the feeds three times.\n")
+        cancelled[sid].wait()
+        reason = "cancelled"
     elif script.startswith("append "):
         path = os.path.join(sessions[sid], "contract.txt")
         update(sid, {"sessionUpdate": "tool_call", "toolCallId": f"t{mid}", "title": "Append contract.txt",
@@ -103,7 +108,7 @@ for raw in sys.stdin:
             instructions[sid] = named.group(1)
         lines = [line.split("<")[0].strip() for line in text.splitlines()]
         handoff = "Imported conversation history from the previous host" in text
-        script = "" if handoff else next((line for line in lines if line.startswith(("append ", "stream ")) or line in ("ask", "wait", "plan", "fill", "instruct", "reinstruct")), "")
+        script = "" if handoff else next((line for line in lines if line.startswith(("append ", "stream ")) or line in ("ask", "wait", "plan", "fill", "instruct", "reinstruct", "rewrite-wait")), "")
         threading.Thread(target=prompt, args=(mid, sid, script)).start()
     elif method == "session/cancel":
         cancelled[params["sessionId"]].set()

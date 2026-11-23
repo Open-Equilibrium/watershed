@@ -586,7 +586,7 @@ async fn follow(shared: &Shared, id: &str) -> Result<(), String> {
                 let last = thread
                     .turns()
                     .iter()
-                    .filter(|turn| turn.status == TurnStatus::Completed)
+                    .filter(|turn| !matches!(turn.status, TurnStatus::Queued | TurnStatus::Running))
                     .map(|turn| turn.number)
                     .max();
                 notice(shared, &agent, &thread, last).await?;
@@ -599,7 +599,9 @@ async fn follow(shared: &Shared, id: &str) -> Result<(), String> {
             && let Some(event) = events.recv().await
         {
             match event.event {
-                AgentEvent::TurnCompleted { turn, .. } => ended = Some(turn.0),
+                AgentEvent::TurnCompleted { turn, .. } | AgentEvent::TurnAborted { turn, .. } => {
+                    ended = Some(turn.0);
+                }
                 AgentEvent::ModelRequestCompleted { .. } => full = filled(&thread),
                 _ => {}
             }

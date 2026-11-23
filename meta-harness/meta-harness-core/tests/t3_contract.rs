@@ -478,6 +478,50 @@ async fn an_agent_made_by_chat_names_itself_logs_its_changes_and_answers_a_menti
     assert!(!host.agent_changes("news-bot").await.unwrap()[2].held);
     assert!(host.agent_apply("news-bot", held.id).await.is_err());
 
+    let stopped = host
+        .agent_routine_add(
+            "news-bot",
+            NewRoutine {
+                title: "Stopped".to_owned(),
+                prompt: "rewrite-wait".to_owned(),
+                schedule: Schedule {
+                    kind: ScheduleKind::Interval,
+                    every_ms: Some(3_600_000),
+                    time_of_day: None,
+                    weekdays: Vec::new(),
+                    run_at: None,
+                },
+            },
+        )
+        .await
+        .unwrap();
+    thread.run_automation_now(&stopped.id).await.unwrap();
+    wait(&thread, |s| {
+        s.turns.iter().any(|t| t.status == TurnStatus::Running)
+    })
+    .await;
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    thread.stop().await.unwrap();
+    let aborted = tokio::time::timeout(Duration::from_secs(30), async {
+        loop {
+            let changes = host.agent_changes("news-bot").await.unwrap();
+            if changes.len() == 4 {
+                return changes[3].clone();
+            }
+            tokio::time::sleep(Duration::from_millis(200)).await;
+        }
+    })
+    .await
+    .expect("a stopped routine run's change is noticed");
+    assert!(aborted.held, "a routine run that was stopped is held too");
+    assert_eq!(
+        host.agent_instructions("news-bot").await.unwrap(),
+        "# news-bot\n\nRead the feeds twice.\n"
+    );
+    host.agent_routine_remove("news-bot", &stopped.id)
+        .await
+        .unwrap();
+
     let chat = project
         .start(start(
             "Fix the move dialog",
@@ -497,8 +541,12 @@ async fn an_agent_made_by_chat_names_itself_logs_its_changes_and_answers_a_menti
         .await
         .unwrap();
     let answered = wait(&thread, completed(3)).await;
-    assert!(answered.turns[2].prompt.contains("Is main green?"));
-    assert!(answered.turns[2].prompt.contains("t3-context://v1/thread/"));
+    let asked = answered
+        .turns
+        .iter()
+        .find(|turn| turn.prompt.contains("Is main green?"))
+        .expect("the mention is a turn of the agent");
+    assert!(asked.prompt.contains("t3-context://v1/thread/"));
     let mentions = host.agent_mentions(chat.id()).await.unwrap();
     assert_eq!(
         (
