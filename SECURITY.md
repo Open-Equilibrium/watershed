@@ -174,6 +174,14 @@ This is Liquid's **workspace** action history (over Liquid's own data), not a pr
 
 Dependency hygiene: committed lockfiles, exact pins and minimal dependencies; CI runs `cargo audit` (RustSec advisories), `cargo deny` (license/bans/sources/advisory policy via `deny.toml`) and `pnpm audit`. Rust reduces but does not eliminate supply-chain risk (`build.rs`/proc-macros run at build time); future isolated runtimes must limit blast radius regardless of language.
 
+A PR that adds a dependency or moves its pin, a Dependabot PR before its merge included, checks the new version and states the result in the PR:
+
+- the real upstream behind the registry link, not a fork or mirror;
+- advisories in RustSec, GHSA, OSV and the upstream repository's own;
+- that its release line is still supported;
+- maintainer activity: authors, releases, and answers to bugs on our platforms;
+- for a crate that vendors a C library, the same for that library.
+
 Dependabot (`.github/dependabot.yml`) proposes weekly grouped updates for Cargo, pub, npm and GitHub Actions, each release at least three days old. A monthly dependency audit covers what Dependabot and the advisory gates cannot see (ADR-0320):
 
 - toolchains: both `rust-toolchain.toml` files, Flutter in `liquid/app/pubspec.yaml`, `.node-version` and pnpm;
