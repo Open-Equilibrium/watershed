@@ -95,6 +95,7 @@ pub enum BlockKind {
     Whiteboard,
     Calculation,
     Chart,
+    Math,
     Unknown,
 }
 
@@ -108,6 +109,7 @@ impl BlockKind {
             Some("whiteboard") => Self::Whiteboard,
             Some("calculation") => Self::Calculation,
             Some("chart") => Self::Chart,
+            Some("math") => Self::Math,
             _ => Self::Unknown,
         }
     }
@@ -320,6 +322,11 @@ pub(crate) fn code(doc: &AutoCommit, block: &str) -> Option<Code> {
         text: doc.text(&child(doc, &entry, TEXT)?).ok()?,
         language: string(doc, &entry, LANGUAGE).unwrap_or_default(),
     })
+}
+
+pub(crate) fn math(doc: &AutoCommit, block: &str) -> Option<String> {
+    let entry = of_kind(doc, block, BlockKind::Math)?;
+    doc.text(&child(doc, &entry, TEXT)?).ok()
 }
 
 pub(crate) fn media(doc: &AutoCommit, block: &str) -> Option<Media> {

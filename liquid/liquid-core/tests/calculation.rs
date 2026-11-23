@@ -1187,3 +1187,95 @@ fn a_chart_of_a_select_with_many_options_draws_the_ones_in_use() {
         ]
     );
 }
+
+#[test]
+fn a_duplicated_table_keeps_its_formulas_and_overflow_is_an_error() {
+    use liquid_core::{ChartSetup, ChartSource, ChartValue, FieldTotal, Total};
+    let mut home = Home::new();
+    let (table, amount, page) = (home.table.clone(), home.amount.clone(), home.page.clone());
+    let Some(Created::Field(double)) = home
+        .edit(Mutation::AddField {
+            block: table.clone(),
+            place: Place::Last,
+            name: "Double".into(),
+            kind: FieldKind::Formula,
+        })
+        .unwrap()
+        .created
+    else {
+        panic!("a field")
+    };
+    home.edit(Mutation::SetFieldFormula {
+        block: table.clone(),
+        field: double.clone(),
+        formula: format!("{{{amount}}} * 2 + SUM({{{table}.{amount}}})"),
+    })
+    .unwrap();
+    let Some(Created::Block { block: copy, .. }) = home
+        .edit(Mutation::DuplicateTable {
+            page: page.clone(),
+            after: None,
+            table: table.clone(),
+            name: "Expenses copy".into(),
+            tabs: Vec::new(),
+        })
+        .unwrap()
+        .created
+    else {
+        panic!("a copy")
+    };
+    let copied = home.workspace.database(&copy).unwrap().unwrap();
+    let field = copied
+        .fields
+        .iter()
+        .find(|field| field.id == double)
+        .unwrap();
+    assert_eq!(
+        field.formula,
+        format!("{{{amount}}} * 2 + SUM({{{copy}.{amount}}})"),
+        "the copy reads its own column"
+    );
+
+    for row in home
+        .workspace
+        .rows(&table, &query(Vec::new()))
+        .unwrap()
+        .rows
+    {
+        home.edit(Mutation::SetCell {
+            block: table.clone(),
+            row: row.id,
+            field: amount.clone(),
+            value: Cell::Number(1e308),
+        })
+        .unwrap();
+    }
+    let sum = vec![FieldTotal {
+        field: amount.clone(),
+        total: Total::Sum,
+    }];
+    let totals = home.workspace.rows(&table, &query(sum)).unwrap().totals;
+    assert_eq!(totals[0].1.to_string(), "#NUM!");
+    let Some(Created::Block { block: chart, .. }) = home
+        .edit(Mutation::AddChartBlock {
+            page: page.clone(),
+            after: None,
+        })
+        .unwrap()
+        .created
+    else {
+        panic!("a Chart")
+    };
+    home.edit(Mutation::SetChart {
+        page: page.clone(),
+        block: chart.clone(),
+        setup: ChartSetup {
+            source: Some(ChartSource::Table(table)),
+            value: ChartValue::Sum(amount),
+            ..ChartSetup::default()
+        },
+    })
+    .unwrap();
+    let points = home.workspace.chart(&page, &chart).unwrap().unwrap().points;
+    assert!(points.iter().all(|point| point.value.is_finite()));
+}

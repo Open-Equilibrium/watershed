@@ -65,6 +65,10 @@ pub(crate) fn compute(rows: &[Row], totals: &[FieldTotal]) -> Vec<(FieldId, Valu
                     Value::Number(numbers.iter().copied().fold(f64::NEG_INFINITY, f64::max))
                 }
             };
+            let shown = match shown {
+                Value::Number(n) if !n.is_finite() => Value::Error(crate::Failure::Num),
+                shown => shown,
+            };
             (field.clone(), shown)
         })
         .collect()

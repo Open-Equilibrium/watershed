@@ -137,6 +137,11 @@ fn excel_functions_read_references_and_ranges() {
             "TRUETRUEFALSETRUE",
         ),
         ("ROUND(1, 0, 0)", "#VALUE!"),
+        ("SUM(1e308, 1e308)", "#NUM!"),
+        ("PRODUCT(1e200, 1e200)", "#NUM!"),
+        ("1e309", "#NUM!"),
+        ("IF(SUM(1e308, 1e308) > 0, 1, 2)", "#NUM!"),
+        ("MEDIAN(1e308, 1e308)", "1E+308"),
         (
             "ROUND(1.5, 400) & \"|\" & ROUND(123, -400) & \"|\" & ROUND(1E300, 20)",
             "1.5|0|1E+300",

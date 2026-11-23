@@ -26,6 +26,11 @@ bool codeTyped(String text, String before, int caret) =>
     !before.startsWith(codeShortcut) &&
     caret == codeShortcut.length;
 
+const mathShortcut = r'$$';
+
+bool mathTyped(String text, String before, int caret) =>
+    text == mathShortcut && (before.isEmpty || before == r'$') && caret == 2;
+
 const sectionBreak = '---';
 
 (String, BridgeTextStyle)? shortcutTyped(

@@ -237,14 +237,17 @@ class _PowerBarState extends State<PowerBar> {
         case SlashCommand(block: BridgeBlockKind.media):
           final files = await MediaPlatform.pickFiles();
           if (files.isNotEmpty) await addMedia(views, files, after: after);
-        case SlashCommand(block: BridgeBlockKind.code):
+        case SlashCommand(block: final kind?)
+            when kind == BridgeBlockKind.code || kind == BridgeBlockKind.math:
           final added = await views.write(
             change(BridgeMutationKind.addTextBlock),
             const [],
           );
           await views.write(
             mutation(
-              BridgeMutationKind.turnIntoCode,
+              kind == BridgeBlockKind.code
+                  ? BridgeMutationKind.turnIntoCode
+                  : BridgeMutationKind.turnIntoMath,
               page: views.page,
               block: added.block,
             ),

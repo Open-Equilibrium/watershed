@@ -440,18 +440,22 @@ impl Eval<'_> {
     }
 
     fn value(&self, expr: &Expr) -> Value {
-        if !matches!(
+        let value = if !matches!(
             expr,
             Expr::Chain(..) | Expr::Call(..) | Expr::Sign { .. } | Expr::Percent { .. }
         ) {
-            return self.leaf(expr);
+            self.leaf(expr)
+        } else if self.resolver.borrow_mut().enter() {
+            let value = self.leaf(expr);
+            self.resolver.borrow_mut().leave();
+            value
+        } else {
+            Value::Error(Failure::Ref)
+        };
+        match value {
+            Value::Number(n) if !n.is_finite() => Value::Error(Failure::Num),
+            value => value,
         }
-        if !self.resolver.borrow_mut().enter() {
-            return Value::Error(Failure::Ref);
-        }
-        let value = self.leaf(expr);
-        self.resolver.borrow_mut().leave();
-        value
     }
 
     fn leaf(&self, expr: &Expr) -> Value {
@@ -580,7 +584,7 @@ impl Eval<'_> {
                 let middle = numbers.len() / 2;
                 match numbers.len() {
                     0 => return Err(Failure::Num),
-                    len if len % 2 == 0 => n((numbers[middle - 1] + numbers[middle]) / 2.0),
+                    len if len % 2 == 0 => n(numbers[middle - 1] / 2.0 + numbers[middle] / 2.0),
                     _ => n(numbers[middle]),
                 }
             }

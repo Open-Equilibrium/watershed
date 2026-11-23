@@ -199,6 +199,7 @@ enum BridgeBlockKind {
   whiteboard,
   calculation,
   chart,
+  math,
   unknown,
 }
 
@@ -426,6 +427,7 @@ enum BridgeMutationKind {
   setSectionBoundary,
   turnIntoCode,
   turnIntoText,
+  turnIntoMath,
   setCodeLanguage,
   addMediaBlock,
   addWhiteboardBlock,
@@ -545,6 +547,7 @@ enum BridgeQueryKind {
   views,
   text,
   code,
+  math,
   media,
   drawing,
   calculation,
