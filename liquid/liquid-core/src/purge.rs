@@ -5,8 +5,8 @@ use crate::model::{self, NAME, TABLES};
 use crate::store::{Store, Write};
 use crate::workspace::{Recorded, header};
 use crate::{
-    Action, ActionId, Actor, Applied, Document, Error, Operation, Origin, Permission, Purge,
-    Workspace, patch,
+    Action, ActionId, Actor, Applied, Document, Error, Mutation, Operation, Origin, PageId,
+    Permission, Purge, Workspace, patch,
 };
 
 const PAGE: usize = 1_000;
@@ -21,13 +21,18 @@ fn kind(operation: &Operation) -> String {
     }
 }
 
-fn redacted(mut action: Action, gone: &Document, mention: Option<&str>) -> Option<Action> {
+fn redacted(
+    mut action: Action,
+    gone: &Document,
+    mention: Option<&str>,
+    created: bool,
+) -> Option<Action> {
     let touches = action.changes.iter().any(|(document, _)| document == gone);
     let names = mention.is_some_and(|id| {
         matches!(action.operation, Operation::Mutation(_))
             && serde_json::to_string(&action.operation).is_ok_and(|text| text.contains(id))
     });
-    if !touches && !names {
+    if !touches && !names && !created {
         return None;
     }
     action.changes.retain(|(document, _)| document != gone);
@@ -41,6 +46,29 @@ fn redacted(mut action: Action, gone: &Document, mention: Option<&str>) -> Optio
 }
 
 impl<S: Store> Workspace<S> {
+    fn creates(&mut self, action: &Action, page: &PageId) -> Result<bool, Error> {
+        if !matches!(
+            action.operation,
+            Operation::Mutation(Mutation::CreatePage { .. })
+        ) {
+            return Ok(false);
+        }
+        for (document, hash) in &action.changes {
+            let doc = self.doc(document)?;
+            let Some(change) = doc.get_change_by_hash(hash) else {
+                continue;
+            };
+            let deps = change.deps().to_vec();
+            if patch::touched(&doc.diff(&deps, &[*hash]))
+                .iter()
+                .any(|(_, key)| key == page.as_str())
+            {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
+
     pub fn purge(&mut self, actor: &Actor, target: &Purge) -> Result<Applied, Error> {
         self.permit(actor)?;
         let (document, removed) = match target {
@@ -71,9 +99,14 @@ impl<S: Store> Workspace<S> {
         };
         let message = header(&action);
         let mut recorded = Recorded::default();
-        let mention = match (removed, target) {
-            (true, Purge::Table(table)) => Some(table.to_string()),
-            _ => None,
+        let (mention, scanned) = match target {
+            Purge::Table(table) if removed => (Some(table.to_string()), None),
+            Purge::Table(_) => (None, Some(vec![document.clone()])),
+            Purge::Page(page) => {
+                let mut scanned = vec![document.clone()];
+                scanned.extend(self.area_of(page).ok().map(Document::Area));
+                (Some(page.to_string()), Some(scanned))
+            }
         };
         let mut rebuilt = Vec::new();
         let mut touched = Vec::new();
@@ -117,22 +150,21 @@ impl<S: Store> Workspace<S> {
         let mut redact: Vec<Action> = Vec::new();
         let mut before: Option<ActionId> = None;
         loop {
-            let listed = match &mention {
-                Some(_) => self.store.history(before.as_ref(), PAGE)?,
-                None => {
-                    self.store
-                        .history_of(std::slice::from_ref(&document), before.as_ref(), PAGE)?
-                }
+            let listed = match &scanned {
+                None => self.store.history(before.as_ref(), PAGE)?,
+                Some(scanned) => self.store.history_of(scanned, before.as_ref(), PAGE)?,
             };
             let Some(last) = listed.last() else {
                 break;
             };
             before = Some(last.id.clone());
-            redact.extend(
-                listed
-                    .into_iter()
-                    .filter_map(|kept| redacted(kept, &document, mention.as_deref())),
-            );
+            for kept in listed {
+                let created = match target {
+                    Purge::Page(page) => self.creates(&kept, page)?,
+                    Purge::Table(_) => false,
+                };
+                redact.extend(redacted(kept, &document, mention.as_deref(), created));
+            }
         }
         recorded.redact = redact;
         let mut changed = Vec::new();

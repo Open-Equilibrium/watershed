@@ -478,3 +478,43 @@ fn a_version_before_an_undo_restores_from_the_disk() {
         "Ours: Five days in Lisbon"
     );
 }
+
+#[test]
+fn an_upgrade_that_cannot_index_its_actions_is_retried_on_the_next_open() {
+    let scratch = Scratch::new("upgrade");
+    let (workspace, page, _) = lisbon(&scratch.db());
+    drop(workspace);
+    let connection = keyed(&scratch.db());
+    let (seq, record): (i64, String) = connection
+        .query_row(
+            "SELECT seq, record FROM actions ORDER BY seq LIMIT 1",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    connection
+        .execute_batch("DROP TABLE action_documents; PRAGMA user_version = 2;")
+        .unwrap();
+    connection
+        .execute("UPDATE actions SET record = 'torn' WHERE seq = ?1", [seq])
+        .unwrap();
+    drop(connection);
+    assert!(matches!(
+        Sqlite::open(&scratch.db(), &KEY),
+        Err(Error::Storage(_))
+    ));
+
+    keyed(&scratch.db())
+        .execute(
+            "UPDATE actions SET record = ?1 WHERE seq = ?2",
+            rusqlite::params![record, seq],
+        )
+        .unwrap();
+    let mut store = Sqlite::open(&scratch.db(), &KEY).unwrap();
+    assert!(
+        !store
+            .history_of(&[Document::Page(page)], None, 100)
+            .unwrap()
+            .is_empty()
+    );
+}

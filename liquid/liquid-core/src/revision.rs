@@ -531,8 +531,25 @@ impl<S: Store> Workspace<S> {
             at: 0,
         };
         let message = header(&action);
-        let mut recorded = Recorded::default();
         let mut documents = Vec::new();
+        let merged = self
+            .merge_reverts(steps, &message, &mut documents)
+            .and_then(|recorded| self.settle(id, action, &documents, recorded));
+        if merged.is_err() {
+            for document in &documents {
+                self.docs.remove(document);
+            }
+        }
+        merged
+    }
+
+    fn merge_reverts(
+        &mut self,
+        steps: Vec<(Document, ChangeHash)>,
+        message: &str,
+        documents: &mut Vec<Document>,
+    ) -> Result<Recorded, Error> {
+        let mut recorded = Recorded::default();
         for (document, hash) in steps {
             let doc = self.doc(&document)?;
             let deps = doc
@@ -543,7 +560,7 @@ impl<S: Store> Workspace<S> {
             let mut fork = doc.fork_at(&[hash])?;
             let patches = fork.diff(&[hash], &deps);
             patch::apply(&mut fork, patches)?;
-            let options = CommitOptions::default().with_message(message.clone());
+            let options = CommitOptions::default().with_message(message.to_owned());
             let Some(made) = fork.commit_with(options) else {
                 continue;
             };
@@ -552,14 +569,14 @@ impl<S: Store> Workspace<S> {
                 .ok_or(Error::NotFound)?
                 .bytes()
                 .into_owned();
+            documents.push(document.clone());
             doc.merge(&mut fork)?;
-            recorded.merged.push((document.clone(), made, chunk));
-            documents.push(document);
+            recorded.merged.push((document, made, chunk));
         }
         if recorded.merged.is_empty() {
             return Err(Error::NoChange);
         }
-        self.settle(id, action, &documents, recorded)
+        Ok(recorded)
     }
 
     fn settle(

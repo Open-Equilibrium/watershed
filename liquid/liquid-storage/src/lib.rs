@@ -84,7 +84,7 @@ fn held() -> Error {
 
 impl Sqlite {
     pub fn open(path: &Path, key: &[u8; 32]) -> Result<Self, Error> {
-        let connection = Connection::open(path).map_err(failed)?;
+        let mut connection = Connection::open(path).map_err(failed)?;
         let mut hex = String::with_capacity(64);
         for byte in key {
             let _ = write!(hex, "{byte:02x}");
@@ -129,35 +129,38 @@ impl Sqlite {
                 )));
             }
         };
-        connection
+        let transaction = connection.transaction().map_err(failed)?;
+        transaction
             .execute_batch(&format!(
-                "BEGIN; {create} {DEVICE} PRAGMA user_version = {VERSION}; \
-                 DELETE FROM parts WHERE upload NOT IN (SELECT upload FROM attachments); COMMIT;"
+                "{create} {DEVICE} \
+                 DELETE FROM parts WHERE upload NOT IN (SELECT upload FROM attachments);"
             ))
             .map_err(failed)?;
-        let mut sqlite = Self { connection };
         if (1..VERSION).contains(&version) {
-            sqlite.index_actions()?;
+            index_actions(&transaction)?;
         }
-        Ok(sqlite)
-    }
-
-    fn index_actions(&mut self) -> Result<(), Error> {
-        let transaction = self.connection.transaction().map_err(failed)?;
-        let actions: Vec<(i64, String)> = transaction
-            .prepare("SELECT seq, record FROM actions")
-            .and_then(|mut query| {
-                query
-                    .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
-                    .collect()
-            })
+        transaction
+            .execute_batch(&format!("PRAGMA user_version = {VERSION};"))
             .map_err(failed)?;
-        for (seq, record) in actions {
-            let action: Action = serde_json::from_str(&record).map_err(failed)?;
-            index_documents(&transaction, seq, &action)?;
-        }
-        transaction.commit().map_err(failed)
+        transaction.commit().map_err(failed)?;
+        Ok(Self { connection })
     }
+}
+
+fn index_actions(transaction: &rusqlite::Transaction<'_>) -> Result<(), Error> {
+    let actions: Vec<(i64, String)> = transaction
+        .prepare("SELECT seq, record FROM actions")
+        .and_then(|mut query| {
+            query
+                .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+                .collect()
+        })
+        .map_err(failed)?;
+    for (seq, record) in actions {
+        let action: Action = serde_json::from_str(&record).map_err(failed)?;
+        index_documents(transaction, seq, &action)?;
+    }
+    Ok(())
 }
 
 fn index_documents(

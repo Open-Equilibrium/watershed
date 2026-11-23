@@ -694,3 +694,56 @@ fn a_run_whose_later_step_fails_leaves_no_row_of_an_earlier_one() {
         .unwrap();
     assert_eq!(rows.count, 1);
 }
+
+#[test]
+fn an_undo_the_store_refuses_leaves_the_text_as_it_was() {
+    let owner = Actor::Person(PersonId::new("benni"));
+    let mut workspace = Workspace::create(PersonId::new("benni"), Flaky::default()).unwrap();
+    let mut apply = |mutation| {
+        workspace
+            .apply(Request {
+                actor: owner.clone(),
+                origin: Origin::Ui,
+                mutation,
+            })
+            .unwrap()
+            .created
+    };
+    let Some(Created::Area(area)) = apply(Mutation::CreateArea {
+        name: "Trips".into(),
+    }) else {
+        panic!("an area")
+    };
+    let Some(Created::Page(page)) = apply(Mutation::CreatePage {
+        area,
+        parent: None,
+        title: "Lisbon".into(),
+    }) else {
+        panic!("a Page")
+    };
+    let Some(Created::Block { block, .. }) = apply(Mutation::AddTextBlock {
+        page: page.clone(),
+        after: None,
+        text: "Five days".into(),
+    }) else {
+        panic!("a Block")
+    };
+    apply(Mutation::EditText {
+        page: page.clone(),
+        block: block.clone(),
+        at: 0,
+        delete: 0,
+        insert: "Our ".into(),
+    });
+
+    workspace.store.failing = true;
+    let owner = Actor::Person(PersonId::new("benni"));
+    assert_eq!(
+        workspace.undo(&owner).unwrap_err(),
+        Error::Storage("disk full".into())
+    );
+    assert_eq!(
+        workspace.text(&page, &block).unwrap().unwrap(),
+        "Our Five days"
+    );
+}

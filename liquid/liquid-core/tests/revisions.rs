@@ -352,6 +352,14 @@ fn deleting_earlier_versions_keeps_the_page_and_drops_what_only_they_held() {
         delete: 7,
         insert: "Rent".into(),
     });
+    budget.edit(Mutation::RenamePage {
+        page: budget.page.clone(),
+        title: "Severance for Ana".into(),
+    });
+    budget.edit(Mutation::RenamePage {
+        page: budget.page.clone(),
+        title: "Monthly costs".into(),
+    });
     let purged = budget
         .workspace
         .purge(&owner(), &Purge::Page(budget.page.clone()))
@@ -359,6 +367,7 @@ fn deleting_earlier_versions_keeps_the_page_and_drops_what_only_they_held() {
     assert_eq!(budget.text(), "Rent");
     let records = serde_json::to_string(&budget.workspace.history(None, 100).unwrap()).unwrap();
     assert!(!records.contains("hunter2"));
+    assert!(!records.contains("Severance") && !records.contains("Household"));
     assert_eq!(
         budget
             .workspace
@@ -370,7 +379,7 @@ fn deleting_earlier_versions_keeps_the_page_and_drops_what_only_they_held() {
     assert_eq!(entries[0].actions, [purged.action]);
     assert_eq!(
         entries[0].title,
-        "Deleted the earlier versions of “Household budget”"
+        "Deleted the earlier versions of “Monthly costs”"
     );
     assert!(
         entries
