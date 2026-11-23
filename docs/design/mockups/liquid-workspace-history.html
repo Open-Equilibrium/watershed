@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en"><head><title>Liquid: Workspace History and Workspace settings mockups</title>
+<html lang="en"><head><title>Liquid: Workspace settings mockups</title>
 <link rel="stylesheet" href="mockup.css"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <style>
 .dlg{width:540px;box-sizing:border-box;border-radius:12px;background:var(--ws-surface);box-shadow:var(--ws-shadow);padding:16px;display:flex;flex-direction:column;gap:12px;font-size:13px;line-height:20px}
@@ -67,50 +67,24 @@
     <div>Size <span class="seg" id="size"><button data-v="fit" class="on">Fit</button><button data-v="full">100 %</button></span></div>
   </div>
   <section>
-    <h1>Liquid Workspace: History and Workspace settings</h1>
-    <p class="sub">Mockups for the M3a slice in <a href="../../../PLAN.md#m3a--local-workspace-foundation">PLAN.md</a>, approved by the maintainer on 2026-11-01: one History over the Workspace, revert and Restore version, and Workspace settings. Roles and protected Tables are built; the <a href="../../concept/V-Spec_Liquid.html#permissions">V-Spec</a> holds their rules. They follow the <a href="../../concept/V-Spec_Liquid.html#history">V-Spec</a>, ADR-0235 and <a href="../guidelines.md">guidelines.md</a>; the shell is the one in the <a href="liquid-workspace-pages.html">Pages mockups</a>.</p>
+    <h1>Liquid Workspace: Workspace settings</h1>
+    <p class="sub">Mockups for the M3a slice in <a href="../../../PLAN.md#m3a--local-workspace-foundation">PLAN.md</a>, approved by the maintainer on 2026-11-01: Workspace settings. History, revert, Restore version, deleting for good, Roles and protected Tables are built; the <a href="../../concept/V-Spec_Liquid.html#history">V-Spec</a> holds their rules. They follow the <a href="../../concept/V-Spec_Liquid.html#history">V-Spec</a>, ADR-0235 and <a href="../guidelines.md">guidelines.md</a>; the shell is the one in the <a href="liquid-workspace-pages.html">Pages mockups</a>.</p>
     <p class="sub"><b>Revised by ADR-0239 and ADR-0241:</b> the rail with the Workspace switcher, Inbox and Settings, tabs side by side, Chats in place of agent sessions and Notion's scale are in <a href="liquid-app-concept.html">the app's structure</a>; this file keeps its slice's content, and the shell is redrawn as each slice is built.</p>
   </section>
   <section>
-    <h3 class="sec">1 · History</h3>
-    <p class="sub">"History" at the Explorer's foot opens a dialog over the current Page or Source; closing it shows that Page again. It lists every Action of the Workspace, newest first: who made it, from where, and what it changed. Filters narrow it to a Page or Block, an actor or an origin; "Page history" and "Block history" open it already filtered. Typing is grouped into one entry per pause. ⌘Z reverts your last Action and appears as an Undo entry. The selected entry shows each object it changed and a preview of the change.</p>
-    <div class="stage"><div class="scaler"><div class="win" id="w-hist" data-w="1240"></div></div></div>
-  </section>
-  <section>
-    <h3 class="sec">2 · Revert</h3>
-    <p class="sub">Revert records a new Action that undoes the selected one, as <code>git revert</code> does; the original stays in History (ADR-0235). Reverting the deletion brings back the Block, its Views, Connections and Automation, and turns the Workspace Automation on again.</p>
-    <div class="stage"><div class="scaler"><div class="win bare" id="w-rev" data-w="1240"></div></div></div>
-  </section>
-  <section>
-    <h3 class="sec">3 · Restore version</h3>
-    <p class="sub">The clock in the Page header opens "Page history" as a dialog, as Notion does. It shows the Page's versions: save points, plus one before each change made by an Automation or by someone else. Choosing one previews the Page as it was, with what changed since marked. Restore version returns the whole Page, also when later changes block a revert, and is itself one Action. A Block that other Pages show changes there too, and the banner says so.</p>
-    <div class="stage"><div class="scaler"><div class="win" id="w-ver" data-w="1240"></div></div></div>
-  </section>
-  <section>
-    <h3 class="sec">3b · Deleting for good</h3>
-    <p class="sub">Until now History keeps every text ever written, deleted text included (ADR-0250). "Delete earlier versions…" in Page history's menu, and in a Table's menu, keeps the Page or Table as it is now and removes everything only its earlier versions hold, from this device, for good. A deleted Table's History entry offers "Delete for good…". Both need Manage on what they delete, ask first and say what can no longer be brought back; their own History entry stays, without content, and can never be deleted itself. Retention rules and legal holds that keep content a company must keep follow with sync, on the Sync Server. History keeps that the changes happened, without what they were: their entries say "content deleted for good" and cannot be reverted, and a purged Table shows as "a deleted Table". Nothing syncs yet, so this covers the one device; with sync it needs its own design (client architecture, risk "Purge").</p>
-    <div class="stage"><div class="scaler"><div class="win bare" id="w-purge" data-w="1240"></div></div></div>
-    <div class="stage" style="margin-top:16px"><div class="scaler"><div class="win" id="w-purged" data-w="1240"></div></div></div>
-  </section>
-  <section>
-    <h3 class="sec">4 · Workspace settings</h3>
+    <h3 class="sec">1 · Workspace settings</h3>
     <p class="sub">The Settings dialog keeps the approved App sections and adds a Workspace group: General, with the name and the areas, beside the built Roles section. Each area's menu in the Explorer also renames it.</p>
     <div class="stage"><div class="scaler"><div class="win" id="w-set" data-w="1240"></div></div></div>
   </section>
   <section>
     <h3 class="sec">Decisions</h3>
-    <h4 class="qh">Decided (ADR-0235)</h4>
-    <ol class="qs">
-      <li>History is a sequence of Actions plus save points; Revert records a new reversing Action; Restore version returns a Page to an earlier point, also when later changes conflict; ⌘Z appears as Undo.</li>
-    </ol>
     <h4 class="qh">Approved with these mockups (2026-11-01)</h4>
     <ol class="qs">
-      <li>History is a list with a detail pane, like the Diff panel; typing groups into one entry per pause of a few seconds.</li>
       <li>Workspace settings: General with name and areas.</li>
     </ol>
     <h4 class="qh">Added on request, approved the same day</h4>
     <ol class="qs">
-      <li>History, Page history and Settings open as dialogs over the current Page or Source; closing one shows it again. Settings sits at the Explorer's foot beside Automations and History. This replaces the approved Settings page that took over the main area.</li>
+      <li>Settings opens as a dialog over the current Page or Source, as History does; closing it shows the Page again. This replaces the Settings page that takes over the main area.</li>
     </ol>
   </section>
 </div>
@@ -181,100 +155,6 @@ area:sv('<rect x="2" y="3" width="12" height="10" rx="1.5"/><path d="M2 6.5h12"/
 });
 const bgPage=`<div class="pg"><div class="col"><div class="ttl"><span class="tic">💰</span>Household budget</div><div class="prose"><p>October is almost done.</p></div>${dbHead({synced:true})}${dbTable()}</div></div>`;
 const bgHead=head('Private <span>›</span> <b>💰 Household budget</b>');
-const he=(t,title,meta,on)=>`<div class="he ${on?'on':''}"><span class="t">${t}</span><span>${title}</span><span class="m">${meta}</span></div>`;
-const you='<span class="av" style="width:16px;height:16px;font-size:10px;border-radius:3px">B</span>You';
-const auto=`<span style="color:var(--ws-data-2)">${I.zap}</span>Flag large expenses`;
-const hlist=`<div class="hl"><div class="flt"><span class="sel">All Pages<span class="c">⌄</span></span><span class="sel">Anyone<span class="c">⌄</span></span><span class="sel">Any origin<span class="c">⌄</span></span></div>
-<div style="overflow:hidden;flex:1;-webkit-mask-image:linear-gradient(to top,transparent 0,#000 40px);mask-image:linear-gradient(to top,transparent 0,#000 40px)">
-<div class="hday">Today</div>
-${he('11:02','Deleted Block “Expenses”',`${you}<span>·</span><span class="org">App</span><span>Household budget · 4 dependents</span>`,1)}
-${he('10:50','Changed Category of “Rent” to Home',`${you}<span>·</span><span class="org">App</span><span>Expenses</span>`)}
-${he('10:42','Set Category of “Rent” to Review',`${auto}<span>·</span><span class="org auto">Automation</span><span>as Budget editor</span>`)}
-${he('10:41','Added a row to Expenses',`${you}<span>·</span><span class="org">App</span><span>Household budget</span>`)}
-${he('10:30','Edited text',`${you}<span>·</span><span class="org">App</span><span>Household budget · 3 paragraphs</span>`)}
-${he('10:12',`<span style="display:inline-flex;gap:6px;align-items:center">${I.undo}Undo: Moved Chart above Expenses</span>`,`${you}<span>·</span><span class="org">App</span><span>⌘Z</span>`)}
-<div class="hday">Yesterday</div>
-${he('18:05','Created Page “Monthly review” from Budget',`${you}<span>·</span><span class="org">App</span>`)}
-${he('17:50','Protected Block “Expenses”',`${you}<span>·</span><span class="org">App</span>`)}
-</div></div>`;
-const hdetail=`<div class="hd2"><div style="display:flex;align-items:center;gap:10px"><h2>Deleted Block “Expenses”</h2><span style="margin-left:auto" class="btn">${I.undo}Revert…</span></div>
-<div class="kv"><span class="l">By</span><span>You, in the app</span><span class="l">When</span><span>Today 11:02</span><span class="l">Allowed by</span><span>Can manage in Private</span></div>
-<div class="chg">
-<div><span class="d">−</span>${I.db}Expenses<span class="r">Database Block, 5 rows</span></div>
-<div><span class="d">−</span>${I.page}View on Household budget<span class="r">its last View</span></div>
-<div><span class="d">−</span>${I.link}Connection to Spending by category<span class="r">Chart</span></div>
-<div><span class="d">−</span>${I.link}Connection to Left this month<span class="r">Calculation</span></div>
-<div><span class="d">−</span>${I.zap}Flag large expenses<span class="r">its own Automation</span></div>
-<div><span class="w">⚠</span>${I.zap}Monthly summary<span class="r">turned off</span></div></div>
-<div class="cap">Before</div>
-<div class="tbl" style="--cols:96px 1fr 120px 110px"><div class="tr hd"><span>Date</span><span>Item</span><span>Category</span><span class="num">Amount</span></div>
-${rows.slice(0,4).map(r=>`<div class="tr gone"><span>${r[0]}</span><span>${r[1]}</span><span>${r[2]}</span><span class="num">€ ${r[4]}</span></div>`).join('')}</div></div>`;
-frame('w-hist',{h:700,side:{sel:'hist',att:true},head:bgHead,main:bgPage,over:modal('History',`<div class="hist">${hlist}${hdetail}</div>`,{w:1060,right:`<span class="ib">${I.srch}</span>`})});
-
-// 2 · Revert
-const revDlg=`<div class="dlg" style="flex:none"><h4>Revert “Deleted Block Expenses”?</h4>
-<p>This adds a new Action that brings back what the deletion removed. The deletion stays in History.</p>
-<div class="flist">
-<div class="frow"><span class="ico">${I.db}</span>Expenses with 5 rows<span class="r">on Household budget</span></div>
-<div class="frow"><span class="ico">${I.link}</span>2 Connections<span class="r">Chart, Calculation</span></div>
-<div class="frow"><span class="ico">${I.zap}</span>Flag large expenses<span class="r">its own Automation</span></div>
-<div class="frow"><span class="ico">${I.zap}</span>Monthly summary<span class="r">turned on again</span></div></div>
-<div class="acts"><span class="btn pri">Revert <kbd>⏎</kbd></span><span class="sp"></span><span class="btn">Cancel <kbd>esc</kbd></span></div></div>`;
-const confDlg=`<div class="dlg" style="flex:none"><h4>Revert “Set Category of Rent to Review”?</h4>
-<p>It cannot be reverted cleanly: a later change touched the same field.</p>
-<div class="flist"><div class="frow"><span class="ico">${I.db}</span>Category of “Rent”<span class="r">changed by you at 10:50</span></div></div>
-<p>Restore version returns Household budget to how it was before 10:42; your change at 10:50 is undone too, and stays in History.</p>
-<div class="acts"><span class="btn pri">Restore version…</span><span class="btn">Show the later change</span><span class="sp"></span><span class="btn">Cancel <kbd>esc</kbd></span></div></div>`;
-document.getElementById('w-rev').innerHTML=`<div style="display:flex;gap:40px;align-items:flex-start">${revDlg}${confDlg}</div>`;
-
-// 3 · Restore version
-const vlist=`<div class="vers"><h5>Versions of Household budget</h5>
-<div class="vr">Today 10:50<span>You</span></div>
-<div class="vr">Today 10:42<span>Flag large expenses · Automation</span></div>
-<div class="vr">Today 10:41<span>You</span></div>
-<div class="vr on">Today 09:15<span>Save point</span></div>
-<div class="vr">Yesterday 18:05<span>You</span></div>
-<div class="vr">30 Oct<span>Save point</span></div></div>`;
-frame('w-ver',{h:660,head:bgHead,main:bgPage,over:modal('Page history <span style="font-weight:400;color:var(--ws-text-muted)">· 💰 Household budget</span>',`<div style="flex:1;display:flex;flex-direction:column;min-width:0"><div class="vban">Version from today 09:15 · read-only<span class="end"><span class="btn pri">Restore version</span></span></div>
-<div style="display:flex;flex:1;min-height:0"><div class="pg"><div class="col" style="width:600px">
-<div class="ttl"><span class="tic">💰</span>Household budget</div>
-<div class="prose"><p>October is almost done. Rent is the largest share, as every month<span class="mark-del">; the trip to Porto stayed under € 50</span>.</p></div>
-<div class="notice" style="padding:8px 10px;border-radius:6px;background:var(--ws-warning-subtle);color:var(--ws-warning);font-size:13px">Expenses is also on Monthly review; restoring changes it there too.</div>
-${dbHead({synced:true})}<div class="tbl" style="--cols:96px 1fr 120px 110px"><div class="tr hd"><span>Date</span><span>Item</span><span>Category</span><span class="num">Amount</span></div>
-<div class="tr gone"><span>1 Nov</span><span>Groceries</span><span>Food</span><span class="num">€ 84.20</span></div>
-${rows.slice(1,4).map(r=>`<div class="tr"><span>${r[0]}</span><span>${r[1]}</span><span><span class="tag ${r[3]}">${r[2]}</span></span><span class="num">€ ${r[4]}</span></div>`).join('')}</div>
-<div class="cap">Struck through: added since this version; restoring removes it.</div>
-</div></div>${vlist}</div></div>`,{w:1080})});
-
-// 3b · Deleting for good
-const purgeVer=`<div class="dlg" style="flex:none"><h4>Delete the earlier versions of “Household budget”?</h4>
-<p>The Page stays as it is now. Its earlier versions, and everything only they still hold, such as deleted text, leave this device for good.</p>
-<div class="flist">
-<div class="frow"><span class="ico">${I.clock}</span>6 versions, back to 30 Oct<span class="r">removed</span></div>
-<div class="frow"><span class="ico">${I.undo}</span>14 History entries<span class="r">kept, without their content</span></div>
-<div class="frow"><span class="ico">${I.db}</span>Expenses<span class="r">keeps its versions; delete them in its menu</span></div></div>
-<p>None of these changes can be reverted afterwards, and Restore version starts from now.</p>
-<div class="acts"><span class="btn dngp">Delete earlier versions</span><span class="sp"></span><span class="btn">Cancel <kbd>esc</kbd></span></div></div>`;
-const purgeTable=`<div class="dlg" style="flex:none"><h4>Delete “Bills” for good?</h4>
-<p>The Table was deleted today at 11:02. Its 12 rows and every earlier version of it leave this device for good.</p>
-<div class="flist">
-<div class="frow"><span class="ico">${I.undo}</span>Deleted Table “Bills”<span class="r">can no longer be reverted</span></div>
-<div class="frow"><span class="ico">${I.undo}</span>23 earlier History entries<span class="r">kept, as “a deleted Table”</span></div></div>
-<div class="acts"><span class="btn dngp">Delete for good</span><span class="sp"></span><span class="btn">Cancel <kbd>esc</kbd></span></div></div>`;
-document.getElementById('w-purge').innerHTML=`<div style="display:flex;gap:40px;align-items:flex-start">${purgeVer}${purgeTable}</div>`;
-const purgedList=`<div class="hl"><div class="flt"><span class="sel">All Pages<span class="c">⌄</span></span><span class="sel">Anyone<span class="c">⌄</span></span><span class="sel">Any origin<span class="c">⌄</span></span></div>
-<div style="overflow:hidden;flex:1">
-<div class="hday">Today</div>
-${he('11:20','Deleted the earlier versions of “Household budget”',`${you}<span>·</span><span class="org">App</span>`,1)}
-${he('11:02','Deleted a Table for good',`${you}<span>·</span><span class="org">App</span>`)}
-${he('10:30','<span style="color:var(--ws-text-faint)">Edited text · content deleted for good</span>',`${you}<span>·</span><span class="org">App</span><span>Household budget</span>`)}
-${he('10:12','<span style="color:var(--ws-text-faint)">Changed a deleted Table</span>',`${you}<span>·</span><span class="org">App</span>`)}
-</div></div>`;
-const purgedDetail=`<div class="hd2"><div style="display:flex;align-items:center;gap:10px"><h2>Edited text</h2><span style="margin-left:auto;opacity:.45" class="btn">${I.undo}Revert…</span></div>
-<div class="kv"><span class="l">By</span><span>You, in the app</span><span class="l">When</span><span>Today 10:30</span></div>
-<div class="cap">Its content was deleted for good at 11:20 with the earlier versions of Household budget, so it cannot be reverted.</div></div>`;
-frame('w-purged',{h:420,side:{sel:'hist'},head:bgHead,main:bgPage,over:modal('History',`<div class="hist">${purgedList}${purgedDetail}</div>`,{w:1060})});
-
 const snav=(on)=>`<div class="snav"><div class="h">App</div><div class="it">Appearance</div><div class="it">Shortcuts</div><div class="it">Diff</div><div class="h">Workspace</div><div class="it ${on=='gen'?'on':''}">General</div><div class="it ${on=='roles'?'on':''}">Roles</div></div>`;
 // 4 · Settings
 frame('w-set',{h:540,side:{sel:'set'},head:bgHead,main:bgPage,over:modal('Settings',`<div class="sett">${snav('gen')}<div class="sc"><h2>General</h2>
