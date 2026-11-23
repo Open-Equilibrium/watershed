@@ -15,7 +15,7 @@ import 'slash_commands.dart';
 import 'table_pickers.dart';
 import '../rust/api/source.dart';
 import 'page_icon.dart';
-import 'source_page.dart' show sourceIcon;
+import 'source_kind.dart' show sourceIcon;
 import 'workspace_state.dart';
 
 const _width = 560.0;
