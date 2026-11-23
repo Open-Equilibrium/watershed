@@ -151,6 +151,19 @@ impl<S: Store> Workspace<S> {
 
     pub fn purge(&mut self, actor: &Actor, target: &Purge) -> Result<Applied, Error> {
         self.permit(actor)?;
+        let purged = self.purging(actor, target);
+        if purged.is_err() {
+            self.rollback();
+            let document = match target {
+                Purge::Page(page) => Document::Page(page.clone()),
+                Purge::Table(table) => Document::Table(table.clone()),
+            };
+            self.docs.remove(&document);
+        }
+        purged
+    }
+
+    fn purging(&mut self, actor: &Actor, target: &Purge) -> Result<Applied, Error> {
         let (document, removed) = match target {
             Purge::Page(page) => {
                 self.doc(&Document::Page(page.clone()))?;

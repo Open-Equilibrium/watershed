@@ -1,8 +1,9 @@
 use std::collections::{HashMap, HashSet};
 
-use automerge::ChangeHash;
 use automerge::transaction::CommitOptions;
+use automerge::{AutoCommit, ChangeHash, ObjId, ROOT, ReadDoc, Value};
 
+use crate::model;
 use crate::order::Order;
 use crate::store::Store;
 use crate::workspace::{Recorded, header, page_entry, table_entry};
@@ -143,7 +144,34 @@ fn purged_title(kind: &str) -> &'static str {
     }
 }
 
+fn deleted_views(doc: &AutoCommit, at: &[ChangeHash], tables: &HashSet<String>) -> HashSet<ObjId> {
+    let Ok(Some((Value::Object(_), views))) = doc.get_at(&ROOT, model::VIEWS, at) else {
+        return HashSet::new();
+    };
+    doc.map_range_at(&views, .., at)
+        .filter(|item| {
+            matches!(
+                doc.get_at(item.id(), model::TABLE, at),
+                Ok(Some((Value::Scalar(table), _))) if table.as_str().is_some_and(|table| tables.contains(table))
+            )
+        })
+        .map(|item| item.id())
+        .collect()
+}
+
 impl<S: Store> Workspace<S> {
+    fn deleted_tables(&mut self) -> Result<HashSet<String>, Error> {
+        let workspace = self.doc(&Document::Workspace)?;
+        let Some(map) = model::child(workspace, &ROOT, model::TABLES) else {
+            return Ok(HashSet::new());
+        };
+        Ok(workspace
+            .map_range(&map, ..)
+            .map(|item| item.key.to_string())
+            .filter(|key| model::live_in(workspace, &map, key).is_none())
+            .collect())
+    }
+
     fn page_titles(&mut self) -> Result<HashMap<PageId, String>, Error> {
         let mut titles = HashMap::new();
         for area in self.areas()? {
@@ -912,6 +940,7 @@ impl<S: Store> Workspace<S> {
                 return Err(Error::Purged);
             }
         }
+        let deleted = self.deleted_tables()?;
         let mut touched = Vec::new();
         for (document, target) in targets {
             let doc = self.doc(&document)?;
@@ -919,7 +948,15 @@ impl<S: Store> Workspace<S> {
             if current == target {
                 continue;
             }
-            let patches = doc.diff(&current, &target);
+            let hidden = match document {
+                Document::Page(_) => deleted_views(doc, &target, &deleted),
+                _ => HashSet::new(),
+            };
+            let patches = doc
+                .diff(&current, &target)
+                .into_iter()
+                .filter(|patch| !hidden.contains(&patch.obj))
+                .collect();
             if let Err(error) = patch::apply(doc, patches) {
                 self.rollback();
                 return Err(error);
@@ -984,6 +1021,7 @@ impl<S: Store> Workspace<S> {
         documents.extend(self.page_documents_at(page, to)?);
         let targets: HashMap<Document, Vec<ChangeHash>> =
             self.heads_at(&documents, to)?.into_iter().collect();
+        let deleted = self.deleted_tables()?;
         let mut saved = Vec::new();
         for document in documents {
             let Ok(doc) = self.doc(&document) else {
@@ -995,7 +1033,14 @@ impl<S: Store> Workspace<S> {
                         .iter()
                         .all(|hash| doc.get_change_by_hash(hash).is_some()) =>
                 {
-                    doc.fork_at(heads)?.save()
+                    let mut then = doc.fork_at(heads)?;
+                    if let Document::Page(_) = document {
+                        let at = then.get_heads();
+                        for view in deleted_views(&then, &at, &deleted) {
+                            model::mark_deleted(&mut then, &view)?;
+                        }
+                    }
+                    then.save()
                 }
                 _ => doc.save(),
             };

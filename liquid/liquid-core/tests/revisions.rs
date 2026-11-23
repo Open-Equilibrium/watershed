@@ -733,3 +733,32 @@ fn deleting_earlier_versions_drops_the_files_only_they_still_showed() {
     assert_eq!(budget.workspace.attachment_size(&gone).unwrap(), None);
     assert!(budget.workspace.attachment_size(&kept).unwrap().is_some());
 }
+
+#[test]
+fn restore_version_leaves_a_table_deleted_since_to_its_own_revert() {
+    let mut budget = Budget::new();
+    let rent = budget.row();
+    let point = budget.set(&rent, 950.0);
+    budget.typed(0, "October");
+    let deleted = budget
+        .edit(Mutation::DeleteTable {
+            block: budget.table.clone(),
+        })
+        .action;
+    let page = budget.page.clone();
+    let tables = |workspace: &mut Workspace| {
+        workspace
+            .views(&page, 0, usize::MAX)
+            .unwrap()
+            .into_iter()
+            .filter(|view| view.kind == liquid_core::BlockKind::Database)
+            .count()
+    };
+    let mut preview = budget.workspace.preview(&page, &point).unwrap();
+    assert_eq!(tables(&mut preview), 0);
+    budget.workspace.restore(&owner(), &page, &point).unwrap();
+    assert_eq!(budget.text(), "");
+    assert_eq!(tables(&mut budget.workspace), 0);
+    budget.workspace.revert(&owner(), &[deleted]).unwrap();
+    assert_eq!(tables(&mut budget.workspace), 1);
+}
