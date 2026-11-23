@@ -253,19 +253,21 @@ impl Store for Sqlite {
             .map_err(failed)?;
         let seq = transaction.last_insert_rowid();
         index_documents(&transaction, seq, commit.action)?;
-        transaction.commit().map_err(failed)?;
         let erased = !commit.redact.is_empty()
             || commit
                 .writes
                 .iter()
                 .any(|write| matches!(write, Write::Remove { .. }));
         if erased {
-            self.connection
+            transaction
                 .execute("INSERT INTO search(search) VALUES('optimize')", [])
                 .map_err(failed)?;
+        }
+        transaction.commit().map_err(failed)?;
+        if erased {
             self.connection
                 .query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |_| Ok(()))
-                .map_err(failed)?;
+                .ok();
         }
         Ok(())
     }

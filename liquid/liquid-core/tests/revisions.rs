@@ -617,3 +617,30 @@ fn after_deleting_earlier_versions_undo_passes_over_a_restore_it_cannot_take_bac
         .unwrap();
     assert!(!entry.revertable);
 }
+
+#[test]
+fn a_version_brings_back_a_table_the_page_showed_then_as_it_was() {
+    let mut budget = Budget::new();
+    let rent = budget.row();
+    let point = budget.set(&rent, 950.0);
+    let page = budget.page.clone();
+    let shown = budget
+        .workspace
+        .views(&page, 0, usize::MAX)
+        .unwrap()
+        .into_iter()
+        .find(|view| view.block == budget.table)
+        .unwrap();
+    budget.edit(Mutation::RemoveView {
+        page: page.clone(),
+        view: shown.id,
+    });
+    budget.set(&rent, 900.0);
+
+    let mut preview = budget.workspace.preview(&page, &point).unwrap();
+    std::mem::swap(&mut budget.workspace, &mut preview);
+    assert_eq!(budget.amounts(), [Cell::Number(950.0)]);
+    std::mem::swap(&mut budget.workspace, &mut preview);
+    budget.workspace.restore(&owner(), &page, &point).unwrap();
+    assert_eq!(budget.amounts(), [Cell::Number(950.0)]);
+}

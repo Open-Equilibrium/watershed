@@ -3,6 +3,7 @@ use std::collections::{HashMap, HashSet};
 use automerge::ChangeHash;
 use automerge::transaction::CommitOptions;
 
+use crate::order::Order;
 use crate::store::Store;
 use crate::workspace::{Recorded, header, page_entry, table_entry};
 use crate::{
@@ -447,6 +448,39 @@ impl<S: Store> Workspace<S> {
         Ok(documents)
     }
 
+    fn page_documents_at(&mut self, page: &PageId, to: &ActionId) -> Result<Vec<Document>, Error> {
+        let mut documents = self.page_documents(page)?;
+        let mut reaching = documents.clone();
+        for action in self.actions(std::slice::from_ref(to))? {
+            for (document, _) in action.changes {
+                if !reaching.contains(&document) {
+                    reaching.push(document);
+                }
+            }
+        }
+        let shown = Document::Page(page.clone());
+        let heads = self
+            .heads_at(&reaching, to)?
+            .into_iter()
+            .find_map(|(document, heads)| (document == shown).then_some(heads));
+        let doc = self.doc(&shown)?;
+        let Some(heads) = heads.filter(|heads| {
+            heads
+                .iter()
+                .all(|hash| doc.get_change_by_hash(hash).is_some())
+        }) else {
+            return Ok(documents);
+        };
+        let then = doc.fork_at(&heads)?;
+        for view in Order::read(&then).window(0, usize::MAX) {
+            let table = Document::Table(view.block);
+            if view.kind == BlockKind::Database && !documents.contains(&table) {
+                documents.push(table);
+            }
+        }
+        Ok(documents)
+    }
+
     fn reaching(&mut self, ids: &[ActionId]) -> Result<Vec<Action>, Error> {
         let mut all: Vec<Action> = Vec::new();
         let mut missing: HashSet<&ActionId> = ids.iter().collect();
@@ -854,7 +888,7 @@ impl<S: Store> Workspace<S> {
         to: &ActionId,
     ) -> Result<Applied, Error> {
         self.permit(actor)?;
-        let documents = self.page_documents(page)?;
+        let documents = self.page_documents_at(page, to)?;
         let targets = self.heads_at(&documents, to)?;
         for (document, target) in &targets {
             let doc = self.doc(document)?;
@@ -904,11 +938,10 @@ impl<S: Store> Workspace<S> {
                 loaded.databases.clear();
             }
         }
-        self.record(action, &touched, Vec::new(), Vec::new())?;
         for document in &touched {
             self.changes_of(document, &mut changed, &mut index)?;
         }
-        self.store.index(&index, None)?;
+        self.record(action, &touched, Vec::new(), index)?;
         changed.dedup();
         Ok(Applied {
             action: id,
@@ -935,7 +968,7 @@ impl<S: Store> Workspace<S> {
         for area in self.areas()? {
             documents.push(Document::Area(area.id));
         }
-        documents.extend(self.page_documents(page)?);
+        documents.extend(self.page_documents_at(page, to)?);
         let targets: HashMap<Document, Vec<ChangeHash>> =
             self.heads_at(&documents, to)?.into_iter().collect();
         let mut saved = Vec::new();
