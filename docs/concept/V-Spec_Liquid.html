@@ -319,7 +319,7 @@ integrations
       <pre><code>request → validate → effective permission → diff/proposal
         → apply atomically → record Action → emit event</code></pre>
       <p>UI, Liquid AI, CLI/API, App, Automation, import and sync all use this path. The CLI/API exposes small typed operations rather than one unrestricted document interface; final syntax remains <a href="../decisions/open-decisions.html#d-027">D-027</a>. History is a sequence of Actions plus save points. A revert records a new reversing Action, as <code>git revert</code> does; Restore version returns a Page to an earlier point, also when later changes conflict; ⌘Z reverts the person's last Action as an Undo entry (ADR-0235).</p>
-      <p>Built in M3a (ADR-0250, ADR-0322):</p>
+      <p>Built in M3a (ADR-0250, ADR-0323):</p>
       <ul>
         <li><b>History:</b> "History" at the Explorer's foot opens a dialog over the Page that lists the Workspace's Actions, newest first and by day, filtered by Page, Automation and origin; typing in one Block with pauses under 3 seconds is one entry. An entry says who made it, from where, when and what allowed it, and whether a later entry undid it.</li>
         <li><b>Revert:</b> asks first, then records a new Action that undoes the entry from Automerge's diff, as <code>git revert</code> does; a deleted Table comes back with its rows, Views and Automations. When a later change touched the same field, the revert is refused and offers Restore version instead. Reverting an edit that was undone and redone reverts the redo.</li>
