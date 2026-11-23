@@ -132,8 +132,9 @@ void main() {
       find.textContaining('Turned off: its Database “Bills” was deleted'),
       findsOneWidget,
     );
-    final on = tester.widget<Switch>(find.byKey(const Key('automation on')));
-    expect(on.onChanged, isNull);
+    await tester.tap(find.byKey(const Key('automation on')));
+    await tester.pumpAndSettle();
+    expect(kit.applied(BridgeMutationKind.setAutomationOn).last.on_, isTrue);
   });
 
   testWidgets('a new Automation is built as a sentence: when, if and then', (

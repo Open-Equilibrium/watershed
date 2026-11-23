@@ -517,19 +517,17 @@ class _AutomationEditorState extends State<AutomationEditor> {
                   key: const Key('automation on'),
                   materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
                   value: automation.on_,
-                  onChanged: attention != null
-                      ? null
-                      : (on) => unawaited(
-                          _state
-                              .apply(
-                                mutation(
-                                  BridgeMutationKind.setAutomationOn,
-                                  automation: widget.automation,
-                                  on: on,
-                                ),
-                              )
-                              .then<void>((_) {}, onError: (Object _) {}),
-                        ),
+                  onChanged: (on) => unawaited(
+                    _state
+                        .apply(
+                          mutation(
+                            BridgeMutationKind.setAutomationOn,
+                            automation: widget.automation,
+                            on: on,
+                          ),
+                        )
+                        .then<void>((_) {}, onError: (Object _) {}),
+                  ),
                 ),
               ),
             ),
@@ -1026,10 +1024,11 @@ class _Attention extends StatelessWidget {
     final reason = switch (attention) {
       BridgeAttention(kind: BridgeAttentionKind.tableDeleted, :final table) =>
         'Turned off: its Database “$table” was deleted. Choose another '
-            'Database to repair it.',
+            'Database, then turn it on.',
       BridgeAttention(:final table, :final field) =>
-        'Turned off: its field “$field” of “$table” was removed. Choose '
-            'another field to repair it.',
+        'Turned off: its field “$field” of “$table” was removed, with the '
+            'conditions and actions that used it. Choose another field where '
+            'one is missing, then turn it on.',
     };
     return Container(
       padding: const EdgeInsets.symmetric(

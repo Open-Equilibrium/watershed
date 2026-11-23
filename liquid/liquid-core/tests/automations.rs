@@ -537,6 +537,12 @@ fn removing_a_field_an_automation_uses_turns_it_off() {
             field: "Category".into(),
         })
     );
+    assert_eq!(
+        automation.setup.steps,
+        [Step::Notify {
+            message: format!("Large expense: {{{}}}", budget.item),
+        }]
+    );
     let rent = created_row(&budget.row(&budget.expenses.clone()));
     assert!(
         budget
@@ -544,6 +550,57 @@ fn removing_a_field_an_automation_uses_turns_it_off() {
             .ran
             .is_empty()
     );
+    budget
+        .edit(Mutation::SetAutomationOn {
+            automation: automation.id.clone(),
+            on: true,
+        })
+        .unwrap();
+    let repaired = budget.workspace.automations().unwrap().remove(0);
+    assert!(repaired.on);
+    assert_eq!(repaired.attention, None);
+}
+
+#[test]
+fn an_automation_whose_trigger_field_went_is_repaired_by_choosing_another() {
+    let mut budget = Budget::new();
+    let mut setup = budget.flag_large();
+    setup.steps.push(Step::Notify {
+        message: format!("{{{}}} spent", budget.amount),
+    });
+    let flag = budget.create(setup).unwrap();
+    budget
+        .edit(Mutation::RemoveField {
+            block: budget.expenses.clone(),
+            field: budget.amount.clone(),
+        })
+        .unwrap();
+    let broken = budget.workspace.automations().unwrap().remove(0);
+    assert!(broken.setup.conditions.is_empty());
+    assert_eq!(
+        broken.setup.steps.last(),
+        Some(&Step::Notify {
+            message: "{Amount} spent".into()
+        })
+    );
+    let on = Mutation::SetAutomationOn {
+        automation: flag.clone(),
+        on: true,
+    };
+    assert_eq!(budget.edit(on.clone()).unwrap_err(), Error::NotAllowed);
+    let mut repaired = broken.setup;
+    repaired.trigger = Some(Trigger::FieldChanged(
+        budget.expenses.clone(),
+        budget.item.clone(),
+    ));
+    budget
+        .edit(Mutation::SetAutomation {
+            automation: flag,
+            setup: Box::new(repaired),
+        })
+        .unwrap();
+    budget.edit(on).unwrap();
+    assert!(budget.workspace.automations().unwrap()[0].on);
 }
 
 #[test]

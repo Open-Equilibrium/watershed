@@ -113,6 +113,31 @@ impl AutomationSetup {
             .then(|| table.clone())
     }
 
+    fn without_field(mut self, table: &BlockId, field: &FieldId, name: &str) -> Self {
+        let own = self.trigger.as_ref().is_some_and(|t| t.table() == table);
+        let token = format!("{{{field}}}");
+        if own {
+            self.conditions
+                .retain(|condition| condition.field != *field);
+        }
+        self.steps.retain_mut(|step| match step {
+            Step::Set { field: set, .. } => !(own && set == field),
+            Step::AddRow { table: to, cells } => {
+                if to == table {
+                    cells.retain(|(set, _)| set != field);
+                }
+                true
+            }
+            Step::Notify { message } => {
+                if own {
+                    *message = message.replace(&token, &format!("{{{name}}}"));
+                }
+                true
+            }
+        });
+        self
+    }
+
     fn uses_field(&self, table: &BlockId, field: &FieldId) -> bool {
         let own = self.trigger.as_ref().is_some_and(|t| t.table() == table);
         let trigger = matches!(
@@ -331,10 +356,14 @@ impl<S: Store> Workspace<S> {
         automation: &AutomationId,
         on: bool,
     ) -> Result<Written, Error> {
+        let stored = self.automation(automation)?;
+        if on && stored.attention.is_some() {
+            self.check(&stored.setup).map_err(|_| Error::NotAllowed)?;
+        }
         let doc = self.doc(&Document::Workspace)?;
         let entry = entry(doc, automation)?;
-        if on && doc.get(&entry, ATTENTION)?.is_some() {
-            return Err(Error::NotAllowed);
+        if on && stored.attention.is_some() {
+            doc.delete(&entry, ATTENTION)?;
         }
         doc.put(&entry, ON, on)?;
         Ok(written())
@@ -386,27 +415,30 @@ impl<S: Store> Workspace<S> {
         written: &mut Written,
     ) -> Result<(), Error> {
         let doc = self.doc(&Document::Workspace)?;
-        let using: Vec<AutomationId> = read(doc)
+        let using: Vec<Automation> = read(doc)
             .into_iter()
             .filter(|automation| automation.setup.uses_field(table, field))
-            .map(|automation| automation.id)
             .collect();
         if using.is_empty() {
             return Ok(());
         }
         let database = self.database(table)?.ok_or(Error::NotFound)?;
+        let name = database
+            .fields
+            .iter()
+            .find(|known| known.id == *field)
+            .map(|known| known.name.clone())
+            .unwrap_or_default();
         let attention = Attention::FieldRemoved {
-            field: database
-                .fields
-                .iter()
-                .find(|known| known.id == *field)
-                .map(|known| known.name.clone())
-                .unwrap_or_default(),
+            field: name.clone(),
             table: database.name,
         };
         let doc = self.doc(&Document::Workspace)?;
         for automation in using {
-            turn_off(doc, &entry(doc, &automation)?, &attention)?;
+            let entry = entry(doc, &automation.id)?;
+            let setup = automation.setup.without_field(table, field, &name);
+            doc.put(&entry, SETUP, encode(&setup)?)?;
+            turn_off(doc, &entry, &attention)?;
         }
         written.touched.push(Document::Workspace);
         written.changed.push(Changed::Automations);
