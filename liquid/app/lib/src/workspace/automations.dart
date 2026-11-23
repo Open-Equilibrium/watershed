@@ -72,14 +72,18 @@ class _AutomationsDialogState extends State<AutomationsDialog> {
   void initState() {
     super.initState();
     _state.automations.addListener(_readDatabases);
+    _state.roles.addListener(_rolesChanged);
     _readDatabases();
   }
 
   @override
   void dispose() {
     _state.automations.removeListener(_readDatabases);
+    _state.roles.removeListener(_rolesChanged);
     super.dispose();
   }
+
+  void _rolesChanged() => setState(() {});
 
   void _readDatabases() {
     for (final automation in _state.automations.value) {
@@ -261,7 +265,10 @@ class _AutomationsDialogState extends State<AutomationsDialog> {
                         ),
                         color: ws.textMuted,
                       ),
-                      text(runsAs, color: ws.textMuted),
+                      text(
+                        _state.roleName(automation.role),
+                        color: ws.textMuted,
+                      ),
                       AutomationStatus(automation: automation),
                     ],
                   ),
@@ -282,8 +289,6 @@ class _AutomationsDialogState extends State<AutomationsDialog> {
     );
   }
 }
-
-const runsAs = 'Can manage';
 
 class AutomationStatus extends StatelessWidget {
   const AutomationStatus({super.key, required this.automation});

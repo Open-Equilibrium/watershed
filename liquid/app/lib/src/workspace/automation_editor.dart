@@ -14,6 +14,7 @@ import 'anchored_menu.dart';
 import 'automations.dart';
 import 'chart_block.dart' show ChoiceList;
 import 'explorer.dart' show untitled;
+import 'roles.dart' show RunsAs;
 import 'table_view_parts.dart' show MoreMenu;
 import 'workspace_state.dart';
 
@@ -661,17 +662,17 @@ class _AutomationEditorState extends State<AutomationEditor> {
                 const SizedBox(height: WsMetrics.space2),
                 _Facts(
                   facts: [
-                    ('Runs as', '$runsAs · you'),
+                    ('Runs as', RunsAs(state: _state, automation: automation)),
                     (
                       'Belongs to',
-                      switch (automation.owner) {
+                      Text(switch (automation.owner) {
                         final owner? =>
                           '${tableName(_state, owner)} · deleted together with it',
                         null =>
                           'Workspace · stays when Tables it uses are deleted',
-                      },
+                      }),
                     ),
-                    ('Last run', lastRun(automation.last)),
+                    ('Last run', Text(lastRun(automation.last))),
                   ],
                 ),
               ],
@@ -1056,7 +1057,7 @@ class _Attention extends StatelessWidget {
 class _Facts extends StatelessWidget {
   const _Facts({required this.facts});
 
-  final List<(String, String)> facts;
+  final List<(String, Widget)> facts;
 
   @override
   Widget build(BuildContext context) {
@@ -1072,7 +1073,7 @@ class _Facts extends StatelessWidget {
                 width: 120,
                 child: Text(label, style: TextStyle(color: ws.textMuted)),
               ),
-              Expanded(child: Text(value)),
+              Expanded(child: value),
             ],
           ),
       ],

@@ -480,7 +480,7 @@ impl<S: Store> Workspace<S> {
         Ok(self.page(page)?.1.view(view).cloned())
     }
 
-    fn table_name(&mut self, table: &BlockId) -> Result<Option<String>, Error> {
+    pub(crate) fn table_name(&mut self, table: &BlockId) -> Result<Option<String>, Error> {
         let doc = self.doc(&Document::Workspace)?;
         Ok(model::live(doc, TABLES, table.as_str())
             .map(|entry| model::string(doc, &entry, NAME).unwrap_or_default()))
@@ -983,6 +983,14 @@ impl<S: Store> Workspace<S> {
                 self.write_automation_on(automation, *on)
             }
             Mutation::RemoveAutomation { automation } => self.write_remove_automation(automation),
+            Mutation::SetAutomationRole { automation, role } => {
+                self.write_automation_role(automation, role)
+            }
+            Mutation::CreateRole { setup } => self.write_create_role(setup),
+            Mutation::SetRole { role, setup } => self.write_set_role(role, setup),
+            Mutation::RemoveRole { role } => self.write_remove_role(role),
+            Mutation::ProtectTable { table, roles } => self.write_protect(table, roles),
+            Mutation::UnprotectTable { table } => self.write_unprotect(table),
         }
     }
 
@@ -1534,6 +1542,7 @@ impl<S: Store> Workspace<S> {
         let mut written = Written::new(Document::Workspace, Changed::Tables);
         written.changed.push(Changed::Table(table.clone()));
         self.table_deleted(table, &database, &mut written)?;
+        self.table_left_roles(table, &mut written)?;
         for (page, view) in shown {
             let Ok((doc, order)) = self.page(&page) else {
                 continue;

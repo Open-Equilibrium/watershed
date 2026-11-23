@@ -115,4 +115,6 @@ abstract final class LucideIcons {
   static const mousePointerClick = IconData(0xe120, fontFamily: _family);
   static const bell = IconData(0xe059, fontFamily: _family);
   static const arrowLeft = IconData(0xe048, fontFamily: _family);
+  static const lock = IconData(0xe10b, fontFamily: _family);
+  static const lockOpen = IconData(0xe10c, fontFamily: _family);
 }

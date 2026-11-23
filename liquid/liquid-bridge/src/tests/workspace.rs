@@ -126,6 +126,9 @@ pub(super) fn mutation(kind: BridgeMutationKind) -> BridgeMutation {
         automation: None,
         automation_setup: None,
         on: false,
+        role: None,
+        role_setup: None,
+        roles: Vec::new(),
     }
 }
 

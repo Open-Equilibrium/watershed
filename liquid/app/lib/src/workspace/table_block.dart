@@ -26,6 +26,7 @@ import 'table_query.dart';
 import 'table_groups.dart';
 import 'table_selection.dart';
 import 'table_tabs.dart';
+import 'roles.dart' show ProtectedMark;
 import 'table_view_parts.dart';
 import 'total_menu.dart';
 import 'follow.dart';
@@ -1445,7 +1446,27 @@ class _TableBlockState extends State<TableBlock> implements CellDrop {
               Flexible(
                 child: Align(
                   alignment: Alignment.centerRight,
-                  child: TableNote(name: database.name, onOpen: _openTable),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    spacing: WsMetrics.space3,
+                    children: [
+                      ValueListenableBuilder(
+                        valueListenable: _state.tables,
+                        builder: (context, tables, _) =>
+                            tables.any(
+                              (table) => table.id == _block && table.protected,
+                            )
+                            ? const ProtectedMark()
+                            : const SizedBox.shrink(),
+                      ),
+                      Flexible(
+                        child: TableNote(
+                          name: database.name,
+                          onOpen: _openTable,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ],

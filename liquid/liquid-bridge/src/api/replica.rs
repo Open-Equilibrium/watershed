@@ -16,6 +16,7 @@ use super::database::{
 };
 use super::drawing::BridgeDrawing;
 use super::media::BridgeMedia;
+use super::role::{BridgeAllows, BridgeRole, BridgeRoleAllows};
 use super::workspace::{
     BridgeAnswer, BridgeApplied, BridgeArea, BridgeBlockKind, BridgeChange, BridgeFound, BridgeHit,
     BridgeMutation, BridgePage, BridgeQuery, BridgeQueryKind, BridgeResource, BridgeShown,
@@ -162,6 +163,7 @@ impl LiquidWorkspace {
             elements: Vec::new(),
             line: None,
             automation: None,
+            role: None,
             ran: applied.ran.into_iter().map(BridgeRan::of).collect(),
         };
         match applied.created {
@@ -180,6 +182,7 @@ impl LiquidWorkspace {
             Some(Created::Automation(automation)) => {
                 answer.automation = Some(automation.to_string());
             }
+            Some(Created::Role(role)) => answer.role = Some(role.to_string()),
             Some(Created::Elements(elements)) => {
                 answer.elements = elements.iter().map(ToString::to_string).collect();
             }
@@ -263,6 +266,8 @@ impl LiquidWorkspace {
             chart: None,
             follows: Vec::new(),
             automations: Vec::new(),
+            roles: Vec::new(),
+            allows: Vec::new(),
         };
         match query.kind {
             BridgeQueryKind::Workspace => {
@@ -445,6 +450,7 @@ impl LiquidWorkspace {
                         id: table.id.to_string(),
                         area: table.area.to_string(),
                         name: table.name,
+                        protected: table.protected,
                     })
                     .collect();
             }
@@ -457,6 +463,21 @@ impl LiquidWorkspace {
                     .take(limit)
                     .map(BridgeWorkspaceAutomation::of)
                     .collect();
+            }
+            BridgeQueryKind::Roles => {
+                let roles = workspace.roles().map_err(message)?;
+                answer.count = roles.len() as i64;
+                answer.roles = roles.into_iter().map(BridgeRole::of).collect();
+            }
+            BridgeQueryKind::Allows => {
+                let block = id(&query.block, BlockId::parse, "block")?;
+                for role in workspace.roles().map_err(message)? {
+                    let allows = workspace.allows(&role.id, &block).map_err(message)?;
+                    answer.allows.push(BridgeRoleAllows {
+                        role: role.id.to_string(),
+                        allows: BridgeAllows::of(allows),
+                    });
+                }
             }
             BridgeQueryKind::TableViews => {
                 let block = id(&query.block, BlockId::parse, "block")?;

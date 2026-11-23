@@ -270,7 +270,7 @@ meta uninstall</code></pre>
         <li>policy-gated config-improvement proposals.</li>
       </ul>
       <h3 id="orchestration">Agents orchestrating agents</h3>
-      <p>Accepted target (ADR-0288): agents use T3 Code's own orchestration tools, and a tool that takes an <code>environmentId</code> acts on another host through T3's peer links. Meta-Harness builds no tools of its own for this.</p>
+      <p>Accepted target (ADR-0288): agents use T3 Code's own orchestration tools, and a tool that takes an <code>environmentId</code> acts on another host through T3's peer links. Meta-Harness carries each link over the host connection (ADR-0285), pairs the T3 servers itself and sets each link's access level by policy; it builds no tools of its own for this unless a spike shows pairing needs a person or T3 refuses the tunnel's address.</p>
       <p><span class="pd-key pd-ws">Watershed</span><span class="pd-key pd-t3">T3 Code, unchanged</span><span class="pd-key pd-h">Harness or outside agent</span><span class="pd-key pd-sy">Host connection</span></p>
       <div class="pd-row">
         <div>

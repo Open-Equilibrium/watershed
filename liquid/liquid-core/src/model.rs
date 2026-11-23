@@ -72,6 +72,7 @@ pub struct TableEntry {
     pub id: BlockId,
     pub area: AreaId,
     pub name: String,
+    pub protected: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -284,6 +285,7 @@ pub(crate) fn tables(doc: &AutoCommit) -> Vec<TableEntry> {
             id: BlockId::stored(&entry.id),
             area: AreaId::stored(entry.get(AREA).unwrap_or_default()),
             name: entry.get(NAME).unwrap_or_default().to_string(),
+            protected: entry.get(crate::role::PROTECTED) == Some("true"),
         })
         .collect()
 }

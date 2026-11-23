@@ -73,6 +73,7 @@ pub struct BridgeWorkspaceAutomation {
     pub attention: Option<BridgeAttention>,
     pub last: Option<BridgeLastRun>,
     pub owner: Option<String>,
+    pub role: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -229,6 +230,7 @@ impl BridgeWorkspaceAutomation {
                 notified: last.notified as i64,
             }),
             owner: automation.owner.map(|owner| owner.to_string()),
+            role: automation.role.to_string(),
         }
     }
 }

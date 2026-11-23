@@ -59,6 +59,7 @@ ids! {
     ElementId,
     LineId,
     AutomationId,
+    RoleId,
     #[derive(Default)]
     TabId,
 }

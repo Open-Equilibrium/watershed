@@ -27,6 +27,7 @@ import '../theme/tokens.g.dart';
 import '../workspace/automations.dart';
 import '../workspace/notices.dart';
 import '../workspace/power_bar.dart';
+import '../workspace/roles.dart';
 import '../workspace/page_view.dart';
 import '../workspace/table_page.dart';
 import '../workspace/workspaces.dart';
@@ -530,6 +531,10 @@ class _AgentShellState extends State<AgentShell> {
                               writer: project == null
                                   ? null
                                   : WriterModelPane(project: project),
+                              roles: switch (widget.workspace) {
+                                final workspace? => RolesPane(state: workspace),
+                                null => null,
+                              },
                               agentHosts: widget.agentHosts == null
                                   ? null
                                   : AgentHostsPane(

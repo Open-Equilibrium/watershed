@@ -144,6 +144,7 @@ void main() {
       const BridgeResource(kind: BridgeResourceKind.areas),
       const BridgeResource(kind: BridgeResourceKind.tables),
       const BridgeResource(kind: BridgeResourceKind.automations),
+      const BridgeResource(kind: BridgeResourceKind.roles),
       const BridgeResource(kind: BridgeResourceKind.workspace),
       BridgeResource(
         kind: BridgeResourceKind.pages,

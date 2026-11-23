@@ -7,6 +7,7 @@ import '../rust/api/calculation.dart';
 import '../rust/api/chart.dart';
 import '../rust/api/database.dart';
 import '../rust/api/replica.dart';
+import '../rust/api/role.dart';
 import '../settings_file.dart';
 import '../rust/api/drawing.dart';
 import '../rust/api/workspace.dart';
@@ -52,6 +53,9 @@ BridgeMutation mutation(
   String? automation,
   BridgeAutomationSetup? automationSetup,
   bool on = false,
+  String? role,
+  BridgeRoleSetup? roleSetup,
+  List<String> roles = const [],
 }) => BridgeMutation(
   kind: kind,
   area: area,
@@ -89,6 +93,9 @@ BridgeMutation mutation(
   automation: automation,
   automationSetup: automationSetup,
   on_: on,
+  role: role,
+  roleSetup: roleSetup,
+  roles: roles,
 );
 
 BridgeQuery query(
@@ -226,7 +233,18 @@ class WorkspaceState {
 
   final automations = ValueNotifier<List<BridgeWorkspaceAutomation>>(const []);
 
+  final roles = ValueNotifier<List<BridgeRole>>(const []);
+
   final notices = ValueNotifier<List<Notice>>(const []);
+
+  Future<Map<String, BridgeAllows>> allowsOn(String table) async {
+    final answer = await read(query(BridgeQueryKind.allows, block: table));
+    return {for (final kept in answer.allows) kept.role: kept.allows};
+  }
+
+  String roleName(String role) =>
+      roles.value.where((kept) => kept.id == role).firstOrNull?.setup.name ??
+      'a deleted Role';
 
   static const noticeShown = Duration(seconds: 5);
 
@@ -403,6 +421,10 @@ class WorkspaceState {
       automations,
     );
     _listen(
+      const BridgeResource(kind: BridgeResourceKind.roles),
+      _Reread(_readRoles),
+    );
+    _listen(
       const BridgeResource(kind: BridgeResourceKind.workspace),
       _Reread(_readNamed),
     );
@@ -480,6 +502,11 @@ class WorkspaceState {
       read.addAll(answer.tables);
     } while (read.length < count);
     if (!_disposed) tables.value = read;
+  }
+
+  Future<void> _readRoles() async {
+    final answer = await read(query(BridgeQueryKind.roles));
+    if (!_disposed) roles.value = answer.roles;
   }
 
   Future<void> _readAutomations() async {
@@ -597,6 +624,7 @@ class WorkspaceState {
     areas.dispose();
     tables.dispose();
     automations.dispose();
+    roles.dispose();
     notices.dispose();
     named.dispose();
     folded.dispose();

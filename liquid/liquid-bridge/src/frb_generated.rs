@@ -7048,6 +7048,24 @@ impl SseDecode for crate::api::agents::BridgeAgentChangeKind {
     }
 }
 
+impl SseDecode for crate::api::role::BridgeAllows {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_read = <bool>::sse_decode(deserializer);
+        let mut var_propose = <bool>::sse_decode(deserializer);
+        let mut var_apply = <bool>::sse_decode(deserializer);
+        let mut var_approve = <bool>::sse_decode(deserializer);
+        let mut var_manage = <bool>::sse_decode(deserializer);
+        return crate::api::role::BridgeAllows {
+            read: var_read,
+            propose: var_propose,
+            apply: var_apply,
+            approve: var_approve,
+            manage: var_manage,
+        };
+    }
+}
+
 impl SseDecode for crate::api::workspace::BridgeAnswer {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -7078,6 +7096,8 @@ impl SseDecode for crate::api::workspace::BridgeAnswer {
             <Vec<crate::api::workspace::BridgeResource>>::sse_decode(deserializer);
         let mut var_automations =
             <Vec<crate::api::automation::BridgeWorkspaceAutomation>>::sse_decode(deserializer);
+        let mut var_roles = <Vec<crate::api::role::BridgeRole>>::sse_decode(deserializer);
+        let mut var_allows = <Vec<crate::api::role::BridgeRoleAllows>>::sse_decode(deserializer);
         return crate::api::workspace::BridgeAnswer {
             areas: var_areas,
             pages: var_pages,
@@ -7101,6 +7121,8 @@ impl SseDecode for crate::api::workspace::BridgeAnswer {
             chart: var_chart,
             follows: var_follows,
             automations: var_automations,
+            roles: var_roles,
+            allows: var_allows,
         };
     }
 }
@@ -7120,6 +7142,7 @@ impl SseDecode for crate::api::workspace::BridgeApplied {
         let mut var_elements = <Vec<String>>::sse_decode(deserializer);
         let mut var_line = <Option<String>>::sse_decode(deserializer);
         let mut var_automation = <Option<String>>::sse_decode(deserializer);
+        let mut var_role = <Option<String>>::sse_decode(deserializer);
         let mut var_ran = <Vec<crate::api::automation::BridgeRan>>::sse_decode(deserializer);
         return crate::api::workspace::BridgeApplied {
             action: var_action,
@@ -7134,6 +7157,7 @@ impl SseDecode for crate::api::workspace::BridgeApplied {
             elements: var_elements,
             line: var_line,
             automation: var_automation,
+            role: var_role,
             ran: var_ran,
         };
     }
@@ -7905,6 +7929,20 @@ impl SseDecode for crate::api::git::BridgeGitStatus {
     }
 }
 
+impl SseDecode for crate::api::role::BridgeGrant {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_kind = <crate::api::role::BridgeTargetKind>::sse_decode(deserializer);
+        let mut var_id = <Option<String>>::sse_decode(deserializer);
+        let mut var_allows = <crate::api::role::BridgeAllows>::sse_decode(deserializer);
+        return crate::api::role::BridgeGrant {
+            kind: var_kind,
+            id: var_id,
+            allows: var_allows,
+        };
+    }
+}
+
 impl SseDecode for crate::api::database::BridgeGroup {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -8483,6 +8521,10 @@ impl SseDecode for crate::api::workspace::BridgeMutation {
         let mut var_automationSetup =
             <Option<crate::api::automation::BridgeAutomationSetup>>::sse_decode(deserializer);
         let mut var_on_ = <bool>::sse_decode(deserializer);
+        let mut var_role = <Option<String>>::sse_decode(deserializer);
+        let mut var_roleSetup =
+            <Option<crate::api::role::BridgeRoleSetup>>::sse_decode(deserializer);
+        let mut var_roles = <Vec<String>>::sse_decode(deserializer);
         return crate::api::workspace::BridgeMutation {
             kind: var_kind,
             area: var_area,
@@ -8520,6 +8562,9 @@ impl SseDecode for crate::api::workspace::BridgeMutation {
             automation: var_automation,
             automation_setup: var_automationSetup,
             on: var_on_,
+            role: var_role,
+            role_setup: var_roleSetup,
+            roles: var_roles,
         };
     }
 }
@@ -8589,6 +8634,12 @@ impl SseDecode for crate::api::workspace::BridgeMutationKind {
             57 => crate::api::workspace::BridgeMutationKind::SetAutomation,
             58 => crate::api::workspace::BridgeMutationKind::SetAutomationOn,
             59 => crate::api::workspace::BridgeMutationKind::RemoveAutomation,
+            60 => crate::api::workspace::BridgeMutationKind::SetAutomationRole,
+            61 => crate::api::workspace::BridgeMutationKind::CreateRole,
+            62 => crate::api::workspace::BridgeMutationKind::SetRole,
+            63 => crate::api::workspace::BridgeMutationKind::RemoveRole,
+            64 => crate::api::workspace::BridgeMutationKind::ProtectTable,
+            65 => crate::api::workspace::BridgeMutationKind::UnprotectTable,
             _ => unreachable!("Invalid variant for BridgeMutationKind: {}", inner),
         };
     }
@@ -8821,6 +8872,8 @@ impl SseDecode for crate::api::workspace::BridgeQueryKind {
             15 => crate::api::workspace::BridgeQueryKind::Tables,
             16 => crate::api::workspace::BridgeQueryKind::TableViews,
             17 => crate::api::workspace::BridgeQueryKind::Automations,
+            18 => crate::api::workspace::BridgeQueryKind::Roles,
+            19 => crate::api::workspace::BridgeQueryKind::Allows,
             _ => unreachable!("Invalid variant for BridgeQueryKind: {}", inner),
         };
     }
@@ -8990,7 +9043,46 @@ impl SseDecode for crate::api::workspace::BridgeResourceKind {
             5 => crate::api::workspace::BridgeResourceKind::Tables,
             6 => crate::api::workspace::BridgeResourceKind::Table,
             7 => crate::api::workspace::BridgeResourceKind::Automations,
+            8 => crate::api::workspace::BridgeResourceKind::Roles,
             _ => unreachable!("Invalid variant for BridgeResourceKind: {}", inner),
+        };
+    }
+}
+
+impl SseDecode for crate::api::role::BridgeRole {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_id = <String>::sse_decode(deserializer);
+        let mut var_setup = <crate::api::role::BridgeRoleSetup>::sse_decode(deserializer);
+        let mut var_template = <Option<crate::api::role::BridgeTemplate>>::sse_decode(deserializer);
+        return crate::api::role::BridgeRole {
+            id: var_id,
+            setup: var_setup,
+            template: var_template,
+        };
+    }
+}
+
+impl SseDecode for crate::api::role::BridgeRoleAllows {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_role = <String>::sse_decode(deserializer);
+        let mut var_allows = <crate::api::role::BridgeAllows>::sse_decode(deserializer);
+        return crate::api::role::BridgeRoleAllows {
+            role: var_role,
+            allows: var_allows,
+        };
+    }
+}
+
+impl SseDecode for crate::api::role::BridgeRoleSetup {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_name = <String>::sse_decode(deserializer);
+        let mut var_grants = <Vec<crate::api::role::BridgeGrant>>::sse_decode(deserializer);
+        return crate::api::role::BridgeRoleSetup {
+            name: var_name,
+            grants: var_grants,
         };
     }
 }
@@ -9225,10 +9317,25 @@ impl SseDecode for crate::api::workspace::BridgeTable {
         let mut var_id = <String>::sse_decode(deserializer);
         let mut var_area = <String>::sse_decode(deserializer);
         let mut var_name = <String>::sse_decode(deserializer);
+        let mut var_protected = <bool>::sse_decode(deserializer);
         return crate::api::workspace::BridgeTable {
             id: var_id,
             area: var_area,
             name: var_name,
+            protected: var_protected,
+        };
+    }
+}
+
+impl SseDecode for crate::api::role::BridgeTargetKind {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut inner = <i32>::sse_decode(deserializer);
+        return match inner {
+            0 => crate::api::role::BridgeTargetKind::Workspace,
+            1 => crate::api::role::BridgeTargetKind::Area,
+            2 => crate::api::role::BridgeTargetKind::Table,
+            _ => unreachable!("Invalid variant for BridgeTargetKind: {}", inner),
         };
     }
 }
@@ -9241,6 +9348,19 @@ impl SseDecode for crate::api::events::BridgeTaskStep {
         return crate::api::events::BridgeTaskStep {
             text: var_text,
             status: var_status,
+        };
+    }
+}
+
+impl SseDecode for crate::api::role::BridgeTemplate {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut inner = <i32>::sse_decode(deserializer);
+        return match inner {
+            0 => crate::api::role::BridgeTemplate::CanManage,
+            1 => crate::api::role::BridgeTemplate::CanEdit,
+            2 => crate::api::role::BridgeTemplate::CanView,
+            _ => unreachable!("Invalid variant for BridgeTemplate: {}", inner),
         };
     }
 }
@@ -9558,6 +9678,7 @@ impl SseDecode for crate::api::automation::BridgeWorkspaceAutomation {
         let mut var_last =
             <Option<crate::api::automation::BridgeLastRun>>::sse_decode(deserializer);
         let mut var_owner = <Option<String>>::sse_decode(deserializer);
+        let mut var_role = <String>::sse_decode(deserializer);
         return crate::api::automation::BridgeWorkspaceAutomation {
             id: var_id,
             setup: var_setup,
@@ -9565,6 +9686,7 @@ impl SseDecode for crate::api::automation::BridgeWorkspaceAutomation {
             attention: var_attention,
             last: var_last,
             owner: var_owner,
+            role: var_role,
         };
     }
 }
@@ -9817,6 +9939,18 @@ impl SseDecode for Vec<crate::api::database::BridgeFilter> {
             ans_.push(<crate::api::database::BridgeFilter>::sse_decode(
                 deserializer,
             ));
+        }
+        return ans_;
+    }
+}
+
+impl SseDecode for Vec<crate::api::role::BridgeGrant> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut len_ = <i32>::sse_decode(deserializer);
+        let mut ans_ = Vec::with_capacity(len_ as usize);
+        for idx_ in 0..len_ {
+            ans_.push(<crate::api::role::BridgeGrant>::sse_decode(deserializer));
         }
         return ans_;
     }
@@ -10101,6 +10235,32 @@ impl SseDecode for Vec<crate::api::workspace::BridgeResource> {
         let mut ans_ = Vec::with_capacity(len_ as usize);
         for idx_ in 0..len_ {
             ans_.push(<crate::api::workspace::BridgeResource>::sse_decode(
+                deserializer,
+            ));
+        }
+        return ans_;
+    }
+}
+
+impl SseDecode for Vec<crate::api::role::BridgeRole> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut len_ = <i32>::sse_decode(deserializer);
+        let mut ans_ = Vec::with_capacity(len_ as usize);
+        for idx_ in 0..len_ {
+            ans_.push(<crate::api::role::BridgeRole>::sse_decode(deserializer));
+        }
+        return ans_;
+    }
+}
+
+impl SseDecode for Vec<crate::api::role::BridgeRoleAllows> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut len_ = <i32>::sse_decode(deserializer);
+        let mut ans_ = Vec::with_capacity(len_ as usize);
+        for idx_ in 0..len_ {
+            ans_.push(<crate::api::role::BridgeRoleAllows>::sse_decode(
                 deserializer,
             ));
         }
@@ -10681,11 +10841,35 @@ impl SseDecode for Option<crate::api::events::BridgeRequest> {
     }
 }
 
+impl SseDecode for Option<crate::api::role::BridgeRoleSetup> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        if (<bool>::sse_decode(deserializer)) {
+            return Some(<crate::api::role::BridgeRoleSetup>::sse_decode(
+                deserializer,
+            ));
+        } else {
+            return None;
+        }
+    }
+}
+
 impl SseDecode for Option<crate::api::database::BridgeSort> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
         if (<bool>::sse_decode(deserializer)) {
             return Some(<crate::api::database::BridgeSort>::sse_decode(deserializer));
+        } else {
+            return None;
+        }
+    }
+}
+
+impl SseDecode for Option<crate::api::role::BridgeTemplate> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        if (<bool>::sse_decode(deserializer)) {
+            return Some(<crate::api::role::BridgeTemplate>::sse_decode(deserializer));
         } else {
             return None;
         }
@@ -11588,6 +11772,30 @@ impl flutter_rust_bridge::IntoIntoDart<crate::api::agents::BridgeAgentChangeKind
     }
 }
 // Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::role::BridgeAllows {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.read.into_into_dart().into_dart(),
+            self.propose.into_into_dart().into_dart(),
+            self.apply.into_into_dart().into_dart(),
+            self.approve.into_into_dart().into_dart(),
+            self.manage.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::role::BridgeAllows
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::role::BridgeAllows>
+    for crate::api::role::BridgeAllows
+{
+    fn into_into_dart(self) -> crate::api::role::BridgeAllows {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
 impl flutter_rust_bridge::IntoDart for crate::api::workspace::BridgeAnswer {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         [
@@ -11613,6 +11821,8 @@ impl flutter_rust_bridge::IntoDart for crate::api::workspace::BridgeAnswer {
             self.chart.into_into_dart().into_dart(),
             self.follows.into_into_dart().into_dart(),
             self.automations.into_into_dart().into_dart(),
+            self.roles.into_into_dart().into_dart(),
+            self.allows.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -11644,6 +11854,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::workspace::BridgeApplied {
             self.elements.into_into_dart().into_dart(),
             self.line.into_into_dart().into_dart(),
             self.automation.into_into_dart().into_dart(),
+            self.role.into_into_dart().into_dart(),
             self.ran.into_into_dart().into_dart(),
         ]
         .into_dart()
@@ -12754,6 +12965,25 @@ impl flutter_rust_bridge::IntoIntoDart<crate::api::git::BridgeGitStatus>
     }
 }
 // Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::role::BridgeGrant {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.kind.into_into_dart().into_dart(),
+            self.id.into_into_dart().into_dart(),
+            self.allows.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive for crate::api::role::BridgeGrant {}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::role::BridgeGrant>
+    for crate::api::role::BridgeGrant
+{
+    fn into_into_dart(self) -> crate::api::role::BridgeGrant {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
 impl flutter_rust_bridge::IntoDart for crate::api::database::BridgeGroup {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         [
@@ -13523,6 +13753,9 @@ impl flutter_rust_bridge::IntoDart for crate::api::workspace::BridgeMutation {
             self.automation.into_into_dart().into_dart(),
             self.automation_setup.into_into_dart().into_dart(),
             self.on.into_into_dart().into_dart(),
+            self.role.into_into_dart().into_dart(),
+            self.role_setup.into_into_dart().into_dart(),
+            self.roles.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -13602,6 +13835,12 @@ impl flutter_rust_bridge::IntoDart for crate::api::workspace::BridgeMutationKind
             Self::SetAutomation => 57.into_dart(),
             Self::SetAutomationOn => 58.into_dart(),
             Self::RemoveAutomation => 59.into_dart(),
+            Self::SetAutomationRole => 60.into_dart(),
+            Self::CreateRole => 61.into_dart(),
+            Self::SetRole => 62.into_dart(),
+            Self::RemoveRole => 63.into_dart(),
+            Self::ProtectTable => 64.into_dart(),
+            Self::UnprotectTable => 65.into_dart(),
             _ => unreachable!(),
         }
     }
@@ -13908,6 +14147,8 @@ impl flutter_rust_bridge::IntoDart for crate::api::workspace::BridgeQueryKind {
             Self::Tables => 15.into_dart(),
             Self::TableViews => 16.into_dart(),
             Self::Automations => 17.into_dart(),
+            Self::Roles => 18.into_dart(),
+            Self::Allows => 19.into_dart(),
             _ => unreachable!(),
         }
     }
@@ -14137,6 +14378,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::workspace::BridgeResourceKind
             Self::Tables => 5.into_dart(),
             Self::Table => 6.into_dart(),
             Self::Automations => 7.into_dart(),
+            Self::Roles => 8.into_dart(),
             _ => unreachable!(),
         }
     }
@@ -14149,6 +14391,67 @@ impl flutter_rust_bridge::IntoIntoDart<crate::api::workspace::BridgeResourceKind
     for crate::api::workspace::BridgeResourceKind
 {
     fn into_into_dart(self) -> crate::api::workspace::BridgeResourceKind {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::role::BridgeRole {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.id.into_into_dart().into_dart(),
+            self.setup.into_into_dart().into_dart(),
+            self.template.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive for crate::api::role::BridgeRole {}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::role::BridgeRole>
+    for crate::api::role::BridgeRole
+{
+    fn into_into_dart(self) -> crate::api::role::BridgeRole {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::role::BridgeRoleAllows {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.role.into_into_dart().into_dart(),
+            self.allows.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::role::BridgeRoleAllows
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::role::BridgeRoleAllows>
+    for crate::api::role::BridgeRoleAllows
+{
+    fn into_into_dart(self) -> crate::api::role::BridgeRoleAllows {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::role::BridgeRoleSetup {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.name.into_into_dart().into_dart(),
+            self.grants.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::role::BridgeRoleSetup
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::role::BridgeRoleSetup>
+    for crate::api::role::BridgeRoleSetup
+{
+    fn into_into_dart(self) -> crate::api::role::BridgeRoleSetup {
         self
     }
 }
@@ -14483,6 +14786,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::workspace::BridgeTable {
             self.id.into_into_dart().into_dart(),
             self.area.into_into_dart().into_dart(),
             self.name.into_into_dart().into_dart(),
+            self.protected.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -14495,6 +14799,28 @@ impl flutter_rust_bridge::IntoIntoDart<crate::api::workspace::BridgeTable>
     for crate::api::workspace::BridgeTable
 {
     fn into_into_dart(self) -> crate::api::workspace::BridgeTable {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::role::BridgeTargetKind {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        match self {
+            Self::Workspace => 0.into_dart(),
+            Self::Area => 1.into_dart(),
+            Self::Table => 2.into_dart(),
+            _ => unreachable!(),
+        }
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::role::BridgeTargetKind
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::role::BridgeTargetKind>
+    for crate::api::role::BridgeTargetKind
+{
+    fn into_into_dart(self) -> crate::api::role::BridgeTargetKind {
         self
     }
 }
@@ -14516,6 +14842,28 @@ impl flutter_rust_bridge::IntoIntoDart<crate::api::events::BridgeTaskStep>
     for crate::api::events::BridgeTaskStep
 {
     fn into_into_dart(self) -> crate::api::events::BridgeTaskStep {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::role::BridgeTemplate {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        match self {
+            Self::CanManage => 0.into_dart(),
+            Self::CanEdit => 1.into_dart(),
+            Self::CanView => 2.into_dart(),
+            _ => unreachable!(),
+        }
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::role::BridgeTemplate
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::role::BridgeTemplate>
+    for crate::api::role::BridgeTemplate
+{
+    fn into_into_dart(self) -> crate::api::role::BridgeTemplate {
         self
     }
 }
@@ -14943,6 +15291,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::automation::BridgeWorkspaceAu
             self.attention.into_into_dart().into_dart(),
             self.last.into_into_dart().into_dart(),
             self.owner.into_into_dart().into_dart(),
+            self.role.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -15244,6 +15593,17 @@ impl SseEncode for crate::api::agents::BridgeAgentChangeKind {
     }
 }
 
+impl SseEncode for crate::api::role::BridgeAllows {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <bool>::sse_encode(self.read, serializer);
+        <bool>::sse_encode(self.propose, serializer);
+        <bool>::sse_encode(self.apply, serializer);
+        <bool>::sse_encode(self.approve, serializer);
+        <bool>::sse_encode(self.manage, serializer);
+    }
+}
+
 impl SseEncode for crate::api::workspace::BridgeAnswer {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
@@ -15272,6 +15632,8 @@ impl SseEncode for crate::api::workspace::BridgeAnswer {
             self.automations,
             serializer,
         );
+        <Vec<crate::api::role::BridgeRole>>::sse_encode(self.roles, serializer);
+        <Vec<crate::api::role::BridgeRoleAllows>>::sse_encode(self.allows, serializer);
     }
 }
 
@@ -15290,6 +15652,7 @@ impl SseEncode for crate::api::workspace::BridgeApplied {
         <Vec<String>>::sse_encode(self.elements, serializer);
         <Option<String>>::sse_encode(self.line, serializer);
         <Option<String>>::sse_encode(self.automation, serializer);
+        <Option<String>>::sse_encode(self.role, serializer);
         <Vec<crate::api::automation::BridgeRan>>::sse_encode(self.ran, serializer);
     }
 }
@@ -15920,6 +16283,15 @@ impl SseEncode for crate::api::git::BridgeGitStatus {
     }
 }
 
+impl SseEncode for crate::api::role::BridgeGrant {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <crate::api::role::BridgeTargetKind>::sse_encode(self.kind, serializer);
+        <Option<String>>::sse_encode(self.id, serializer);
+        <crate::api::role::BridgeAllows>::sse_encode(self.allows, serializer);
+    }
+}
+
 impl SseEncode for crate::api::database::BridgeGroup {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
@@ -16377,6 +16749,9 @@ impl SseEncode for crate::api::workspace::BridgeMutation {
             serializer,
         );
         <bool>::sse_encode(self.on, serializer);
+        <Option<String>>::sse_encode(self.role, serializer);
+        <Option<crate::api::role::BridgeRoleSetup>>::sse_encode(self.role_setup, serializer);
+        <Vec<String>>::sse_encode(self.roles, serializer);
     }
 }
 
@@ -16445,6 +16820,12 @@ impl SseEncode for crate::api::workspace::BridgeMutationKind {
                 crate::api::workspace::BridgeMutationKind::SetAutomation => 57,
                 crate::api::workspace::BridgeMutationKind::SetAutomationOn => 58,
                 crate::api::workspace::BridgeMutationKind::RemoveAutomation => 59,
+                crate::api::workspace::BridgeMutationKind::SetAutomationRole => 60,
+                crate::api::workspace::BridgeMutationKind::CreateRole => 61,
+                crate::api::workspace::BridgeMutationKind::SetRole => 62,
+                crate::api::workspace::BridgeMutationKind::RemoveRole => 63,
+                crate::api::workspace::BridgeMutationKind::ProtectTable => 64,
+                crate::api::workspace::BridgeMutationKind::UnprotectTable => 65,
                 _ => {
                     unimplemented!("");
                 }
@@ -16635,6 +17016,8 @@ impl SseEncode for crate::api::workspace::BridgeQueryKind {
                 crate::api::workspace::BridgeQueryKind::Tables => 15,
                 crate::api::workspace::BridgeQueryKind::TableViews => 16,
                 crate::api::workspace::BridgeQueryKind::Automations => 17,
+                crate::api::workspace::BridgeQueryKind::Roles => 18,
+                crate::api::workspace::BridgeQueryKind::Allows => 19,
                 _ => {
                     unimplemented!("");
                 }
@@ -16758,12 +17141,38 @@ impl SseEncode for crate::api::workspace::BridgeResourceKind {
                 crate::api::workspace::BridgeResourceKind::Tables => 5,
                 crate::api::workspace::BridgeResourceKind::Table => 6,
                 crate::api::workspace::BridgeResourceKind::Automations => 7,
+                crate::api::workspace::BridgeResourceKind::Roles => 8,
                 _ => {
                     unimplemented!("");
                 }
             },
             serializer,
         );
+    }
+}
+
+impl SseEncode for crate::api::role::BridgeRole {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <String>::sse_encode(self.id, serializer);
+        <crate::api::role::BridgeRoleSetup>::sse_encode(self.setup, serializer);
+        <Option<crate::api::role::BridgeTemplate>>::sse_encode(self.template, serializer);
+    }
+}
+
+impl SseEncode for crate::api::role::BridgeRoleAllows {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <String>::sse_encode(self.role, serializer);
+        <crate::api::role::BridgeAllows>::sse_encode(self.allows, serializer);
+    }
+}
+
+impl SseEncode for crate::api::role::BridgeRoleSetup {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <String>::sse_encode(self.name, serializer);
+        <Vec<crate::api::role::BridgeGrant>>::sse_encode(self.grants, serializer);
     }
 }
 
@@ -16955,6 +17364,24 @@ impl SseEncode for crate::api::workspace::BridgeTable {
         <String>::sse_encode(self.id, serializer);
         <String>::sse_encode(self.area, serializer);
         <String>::sse_encode(self.name, serializer);
+        <bool>::sse_encode(self.protected, serializer);
+    }
+}
+
+impl SseEncode for crate::api::role::BridgeTargetKind {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(
+            match self {
+                crate::api::role::BridgeTargetKind::Workspace => 0,
+                crate::api::role::BridgeTargetKind::Area => 1,
+                crate::api::role::BridgeTargetKind::Table => 2,
+                _ => {
+                    unimplemented!("");
+                }
+            },
+            serializer,
+        );
     }
 }
 
@@ -16963,6 +17390,23 @@ impl SseEncode for crate::api::events::BridgeTaskStep {
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
         <String>::sse_encode(self.text, serializer);
         <crate::api::events::BridgeStepStatus>::sse_encode(self.status, serializer);
+    }
+}
+
+impl SseEncode for crate::api::role::BridgeTemplate {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(
+            match self {
+                crate::api::role::BridgeTemplate::CanManage => 0,
+                crate::api::role::BridgeTemplate::CanEdit => 1,
+                crate::api::role::BridgeTemplate::CanView => 2,
+                _ => {
+                    unimplemented!("");
+                }
+            },
+            serializer,
+        );
     }
 }
 
@@ -17208,6 +17652,7 @@ impl SseEncode for crate::api::automation::BridgeWorkspaceAutomation {
         <Option<crate::api::automation::BridgeAttention>>::sse_encode(self.attention, serializer);
         <Option<crate::api::automation::BridgeLastRun>>::sse_encode(self.last, serializer);
         <Option<String>>::sse_encode(self.owner, serializer);
+        <String>::sse_encode(self.role, serializer);
     }
 }
 
@@ -17398,6 +17843,16 @@ impl SseEncode for Vec<crate::api::database::BridgeFilter> {
         <i32>::sse_encode(self.len() as _, serializer);
         for item in self {
             <crate::api::database::BridgeFilter>::sse_encode(item, serializer);
+        }
+    }
+}
+
+impl SseEncode for Vec<crate::api::role::BridgeGrant> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(self.len() as _, serializer);
+        for item in self {
+            <crate::api::role::BridgeGrant>::sse_encode(item, serializer);
         }
     }
 }
@@ -17608,6 +18063,26 @@ impl SseEncode for Vec<crate::api::workspace::BridgeResource> {
         <i32>::sse_encode(self.len() as _, serializer);
         for item in self {
             <crate::api::workspace::BridgeResource>::sse_encode(item, serializer);
+        }
+    }
+}
+
+impl SseEncode for Vec<crate::api::role::BridgeRole> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(self.len() as _, serializer);
+        for item in self {
+            <crate::api::role::BridgeRole>::sse_encode(item, serializer);
+        }
+    }
+}
+
+impl SseEncode for Vec<crate::api::role::BridgeRoleAllows> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(self.len() as _, serializer);
+        for item in self {
+            <crate::api::role::BridgeRoleAllows>::sse_encode(item, serializer);
         }
     }
 }
@@ -18062,12 +18537,32 @@ impl SseEncode for Option<crate::api::events::BridgeRequest> {
     }
 }
 
+impl SseEncode for Option<crate::api::role::BridgeRoleSetup> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <bool>::sse_encode(self.is_some(), serializer);
+        if let Some(value) = self {
+            <crate::api::role::BridgeRoleSetup>::sse_encode(value, serializer);
+        }
+    }
+}
+
 impl SseEncode for Option<crate::api::database::BridgeSort> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
         <bool>::sse_encode(self.is_some(), serializer);
         if let Some(value) = self {
             <crate::api::database::BridgeSort>::sse_encode(value, serializer);
+        }
+    }
+}
+
+impl SseEncode for Option<crate::api::role::BridgeTemplate> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <bool>::sse_encode(self.is_some(), serializer);
+        if let Some(value) = self {
+            <crate::api::role::BridgeTemplate>::sse_encode(value, serializer);
         }
     }
 }

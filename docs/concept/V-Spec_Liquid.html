@@ -142,7 +142,7 @@
         <li><b>Then:</b> set a field of the row, add a row to a Table, or show a notification, whose text shows a field's value where it names <code>{Field}</code>; the notification is a toast at the window's foot. A run is one Action, by the Automation, in History; a step that fails undoes the run and the toast says why.</li>
         <li><b>Test</b> runs the steps once on the trigger Table's last row, without the conditions, as a run like any other. An Automation starts on, and its switch turns it off.</li>
         <li><b>Belongs to:</b> an Automation that uses only its trigger's Table belongs to it and is deleted with it; one that uses other Tables belongs to the Workspace. Deleting a Table it uses, or removing a field it uses, turns it off and marks it <em>Needs attention</em> with the reason, in the same Action; the deleted Table or removed field also takes the conditions and steps that used it, and a notification keeps a field's name as text, so only the trigger can still need choosing again. Choosing another Table or field clears the mark, and so does turning it on once nothing it uses is missing.</li>
-        <li><b>Runs as:</b> the Workspace owner's access until Roles are built, shown as Can manage.</li>
+        <li><b>Runs as:</b> Can edit unless another Role is chosen (<a href="#permissions">§6</a>, ADR-0321).</li>
         <li><b>Bounds:</b> 500 Automations per Workspace, 20 conditions and 20 steps each, a name, message or value of 1,000 characters.</li>
       </ul>
     </div></section>
@@ -172,7 +172,7 @@
     </div></section>
 
     <section id="permissions" class="section"><h2>6. Roles and safety</h2><div class="body">
-      <p class="muted" id="workspace-access">Accepted target (M3). What ships today is listed in <a href="../../SECURITY.md#liquid-workspace-access--external-agent-edits">SECURITY.md</a>; Roles, the Workspace CLI/API and the rules below follow.</p>
+      <p class="muted" id="workspace-access">Accepted target (M3). What ships today is listed in <a href="../../SECURITY.md#liquid-workspace-access--external-agent-edits">SECURITY.md</a>; Roles for people and agent profiles, the Workspace CLI/API and the rules below follow, and what M3a built is marked below.</p>
       <p>A <a href="../../GLOSSARY.md#liquid-primitives"><strong>Role</strong></a> is an editable composition of allow-only permissions over named Workspaces, Pages, Blocks, Sources, App actions, Meta-Harness projections, agent controls and administrative capabilities.</p>
       <pre><code>effective permission =
   Role allow
@@ -191,7 +191,8 @@
         <li>Secrets and credentials are never Workspace data; Workspace data holds only references to a keychain or a company secret manager (ADR-0224).</li>
         <li>Visibility, View placement, Connection existence and sync access never imply execution authority.</li>
         <li>Rights inherit from an area to its Pages and Blocks. A <strong>protected</strong> Page, Block or Source stops inheriting them, so only Roles allowed on it may change it. A Block's rights follow its home (for a Table, its area), never the Page that shows a View of it. Read access is never finer than an area; in M3 every authorized device holds the complete Workspace, so the Workspace stays the confidentiality boundary (ADR-0235).</li>
-        <li>M3a assigns Roles to Automations; people follow with sync and agent profiles with M3b (ADR-0235). Three editable Role templates follow Notion's access levels: Can view (read), Can edit (read and apply) and Can manage (every capability). The person who creates a Workspace holds Can manage, which protection never removes, so no one can lock the owner out (<a href="../design/mockups/liquid-workspace-history.html">History and Roles mockups</a>).</li>
+        <li>M3a assigns Roles to Automations; people follow with sync and agent profiles with M3b (ADR-0235). Three Role templates follow Notion's access levels: Can view (read), Can edit (read and apply) and Can manage (every capability); Can view and Can edit are editable, Can manage is fixed. The person who creates a Workspace holds Can manage, which protection never removes, so no one can lock the owner out.</li>
+        <li><b>Built in M3a (ADR-0321):</b> Settings › Roles lists the templates and the Workspace's Roles. A Role lists what it is allowed on, all areas, an area or a Table, with Read, Propose, Apply, Approve and Manage; Propose and Approve matter once agents act. Can manage holds every capability and stays as it is; a Role assigned to an Automation cannot be deleted, and deleting a Table drops what Roles grant on it. An Automation runs as Can edit unless another Role is chosen in its editor, which says what its Role does not allow; a run needs Read on its trigger's Table and Apply where it writes, else it is refused with the reason. "Protect…" in a Table's menu keeps the Roles chosen with what they were allowed there; the Table then shows a lock, and "Stop protecting" lets it inherit again. Pages and Sources gain rights and protection once something besides their owner can change them.</li>
       </ul>
       <h3>How an agent changes Workspace data</h3>
       <div class="flow">
