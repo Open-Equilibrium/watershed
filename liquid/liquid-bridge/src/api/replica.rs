@@ -283,6 +283,7 @@ impl LiquidWorkspace {
                             BlockKind::Whiteboard => BridgeBlockKind::Whiteboard,
                             BlockKind::Calculation => BridgeBlockKind::Calculation,
                             BlockKind::Chart => BridgeBlockKind::Chart,
+                            BlockKind::Math => BridgeBlockKind::Math,
                             BlockKind::Unknown => BridgeBlockKind::Unknown,
                         },
                         tabs: view.tabs.iter().map(BridgeTab::of).collect(),
@@ -307,6 +308,11 @@ impl LiquidWorkspace {
                     answer.text = Some(code.text);
                     answer.language = Some(code.language);
                 }
+            }
+            BridgeQueryKind::Math => {
+                let page = id(&query.page, PageId::parse, "page")?;
+                let block = id(&query.block, BlockId::parse, "block")?;
+                answer.text = workspace.math(&page, &block).map_err(message)?;
             }
             BridgeQueryKind::Media => {
                 let page = id(&query.page, PageId::parse, "page")?;

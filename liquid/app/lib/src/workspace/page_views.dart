@@ -157,7 +157,8 @@ class PageViews extends ChangeNotifier {
       final view = _views.at(at);
       if (view == null ||
           view.kind == BridgeBlockKind.text ||
-          view.kind == BridgeBlockKind.code) {
+          view.kind == BridgeBlockKind.code ||
+          view.kind == BridgeBlockKind.math) {
         return view;
       }
     }

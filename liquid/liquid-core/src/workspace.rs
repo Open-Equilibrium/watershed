@@ -150,7 +150,12 @@ impl<S: Store> Workspace<S> {
         let blocks: Vec<BlockId> = self
             .views(page, 0, usize::MAX)?
             .into_iter()
-            .filter(|view| matches!(view.kind, BlockKind::Text | BlockKind::Code))
+            .filter(|view| {
+                matches!(
+                    view.kind,
+                    BlockKind::Text | BlockKind::Code | BlockKind::Math
+                )
+            })
             .map(|view| view.block)
             .collect();
         blocks
@@ -162,7 +167,10 @@ impl<S: Store> Workspace<S> {
     fn text_entry(&mut self, page: &PageId, block: &BlockId) -> Result<IndexWrite, Error> {
         let text = match self.text(page, block)? {
             Some(text) => Some(text),
-            None => self.code(page, block)?.map(|code| code.text),
+            None => match self.code(page, block)? {
+                Some(code) => Some(code.text),
+                None => self.math(page, block)?,
+            },
         };
         Ok(IndexWrite {
             found: Found::Text,
@@ -315,6 +323,13 @@ impl<S: Store> Workspace<S> {
 
     pub fn code(&mut self, page: &PageId, block: &BlockId) -> Result<Option<Code>, Error> {
         Ok(model::code(
+            self.doc(&Document::Page(page.clone()))?,
+            block.as_str(),
+        ))
+    }
+
+    pub fn math(&mut self, page: &PageId, block: &BlockId) -> Result<Option<String>, Error> {
+        Ok(model::math(
             self.doc(&Document::Page(page.clone()))?,
             block.as_str(),
         ))
@@ -542,6 +557,7 @@ impl<S: Store> Workspace<S> {
             | Mutation::SetSectionBoundary { page, .. }
             | Mutation::TurnIntoCode { page, .. }
             | Mutation::TurnIntoText { page, .. }
+            | Mutation::TurnIntoMath { page, .. }
             | Mutation::AddMediaBlock { page, .. }
             | Mutation::AddWhiteboardBlock { page, .. }
             | Mutation::AddCalculationBlock { page, .. }
@@ -693,7 +709,16 @@ impl<S: Store> Workspace<S> {
                 self.write_turn_into(page, block, BlockKind::Text, (BlockKind::Code, "code"))
             }
             Mutation::TurnIntoText { page, block } => {
-                self.write_turn_into(page, block, BlockKind::Code, (BlockKind::Text, "text"))
+                let doc = self.doc(&Document::Page(page.clone()))?;
+                let from = if model::math(doc, block.as_str()).is_some() {
+                    BlockKind::Math
+                } else {
+                    BlockKind::Code
+                };
+                self.write_turn_into(page, block, from, (BlockKind::Text, "text"))
+            }
+            Mutation::TurnIntoMath { page, block } => {
+                self.write_turn_into(page, block, BlockKind::Text, (BlockKind::Math, "math"))
             }
             Mutation::SetCodeLanguage {
                 page,
@@ -1159,6 +1184,7 @@ impl<S: Store> Workspace<S> {
         let doc = self.doc(&Document::Page(page.clone()))?;
         let entry = model::of_kind(doc, block.as_str(), BlockKind::Text)
             .or_else(|| model::of_kind(doc, block.as_str(), BlockKind::Code))
+            .or_else(|| model::of_kind(doc, block.as_str(), BlockKind::Math))
             .ok_or(Error::NotFound)?;
         let content = model::child(doc, &entry, TEXT).ok_or(Error::NotFound)?;
         let end = at.checked_add(delete).ok_or(Error::OutOfRange)?;

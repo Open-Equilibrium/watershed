@@ -113,6 +113,12 @@ const slashCommands = [
     existing: true,
   ),
   SlashCommand(
+    'Math',
+    LucideIcons.sigma,
+    block: BridgeBlockKind.math,
+    description: 'A formula in LaTeX',
+  ),
+  SlashCommand(
     'Chart',
     LucideIcons.barChart3,
     block: BridgeBlockKind.chart,

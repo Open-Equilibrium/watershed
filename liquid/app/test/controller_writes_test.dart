@@ -12,7 +12,7 @@ void main() {
           file.path: file.readAsLinesSync(),
     };
     final declared = RegExp(
-      r'TextEditingController\??\s+(?:get\s+)?(\w+)|(\w+)\s*=\s*TextEditingController[.(]',
+      r'(?:TextEditingController|MathText)\??\s+(?:get\s+)?(\w+)|(\w+)\s*=\s*(?:TextEditingController|MathText)[.(]',
     );
     final write = RegExp(
       r'(\w+)\.(?:text\s*=(?![=>])|value\s*=(?![=>])|clear\(\))',

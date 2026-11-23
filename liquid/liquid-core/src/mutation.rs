@@ -257,6 +257,10 @@ pub enum Mutation {
         page: PageId,
         block: BlockId,
     },
+    TurnIntoMath {
+        page: PageId,
+        block: BlockId,
+    },
     SetCodeLanguage {
         page: PageId,
         block: BlockId,

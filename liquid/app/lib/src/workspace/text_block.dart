@@ -13,6 +13,7 @@ import '../theme/tokens.g.dart';
 import 'anchored_menu.dart';
 import 'follow.dart';
 import 'media_block.dart';
+import 'inline_math.dart';
 import 'page_editor.dart';
 import 'page_views.dart';
 import 'arranged_page.dart' show InTile;
@@ -41,7 +42,7 @@ class TextBlock extends StatefulWidget {
 }
 
 class _TextBlockState extends State<TextBlock> implements EditorSource {
-  var _text = TextEditingController();
+  var _text = MathText.fromValue(TextEditingValue.empty);
 
   final _field = GlobalKey(debugLabel: 'Text Block field');
   late final _focus = FocusNode(
@@ -142,6 +143,7 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
   bool get focused => _focus.hasFocus;
 
   void _focusChanged() {
+    setState(() => _text.focused = _focus.hasFocus);
     if (_focus.hasFocus) {
       widget.views.lastFocused = widget.view.id;
       return;
@@ -180,6 +182,7 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
       return;
     }
     if (choice.block == BridgeBlockKind.code) return _turnIntoCode();
+    if (choice.block == BridgeBlockKind.math) return _turnIntoMath();
     if (choice.block == BridgeBlockKind.media) return _addMedia(_pickFiles);
     if (choice.block == BridgeBlockKind.whiteboard) {
       return _addBlock(BridgeMutationKind.addWhiteboardBlock, 'Whiteboard');
@@ -406,7 +409,11 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
 
   void _adopt() {
     _replaced = false;
-    _text = adoptController(_text, listener: _typed);
+    _text = adoptController(
+      _text,
+      listener: _typed,
+      create: MathText.fromValue,
+    ) as MathText..focused = _focus.hasFocus;
   }
 
   @override
@@ -475,6 +482,12 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
     if (_composing && !_state.quitting) return;
     final text = _text.text;
     if (text == stored) return;
+    if (mathTyped(text, stored, _text.selection.baseOffset)) {
+      _set('', 0);
+      _send('');
+      _turnIntoMath();
+      return;
+    }
     if (codeTyped(text, stored, _text.selection.baseOffset)) {
       final rest = text.substring(codeShortcut.length);
       _set(rest, 0);
@@ -731,6 +744,15 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
     );
     widget.views.moveCaret(
       Caret(widget.view.id, 0, kind: BridgeBlockKind.code),
+    );
+  }
+
+  void _turnIntoMath() {
+    _write(
+      mutation(BridgeMutationKind.turnIntoMath, page: _page, block: block),
+    );
+    widget.views.moveCaret(
+      Caret(widget.view.id, 0, kind: BridgeBlockKind.math),
     );
   }
 

@@ -10,6 +10,7 @@ import '../theme/tokens.g.dart';
 import 'calculation_block.dart';
 import 'chart_block.dart';
 import 'code_block.dart';
+import 'math_block.dart';
 import 'explorer.dart';
 import 'media_block.dart';
 import 'arrange_bar.dart';
@@ -289,6 +290,7 @@ class _WorkspacePageState extends State<WorkspacePage> implements EditorSource {
                 view: view,
               ),
               BridgeBlockKind.chart => ChartBlock(views: _views, view: view),
+              BridgeBlockKind.math => MathBlock(views: _views, view: view),
               _ => const _Placeholder(),
             },
           ],

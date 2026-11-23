@@ -237,3 +237,37 @@ fn a_chart_s_setup_crosses_and_its_points_come_back() {
         .views;
     assert!(views.iter().any(|view| view.kind == BridgeBlockKind::Chart));
 }
+
+#[test]
+fn a_math_block_crosses_as_its_latex() {
+    let folder = Folder::new("math");
+    let workspace = LiquidWorkspace::open_with(&folder.0, &Memory::default()).unwrap();
+    let (_, page, block, _) = lisbon(&workspace);
+    workspace
+        .apply(BridgeMutation {
+            page: Some(page.clone()),
+            block: Some(block.clone()),
+            ..mutation(BridgeMutationKind::TurnIntoMath)
+        })
+        .unwrap();
+    let read = |kind| {
+        workspace
+            .query(BridgeQuery {
+                page: Some(page.clone()),
+                block: Some(block.clone()),
+                ..query(kind)
+            })
+            .unwrap()
+            .text
+    };
+    assert_eq!(read(BridgeQueryKind::Math).as_deref(), Some("Five days"));
+    assert_eq!(read(BridgeQueryKind::Text), None);
+    let views = workspace
+        .query(BridgeQuery {
+            page: Some(page.clone()),
+            ..query(BridgeQueryKind::Views)
+        })
+        .unwrap()
+        .views;
+    assert_eq!(views[0].kind, BridgeBlockKind::Math);
+}
