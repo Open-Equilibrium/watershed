@@ -12,6 +12,7 @@ import '../rust/api/workspace.dart';
 import '../theme/icons.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
+import 'page_icon.dart';
 import 'pdf_pages.dart';
 import 'stored_name.dart';
 import 'table_view_parts.dart' show MoreMenu;
@@ -915,6 +916,7 @@ class _PagePicker extends StatelessWidget {
           MenuItemButton(
             key: ValueKey('use in ${page.id}'),
             onPressed: () => onPage(page.id),
+            leadingIcon: PageIcon(page.icon),
             child: Text(page.title.isEmpty ? 'Untitled' : page.title),
           ),
     ],

@@ -824,3 +824,32 @@ fn a_workspace_keeps_its_name_and_icon() {
         Err(Error::TooLong)
     );
 }
+
+#[test]
+fn a_page_s_icon_is_set_listed_reverted_and_bounded() {
+    let mut workspace = workspace();
+    let private = area(&mut workspace, "Private");
+    let budget = page(&mut workspace, &private, None, "Household budget");
+    let set = apply(
+        &mut workspace,
+        Mutation::SetPageIcon {
+            page: budget.clone(),
+            icon: "💰".into(),
+        },
+    );
+    let icon = |workspace: &mut Workspace| workspace.pages(&private).unwrap()[0].icon.clone();
+    assert_eq!(icon(&mut workspace), "💰");
+    assert_eq!(
+        edit(
+            &mut workspace,
+            Mutation::SetPageIcon {
+                page: budget.clone(),
+                icon: "x".repeat(65),
+            },
+        )
+        .unwrap_err(),
+        Error::TooLong
+    );
+    workspace.revert(&owner(), &[set.action]).unwrap();
+    assert_eq!(icon(&mut workspace), "");
+}

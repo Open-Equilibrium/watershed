@@ -250,6 +250,10 @@ impl<S: Store> Workspace<S> {
                 Mutation::RenamePage { title, .. } => {
                     format!("Renamed a Page to {}", quoted(title))
                 }
+                Mutation::SetPageIcon { page, .. } => match titles.get(page) {
+                    Some(title) => format!("Changed the icon of {}", quoted(title)),
+                    None => "Changed a Page's icon".into(),
+                },
                 Mutation::AddSource { name, .. } => format!("Added the Source {}", quoted(name)),
                 Mutation::RenameSource { name, .. } => {
                     format!("Renamed a Source to {}", quoted(name))

@@ -9,6 +9,7 @@ import '../theme/icons.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
 import '../rust/api/source.dart';
+import 'page_icon.dart';
 import 'source_page.dart' show sourceIcon;
 import 'workspace_state.dart';
 
@@ -606,11 +607,7 @@ class _PageRow extends StatelessWidget {
                   const SizedBox(width: WsMetrics.space2),
                   SizedBox(
                     width: 18,
-                    child: Icon(
-                      LucideIcons.file,
-                      size: 14,
-                      color: ws.textFaint,
-                    ),
+                    child: Center(child: PageIcon(page.icon)),
                   ),
                   const SizedBox(width: WsMetrics.space2),
                   Expanded(

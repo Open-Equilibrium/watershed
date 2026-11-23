@@ -1001,3 +1001,25 @@ fn search_finds_pages_and_text_across_the_bridge() {
         .hits;
     assert_eq!(pages[0].found, BridgeFound::Page);
 }
+
+#[test]
+fn a_page_s_icon_crosses_the_bridge() {
+    let folder = Folder::new("icon");
+    let workspace = LiquidWorkspace::open_with(&folder.0, &Memory::default()).unwrap();
+    let (area, page, _, _) = lisbon(&workspace);
+    workspace
+        .apply(BridgeMutation {
+            page: Some(page),
+            text: Some("🧳".into()),
+            ..mutation(BridgeMutationKind::SetPageIcon)
+        })
+        .unwrap();
+    let pages = workspace
+        .query(BridgeQuery {
+            area: Some(area),
+            ..query(BridgeQueryKind::Pages)
+        })
+        .unwrap()
+        .pages;
+    assert_eq!(pages[0].icon, "🧳");
+}

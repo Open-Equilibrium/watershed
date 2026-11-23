@@ -627,6 +627,18 @@ class WorkspaceState {
   Future<void> rename(String page, String title) =>
       apply(mutation(BridgeMutationKind.renamePage, page: page, text: title));
 
+  Future<void> setPageIcon(String page, String icon) =>
+      apply(mutation(BridgeMutationKind.setPageIcon, page: page, text: icon));
+
+  String iconOf(String page) {
+    for (final tree in _trees.values) {
+      for (final known in tree.value) {
+        if (known.id == page) return known.icon;
+      }
+    }
+    return '';
+  }
+
   Future<void> readPages(String area) =>
       _treeReads[area]?.call() ?? Future.value();
 

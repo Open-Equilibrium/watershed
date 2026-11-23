@@ -363,6 +363,7 @@ impl LiquidWorkspace {
                         id: page.id.to_string(),
                         parent: page.parent.map(|parent| parent.to_string()),
                         title: page.title,
+                        icon: page.icon,
                     })
                     .collect();
             }

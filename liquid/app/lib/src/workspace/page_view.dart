@@ -22,6 +22,7 @@ import 'stored_name.dart';
 import 'table_block.dart';
 import 'text_block.dart';
 import 'whiteboard_block.dart';
+import 'page_icon.dart';
 import 'workspace_state.dart';
 
 class WorkspacePage extends StatefulWidget {
@@ -307,6 +308,47 @@ class _WorkspacePageState extends State<WorkspacePage> implements EditorSource {
     );
   }
 
+  var _titleHovered = false;
+
+  Widget _titled(BuildContext context, Widget title) => MouseRegion(
+    onEnter: (_) => setState(() => _titleHovered = true),
+    onExit: (_) => setState(() => _titleHovered = false),
+    child: ListenableBuilder(
+      listenable: widget.state.pages(widget.open.area),
+      builder: (context, _) {
+        final icon = widget.state.iconOf(widget.open.page);
+        return Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (widget.version)
+              if (icon.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(right: WsMetrics.space2),
+                  child: PageIcon(
+                    icon,
+                    size: WsMetrics.fsDisplay,
+                    color: context.ws.text,
+                  ),
+                )
+              else
+                const SizedBox.shrink()
+            else
+              Padding(
+                padding: const EdgeInsets.only(right: WsMetrics.space2),
+                child: PageIconButton(
+                  state: widget.state,
+                  page: widget.open.page,
+                  icon: icon,
+                  shown: _titleHovered || _title.controller.text.isEmpty,
+                ),
+              ),
+            Expanded(child: title),
+          ],
+        );
+      },
+    ),
+  );
+
   @override
   Widget build(BuildContext context) {
     final ws = context.ws;
@@ -377,27 +419,30 @@ class _WorkspacePageState extends State<WorkspacePage> implements EditorSource {
                         maxWidth: _views.arranged || _views.arranging.value
                             ? arrangedWidth
                             : readingWidth,
-                        TextField(
-                          key: const Key('page-title'),
-                          controller: _title.take(),
-                          focusNode: _titleFocus,
-                          maxLines: null,
-                          keyboardType: TextInputType.text,
-                          inputFormatters: [
-                            FilteringTextInputFormatter.deny(
-                              RegExp(r'[\n\r]'),
-                              replacementString: ' ',
+                        _titled(
+                          context,
+                          TextField(
+                            key: const Key('page-title'),
+                            controller: _title.take(),
+                            focusNode: _titleFocus,
+                            maxLines: null,
+                            keyboardType: TextInputType.text,
+                            inputFormatters: [
+                              FilteringTextInputFormatter.deny(
+                                RegExp(r'[\n\r]'),
+                                replacementString: ' ',
+                              ),
+                            ],
+                            style: TextStyle(
+                              fontSize: WsMetrics.fsDisplay,
+                              height: WsMetrics.lhDisplay / WsMetrics.fsDisplay,
+                              fontWeight: WsMetrics.fwBold,
+                              color: ws.text,
                             ),
-                          ],
-                          style: TextStyle(
-                            fontSize: WsMetrics.fsDisplay,
-                            height: WsMetrics.lhDisplay / WsMetrics.fsDisplay,
-                            fontWeight: WsMetrics.fwBold,
-                            color: ws.text,
-                          ),
-                          decoration: InputDecoration.collapsed(
-                            hintText: untitled,
-                            hintStyle: TextStyle(color: ws.textFaint),
+                            decoration: InputDecoration.collapsed(
+                              hintText: untitled,
+                              hintStyle: TextStyle(color: ws.textFaint),
+                            ),
                           ),
                         ),
                       ),
@@ -547,6 +592,11 @@ class _Breadcrumb extends StatelessWidget {
                 ),
                 child: Text('›', style: TextStyle(color: ws.textMuted)),
               ),
+              if (state.iconOf(open.page) case final icon
+                  when icon.isNotEmpty) ...[
+                PageIcon(icon, size: 14),
+                const SizedBox(width: WsMetrics.space2),
+              ],
               Flexible(
                 child: Text(
                   title == null || title.isEmpty ? untitled : title,

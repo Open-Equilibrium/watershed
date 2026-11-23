@@ -703,6 +703,12 @@ impl<S: Store> Workspace<S> {
                 title,
             } => self.write_create_page(area, parent.as_ref(), title),
             Mutation::RenamePage { page, title } => self.write_rename_page(page, title),
+            Mutation::SetPageIcon { page, icon } => {
+                if icon.len() > MAX_ICON {
+                    return Err(Error::TooLong);
+                }
+                self.write_page_field(page, ICON, icon)
+            }
             Mutation::AddSource {
                 area,
                 parent,
@@ -1082,10 +1088,19 @@ impl<S: Store> Workspace<S> {
     }
 
     fn write_rename_page(&mut self, page: &PageId, title: &str) -> Result<Written, Error> {
+        self.write_page_field(page, TITLE, title)
+    }
+
+    fn write_page_field(
+        &mut self,
+        page: &PageId,
+        field: &str,
+        value: &str,
+    ) -> Result<Written, Error> {
         let area = self.area_of(page)?;
         let area_doc = self.doc(&Document::Area(area.clone()))?;
         let entry = model::live(area_doc, PAGES, page.as_str()).ok_or(Error::NotFound)?;
-        area_doc.put(&entry, TITLE, title)?;
+        area_doc.put(&entry, field, value)?;
         Ok(Written::new(
             Document::Area(area.clone()),
             Changed::Pages(area),

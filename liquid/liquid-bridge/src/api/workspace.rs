@@ -23,6 +23,7 @@ pub enum BridgeMutationKind {
     CreateArea,
     CreatePage,
     RenamePage,
+    SetPageIcon,
     AddTextBlock,
     EditText,
     RemoveView,
@@ -241,6 +242,7 @@ pub struct BridgePage {
     pub id: String,
     pub parent: Option<String>,
     pub title: String,
+    pub icon: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -508,6 +510,10 @@ impl BridgeMutation {
             BridgeMutationKind::RenamePage => Mutation::RenamePage {
                 page: id(&self.page, PageId::parse, "page")?,
                 title: text()?,
+            },
+            BridgeMutationKind::SetPageIcon => Mutation::SetPageIcon {
+                page: id(&self.page, PageId::parse, "page")?,
+                icon: text()?,
             },
             BridgeMutationKind::AddTextBlock => Mutation::AddTextBlock {
                 page: id(&self.page, PageId::parse, "page")?,

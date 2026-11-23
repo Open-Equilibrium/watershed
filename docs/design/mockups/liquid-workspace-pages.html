@@ -9,7 +9,7 @@
   </div>
   <section>
     <h1>Liquid Workspace: Pages</h1>
-    <p class="sub">Mockups for the M3a slice in <a href="../../../PLAN.md#m3a--local-workspace-foundation">PLAN.md</a>, approved by the maintainer on 2026-11-01: the Explorer, a blank Page and its first actions, the built-in Blocks, Arrange mode and the PowerBar; Sources are built (V-Spec). They follow the <a href="../../concept/V-Spec_Liquid.html#experience">V-Spec</a>, ADR-0235 and <a href="../guidelines.md">guidelines.md</a>. Page icons, Settings at the Explorer's foot and the PowerBar's prefixes were added on his request and approved the same day. Views and the deletion cascade are in the <a href="liquid-workspace-blocks.html">Blocks mockups</a>, Workspace settings in the <a href="liquid-workspace-history.html">Workspace settings mockups</a>.</p>
+    <p class="sub">Mockups for the M3a slice in <a href="../../../PLAN.md#m3a--local-workspace-foundation">PLAN.md</a>, approved by the maintainer on 2026-11-01: the Explorer, a blank Page and its first actions, the built-in Blocks, Arrange mode and the PowerBar; Sources and Page icons are built (V-Spec). They follow the <a href="../../concept/V-Spec_Liquid.html#experience">V-Spec</a>, ADR-0235 and <a href="../guidelines.md">guidelines.md</a>. Settings at the Explorer's foot and the PowerBar's prefixes were added on his request and approved the same day. Views and the deletion cascade are in the <a href="liquid-workspace-blocks.html">Blocks mockups</a>, Workspace settings in the <a href="liquid-workspace-history.html">Workspace settings mockups</a>.</p>
     <p class="sub"><b>Revised by ADR-0239 and ADR-0241:</b> the rail with Inbox and Settings, the Workspace switcher in the sidebar's top row, tabs side by side, Chats in place of agent sessions and Notion's scale are in <a href="liquid-app-concept.html">the app's structure</a>; this file keeps its slice's content, and the shell is redrawn as each slice is built.</p>
   </section>
   <section>
@@ -21,11 +21,6 @@
     <h3 class="sec">2 · A blank Page</h3>
     <p class="sub">A new Page opens with its title focused and one quiet line that names the first actions, so the empty Page explains itself. It has no type and no layout to choose. The Area's <b>+</b> creates it; the PowerBar and the Explorer's menu do too.</p>
     <div class="stage"><div class="scaler"><div class="win" id="w-blank" data-w="1240"></div></div></div>
-  </section>
-  <section>
-    <h3 class="sec">3 · Page icons</h3>
-    <p class="sub">Every Page can have an icon, as in Notion and AppFlowy, but it sits beside the title in the title's size instead of above it, so the Page keeps its space for content: "Add icon" beside the title of a new Page, shown on hover, or a click on the icon opens the picker with Emoji and Icons tabs and a search. The icon appears in the Explorer, the breadcrumb, the PowerBar, mentions and Views on other Pages; without one, the plain Page symbol shows. Sources keep their file or folder symbol.</p>
-    <div class="stage"><div class="scaler"><div class="win" id="w-icon" data-w="1240"></div></div></div>
   </section>
   <section>
     <h3 class="sec">4 · The first action picks the Block</h3>
@@ -167,12 +162,6 @@ frame('w-blank',{h:440,side:{sel:'new',newp:'Untitled',plus:true},head:head('Pri
 <div class="hint" style="font-size:13px;margin-top:20px">Start from a template&nbsp;&nbsp;<span class="chip">Budget</span>&nbsp;<span class="chip">Meeting notes</span>&nbsp;<span class="chip">Project</span></div>
 </div></div>`});
 
-// 3 · Icons
-const picker=`<div class="pop ipick" style="left:394px;top:112px"><div class="tabs2"><span class="on">Emoji</span><span>Icons</span><span class="end">Remove</span></div>
-<div style="padding:8px 10px"><div class="sel" style="height:30px">${I.srch}<span style="color:var(--ws-text-faint)">Search</span></div></div>
-<div class="lbl" style="padding:2px 12px">Recent</div><div class="egrid">${'💰📊🧳🗺️🧩🗓️📝✅🏠'.match(/\p{Extended_Pictographic}️?/gu).map((e,i)=>`<span class="${i==0?'on':''}">${e}</span>`).join('')}</div>
-<div class="lbl" style="padding:2px 12px">Objects</div><div class="egrid">${'📁📌📎📚💡🔑🧾📦🛒🎯📈📉🧮🗂️📅🧭🔖🎒'.match(/\p{Extended_Pictographic}️?/gu).map(e=>`<span>${e}</span>`).join('')}</div></div>`;
-frame('w-icon',{h:520,head:head('Private <span>›</span> <b>💰 Household budget</b>'),main:`<div class="pg"><div class="col"><div class="ttl"><span class="tic" style="border-radius:6px;background:var(--ws-hover);padding:0 4px">💰</span>Household budget</div><div class="prose"><p>October is almost done.</p></div></div></div>`,over:picker});
 // 4 · Slash
 const chooser=`<div class="pop" style="left:394px;top:200px;width:360px">
 <div class="lbl">Blocks</div>

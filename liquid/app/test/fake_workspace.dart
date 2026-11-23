@@ -469,6 +469,7 @@ class FakeWorkspace implements LiquidWorkspace {
           id: _id(),
           parent: mutation.parent,
           title: mutation.text!,
+          icon: '',
         );
         var at = tree.length;
         if (mutation.parent case final parent?) {
@@ -487,7 +488,8 @@ class FakeWorkspace implements LiquidWorkspace {
           action: _id(),
           page: page.id,
         );
-      case BridgeMutationKind.renamePage:
+      case BridgeMutationKind.renamePage || BridgeMutationKind.setPageIcon:
+        final icon = mutation.kind == BridgeMutationKind.setPageIcon;
         for (final MapEntry(key: area, value: tree) in pages.entries) {
           final at = tree.indexWhere((page) => page.id == mutation.page);
           if (at < 0) continue;
@@ -495,7 +497,8 @@ class FakeWorkspace implements LiquidWorkspace {
           tree[at] = BridgePage(
             id: page.id,
             parent: page.parent,
-            title: mutation.text!,
+            title: icon ? page.title : mutation.text!,
+            icon: icon ? mutation.text! : page.icon,
           );
           _changed(BridgeResource(kind: BridgeResourceKind.pages, area: area));
         }
