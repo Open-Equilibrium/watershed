@@ -235,16 +235,19 @@ class FakeWorkspace implements LiquidWorkspace {
   final asking = <BridgeEntryQuery>[];
 
   @override
-  Future<List<BridgeEntry>> history({required BridgeEntryQuery asked}) async {
+  Future<BridgeHistory> history({required BridgeEntryQuery asked}) async {
     asking.add(asked);
     final start = asked.before == null
         ? 0
         : entries.indexWhere((entry) => entry.actions.last == asked.before) + 1;
-    return entries
+    final shown = entries
         .skip(start)
         .where((entry) => asked.page == null || entry.page == asked.page)
-        .take(asked.limit.toInt())
         .toList();
+    return BridgeHistory(
+      entries: shown.take(asked.limit.toInt()).toList(),
+      more: shown.length > asked.limit.toInt(),
+    );
   }
 
   final reverted = <List<String>>[];

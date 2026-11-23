@@ -170,6 +170,7 @@ impl Budget {
                 limit: 100,
             })
             .unwrap()
+            .entries
     }
 }
 
@@ -550,11 +551,37 @@ fn an_action_older_than_ten_thousand_others_still_reverts() {
             before: None,
             limit: 10,
         })
-        .unwrap();
+        .unwrap()
+        .entries;
     assert!(!entry.is_empty());
     budget
         .workspace
         .revert(&owner(), std::slice::from_ref(&early))
         .unwrap();
     assert_eq!(budget.amounts(), [Cell::Empty]);
+}
+
+#[test]
+fn history_reaches_past_a_long_stretch_of_typing() {
+    let mut budget = Budget::new();
+    for at in 0..5_000 {
+        budget.typed(at, "x");
+    }
+    let listed = budget
+        .workspace
+        .entries(&EntryQuery {
+            page: None,
+            actor: None,
+            origin: None,
+            before: None,
+            limit: 60,
+        })
+        .unwrap()
+        .entries;
+    assert_eq!(listed[0].actions.len(), 5_000);
+    assert!(
+        listed
+            .iter()
+            .any(|entry| entry.title == "Created the Page “Household budget”")
+    );
 }

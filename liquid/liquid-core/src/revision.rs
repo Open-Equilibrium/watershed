@@ -13,7 +13,7 @@ use crate::{
 
 pub const TYPING_PAUSE_MS: i64 = 3_000;
 pub const SAVE_POINT_GAP_MS: i64 = 300_000;
-const SCAN: usize = 10_000;
+const PAGE: usize = 1_000;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct EntryQuery {
@@ -40,6 +40,12 @@ pub struct Entry {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Entries {
+    pub entries: Vec<Entry>,
+    pub more: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Version {
     pub after: ActionId,
     pub at: i64,
@@ -59,6 +65,12 @@ fn together(newer: &Action, older: &Action) -> bool {
         && typing(newer).is_some()
         && typing(newer) == typing(older)
         && newer.at - older.at <= TYPING_PAUSE_MS
+}
+
+enum Visit {
+    Next,
+    Take,
+    Stop,
 }
 
 pub(crate) fn undone(newest_first: &[Action]) -> HashSet<ActionId> {
@@ -323,16 +335,41 @@ impl<S: Store> Workspace<S> {
         }
     }
 
-    pub fn entries(&mut self, query: &EntryQuery) -> Result<Vec<Entry>, Error> {
-        let scan = query.limit.saturating_mul(64).clamp(64, SCAN);
-        let listed = match &query.page {
-            Some(page) => {
-                let documents = self.page_documents(page)?;
-                self.store
-                    .history_of(&documents, query.before.as_ref(), scan)?
-            }
-            None => self.store.history(query.before.as_ref(), scan)?,
+    pub fn entries(&mut self, query: &EntryQuery) -> Result<Entries, Error> {
+        let documents = match &query.page {
+            Some(page) => Some(self.page_documents(page)?),
+            None => None,
         };
+        let mut listed: Vec<Action> = Vec::new();
+        let mut before = query.before.clone();
+        let mut starts = 0;
+        while starts <= query.limit {
+            let page = match &documents {
+                Some(documents) => self.store.history_of(documents, before.as_ref(), PAGE)?,
+                None => self.store.history(before.as_ref(), PAGE)?,
+            };
+            let Some(last) = page.last() else {
+                break;
+            };
+            before = Some(last.id.clone());
+            for action in page {
+                let shown = query
+                    .actor
+                    .as_ref()
+                    .is_none_or(|actor| *actor == action.actor)
+                    && query
+                        .origin
+                        .as_ref()
+                        .is_none_or(|origin| *origin == action.origin);
+                if !shown {
+                    continue;
+                }
+                if listed.last().is_none_or(|newer| !together(newer, &action)) {
+                    starts += 1;
+                }
+                listed.push(action);
+            }
+        }
         let oldest: Vec<ActionId> = listed
             .last()
             .map(|action| action.id.clone())
@@ -346,22 +383,9 @@ impl<S: Store> Workspace<S> {
             .map(|action| (action.id.clone(), action))
             .collect();
         let titles = self.page_titles()?;
-        let shown: Vec<Action> = listed
-            .into_iter()
-            .filter(|action| {
-                query
-                    .actor
-                    .as_ref()
-                    .is_none_or(|actor| *actor == action.actor)
-            })
-            .filter(|action| {
-                query
-                    .origin
-                    .as_ref()
-                    .is_none_or(|origin| *origin == action.origin)
-            })
-            .collect();
+        let shown = listed;
         let mut entries: Vec<Entry> = Vec::new();
+        let mut more = false;
         let mut last: Option<Action> = None;
         for action in shown {
             let joins = last.as_ref().is_some_and(|newer| {
@@ -374,6 +398,7 @@ impl<S: Store> Workspace<S> {
                 continue;
             }
             if entries.len() == query.limit {
+                more = true;
                 break;
             }
             let purged = matches!(action.operation, Operation::Purged { .. });
@@ -406,7 +431,7 @@ impl<S: Store> Workspace<S> {
             });
             last = Some(action);
         }
-        Ok(entries)
+        Ok(Entries { entries, more })
     }
 
     fn page_documents(&mut self, page: &PageId) -> Result<Vec<Document>, Error> {
@@ -604,21 +629,41 @@ impl<S: Store> Workspace<S> {
         Ok(())
     }
 
-    fn undoable(&mut self, actor: &Actor) -> Result<(Vec<Action>, HashSet<ActionId>), Error> {
+    fn own_newest_first(
+        &mut self,
+        actor: &Actor,
+        mut visit: impl FnMut(&Action, &HashSet<ActionId>) -> Visit,
+    ) -> Result<Option<Action>, Error> {
         self.permit(actor)?;
-        let recent = self.store.history(None, SCAN)?;
-        let undone = undone(&recent);
-        let own = recent
-            .into_iter()
-            .filter(|action| action.actor == *actor && action.origin == Origin::Ui)
-            .collect();
-        Ok((own, undone))
+        let mut undone = HashSet::new();
+        let mut before: Option<ActionId> = None;
+        loop {
+            let page = self.store.history(before.as_ref(), PAGE)?;
+            let Some(last) = page.last() else {
+                return Ok(None);
+            };
+            before = Some(last.id.clone());
+            for action in page {
+                if let Operation::Revert { reverted, .. } = &action.operation
+                    && !undone.contains(&action.id)
+                {
+                    undone.extend(reverted.iter().cloned());
+                }
+                if action.actor != *actor || action.origin != Origin::Ui {
+                    continue;
+                }
+                match visit(&action, &undone) {
+                    Visit::Next => {}
+                    Visit::Take => return Ok(Some(action)),
+                    Visit::Stop => return Ok(None),
+                }
+            }
+        }
     }
 
     pub fn undo(&mut self, actor: &Actor) -> Result<Option<Applied>, Error> {
-        let (own, undone) = self.undoable(actor)?;
         let mut group: Vec<Action> = Vec::new();
-        for action in own {
+        self.own_newest_first(actor, |action, undone| {
             let counts = !undone.contains(&action.id)
                 && match &action.operation {
                     Operation::Mutation(_) | Operation::Restore { .. } => true,
@@ -626,12 +671,13 @@ impl<S: Store> Workspace<S> {
                     _ => false,
                 };
             match group.last() {
-                None if counts => group.push(action),
+                None if counts => group.push(action.clone()),
                 None => {}
-                Some(newer) if counts && together(newer, &action) => group.push(action),
-                Some(_) => break,
+                Some(newer) if counts && together(newer, action) => group.push(action.clone()),
+                Some(_) => return Visit::Stop,
             }
-        }
+            Visit::Next
+        })?;
         if group.is_empty() {
             return Ok(None);
         }
@@ -640,28 +686,28 @@ impl<S: Store> Workspace<S> {
     }
 
     pub fn redo(&mut self, actor: &Actor) -> Result<Option<Applied>, Error> {
-        let (own, undone) = self.undoable(actor)?;
-        for action in own {
+        let target = self.own_newest_first(actor, |action, undone| {
             if undone.contains(&action.id) {
-                continue;
+                return Visit::Next;
             }
             match &action.operation {
                 Operation::Revert {
                     kind: RevertKind::Redo,
                     ..
-                } => continue,
+                } => Visit::Next,
                 Operation::Revert {
                     kind: RevertKind::Undo,
                     ..
-                } => {
-                    return self
-                        .revert_actions(actor, &[action], RevertKind::Redo)
-                        .map(Some);
-                }
-                _ => return Ok(None),
+                } => Visit::Take,
+                _ => Visit::Stop,
             }
+        })?;
+        match target {
+            Some(undo) => self
+                .revert_actions(actor, &[undo], RevertKind::Redo)
+                .map(Some),
+            None => Ok(None),
         }
-        Ok(None)
     }
 
     fn kept(&mut self, action: &Action) -> bool {
@@ -686,31 +732,38 @@ impl<S: Store> Workspace<S> {
 
     pub fn versions(&mut self, page: &PageId) -> Result<Vec<Version>, Error> {
         let documents = self.page_documents(page)?;
-        let listed = self.store.history_of(&documents, None, SCAN)?;
         let mut versions = Vec::new();
         let mut newer: Option<Action> = None;
-        for action in listed {
-            if !self.present(&action, &documents) {
+        let mut before: Option<ActionId> = None;
+        'pages: loop {
+            let listed = self.store.history_of(&documents, before.as_ref(), PAGE)?;
+            let Some(last) = listed.last() else {
                 break;
-            }
-            let gap = newer
-                .as_ref()
-                .is_some_and(|newer| newer.at - action.at >= SAVE_POINT_GAP_MS);
-            let boundary = newer
-                .as_ref()
-                .is_none_or(|newer| gap || newer.actor != action.actor);
-            if boundary {
-                versions.push(Version {
-                    after: action.id.clone(),
-                    at: action.at,
-                    actor: action.actor.clone(),
-                    save_point: gap,
-                });
-            }
-            let stops = matches!(action.operation, Operation::Purge { .. });
-            newer = Some(action);
-            if stops {
-                break;
+            };
+            before = Some(last.id.clone());
+            for action in listed {
+                if !self.present(&action, &documents) {
+                    break 'pages;
+                }
+                let gap = newer
+                    .as_ref()
+                    .is_some_and(|newer| newer.at - action.at >= SAVE_POINT_GAP_MS);
+                let boundary = newer
+                    .as_ref()
+                    .is_none_or(|newer| gap || newer.actor != action.actor);
+                if boundary {
+                    versions.push(Version {
+                        after: action.id.clone(),
+                        at: action.at,
+                        actor: action.actor.clone(),
+                        save_point: gap,
+                    });
+                }
+                let stops = matches!(action.operation, Operation::Purge { .. });
+                newer = Some(action);
+                if stops {
+                    break 'pages;
+                }
             }
         }
         Ok(versions)
@@ -775,21 +828,27 @@ impl<S: Store> Workspace<S> {
         self.permit(actor)?;
         let documents = self.page_documents(page)?;
         let targets = self.heads_at(&documents, to)?;
-        let mut touched = Vec::new();
-        for (document, target) in targets {
-            let doc = self.doc(&document)?;
+        for (document, target) in &targets {
+            let doc = self.doc(document)?;
             if target
                 .iter()
                 .any(|hash| doc.get_change_by_hash(hash).is_none())
             {
                 return Err(Error::Purged);
             }
+        }
+        let mut touched = Vec::new();
+        for (document, target) in targets {
+            let doc = self.doc(&document)?;
             let current = doc.get_heads();
             if current == target {
                 continue;
             }
             let patches = doc.diff(&current, &target);
-            patch::apply(doc, patches)?;
+            if let Err(error) = patch::apply(doc, patches) {
+                self.rollback();
+                return Err(error);
+            }
             touched.push(document);
         }
         if touched.is_empty() {

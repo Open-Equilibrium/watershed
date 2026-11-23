@@ -50,6 +50,12 @@ pub struct BridgeEntry {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BridgeHistory {
+    pub entries: Vec<BridgeEntry>,
+    pub more: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BridgeVersion {
     pub after: String,
     pub at: i64,
@@ -105,7 +111,7 @@ fn ids(texts: &[String]) -> Result<Vec<ActionId>, String> {
 }
 
 impl LiquidWorkspace {
-    pub fn history(&self, asked: BridgeEntryQuery) -> Result<Vec<BridgeEntry>, String> {
+    pub fn history(&self, asked: BridgeEntryQuery) -> Result<BridgeHistory, String> {
         let query = EntryQuery {
             page: asked
                 .page
@@ -127,9 +133,10 @@ impl LiquidWorkspace {
             limit: usize::try_from(asked.limit.clamp(1, 500)).unwrap_or(1),
         };
         let mut inner = self.state()?;
-        let entries = inner.workspace.entries(&query).map_err(message)?;
+        let listed = inner.workspace.entries(&query).map_err(message)?;
         let roles = inner.workspace.roles().map_err(message)?;
-        Ok(entries
+        let entries = listed
+            .entries
             .into_iter()
             .map(|entry: Entry| BridgeEntry {
                 actions: entry.actions.iter().map(ToString::to_string).collect(),
@@ -150,7 +157,11 @@ impl LiquidWorkspace {
                 purged: entry.purged,
                 deleted_table: entry.deleted_table.map(|table| table.to_string()),
             })
-            .collect())
+            .collect();
+        Ok(BridgeHistory {
+            entries,
+            more: listed.more,
+        })
     }
 
     pub fn revert(&self, actions: Vec<String>) -> Result<BridgeReverted, String> {

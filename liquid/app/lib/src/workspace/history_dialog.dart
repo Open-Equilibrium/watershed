@@ -77,7 +77,7 @@ class _HistoryDialogState extends State<HistoryDialog> {
     final read = ++_reads;
     _reading = true;
     try {
-      final listed = await _state.workspace.history(
+      final page = await _state.workspace.history(
         asked: BridgeEntryQuery(
           page: _page,
           automation: _automation,
@@ -89,8 +89,8 @@ class _HistoryDialogState extends State<HistoryDialog> {
       if (!mounted || read != _reads) return;
       setState(() {
         if (fresh) _entries.clear();
-        _entries.addAll(listed);
-        _more = listed.length == _limit;
+        _entries.addAll(page.entries);
+        _more = page.more;
         _chosen = fresh
             ? _entries.firstOrNull
             : _chosen ?? _entries.firstOrNull;

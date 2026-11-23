@@ -258,6 +258,9 @@ impl Store for Sqlite {
                 .any(|write| matches!(write, Write::Remove { .. }));
         if erased {
             self.connection
+                .execute("INSERT INTO search(search) VALUES('optimize')", [])
+                .map_err(failed)?;
+            self.connection
                 .query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |_| Ok(()))
                 .map_err(failed)?;
         }

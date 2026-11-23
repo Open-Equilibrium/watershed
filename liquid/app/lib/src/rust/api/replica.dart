@@ -31,7 +31,7 @@ abstract class LiquidWorkspace implements RustOpaqueInterface {
 
   Future<void> close({required PlatformInt64 subscription});
 
-  Future<List<BridgeEntry>> history({required BridgeEntryQuery asked});
+  Future<BridgeHistory> history({required BridgeEntryQuery asked});
 
   static Future<LiquidWorkspace> open({required String dir}) =>
       RustLib.instance.api.crateApiReplicaLiquidWorkspaceOpen(dir: dir);

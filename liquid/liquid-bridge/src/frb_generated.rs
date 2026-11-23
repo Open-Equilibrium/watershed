@@ -8032,6 +8032,18 @@ impl SseDecode for crate::api::database::BridgeGroup {
     }
 }
 
+impl SseDecode for crate::api::history::BridgeHistory {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_entries = <Vec<crate::api::history::BridgeEntry>>::sse_decode(deserializer);
+        let mut var_more = <bool>::sse_decode(deserializer);
+        return crate::api::history::BridgeHistory {
+            entries: var_entries,
+            more: var_more,
+        };
+    }
+}
+
 impl SseDecode for crate::api::workspace::BridgeHit {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -13122,6 +13134,27 @@ impl flutter_rust_bridge::IntoIntoDart<crate::api::database::BridgeGroup>
     }
 }
 // Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::history::BridgeHistory {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.entries.into_into_dart().into_dart(),
+            self.more.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::history::BridgeHistory
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::history::BridgeHistory>
+    for crate::api::history::BridgeHistory
+{
+    fn into_into_dart(self) -> crate::api::history::BridgeHistory {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
 impl flutter_rust_bridge::IntoDart for crate::api::workspace::BridgeHit {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         [
@@ -16426,6 +16459,14 @@ impl SseEncode for crate::api::database::BridgeGroup {
         <i64>::sse_encode(self.count, serializer);
         <Vec<crate::api::database::BridgeRow>>::sse_encode(self.rows, serializer);
         <Vec<crate::api::database::BridgeComputed>>::sse_encode(self.totals, serializer);
+    }
+}
+
+impl SseEncode for crate::api::history::BridgeHistory {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <Vec<crate::api::history::BridgeEntry>>::sse_encode(self.entries, serializer);
+        <bool>::sse_encode(self.more, serializer);
     }
 }
 

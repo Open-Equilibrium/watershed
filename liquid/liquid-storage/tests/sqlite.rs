@@ -440,6 +440,15 @@ fn a_page_s_earlier_versions_deleted_for_good_stay_gone_after_a_reopen() {
         workspace.revert(&owner(), &[typed]).unwrap_err(),
         Error::Purged
     );
+    drop(workspace);
+    let indexed: i64 = keyed(&scratch.db())
+        .query_row(
+            "SELECT count(*) FROM search_data WHERE instr(block, CAST('hunter2' AS BLOB)) > 0",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(indexed, 0);
 }
 
 #[test]

@@ -41,7 +41,7 @@ fn history_revert_undo_restore_and_purge_cross_the_bridge() {
         .action;
     assert_eq!(text(), format!("Ours: {before}"));
 
-    let entries = workspace.history(all()).unwrap();
+    let entries = workspace.history(all()).unwrap().entries;
     assert_eq!(entries[0].actions, std::slice::from_ref(&typed));
     assert_eq!(entries[0].actor.kind, BridgeActorKind::Person);
     assert_eq!(entries[0].allowed_by, "Can manage");
@@ -88,6 +88,6 @@ fn history_revert_undo_restore_and_purge_cross_the_bridge() {
     workspace.purge(Some(page.clone()), None).unwrap();
     let after = workspace.revert(vec![typed]).unwrap();
     assert!(after.purged);
-    let newest = workspace.history(all()).unwrap().remove(0);
+    let newest = workspace.history(all()).unwrap().entries.remove(0);
     assert!(newest.title.starts_with("Deleted the earlier versions of"));
 }
