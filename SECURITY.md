@@ -166,7 +166,7 @@ Liquid's shipped Workspace core enforces:
 
 Accepted agent-host risk (ADR-0254): Watershed puts no sandbox around a harness (ADR-0252). An agent host runs agents under the account it is installed on, so its agents reach what that account reaches: on a person's own account they can delete or damage Liquid's data folder, and the replica key stays Liquid's on macOS, whose keychain releases it only to Liquid, while on Linux the Secret Service and on Windows the Credential Manager release it to any program of the user. Whoever wants agents apart sets Meta-Harness up in a VM, a container, another account or on another computer and links it as an agent host.
 
-[Roles, Workspace CLI/API access and agent grants](docs/concept/V-Spec_Liquid.html#workspace-access), [sync, headless replicas and enterprise storage](docs/concept/V-Spec_Liquid.html#sync) and [Apps, Block packages and MCP](docs/concept/V-Spec_Liquid.html#apps) are accepted targets in the Liquid V-Spec.
+[Roles for people and agents, Workspace CLI/API access and agent grants](docs/concept/V-Spec_Liquid.html#workspace-access), [sync, headless replicas and enterprise storage](docs/concept/V-Spec_Liquid.html#sync) and [Apps, Block packages and MCP](docs/concept/V-Spec_Liquid.html#apps) are accepted targets in the Liquid V-Spec.
 
 This is Liquid's **workspace** action history (over Liquid's own data), not a project-code VCS. Detail: [`docs/concept/V-Spec_Liquid.html`](docs/concept/V-Spec_Liquid.html).
 
