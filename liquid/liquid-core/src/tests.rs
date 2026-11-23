@@ -567,3 +567,121 @@ fn a_failed_index_version_write_leaves_a_created_workspace_usable() {
         crate::INDEX_VERSION
     );
 }
+
+#[test]
+fn a_run_whose_later_step_fails_leaves_no_row_of_an_earlier_one() {
+    use automerge::transaction::Transactable;
+    use automerge::{ROOT, ReadDoc};
+
+    let owner = PersonId::new("benni");
+    let mut workspace = Workspace::create(owner.clone(), MemoryStore::default()).unwrap();
+    let apply = |workspace: &mut Workspace<MemoryStore>, mutation| {
+        workspace
+            .apply(Request {
+                actor: Actor::Person(owner.clone()),
+                origin: Origin::Ui,
+                mutation,
+            })
+            .unwrap()
+    };
+    let Some(Created::Area(area)) = apply(
+        &mut workspace,
+        Mutation::CreateArea {
+            name: "Private".into(),
+        },
+    )
+    .created
+    else {
+        panic!("an area")
+    };
+    let Some(Created::Table(table)) = apply(
+        &mut workspace,
+        Mutation::CreateTable {
+            area,
+            name: "Bills".into(),
+        },
+    )
+    .created
+    else {
+        panic!("a Table")
+    };
+    let Some(Created::Field(category)) = apply(
+        &mut workspace,
+        Mutation::AddField {
+            block: table.clone(),
+            place: crate::Place::Last,
+            name: "Category".into(),
+            kind: crate::FieldKind::Select,
+        },
+    )
+    .created
+    else {
+        panic!("a field")
+    };
+    let setup = crate::AutomationSetup {
+        name: "Copy".into(),
+        trigger: Some(crate::Trigger::RowAdded(table.clone())),
+        conditions: Vec::new(),
+        steps: vec![crate::Step::AddRow {
+            table: table.clone(),
+            cells: Vec::new(),
+        }],
+    };
+    let Some(Created::Automation(automation)) = apply(
+        &mut workspace,
+        Mutation::CreateAutomation {
+            setup: Box::new(setup.clone()),
+        },
+    )
+    .created
+    else {
+        panic!("an Automation")
+    };
+    let broken = crate::AutomationSetup {
+        steps: vec![
+            setup.steps[0].clone(),
+            crate::Step::Set {
+                field: category,
+                value: crate::Cell::Select(crate::OptionId::stored(&"e".repeat(32))),
+            },
+        ],
+        ..setup
+    };
+    let doc = workspace.doc(&Document::Workspace).unwrap();
+    let map = match doc.get(ROOT, "automations").unwrap() {
+        Some((_, map)) => map,
+        None => panic!("the automations map"),
+    };
+    let entry = match doc.get(&map, automation.as_str()).unwrap() {
+        Some((_, entry)) => entry,
+        None => panic!("the Automation"),
+    };
+    doc.put(&entry, "setup", serde_json::to_string(&broken).unwrap())
+        .unwrap();
+    doc.commit();
+
+    let ran = apply(
+        &mut workspace,
+        Mutation::AddRow {
+            block: table.clone(),
+            place: crate::Place::Last,
+        },
+    )
+    .ran;
+    assert_eq!(ran[0].outcome, Err(Error::NotFound));
+    let rows = workspace
+        .rows(
+            &table,
+            &crate::RowQuery {
+                sort: None,
+                filter: None,
+                within: None,
+                start: 0,
+                limit: usize::MAX,
+                search: None,
+                totals: Vec::new(),
+            },
+        )
+        .unwrap();
+    assert_eq!(rows.count, 1);
+}

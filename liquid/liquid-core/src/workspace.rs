@@ -1750,7 +1750,10 @@ impl<S: Store> Workspace<S> {
 
     pub(crate) fn rollback(&mut self) {
         for loaded in self.docs.values_mut() {
-            loaded.doc.rollback();
+            if loaded.doc.rollback() > 0 {
+                loaded.order = None;
+                loaded.databases.clear();
+            }
         }
     }
 
