@@ -56,6 +56,29 @@ pub fn install_files(bundle: &Path, prefix: &Path, platform: &str) -> Result<Pat
     let stage = lib.join(format!(".{}.install", name.to_string_lossy()));
     let _ = std::fs::remove_dir_all(&stage);
     copy_tree(t3_source, &stage)?;
+    let program = bin.join(&meta);
+    let previous = bin.join(format!("{meta}.old"));
+    let kept = program.exists();
+    if kept {
+        let _ = std::fs::remove_file(&previous);
+        std::fs::rename(&program, &previous).map_err(|e| {
+            let _ = std::fs::remove_dir_all(&stage);
+            format!(
+                "Could not move the running {} aside: {e}",
+                program.display()
+            )
+        })?;
+    }
+    let restore = |error: String| {
+        let _ = std::fs::remove_dir_all(&stage);
+        if kept {
+            let _ = std::fs::remove_file(&program);
+            let _ = std::fs::rename(&previous, &program);
+        }
+        error
+    };
+    std::fs::copy(bundle.join("bin").join(&meta), &program)
+        .map_err(|e| restore(format!("Could not install {}: {e}", program.display())))?;
     let installed = lib.join(name);
     let aside = lib.join(format!(".{}.old", name.to_string_lossy()));
     let _ = std::fs::remove_dir_all(&aside);
@@ -64,47 +87,38 @@ pub fn install_files(bundle: &Path, prefix: &Path, platform: &str) -> Result<Pat
         while let Err(error) = std::fs::rename(&installed, &aside) {
             tries += 1;
             if tries >= MOVE_TRIES {
-                let _ = std::fs::remove_dir_all(&stage);
-                return Err(format!(
+                return Err(restore(format!(
                     "The running Meta-Harness still holds {} ({error}), so nothing was \
                      replaced. Stop it with `meta service uninstall` and install again.",
                     installed.display()
-                ));
+                )));
             }
             std::thread::sleep(MOVE_WAIT);
         }
     }
-    std::fs::rename(&stage, &installed)
-        .map_err(|e| format!("Could not place {}: {e}", installed.display()))?;
-    let _ = std::fs::remove_dir_all(&aside);
+    if let Err(error) = std::fs::rename(&stage, &installed) {
+        let _ = std::fs::rename(&aside, &installed);
+        return Err(restore(format!(
+            "Could not place {}: {error}",
+            installed.display()
+        )));
+    }
+    for notice in NOTICES {
+        std::fs::copy(bundle.join(notice), share.join(notice))
+            .map_err(|e| format!("Could not install {notice}: {e}"))?;
+    }
     for old in std::fs::read_dir(&lib)
         .map_err(|e| format!("Could not read {}: {e}", lib.display()))?
         .filter_map(Result::ok)
         .map(|entry| entry.path())
     {
-        let t3_folder = old
-            .file_name()
-            .is_some_and(|n| n.to_string_lossy().starts_with("t3-"));
-        if t3_folder && old != installed {
+        let leftover = old.file_name().is_some_and(|n| {
+            let n = n.to_string_lossy();
+            n.starts_with("t3-") || n.starts_with(".t3-")
+        });
+        if leftover && old != installed {
             let _ = std::fs::remove_dir_all(&old);
         }
-    }
-    let program = bin.join(&meta);
-    if program.exists() {
-        let aside = bin.join(format!("{meta}.old"));
-        let _ = std::fs::remove_file(&aside);
-        std::fs::rename(&program, &aside).map_err(|e| {
-            format!(
-                "Could not move the running {} aside: {e}",
-                program.display()
-            )
-        })?;
-    }
-    std::fs::copy(bundle.join("bin").join(&meta), &program)
-        .map_err(|e| format!("Could not install {}: {e}", program.display()))?;
-    for notice in NOTICES {
-        std::fs::copy(bundle.join(notice), share.join(notice))
-            .map_err(|e| format!("Could not install {notice}: {e}"))?;
     }
     Ok(program)
 }
