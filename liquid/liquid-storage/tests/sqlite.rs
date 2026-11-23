@@ -420,6 +420,8 @@ fn a_page_s_earlier_versions_deleted_for_good_stay_gone_after_a_reopen() {
     workspace
         .purge(&owner(), &liquid_core::Purge::Page(page.clone()))
         .unwrap();
+    let wal = std::fs::metadata(scratch.0.join("replica.db-wal")).map_or(0, |file| file.len());
+    assert_eq!(wal, 0);
     drop(workspace);
 
     let mut store = Sqlite::open(&scratch.db(), &KEY).unwrap();
