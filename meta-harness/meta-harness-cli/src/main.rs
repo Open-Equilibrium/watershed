@@ -1,3 +1,4 @@
+mod agents;
 mod hosts;
 mod login;
 
@@ -38,6 +39,20 @@ usage: meta <command>
   host revoke NAME          refuse a paired client's token from its next connection on, and
                             end the T3 sessions of that host's link
   host agents on|off        accept agents from other hosts here (off until turned on)
+  agent create NAME --project PATH --model INSTANCE/MODEL [--permissions MODE]
+        [--instructions TEXT]
+                            create a persistent agent: its own thread in PATH and a private
+                            memory folder here; MODE is approval-required (the default),
+                            auto-accept-edits, auto or full-access
+  agent list                print the persistent agents as JSON
+  agent remove NAME         remove an agent and its routines; its memory folder stays
+  agent routines NAME       print the agent's routines as JSON
+  agent routine add NAME (--every 30m|2h|1d | --at HH:MM [--days mon,fri] | --once ISO
+        | --webhook) --prompt TEXT [--title TEXT]
+                            wake the agent on a schedule or webhook; --once takes a date and
+                            time with an offset, such as 2026-12-01T07:30:00+01:00
+  agent routine remove NAME ID
+                            remove one of the agent's routines
   service install           start the login service, also after each login and crash
   service uninstall         stop and remove the login service
   uninstall                 remove the login service and this installation; data stays
@@ -79,6 +94,7 @@ async fn run(args: &[&str]) -> Result<(), String> {
         ["remote", rest @ ..] => hosts::remote(&connect(&home).await?, rest).await,
         ["invite", rest @ ..] => hosts::invite(&connect(&home).await?, rest).await,
         ["host", rest @ ..] => hosts::host(&connect(&home).await?, rest).await,
+        ["agent", rest @ ..] => agents::agent(&connect(&home).await?, rest).await,
         ["service", "install"] => install(home),
         ["service", "uninstall"] => remove_login_service(),
         ["uninstall"] => uninstall(),

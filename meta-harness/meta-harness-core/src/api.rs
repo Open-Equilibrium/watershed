@@ -47,6 +47,24 @@ pub(crate) enum Call {
         call: GitCall,
     },
     Config(ConfigCall),
+    Agents(AgentsCall),
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum AgentsCall {
+    List,
+    Create(crate::agents::NewAgent),
+    Remove(String),
+    Routines(String),
+    AddRoutine {
+        name: String,
+        routine: crate::agents::NewRoutine,
+    },
+    RemoveRoutine {
+        name: String,
+        id: String,
+    },
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]

@@ -13,8 +13,8 @@ use tokio_tungstenite::tungstenite::handshake::client::Request;
 use tokio_tungstenite::tungstenite::http::{HeaderValue, Response, StatusCode};
 
 use crate::api::{
-    self, Call, Checkout, ConfigCall, GitCall, HostCall, HostsCall, ProjectCall, RemoteCall,
-    RemoteStatus, Reply, ThreadCall,
+    self, AgentsCall, Call, Checkout, ConfigCall, GitCall, HostCall, HostsCall, ProjectCall,
+    RemoteCall, RemoteStatus, Reply, ThreadCall,
 };
 use crate::config::{Change, Current, LogEntry, Proposal};
 use crate::hosts::{Access, ClientKind, HostList};
@@ -435,6 +435,44 @@ impl Host {
 
     pub async fn host_agents(&self, on: bool) -> Result<(), String> {
         self.call(Call::Hosts(HostsCall::Agents(on))).await
+    }
+
+    pub async fn agents(&self) -> Result<Vec<crate::Agent>, String> {
+        self.call(Call::Agents(AgentsCall::List)).await
+    }
+
+    pub async fn agent_create(&self, new: crate::NewAgent) -> Result<crate::Agent, String> {
+        self.call(Call::Agents(AgentsCall::Create(new))).await
+    }
+
+    pub async fn agent_remove(&self, name: &str) -> Result<std::path::PathBuf, String> {
+        self.call(Call::Agents(AgentsCall::Remove(name.to_owned())))
+            .await
+    }
+
+    pub async fn agent_routines(&self, name: &str) -> Result<Vec<crate::Automation>, String> {
+        self.call(Call::Agents(AgentsCall::Routines(name.to_owned())))
+            .await
+    }
+
+    pub async fn agent_routine_add(
+        &self,
+        name: &str,
+        routine: crate::NewRoutine,
+    ) -> Result<crate::AddedRoutine, String> {
+        self.call(Call::Agents(AgentsCall::AddRoutine {
+            name: name.to_owned(),
+            routine,
+        }))
+        .await
+    }
+
+    pub async fn agent_routine_remove(&self, name: &str, id: &str) -> Result<(), String> {
+        self.call(Call::Agents(AgentsCall::RemoveRoutine {
+            name: name.to_owned(),
+            id: id.to_owned(),
+        }))
+        .await
     }
 }
 

@@ -365,6 +365,13 @@ impl Thread {
         crate::statistics::context(&self.state().projection)
     }
 
+    pub(crate) fn branch(&self) -> String {
+        self.state().projection.thread["branch"]
+            .as_str()
+            .unwrap_or_default()
+            .to_owned()
+    }
+
     pub fn title(&self) -> String {
         self.state().projection.thread["title"]
             .as_str()

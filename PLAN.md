@@ -42,6 +42,7 @@ M2 delivers Meta-Harness as a **self-contained, host-scoped headless control pla
 **Deliverables:**
 
 - Meta-Harness CLI run, session, schedule and metrics commands.
+- Persistent agents (ADR-0283): Liquid's screens after the approved [mockups](docs/design/mockups/liquid-persistent-agents.html), with configuration by chat and `@name` in other Chats; moving an Agent profile with its memory folder to another host; sharing with Can use and Can edit once the Liquid account exists.
 - Host links through the Liquid account and an end-to-end relay (ADR-0285); Tailscale carries them until then (ADR-0299).
 - Moving a session whose host is offline, through the account's sync (ADR-0284, ADR-0289); until then a session moves only while both hosts answer (ADR-0308).
 - API/protocol surface for Liquid and BYOA: session registry, live event and transcript streams, artifact/log/handoff queries, config read/write proposals, agent schedule/trigger control, answers to a harness's own approvals and questions, revert.
