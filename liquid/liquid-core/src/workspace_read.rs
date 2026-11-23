@@ -31,37 +31,25 @@ impl<S: Store> Workspace<S> {
     }
 
     pub fn style(&mut self, page: &PageId, block: &BlockId) -> Result<Option<TextStyle>, Error> {
-        let doc = self.doc(&Document::Page(page.clone()))?;
+        let doc = self.page_doc(page)?;
         Ok(text_block(doc, block)
             .map(|entry| model::style(model::string(doc, &entry, STYLE).as_deref())))
     }
 
     pub fn text(&mut self, page: &PageId, block: &BlockId) -> Result<Option<String>, Error> {
-        Ok(model::text(
-            self.doc(&Document::Page(page.clone()))?,
-            block.as_str(),
-        ))
+        Ok(model::text(self.page_doc(page)?, block.as_str()))
     }
 
     pub fn code(&mut self, page: &PageId, block: &BlockId) -> Result<Option<Code>, Error> {
-        Ok(model::code(
-            self.doc(&Document::Page(page.clone()))?,
-            block.as_str(),
-        ))
+        Ok(model::code(self.page_doc(page)?, block.as_str()))
     }
 
     pub fn math(&mut self, page: &PageId, block: &BlockId) -> Result<Option<String>, Error> {
-        Ok(model::math(
-            self.doc(&Document::Page(page.clone()))?,
-            block.as_str(),
-        ))
+        Ok(model::math(self.page_doc(page)?, block.as_str()))
     }
 
     pub fn media(&mut self, page: &PageId, block: &BlockId) -> Result<Option<Media>, Error> {
-        Ok(model::media(
-            self.doc(&Document::Page(page.clone()))?,
-            block.as_str(),
-        ))
+        Ok(model::media(self.page_doc(page)?, block.as_str()))
     }
 
     pub fn drawing(
@@ -70,7 +58,7 @@ impl<S: Store> Workspace<S> {
         block: &BlockId,
         pages: std::ops::Range<u32>,
     ) -> Result<Option<drawing::Drawing>, Error> {
-        drawing::read(self.doc(&Document::Page(page.clone()))?, block, pages)
+        drawing::read(self.page_doc(page)?, block, pages)
     }
 
     pub fn calculation(
@@ -110,10 +98,7 @@ impl<S: Store> Workspace<S> {
         table: &BlockId,
         query: &database::RowQuery,
     ) -> Result<database::Rows, Error> {
-        if self.table_name(table)?.is_none() {
-            return Err(Error::NotFound);
-        }
-        let (doc, index) = self.database_index(table)?;
+        let (doc, index) = self.table_index(table)?;
         let mut rows = database::rows(doc, index, table, query)?;
         rows.uses = calculation::fill(self, table, &mut rows.rows)?;
         if !query.totals.is_empty() {
@@ -129,10 +114,7 @@ impl<S: Store> Workspace<S> {
         query: &database::RowQuery,
         field: &FieldId,
     ) -> Result<Vec<database::Group>, Error> {
-        if self.table_name(table)?.is_none() {
-            return Err(Error::NotFound);
-        }
-        let (doc, index) = self.database_index(table)?;
+        let (doc, index) = self.table_index(table)?;
         let mut groups = database::groups(doc, index, table, query, field)?;
         for group in &mut groups {
             calculation::fill(self, table, &mut group.rows)?;

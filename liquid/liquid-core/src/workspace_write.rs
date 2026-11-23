@@ -2,9 +2,10 @@ use automerge::ROOT;
 use automerge::transaction::Transactable;
 
 use crate::model::{self, ICON, NAME};
+use crate::order::Sections;
 use crate::store::Store;
 use crate::workspace::{Workspace, Written};
-use crate::workspace_page::{add_view, block_changed};
+use crate::workspace_page::block_changed;
 use crate::workspace_table::table_changed;
 use crate::{
     BlockId, BlockKind, Changed, Created, Document, Error, Mutation, PageId, calculation, chart,
@@ -12,6 +13,14 @@ use crate::{
 };
 
 const MAX_ICON: usize = 64;
+
+fn checked_icon(icon: &str) -> Result<&str, Error> {
+    if icon.len() > MAX_ICON {
+        Err(Error::TooLong)
+    } else {
+        Ok(icon)
+    }
+}
 
 impl<S: Store> Workspace<S> {
     pub(crate) fn write(&mut self, mutation: &Mutation) -> Result<Written, Error> {
@@ -41,13 +50,7 @@ impl<S: Store> Workspace<S> {
         }
         let before = order.sections();
         let mut written = self.write_mutation(mutation)?;
-        if self.carry_tiles(page, &before)? {
-            let document = Document::Page(page.clone());
-            if !written.touched.contains(&document) {
-                written.touched.push(document);
-            }
-            written.changed.push(Changed::Views(page.clone()));
-        }
+        self.carry(page, &before, &mut written)?;
         Ok(written)
     }
 
@@ -76,27 +79,32 @@ impl<S: Store> Workspace<S> {
         }
         let mut written = self.write_mutation(mutation)?;
         for (page, sections) in &before {
-            if self.carry_tiles(page, sections)? {
-                let document = Document::Page(page.clone());
-                if !written.touched.contains(&document) {
-                    written.touched.push(document);
-                }
-                written.changed.push(Changed::Views(page.clone()));
-            }
+            self.carry(page, sections, &mut written)?;
         }
         Ok(written)
+    }
+
+    fn carry(
+        &mut self,
+        page: &PageId,
+        before: &Sections,
+        written: &mut Written,
+    ) -> Result<(), Error> {
+        if self.carry_tiles(page, before)? {
+            let document = Document::Page(page.clone());
+            if !written.touched.contains(&document) {
+                written.touched.push(document);
+            }
+            written.changed.push(Changed::Views(page.clone()));
+        }
+        Ok(())
     }
 
     fn write_mutation(&mut self, mutation: &Mutation) -> Result<Written, Error> {
         match mutation {
             Mutation::CreateArea { name } => self.write_create_area(name),
             Mutation::RenameWorkspace { name } => self.write_workspace(NAME, name),
-            Mutation::SetWorkspaceIcon { icon } => {
-                if icon.len() > MAX_ICON {
-                    return Err(Error::TooLong);
-                }
-                self.write_workspace(ICON, icon)
-            }
+            Mutation::SetWorkspaceIcon { icon } => self.write_workspace(ICON, checked_icon(icon)?),
             Mutation::CreatePage {
                 area,
                 parent,
@@ -104,10 +112,7 @@ impl<S: Store> Workspace<S> {
             } => self.write_create_page(area, parent.as_ref(), title),
             Mutation::RenamePage { page, title } => self.write_rename_page(page, title),
             Mutation::SetPageIcon { page, icon } => {
-                if icon.len() > MAX_ICON {
-                    return Err(Error::TooLong);
-                }
-                self.write_page_field(page, ICON, icon)
+                self.write_page_field(page, ICON, checked_icon(icon)?)
             }
             Mutation::AddSource {
                 area,
@@ -147,7 +152,7 @@ impl<S: Store> Workspace<S> {
                 self.write_turn_into(page, block, BlockKind::Text, (BlockKind::Code, "code"))
             }
             Mutation::TurnIntoText { page, block } => {
-                let doc = self.doc(&Document::Page(page.clone()))?;
+                let doc = self.page_doc(page)?;
                 let from = if model::math(doc, block.as_str()).is_some() {
                     BlockKind::Math
                 } else {
@@ -171,21 +176,16 @@ impl<S: Store> Workspace<S> {
                 attachment,
             } => self.write_add_media_block(page, after.as_ref(), name, media_type, attachment),
             Mutation::AddWhiteboardBlock { page, after } => {
-                self.write_add_whiteboard_block(page, after.as_ref())
+                self.add_block(page, after.as_ref(), BlockKind::Whiteboard, drawing::create)
             }
-            Mutation::AddCalculationBlock { page, after } => {
-                self.write_add_calculation_block(page, after.as_ref())
-            }
+            Mutation::AddCalculationBlock { page, after } => self.add_block(
+                page,
+                after.as_ref(),
+                BlockKind::Calculation,
+                calculation::create,
+            ),
             Mutation::AddChartBlock { page, after } => {
-                let (doc, order) = self.page(page)?;
-                let block = BlockId::new()?;
-                chart::create(doc, &block)?;
-                let sort = order.key_after(after.as_ref())?;
-                let view = add_view(doc, order, sort, &block, BlockKind::Chart)?;
-                let mut written =
-                    Written::new(Document::Page(page.clone()), Changed::Views(page.clone()));
-                written.created = Some(Created::Block { block, view });
-                Ok(written)
+                self.add_block(page, after.as_ref(), BlockKind::Chart, chart::create)
             }
             Mutation::SetChart { page, block, setup } => {
                 let areas = chart::set(self, page, block, setup)?;
@@ -202,7 +202,7 @@ impl<S: Store> Workspace<S> {
                 after,
                 line,
             } => {
-                let doc = self.doc(&Document::Page(page.clone()))?;
+                let doc = self.page_doc(page)?;
                 let id = calculation::add_line(doc, block, after.as_ref(), line)?;
                 Ok(block_changed(page, block, Some(Created::Line(id))))
             }
@@ -212,17 +212,17 @@ impl<S: Store> Workspace<S> {
                 line,
                 setup,
             } => {
-                let doc = self.doc(&Document::Page(page.clone()))?;
+                let doc = self.page_doc(page)?;
                 calculation::set_line(doc, block, line, setup)?;
                 Ok(block_changed(page, block, None))
             }
             Mutation::RemoveLine { page, block, line } => {
-                let doc = self.doc(&Document::Page(page.clone()))?;
+                let doc = self.page_doc(page)?;
                 calculation::remove_line(doc, block, line)?;
                 Ok(block_changed(page, block, None))
             }
             Mutation::SetDrawingStyle { page, block, style } => {
-                let doc = self.doc(&Document::Page(page.clone()))?;
+                let doc = self.page_doc(page)?;
                 drawing::set_style(doc, block, *style)?;
                 Ok(block_changed(page, block, None))
             }
@@ -233,7 +233,7 @@ impl<S: Store> Workspace<S> {
                 change,
                 remove,
             } => {
-                let doc = self.doc(&Document::Page(page.clone()))?;
+                let doc = self.page_doc(page)?;
                 let ids = drawing::edit(doc, block, add, change, remove)?;
                 let created = (!ids.is_empty()).then_some(Created::Elements(ids));
                 Ok(block_changed(page, block, created))
@@ -305,20 +305,17 @@ impl<S: Store> Workspace<S> {
                 Ok(table_changed(block, Some(Created::Option(option))))
             }
             Mutation::AddRow { block, place } => {
-                self.table_doc(block)?;
-                let (doc, index) = self.database_index(block)?;
+                let (doc, index) = self.table_index(block)?;
                 let row = database::add_row(doc, index, block, place.as_ref())?;
                 Ok(table_changed(block, Some(Created::Row(row))))
             }
             Mutation::MoveRow { block, row, place } => {
-                self.table_doc(block)?;
-                let (doc, index) = self.database_index(block)?;
+                let (doc, index) = self.table_index(block)?;
                 database::move_row(doc, index, block, row, place.as_ref())?;
                 Ok(table_changed(block, None))
             }
             Mutation::RemoveRow { block, row } => {
-                self.table_doc(block)?;
-                let (doc, index) = self.database_index(block)?;
+                let (doc, index) = self.table_index(block)?;
                 database::remove_row(doc, index, block, row)?;
                 Ok(table_changed(block, None))
             }

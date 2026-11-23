@@ -11,7 +11,7 @@ use crate::workspace::{Workspace, Written};
 use crate::workspace_view::move_boundary;
 use crate::{
     AreaId, AttachmentId, BlockId, BlockKind, Changed, Created, Document, Error, Media, PageId,
-    TextStyle, View, ViewId, calculation, drawing,
+    TextStyle, View, ViewId,
 };
 
 fn add_text_block(
@@ -35,7 +35,7 @@ fn add_text_block(
     Ok((block, view))
 }
 
-pub(crate) fn add_view(
+fn add_view(
     doc: &mut AutoCommit,
     order: &mut Order,
     sort: String,
@@ -91,12 +91,10 @@ fn utf8_offset(text: &str, at: usize) -> usize {
 }
 
 pub(crate) fn block_changed(page: &PageId, block: &BlockId, created: Option<Created>) -> Written {
-    let mut written = Written::new(
-        Document::Page(page.clone()),
-        Changed::Block(page.clone(), block.clone()),
-    );
-    written.created = created;
-    written
+    Written {
+        created,
+        ..Written::block(page, block)
+    }
 }
 
 impl<S: Store> Workspace<S> {
@@ -185,7 +183,7 @@ impl<S: Store> Workspace<S> {
         let (doc, order) = self.page(page)?;
         let sort = order.key_after(after)?;
         let (block, view) = add_text_block(doc, order, sort, text, TextStyle::Paragraph)?;
-        let mut written = Written::new(Document::Page(page.clone()), Changed::Views(page.clone()));
+        let mut written = Written::views(page);
         written.created = Some(Created::Block { block, view });
         Ok(written)
     }
@@ -223,7 +221,7 @@ impl<S: Store> Workspace<S> {
             let sort = order.key_after(Some(view))?;
             add_text_block(doc, order, sort, &tail, style)?
         };
-        let mut written = Written::new(Document::Page(page.clone()), Changed::Views(page.clone()));
+        let mut written = Written::views(page);
         written
             .changed
             .push(Changed::Block(page.clone(), block.clone()));
@@ -251,7 +249,7 @@ impl<S: Store> Workspace<S> {
         doc.splice_text(&target, end, 0, &text)?;
         let entry = model::live(doc, VIEWS, view.as_str()).ok_or(Error::NotFound)?;
         model::mark_deleted(doc, &entry)?;
-        let mut written = Written::new(Document::Page(page.clone()), Changed::Views(page.clone()));
+        let mut written = Written::views(page);
         written
             .changed
             .push(Changed::Block(page.clone(), above.block.clone()));
@@ -277,10 +275,7 @@ impl<S: Store> Workspace<S> {
         let (doc, _) = self.page(page)?;
         let entry = text_block(doc, block).ok_or(Error::NotFound)?;
         doc.put(&entry, STYLE, name)?;
-        Ok(Written::new(
-            Document::Page(page.clone()),
-            Changed::Block(page.clone(), block.clone()),
-        ))
+        Ok(Written::block(page, block))
     }
 
     pub(crate) fn write_edit_text(
@@ -291,7 +286,7 @@ impl<S: Store> Workspace<S> {
         delete: usize,
         insert: &str,
     ) -> Result<Written, Error> {
-        let doc = self.doc(&Document::Page(page.clone()))?;
+        let doc = self.page_doc(page)?;
         let entry = model::of_kind(doc, block.as_str(), BlockKind::Text)
             .or_else(|| model::of_kind(doc, block.as_str(), BlockKind::Code))
             .or_else(|| model::of_kind(doc, block.as_str(), BlockKind::Math))
@@ -303,10 +298,7 @@ impl<S: Store> Workspace<S> {
         }
         let delete = isize::try_from(delete).map_err(|_| Error::OutOfRange)?;
         doc.splice_text(&content, at, delete, insert)?;
-        Ok(Written::new(
-            Document::Page(page.clone()),
-            Changed::Block(page.clone(), block.clone()),
-        ))
+        Ok(Written::block(page, block))
     }
 
     pub(crate) fn write_turn_into(
@@ -324,7 +316,7 @@ impl<S: Store> Workspace<S> {
             _ => doc.delete(&entry, LANGUAGE)?,
         }
         order.set_kind(block, to);
-        let mut written = Written::new(Document::Page(page.clone()), Changed::Views(page.clone()));
+        let mut written = Written::views(page);
         written
             .changed
             .push(Changed::Block(page.clone(), block.clone()));
@@ -337,17 +329,32 @@ impl<S: Store> Workspace<S> {
         block: &BlockId,
         language: &str,
     ) -> Result<Written, Error> {
-        let doc = self.doc(&Document::Page(page.clone()))?;
+        let doc = self.page_doc(page)?;
         let entry = model::of_kind(doc, block.as_str(), BlockKind::Code).ok_or(Error::NotFound)?;
         if language.is_empty() {
             doc.delete(&entry, LANGUAGE)?;
         } else {
             doc.put(&entry, LANGUAGE, language)?;
         }
-        Ok(Written::new(
-            Document::Page(page.clone()),
-            Changed::Block(page.clone(), block.clone()),
-        ))
+        Ok(Written::block(page, block))
+    }
+
+    pub(crate) fn add_block(
+        &mut self,
+        page: &PageId,
+        after: Option<&ViewId>,
+        kind: BlockKind,
+        create: impl FnOnce(&mut AutoCommit, &BlockId) -> Result<(), Error>,
+    ) -> Result<Written, Error> {
+        let (doc, order) = self.page(page)?;
+        let block = BlockId::new()?;
+        create(doc, &block)?;
+        let sort = order.key_after(after)?;
+        let view = add_view(doc, order, sort, &block, kind)?;
+        Ok(Written {
+            created: Some(Created::Block { block, view }),
+            ..Written::views(page)
+        })
     }
 
     pub(crate) fn write_add_media_block(
@@ -362,50 +369,15 @@ impl<S: Store> Workspace<S> {
             .store
             .attachment_size(attachment)?
             .ok_or(Error::NotFound)?;
-        let (doc, order) = self.page(page)?;
-        let block = BlockId::new()?;
-        let entry = model::insert(doc, BLOCKS, block.as_str(), &[(KIND, "media")])?;
         let file = Media {
             name: name.into(),
             media_type: media_type.into(),
             attachment: attachment.clone(),
             size,
         };
-        model::put_file(doc, &entry, &file)?;
-        let sort = order.key_after(after)?;
-        let view = add_view(doc, order, sort, &block, BlockKind::Media)?;
-        let mut written = Written::new(Document::Page(page.clone()), Changed::Views(page.clone()));
-        written.created = Some(Created::Block { block, view });
-        Ok(written)
-    }
-
-    pub(crate) fn write_add_whiteboard_block(
-        &mut self,
-        page: &PageId,
-        after: Option<&ViewId>,
-    ) -> Result<Written, Error> {
-        let (doc, order) = self.page(page)?;
-        let block = BlockId::new()?;
-        drawing::create(doc, &block)?;
-        let sort = order.key_after(after)?;
-        let view = add_view(doc, order, sort, &block, BlockKind::Whiteboard)?;
-        let mut written = Written::new(Document::Page(page.clone()), Changed::Views(page.clone()));
-        written.created = Some(Created::Block { block, view });
-        Ok(written)
-    }
-
-    pub(crate) fn write_add_calculation_block(
-        &mut self,
-        page: &PageId,
-        after: Option<&ViewId>,
-    ) -> Result<Written, Error> {
-        let (doc, order) = self.page(page)?;
-        let block = BlockId::new()?;
-        calculation::create(doc, &block)?;
-        let sort = order.key_after(after)?;
-        let view = add_view(doc, order, sort, &block, BlockKind::Calculation)?;
-        let mut written = Written::new(Document::Page(page.clone()), Changed::Views(page.clone()));
-        written.created = Some(Created::Block { block, view });
-        Ok(written)
+        self.add_block(page, after, BlockKind::Media, |doc, block| {
+            let entry = model::insert(doc, BLOCKS, block.as_str(), &[(KIND, "media")])?;
+            model::put_file(doc, &entry, &file)
+        })
     }
 }

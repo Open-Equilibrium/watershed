@@ -104,7 +104,7 @@ impl<S: Store> Workspace<S> {
                 inner: None,
             },
         );
-        let mut written = Written::new(Document::Page(page.clone()), Changed::Views(page.clone()));
+        let mut written = Written::views(page);
         written.created = Some(Created::Block {
             block: table.clone(),
             view: view.clone(),
@@ -123,7 +123,7 @@ impl<S: Store> Workspace<S> {
         let table = model::string(doc, &entry, TABLE).map(|table| BlockId::stored(&table));
         doc.put(&entry, TITLE, title)?;
         order.set_title(view, title);
-        let mut written = Written::new(Document::Page(page.clone()), Changed::Views(page.clone()));
+        let mut written = Written::views(page);
         if let Some(table) = table
             && self.table_name(&table)?.as_deref() == Some("")
         {
@@ -144,8 +144,7 @@ impl<S: Store> Workspace<S> {
         if let Some(table) = model::string(doc, &entry, TABLE) {
             model::mark_deleted(doc, &entry)?;
             order.remove(view);
-            let mut written =
-                Written::new(Document::Page(page.clone()), Changed::Views(page.clone()));
+            let mut written = Written::views(page);
             let table = BlockId::stored(&table);
             if let Ok(doc) = self.table_doc(&table)
                 && let Some(shown) = model::live(doc, VIEWS, view.as_str())
@@ -158,7 +157,7 @@ impl<S: Store> Workspace<S> {
         }
         let block = BlockId::stored(&model::string(doc, &entry, BLOCK).ok_or(Error::NotFound)?);
         model::mark_deleted(doc, &entry)?;
-        let mut written = Written::new(Document::Page(page.clone()), Changed::Views(page.clone()));
+        let mut written = Written::views(page);
         if !order.shows(&block, view) {
             if let Some(block_entry) = model::live(doc, BLOCKS, block.as_str()) {
                 model::mark_deleted(doc, &block_entry)?;
@@ -208,10 +207,7 @@ impl<S: Store> Workspace<S> {
             None => {}
         }
         order.set_tiles(view, placed, within);
-        Ok(Written::new(
-            Document::Page(page.clone()),
-            Changed::Views(page.clone()),
-        ))
+        Ok(Written::views(page))
     }
 
     pub(crate) fn write_move_views(
@@ -243,10 +239,7 @@ impl<S: Store> Workspace<S> {
             previous = Some(view.id.clone());
             order.insert(key, view);
         }
-        Ok(Written::new(
-            Document::Page(page.clone()),
-            Changed::Views(page.clone()),
-        ))
+        Ok(Written::views(page))
     }
 
     pub(crate) fn write_set_section_boundary(
@@ -259,10 +252,7 @@ impl<S: Store> Workspace<S> {
         let entry = model::live(doc, VIEWS, view.as_str()).ok_or(Error::NotFound)?;
         doc.put(&entry, BOUNDARY, boundary)?;
         order.set_boundary(view, boundary);
-        Ok(Written::new(
-            Document::Page(page.clone()),
-            Changed::Views(page.clone()),
-        ))
+        Ok(Written::views(page))
     }
 
     pub(crate) fn write_add_tab(
@@ -317,7 +307,7 @@ impl<S: Store> Workspace<S> {
         tab::keep(doc, &entry, view.as_str())?;
         let created = change(doc, &entry)?;
         order.set_tabs(view, tab::read(doc, &entry, view.as_str()));
-        let mut written = Written::new(Document::Page(page.clone()), Changed::Views(page.clone()));
+        let mut written = Written::views(page);
         written.created = created.map(Created::Tab);
         Ok(written)
     }

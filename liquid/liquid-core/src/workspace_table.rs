@@ -183,8 +183,7 @@ impl<S: Store> Workspace<S> {
             }
             value => value,
         };
-        self.table_doc(block)?;
-        let (doc, index) = self.database_index(block)?;
+        let (doc, index) = self.table_index(block)?;
         database::set_cell(doc, index, block, row, field, value)?;
         Ok(table_changed(block, None))
     }

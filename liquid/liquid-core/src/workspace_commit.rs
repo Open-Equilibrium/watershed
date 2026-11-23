@@ -1,12 +1,10 @@
-use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use automerge::transaction::{CommitOptions, Transactable};
 use automerge::{AutoCommit, ReadDoc};
 
-use crate::history::Header;
 use crate::store::{Commit, Store, Write};
-use crate::workspace::{Loaded, Recorded, Workspace};
+use crate::workspace::{Loaded, Recorded, Workspace, header};
 use crate::{
     Action, ActionId, Applied, Created, Document, Error, IndexWrite, Mutation, Operation, Request,
     RowId,
@@ -14,14 +12,19 @@ use crate::{
 
 const COMPACT_AFTER: usize = 1_000;
 
-fn trigger(mutation: &Mutation) -> Option<(crate::Trigger, Option<RowId>)> {
-    match mutation {
-        Mutation::AddRow { block, .. } => Some((crate::Trigger::RowAdded(block.clone()), None)),
-        Mutation::SetCell {
-            block, row, field, ..
-        } => Some((
+fn trigger(mutation: &Mutation, created: Option<&Created>) -> Option<(crate::Trigger, RowId)> {
+    match (mutation, created) {
+        (Mutation::AddRow { block, .. }, Some(Created::Row(row))) => {
+            Some((crate::Trigger::RowAdded(block.clone()), row.clone()))
+        }
+        (
+            Mutation::SetCell {
+                block, row, field, ..
+            },
+            _,
+        ) => Some((
             crate::Trigger::FieldChanged(block.clone(), field.clone()),
-            Some(row.clone()),
+            row.clone(),
         )),
         _ => None,
     }
@@ -32,7 +35,6 @@ impl<S: Store> Workspace<S> {
         let permission = self.permit(&request.actor)?;
         let id = ActionId::new()?;
         let leaving = self.leaving(&request.mutation);
-        let trigger = trigger(&request.mutation);
         let written = match self.write(&request.mutation) {
             Ok(written) => written,
             Err(error) => {
@@ -40,6 +42,7 @@ impl<S: Store> Workspace<S> {
                 return Err(error);
             }
         };
+        let fired = trigger(&request.mutation, written.created.as_ref());
         let unchanged = written.new.is_empty()
             && written.touched.iter().all(|document| {
                 self.docs
@@ -67,12 +70,9 @@ impl<S: Store> Workspace<S> {
             at: 0,
         };
         self.record(action, &written.touched, written.new, index)?;
-        let ran = match (trigger, &written.created) {
-            (Some((trigger, Some(row))), _) => self.run_triggered(&trigger, &row, Some(&id)),
-            (Some((trigger, None)), Some(Created::Row(row))) => {
-                self.run_triggered(&trigger, row, Some(&id))
-            }
-            _ => Vec::new(),
+        let ran = match fired {
+            Some((trigger, row)) => self.run_triggered(&trigger, &row, Some(&id)),
+            None => Vec::new(),
         };
         Ok(Applied {
             action: id,
@@ -109,22 +109,15 @@ impl<S: Store> Workspace<S> {
         index: Vec<IndexWrite>,
         recorded: Recorded,
     ) -> Result<(), Error> {
-        action.at = SystemTime::now()
+        let elapsed = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .map_or(0, |elapsed| elapsed.as_millis() as i64);
+            .unwrap_or_default();
+        action.at = elapsed.as_millis() as i64;
         for (document, doc) in new {
-            let loaded = Loaded {
-                doc,
-                chunks: 0,
-                order: None,
-                databases: HashMap::new(),
-            };
-            self.docs.insert(document, loaded);
+            self.docs.insert(document, Loaded::new(doc, 0));
         }
-        let message = serde_json::to_string(&Header::of(&action)).expect("a serializable header");
-        let time = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map_or(0, |elapsed| elapsed.as_secs() as i64);
+        let message = header(&action);
+        let time = elapsed.as_secs() as i64;
         let mut writes = recorded.writes;
         for (document, hash, chunk) in recorded.merged {
             action.changes.push((document.clone(), hash));

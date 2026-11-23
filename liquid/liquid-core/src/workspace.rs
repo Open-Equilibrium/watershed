@@ -33,6 +33,17 @@ pub(crate) struct Loaded {
     pub(crate) databases: HashMap<BlockId, database::Index>,
 }
 
+impl Loaded {
+    pub(crate) fn new(doc: AutoCommit, chunks: usize) -> Self {
+        Self {
+            doc,
+            chunks,
+            order: None,
+            databases: HashMap::new(),
+        }
+    }
+}
+
 pub(crate) struct Written {
     pub(crate) created: Option<Created>,
     pub(crate) changed: Vec<Changed>,
@@ -48,6 +59,17 @@ impl Written {
             touched: vec![touched],
             new: Vec::new(),
         }
+    }
+
+    pub(crate) fn views(page: &PageId) -> Self {
+        Self::new(Document::Page(page.clone()), Changed::Views(page.clone()))
+    }
+
+    pub(crate) fn block(page: &PageId, block: &BlockId) -> Self {
+        Self::new(
+            Document::Page(page.clone()),
+            Changed::Block(page.clone(), block.clone()),
+        )
     }
 }
 
@@ -181,13 +203,8 @@ impl<S: Store> Workspace<S> {
                 return Err(Error::NotFound);
             }
             let doc = model::load(&chunks.concat(), &self.device)?;
-            let loaded = Loaded {
-                doc,
-                chunks: chunks.len(),
-                order: None,
-                databases: HashMap::new(),
-            };
-            self.docs.insert(document.clone(), loaded);
+            self.docs
+                .insert(document.clone(), Loaded::new(doc, chunks.len()));
         }
         Ok(&mut self.docs.get_mut(document).expect("loaded above").doc)
     }
@@ -214,5 +231,17 @@ impl<S: Store> Workspace<S> {
             return Err(Error::NotFound);
         }
         self.doc(&Document::Table(table.clone()))
+    }
+
+    pub(crate) fn table_index(
+        &mut self,
+        block: &BlockId,
+    ) -> Result<(&mut AutoCommit, &mut database::Index), Error> {
+        self.table_doc(block)?;
+        self.database_index(block)
+    }
+
+    pub(crate) fn page_doc(&mut self, page: &PageId) -> Result<&mut AutoCommit, Error> {
+        self.doc(&Document::Page(page.clone()))
     }
 }
