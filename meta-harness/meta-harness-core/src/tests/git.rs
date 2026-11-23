@@ -1,4 +1,5 @@
 use std::path::PathBuf;
+use std::time::Duration;
 
 use serde_json::{Value, json};
 use tokio_tungstenite::tungstenite::Message;
@@ -8,18 +9,16 @@ use crate::git::{
     BranchChanges, BranchPullRequest, ChangedFile, Git, GitAction, GitActionRequest, GitProgress,
     GitStatus, LineCount, Ref, Refs, ResolvedPullRequest,
 };
-use crate::t3::Client;
 
 const CWD: &str = "/repo";
+const WAIT: Duration = Duration::from_secs(10);
 
 pub(super) async fn checkout_in(
     answer: impl Fn(&str, &Value, &str) -> Vec<Message> + Send + 'static,
     thread: Option<&str>,
 ) -> (Fake, Git) {
     let fake = Fake::start(answer).await;
-    let client = Client::connect(&fake.origin, || Box::pin(async { Ok("token".to_owned()) }))
-        .await
-        .unwrap();
+    let client = fake.client().await;
     (
         fake,
         Git::new(client, CWD.to_owned(), thread.map(str::to_owned)),
@@ -138,7 +137,7 @@ async fn status_of_a_folder_outside_any_repository_has_no_branch_or_pull_request
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn watch_reports_each_change_of_the_local_or_remote_status() {
+async fn watch_reports_each_change_of_the_status_and_ends_when_dropped() {
     let (fake, git) = checkout(|_, _, _| Vec::new()).await;
     let mut statuses = git.watch().await.unwrap();
     fake.received("subscribeVcsStatus", 1).await;
@@ -167,6 +166,11 @@ async fn watch_reports_each_change_of_the_local_or_remote_status() {
         fake.payloads("subscribeVcsStatus"),
         vec![json!({"cwd": CWD, "includeRemote": true})]
     );
+    let id = fake.request_id("subscribeVcsStatus");
+    drop(statuses);
+    tokio::time::timeout(WAIT, fake.interrupted(&id))
+        .await
+        .expect("T3 receives the interrupt");
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -280,6 +284,15 @@ async fn progress(mut receiver: tokio::sync::mpsc::Receiver<GitProgress>) -> Vec
     all
 }
 
+fn request(action: GitAction, message: Option<&str>) -> GitActionRequest {
+    GitActionRequest {
+        action,
+        message: message.map(str::to_owned),
+        files: None,
+        feature_branch: false,
+    }
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn every_stacked_action_is_sent_under_its_t3_name() {
     let (fake, git) = checkout(|_, _, _| Vec::new()).await;
@@ -291,13 +304,7 @@ async fn every_stacked_action_is_sent_under_its_t3_name() {
         (GitAction::CommitPushPullRequest, "commit_push_pr"),
     ];
     for (count, (action, name)) in actions.into_iter().enumerate() {
-        let request = GitActionRequest {
-            action,
-            message: None,
-            files: None,
-            feature_branch: false,
-        };
-        let _progress = git.run(request).await.unwrap();
+        let _progress = git.run(request(action, None)).await.unwrap();
         fake.received("git.runStackedAction", count + 1).await;
         assert_eq!(fake.payloads("git.runStackedAction")[count]["action"], name);
     }
@@ -385,10 +392,7 @@ async fn a_stacked_action_that_fails_says_why_and_ends() {
     let sent = &fake.payloads("git.runStackedAction")[0];
     assert_eq!(sent["commitMessage"], "fix");
     assert!(sent.get("filePaths").is_none() && sent.get("featureBranch").is_none());
-}
 
-#[tokio::test(flavor = "multi_thread")]
-async fn a_stacked_action_that_t3_fails_is_reported_as_failed_with_its_reason() {
     let (_fake, git) = checkout(|_, _, id| {
         vec![fail(
             id,
@@ -396,16 +400,8 @@ async fn a_stacked_action_that_t3_fails_is_reported_as_failed_with_its_reason() 
         )]
     })
     .await;
-    let receiver = git
-        .run(GitActionRequest {
-            action: GitAction::Commit,
-            message: None,
-            files: None,
-            feature_branch: false,
-        })
-        .await
-        .unwrap();
-    let ended = tokio::time::timeout(std::time::Duration::from_secs(10), progress(receiver))
+    let receiver = git.run(request(GitAction::Commit, None)).await.unwrap();
+    let ended = tokio::time::timeout(WAIT, progress(receiver))
         .await
         .expect("the action ends");
     assert!(
@@ -429,9 +425,7 @@ async fn a_pull_request_reference_resolves_and_checks_out_in_the_thread_or_local
         vec![ok(id, reply)]
     })
     .await;
-    let client = Client::connect(&fake.origin, || Box::pin(async { Ok("token".to_owned()) }))
-        .await
-        .unwrap();
+    let client = fake.client().await;
     let git = Git::new(client.clone(), CWD.to_owned(), Some("thread-1".to_owned()));
     assert_eq!(
         git.resolve_pull_request("#42").await.unwrap(),
@@ -483,32 +477,12 @@ async fn publishing_names_the_provider_repository_and_visibility() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn dropping_the_status_receiver_interrupts_the_watch_on_t3() {
-    let (fake, git) = checkout(|_, _, _| Vec::new()).await;
-    let statuses = git.watch().await.unwrap();
-    fake.received("subscribeVcsStatus", 1).await;
-    let id = fake.request_id("subscribeVcsStatus");
-    drop(statuses);
-    tokio::time::timeout(std::time::Duration::from_secs(10), fake.interrupted(&id))
-        .await
-        .expect("T3 receives the interrupt");
-}
-
-#[tokio::test(flavor = "multi_thread")]
 async fn a_stacked_action_is_never_sent_again_after_t3_drops_the_connection() {
     let (fake, git) = checkout_in(|_, _, _| Vec::new(), None).await;
-    let receiver = git
-        .run(GitActionRequest {
-            action: GitAction::CommitPush,
-            message: None,
-            files: None,
-            feature_branch: false,
-        })
-        .await
-        .unwrap();
+    let receiver = git.run(request(GitAction::CommitPush, None)).await.unwrap();
     fake.received("git.runStackedAction", 1).await;
     fake.drop_connection();
-    let ended = tokio::time::timeout(std::time::Duration::from_secs(10), progress(receiver))
+    let ended = tokio::time::timeout(WAIT, progress(receiver))
         .await
         .expect("the action ends with the connection");
     assert!(
@@ -516,6 +490,6 @@ async fn a_stacked_action_is_never_sent_again_after_t3_drops_the_connection() {
         "{ended:?}"
     );
     fake.accepted(2).await;
-    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    tokio::time::sleep(Duration::from_millis(200)).await;
     assert_eq!(fake.payloads("git.runStackedAction").len(), 1);
 }

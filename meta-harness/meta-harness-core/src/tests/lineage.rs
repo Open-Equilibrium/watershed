@@ -109,6 +109,19 @@ fn shown(lineage: &Lineage) -> Vec<Shown> {
         .collect()
 }
 
+fn row(thread: &str, relation: Relation, group: Group, title: &str, status: &str) -> Shown {
+    (
+        thread.to_owned(),
+        relation,
+        group,
+        title.to_owned(),
+        status.to_owned(),
+        false,
+        false,
+        None,
+    )
+}
+
 #[test]
 fn a_threads_rows_follow_t3s_relations_order_groups_titles_and_merge_back() {
     let (projection, shells) = root_scenario();
@@ -117,48 +130,38 @@ fn a_threads_rows_follow_t3s_relations_order_groups_titles_and_merge_back() {
     let titles = HashMap::from([("t-next".to_owned(), "Next thread".to_owned())]);
     let lineage = derive(&projection, &shells, &titles).lineage;
 
+    let mut subagent = row(
+        "t-sub",
+        Relation::Subagent,
+        Group::Active,
+        "Read Docs",
+        "Running",
+    );
+    subagent.7 = Some("sub-1".to_owned());
     assert_eq!(
         shown(&lineage),
         vec![
-            (
-                "t-side".to_owned(),
+            row(
+                "t-side",
                 Relation::SideChat,
                 Group::SideChats,
-                "Quick question".to_owned(),
-                "Running".to_owned(),
-                false,
-                false,
-                None
+                "Quick question",
+                "Running"
             ),
-            (
-                "t-fork".to_owned(),
+            row(
+                "t-fork",
                 Relation::Fork,
                 Group::Related,
-                "Root fork".to_owned(),
-                "Done".to_owned(),
-                false,
-                false,
-                None
+                "Root fork",
+                "Done"
             ),
-            (
-                "t-sub".to_owned(),
-                Relation::Subagent,
-                Group::Active,
-                "Read Docs".to_owned(),
-                "Running".to_owned(),
-                false,
-                false,
-                Some("sub-1".to_owned())
-            ),
-            (
-                "t-next".to_owned(),
+            subagent,
+            row(
+                "t-next",
                 Relation::ContextTransfer,
                 Group::Related,
-                "Next thread".to_owned(),
-                "Resolved (native)".to_owned(),
-                false,
-                false,
-                None
+                "Next thread",
+                "Resolved (native)",
             ),
         ]
     );
@@ -188,19 +191,15 @@ fn a_threads_rows_follow_t3s_relations_order_groups_titles_and_merge_back() {
         "runs": [{"id": "r1", "ordinal": 1, "status": "completed"}],
     }));
     let lineage = derive(&fork, &fork_shells, &HashMap::new()).lineage;
-    assert_eq!(
-        shown(&lineage),
-        vec![(
-            "t-root".to_owned(),
-            Relation::ParentThread,
-            Group::Related,
-            "Root".to_owned(),
-            "Idle".to_owned(),
-            false,
-            true,
-            None
-        )]
+    let mut parent = row(
+        "t-root",
+        Relation::ParentThread,
+        Group::Related,
+        "Root",
+        "Idle",
     );
+    parent.6 = true;
+    assert_eq!(shown(&lineage), vec![parent]);
     assert_eq!(lineage.merge_target_title.as_deref(), Some("Root"));
     assert!(lineage.merge_ready && lineage.can_merge);
     assert!(!lineage.can_disconnect);
@@ -250,7 +249,7 @@ async fn merge_back_disconnect_and_stop_subagent_send_the_commands_t3_sends() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn the_lineage_changes_when_its_shell_changes() {
+async fn lineage_watches_wake_for_a_change_of_the_thread_or_its_shell_and_stop_when_dropped() {
     let (fake, thread) = follow_answering(projection(json!({})), 1, |tag, _, id| match tag {
         "orchestration.subscribeShell" => Vec::new(),
         _ => vec![ok(id, json!({}))],
@@ -270,10 +269,7 @@ async fn the_lineage_changes_when_its_shell_changes() {
     tokio::time::timeout(WAIT, fake.interrupted(&shell))
         .await
         .expect("dropping the watch stops the shell stream on T3");
-}
 
-#[tokio::test(flavor = "multi_thread")]
-async fn every_lineage_watch_wakes_for_a_change_of_the_thread() {
     let (fake, thread) = follow_answering(projection(json!({})), 1, |tag, _, id| match tag {
         "orchestration.subscribeShell" => vec![chunk(id, vec![])],
         _ => vec![ok(id, json!({}))],

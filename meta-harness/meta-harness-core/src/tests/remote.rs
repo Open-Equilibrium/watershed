@@ -64,39 +64,30 @@ async fn refusing_peer(reply: &'static [u8]) -> String {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn a_service_of_another_api_version_refuses_the_connection_with_the_version_it_speaks() {
-    let url = refusing_peer(
-        b"HTTP/1.1 426 Upgrade Required\r\nmeta-harness-api: 2\r\ncontent-length: 0\r\nconnection: close\r\n\r\n",
-    )
-    .await;
-    let error = Host::connect_to(&url, "token", "test")
-        .await
-        .err()
-        .expect("the connection is refused");
-    assert_eq!(
-        error,
-        "Meta-Harness speaks API version 2; this client needs 1. Update Meta-Harness or Liquid."
-    );
-    assert!(!connection_lost(&error), "a refusal is not retried");
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn a_revoked_device_is_refused_with_its_pairing_named_and_not_retried() {
-    let url = refusing_peer(
-        b"HTTP/1.1 401 Unauthorized\r\ncontent-length: 0\r\nconnection: close\r\n\r\n",
-    )
-    .await;
-    let error = Host::connect_to(&url, "token", "test")
-        .await
-        .err()
-        .expect("the connection is refused");
-    assert_eq!(
-        error,
-        format!(
-            "Meta-Harness at {url} no longer accepts this device's pairing; pair this device again."
-        )
-    );
-    assert!(!connection_lost(&error), "a revoked pairing is not retried");
+async fn a_refused_connection_says_why_and_is_not_retried() {
+    type Refusal = (&'static [u8], fn(&str) -> String);
+    let cases: [Refusal; 2] = [
+        (
+            b"HTTP/1.1 426 Upgrade Required\r\nmeta-harness-api: 2\r\ncontent-length: 0\r\nconnection: close\r\n\r\n",
+            |_| "Meta-Harness speaks API version 2; this client needs 1. Update Meta-Harness or Liquid.".to_owned(),
+        ),
+        (
+            b"HTTP/1.1 401 Unauthorized\r\ncontent-length: 0\r\nconnection: close\r\n\r\n",
+            |url| format!("Meta-Harness at {url} no longer accepts this device's pairing; pair this device again."),
+        ),
+    ];
+    for (reply, expected) in cases {
+        let url = refusing_peer(reply).await;
+        let error = Host::connect_to(&url, "token", "test")
+            .await
+            .err()
+            .expect("the connection is refused");
+        assert_eq!(error, expected(&url));
+        assert!(
+            !connection_lost(&error),
+            "a refusal is not retried: {error}"
+        );
+    }
 }
 
 #[tokio::test]

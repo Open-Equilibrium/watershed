@@ -1,97 +1,21 @@
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use serde_json::{Value, json};
-
-use std::sync::{Arc, Mutex};
+use tokio_tungstenite::tungstenite::Message;
 
 use super::fake_t3::{Fake, chunk, ok};
 use super::thread::{follow_answering, projection};
 use crate::host_move::{Departure, Harness, Movable};
-use crate::t3::Client;
 use crate::thread::move_out::Saving;
 use crate::{ModelChoice, Permissions, Thread};
-use tokio_tungstenite::tungstenite::Message;
 
 const LIMIT: Duration = Duration::from_millis(300);
-
-fn run(status: &str) -> Value {
-    json!({"id": "run-2", "ordinal": 2, "status": status, "queuePosition": 1})
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn a_message_being_prepared_refuses_the_move_and_any_other_lets_it_go_on() {
-    let (fake, thread) = follow_answering(
-        projection(json!({"runs": [run("preparing")]})),
-        1,
-        |_, _, id| vec![ok(id, json!({}))],
-    )
-    .await;
-    let refused = thread.settle_preparing(LIMIT).await.unwrap_err();
-    assert_eq!(
-        refused,
-        "A queued message is still being prepared, so the session did not move. Nothing changed; try again."
-    );
-    assert!(
-        fake.payloads("orchestration.dispatchCommand").is_empty(),
-        "nothing is cancelled or stopped"
-    );
-
-    let (_fake, thread) = follow_answering(
-        projection(json!({"runs": [run("queued")]})),
-        1,
-        |_, _, id| vec![ok(id, json!({}))],
-    )
-    .await;
-    thread.settle_preparing(LIMIT).await.unwrap();
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn a_move_that_ended_takes_no_further_step_after_it_ended() {
-    let (fake, thread) = follow_answering(
-        projection(json!({"runs": [run("running")]})),
-        1,
-        |_, _, id| vec![ok(id, json!({}))],
-    )
-    .await;
-    let movable = Movable {
-        title: "Fix it".to_owned(),
-        model: ModelChoice {
-            instance: "codex".to_owned(),
-            model: "m".to_owned(),
-            options: Vec::new(),
-        },
-        harness: Harness::Codex,
-        permissions: Permissions::Supervised,
-        branch: "main".to_owned(),
-        remote_url: "https://example.invalid/repo.git".to_owned(),
-        earlier: None,
-    };
-    let departure = Departure {
-        transfer: "tr-1",
-        from_host: "host-a",
-    };
-    let refused = thread
-        .move_out(
-            movable,
-            departure,
-            false,
-            None,
-            Saving {
-                save: &|_, _| Ok(()),
-                unsave: &|_| {},
-                open: &|| Err(crate::host_move::MOVE_ENDED.to_owned()),
-            },
-        )
-        .await
-        .unwrap_err();
-    assert_eq!(refused, crate::host_move::MOVE_ENDED);
-    assert!(
-        fake.payloads("orchestration.dispatchCommand").is_empty(),
-        "a running turn is not stopped once the move ended"
-    );
-}
-
 const SUBSCRIBE: &str = "orchestration.subscribeThread";
+
+fn run(id: &str, ordinal: u64, status: &str) -> Value {
+    json!({"id": id, "ordinal": ordinal, "status": status, "queuePosition": 1})
+}
 
 fn status(branch: &str) -> Value {
     json!({"refName": branch, "isRepo": true, "workingTree": {"files": []}})
@@ -140,12 +64,13 @@ async fn live_thread(
         }
     })
     .await;
-    let client = Client::connect(&fake.origin, || Box::pin(async { Ok("token".to_owned()) }))
-        .await
-        .unwrap();
-    let thread = Thread::follow(client, "thread-1".to_owned(), "/repo".to_owned())
-        .await
-        .unwrap();
+    let thread = Thread::follow(
+        fake.client().await,
+        "thread-1".to_owned(),
+        "/repo".to_owned(),
+    )
+    .await
+    .unwrap();
     (fake, thread)
 }
 
@@ -165,40 +90,91 @@ async fn moving(thread: &Thread) -> Result<crate::MovePackage, String> {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn a_branch_that_changes_while_the_turn_stops_is_raced() {
-    let (_fake, thread) =
-        live_thread(
-            vec![run("running")],
-            |tag, payload, id, subscription| match tag {
-                "orchestration.dispatchCommand" if payload["type"] == "thread.stop" => vec![
-                    update(subscription, 2, run("interrupted")),
-                    ok(id, json!({})),
-                ],
-                "vcs.refreshStatus" => vec![ok(id, status("feature/other"))],
-                "git.runStackedAction" => vec![
-                    chunk(
-                        id,
-                        vec![json!({"kind": "action_finished", "result": {"toast": {"title": "Pushed"}}})],
-                    ),
-                    ok(id, json!({})),
-                ],
-                _ => vec![ok(id, json!({}))],
-            },
-        )
-        .await;
+async fn a_message_being_prepared_refuses_the_move_and_any_other_lets_it_go_on() {
+    let (fake, thread) = follow_answering(
+        projection(json!({"runs": [run("run-2", 2, "preparing")]})),
+        1,
+        |_, _, id| vec![ok(id, json!({}))],
+    )
+    .await;
+    let refused = thread.settle_preparing(LIMIT).await.unwrap_err();
+    assert_eq!(
+        refused,
+        "A queued message is still being prepared, so the session did not move. Nothing changed; try again."
+    );
+    assert!(
+        fake.payloads("orchestration.dispatchCommand").is_empty(),
+        "nothing is cancelled or stopped"
+    );
+
+    let (_fake, thread) = follow_answering(
+        projection(json!({"runs": [run("run-2", 2, "queued")]})),
+        1,
+        |_, _, id| vec![ok(id, json!({}))],
+    )
+    .await;
+    thread.settle_preparing(LIMIT).await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_move_that_ended_takes_no_further_step_after_it_ended() {
+    let (fake, thread) = follow_answering(
+        projection(json!({"runs": [run("run-2", 2, "running")]})),
+        1,
+        |_, _, id| vec![ok(id, json!({}))],
+    )
+    .await;
+    let departure = Departure {
+        transfer: "tr-1",
+        from_host: "host-a",
+    };
+    let saving = Saving {
+        save: &|_, _| Ok(()),
+        unsave: &|_| {},
+        open: &|| Err(crate::host_move::MOVE_ENDED.to_owned()),
+    };
+    let refused = thread
+        .move_out(movable(), departure, false, None, saving)
+        .await
+        .unwrap_err();
+    assert_eq!(refused, crate::host_move::MOVE_ENDED);
+    assert!(
+        fake.payloads("orchestration.dispatchCommand").is_empty(),
+        "a running turn is not stopped once the move ended"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_move_is_refused_when_its_branch_or_turns_change_while_it_starts() {
+    let (_fake, thread) = live_thread(
+        vec![run("run-2", 2, "running")],
+        |tag, payload, id, subscription| match tag {
+            "orchestration.dispatchCommand" if payload["type"] == "thread.stop" => vec![
+                update(subscription, 2, run("run-2", 2, "interrupted")),
+                ok(id, json!({})),
+            ],
+            "vcs.refreshStatus" => vec![ok(id, status("feature/other"))],
+            "git.runStackedAction" => vec![
+                chunk(
+                    id,
+                    vec![json!({"kind": "action_finished", "result": {"toast": {"title": "Pushed"}}})],
+                ),
+                ok(id, json!({})),
+            ],
+            _ => vec![ok(id, json!({}))],
+        },
+    )
+    .await;
     let refused = moving(&thread).await.unwrap_err();
     assert!(
         refused.contains("changed while the move started"),
         "{refused}"
     );
-}
 
-#[tokio::test(flavor = "multi_thread")]
-async fn a_turn_that_completes_during_the_push_is_raced() {
     let (_fake, thread) = live_thread(Vec::new(), |tag, _, id, subscription| match tag {
         "vcs.refreshStatus" => vec![ok(id, status("feature/x"))],
         "git.runStackedAction" => vec![
-            update(subscription, 2, run_with("run-3", 3, "completed")),
+            update(subscription, 2, run("run-3", 3, "completed")),
             chunk(
                 id,
                 vec![json!({"kind": "action_finished", "result": {"toast": {"title": "Pushed"}}})],
@@ -231,8 +207,4 @@ async fn a_move_whose_turns_stay_still_through_the_push_returns_its_package() {
     .await;
     let package = moving(&thread).await.unwrap();
     assert_eq!(package.branch, "feature/x");
-}
-
-fn run_with(id: &str, ordinal: u64, status: &str) -> Value {
-    json!({"id": id, "ordinal": ordinal, "status": status, "queuePosition": 1})
 }

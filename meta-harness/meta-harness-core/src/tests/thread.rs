@@ -9,7 +9,6 @@ use crate::event::{
     AgentEvent, ApprovalOption, ItemDetail, ItemId, ItemKind, ItemStatus, PendingRequest, Question,
     Request, RequestId, StepStatus, TaskStep, TurnId, Usage,
 };
-use crate::t3::Client;
 use crate::thread::{ChatItem, Snapshot, Thread, ThreadEvent, TurnStatus};
 use crate::{ModelChoice, Permissions};
 use tokio_tungstenite::tungstenite::Message;
@@ -60,9 +59,7 @@ pub(super) async fn follow_answering(
         _ => answer(tag, payload, id),
     })
     .await;
-    let client = Client::connect(&fake.origin, || Box::pin(async { Ok("token".to_owned()) }))
-        .await
-        .unwrap();
+    let client = fake.client().await;
     let thread = Thread::follow(client, "thread-1".to_owned(), "/repo".to_owned())
         .await
         .unwrap();
@@ -567,9 +564,21 @@ async fn live_changes_become_the_agent_events_liquid_shows() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn a_message_queues_steers_or_starts_a_turn_as_t3_s_composer_does() {
+async fn commands_name_the_request_queued_turn_or_message_they_act_on() {
     let (fake, thread) = follow(
-        projection(json!({"runs": [run("r1", 1, "running", "m1")], "messages": [{"id": "m1", "text": "go"}]})),
+        projection(json!({
+            "runs": [run("r6", 6, "running", "m6"), run("r7", 7, "queued", "m-q")],
+            "runtimeRequests": [{"id": "req-1", "status": "pending"}, {"id": "req-2", "status": "pending"}],
+            "turnItems": [
+                {"id": "ap1", "runId": "r6", "type": "approval_request", "requestId": "req-1",
+                 "requestKind": "command", "prompt": "ls", "options": [{"decision": "accept", "label": "Approve"}]},
+                {"id": "ui1", "runId": "r6", "type": "user_input_request", "requestId": "req-2",
+                 "questions": [
+                     {"id": "scope", "header": "Scope", "question": "Which?", "options": [], "multiSelect": false},
+                     {"id": "tags", "header": "Tags", "question": "Any?", "options": [], "multiSelect": true},
+                 ]},
+            ],
+        })),
         1,
     )
     .await;
@@ -589,32 +598,7 @@ async fn a_message_queues_steers_or_starts_a_turn_as_t3_s_composer_does() {
         command(&fake),
         json!({"type": "thread.stop", "threadId": "thread-1"})
     );
-    let (fake, thread) = follow(projection(json!({})), 1).await;
-    thread.send("go", false).await.unwrap();
-    let sent = command(&fake);
-    assert_eq!(sent["dispatchMode"], json!({"type": "start_immediately"}));
-    assert_eq!(sent["deliveryIntent"], "auto");
-}
 
-#[tokio::test(flavor = "multi_thread")]
-async fn answers_and_dismissals_name_the_request_and_its_choices() {
-    let (fake, thread) = follow(
-        projection(json!({
-            "runtimeRequests": [{"id": "req-1", "status": "pending"}, {"id": "req-2", "status": "pending"}],
-            "turnItems": [
-                {"id": "ap1", "runId": "r1", "type": "approval_request", "requestId": "req-1",
-                 "requestKind": "command", "prompt": "ls", "options": [{"decision": "accept", "label": "Approve"}]},
-                {"id": "ui1", "runId": "r1", "type": "user_input_request", "requestId": "req-2",
-                 "questions": [
-                     {"id": "scope", "header": "Scope", "question": "Which?", "options": [], "multiSelect": false},
-                     {"id": "tags", "header": "Tags", "question": "Any?", "options": [], "multiSelect": true},
-                 ]},
-            ],
-            "runs": [run("r1", 1, "waiting", "m1")],
-        })),
-        1,
-    )
-    .await;
     thread
         .respond(&RequestId("req-1".to_owned()), "accept")
         .await
@@ -646,16 +630,7 @@ async fn answers_and_dismissals_name_the_request_and_its_choices() {
         command(&fake),
         json!({"type": "thread.user-input.dismiss", "threadId": "thread-1", "requestId": "req-2"})
     );
-}
 
-#[tokio::test(flavor = "multi_thread")]
-async fn queued_turns_can_be_edited_cancelled_and_sent_now() {
-    let queued = |id: &str, ordinal: u64| run(id, ordinal, "queued", "m-q");
-    let (fake, thread) = follow(
-        projection(json!({"runs": [run("r6", 6, "running", "m6"), queued("r7", 7)]})),
-        1,
-    )
-    .await;
     thread.edit_queued(7, "edited").await.unwrap();
     assert_eq!(
         command(&fake),
@@ -675,12 +650,20 @@ async fn queued_turns_can_be_edited_cancelled_and_sent_now() {
     let missing = thread.edit_queued(8, "x").await.unwrap_err();
     assert_eq!(missing, "Turn 8 is not queued.");
 
-    let (fake, thread) = follow(projection(json!({"runs": [queued("r7", 7)]})), 1).await;
+    let (fake, thread) = follow(
+        projection(json!({"runs": [run("r7", 7, "queued", "m-q")]})),
+        1,
+    )
+    .await;
     thread.send_queued_now(7).await.unwrap();
     assert_eq!(
         command(&fake),
         json!({"type": "queued-run.start", "threadId": "thread-1", "runId": "r7"})
     );
+    thread.send("go", false).await.unwrap();
+    let sent = command(&fake);
+    assert_eq!(sent["dispatchMode"], json!({"type": "start_immediately"}));
+    assert_eq!(sent["deliveryIntent"], "auto");
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -828,12 +811,13 @@ async fn a_thread_restarts_from_the_snapshot_t3_sends_on_a_new_connection() {
         _ => vec![ok(id, json!({}))],
     })
     .await;
-    let client = Client::connect(&fake.origin, || Box::pin(async { Ok("token".to_owned()) }))
-        .await
-        .unwrap();
-    let thread = Thread::follow(client, "thread-1".to_owned(), "/repo".to_owned())
-        .await
-        .unwrap();
+    let thread = Thread::follow(
+        fake.client().await,
+        "thread-1".to_owned(),
+        "/repo".to_owned(),
+    )
+    .await
+    .unwrap();
     let (first, mut events) = thread.subscribe();
     assert_eq!(first.sequence, 1);
     fake.drop_connection();
@@ -912,12 +896,13 @@ async fn a_late_branch_answer_keeps_the_newer_branch_t3_already_sent() {
         ],
     })
     .await;
-    let client = Client::connect(&fake.origin, || Box::pin(async { Ok("token".to_owned()) }))
-        .await
-        .unwrap();
-    let thread = Thread::follow(client, "thread-1".to_owned(), "/repo".to_owned())
-        .await
-        .unwrap();
+    let thread = Thread::follow(
+        fake.client().await,
+        "thread-1".to_owned(),
+        "/repo".to_owned(),
+    )
+    .await
+    .unwrap();
     thread.set_branch("older", None).await.unwrap();
     let newer = Some(std::path::PathBuf::from("/worktrees/newer"));
     tokio::time::timeout(Duration::from_secs(5), async {
@@ -932,8 +917,28 @@ async fn a_late_branch_answer_keeps_the_newer_branch_t3_already_sent() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn a_returned_message_queues_behind_the_active_turn_even_when_none_is_running() {
-    let (fake, thread) = follow(projection(json!({})), 1).await;
+async fn a_message_is_sent_once_by_its_stable_id_and_a_returned_one_queues_behind_the_turn() {
+    let (fake, thread) = follow(
+        projection(json!({"messages": [{"id": "queued-tr-0", "text": "first"}]})),
+        1,
+    )
+    .await;
+    thread
+        .send_once("queued-tr-0", "first", false)
+        .await
+        .unwrap();
+    assert!(fake.payloads(COMMAND).is_empty(), "a repeat sends nothing");
+    thread
+        .send_once("queued-tr-1", "second", false)
+        .await
+        .unwrap();
+    let sent = fake
+        .payloads(COMMAND)
+        .pop()
+        .expect("the new message is sent");
+    assert_eq!(sent["messageId"], "queued-tr-1");
+    assert_eq!(sent["text"], "second");
+
     thread.requeue_once("returned-tr-1", "first").await.unwrap();
     assert_eq!(
         command(&fake),
@@ -964,28 +969,4 @@ async fn a_handoff_run_that_was_aborted_does_not_settle_the_move() {
         settled.is_err(),
         "a handoff run that was aborted must not let the move land"
     );
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn a_message_whose_stable_id_the_thread_already_holds_is_not_sent_again() {
-    let (fake, thread) = follow(
-        projection(json!({"messages": [{"id": "queued-tr-0", "text": "first"}]})),
-        1,
-    )
-    .await;
-    thread
-        .send_once("queued-tr-0", "first", false)
-        .await
-        .unwrap();
-    assert!(fake.payloads(COMMAND).is_empty(), "a repeat sends nothing");
-    thread
-        .send_once("queued-tr-1", "second", false)
-        .await
-        .unwrap();
-    let sent = fake
-        .payloads(COMMAND)
-        .pop()
-        .expect("the new message is sent");
-    assert_eq!(sent["messageId"], "queued-tr-1");
-    assert_eq!(sent["text"], "second");
 }

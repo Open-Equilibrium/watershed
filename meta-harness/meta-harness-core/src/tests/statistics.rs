@@ -18,6 +18,22 @@ fn turn(id: &str, attempt: &str, model: Value, usage: Value) -> Value {
         "turnTokenUsage": usage})
 }
 
+fn usage(input: u64, output: u64) -> Usage {
+    Usage {
+        input,
+        output,
+        ..Usage::default()
+    }
+}
+
+fn model_usage(model: &str, usage: Usage, responses: u32) -> ModelUsage {
+    ModelUsage {
+        model: model.to_owned(),
+        usage,
+        responses,
+    }
+}
+
 #[test]
 fn statistics_count_tokens_tools_and_turns_as_t3_records_them() {
     let projection = projection(json!({
@@ -60,35 +76,19 @@ fn statistics_count_tokens_tools_and_turns_as_t3_records_them() {
     }));
 
     let statistics = statistics(&projection);
-    let opus = ModelUsage {
-        model: "claude/opus".to_owned(),
-        usage: Usage {
+    let opus = model_usage(
+        "claude/opus",
+        Usage {
             input: 100,
             output: 25,
             cache_read: 40,
             cache_write: 10,
             reasoning: 5,
         },
-        responses: 2,
-    };
-    let codex = ModelUsage {
-        model: "codex/gpt".to_owned(),
-        usage: Usage {
-            input: 7,
-            output: 3,
-            ..Usage::default()
-        },
-        responses: 1,
-    };
-    let unnamed = ModelUsage {
-        model: String::new(),
-        usage: Usage {
-            input: 2,
-            output: 1,
-            ..Usage::default()
-        },
-        responses: 1,
-    };
+        2,
+    );
+    let codex = model_usage("codex/gpt", usage(7, 3), 1);
+    let unnamed = model_usage("", usage(2, 1), 1);
     assert_eq!(
         statistics.models,
         vec![opus.clone(), codex.clone(), unnamed.clone()]
@@ -149,18 +149,15 @@ fn a_turns_tool_time_counts_the_longest_call_of_each_response() {
              "exitCode": 0, "input": "c", "startedAt": "2026-11-15T10:00:05.000Z", "completedAt": "2026-11-15T10:00:07.000Z"},
         ],
     }));
-    let statistics = statistics(&timed);
-    assert_eq!(statistics.turns[0].tool_ms, Some(5000));
-    assert_eq!(statistics.tools[0].duration_ms, Some(6000));
+    let timed_stats = statistics(&timed);
+    assert_eq!(timed_stats.turns[0].tool_ms, Some(5000));
+    assert_eq!(timed_stats.tools[0].duration_ms, Some(6000));
 
     let chat_only = projection(json!({
         "runs": [run("r1", 1, "completed", json!("2026-11-15T10:00:10.000Z"))],
         "turnItems": [],
     }));
-    assert_eq!(
-        crate::statistics::statistics(&chat_only).turns[0].tool_ms,
-        Some(0)
-    );
+    assert_eq!(statistics(&chat_only).turns[0].tool_ms, Some(0));
 }
 
 #[test]
