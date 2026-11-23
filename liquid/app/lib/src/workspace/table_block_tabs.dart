@@ -44,11 +44,7 @@ extension _TableBlockTabs on _TableBlockState {
   }
 
   void _tabChanged() {
-    if (_down.hasClients) {
-      _scrollingItself = true;
-      _down.jumpTo(0);
-      _scrollingItself = false;
-    }
+    _toTop();
     unawaited(_rows.reread());
   }
 

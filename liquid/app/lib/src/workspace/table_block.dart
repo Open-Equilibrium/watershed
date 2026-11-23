@@ -119,7 +119,7 @@ class _TableBlockState extends State<TableBlock> implements CellDrop {
 
   int _revision = 0;
 
-  var _month = DateTime(DateTime.now().year, DateTime.now().month);
+  var _month = _thisMonth();
 
   final _sideways = ScrollController();
   final _down = ScrollController();
@@ -354,7 +354,7 @@ class _TableBlockState extends State<TableBlock> implements CellDrop {
     indexOf: (row) => _rows.indexWhere((shown) => shown.id == row),
     idAt: (index) async => (await _rows.load(index))?.id,
     insert: _insertRow,
-    remove: (row) => _writeRows(
+    remove: (row) => _write(
       mutation(
         BridgeMutationKind.removeRow,
         page: _page,
@@ -405,13 +405,14 @@ class _TableBlockState extends State<TableBlock> implements CellDrop {
     final ws = context.ws;
     final database = _database;
     final locale = Localizations.localeOf(context);
-    final numbers = intlLocale(locale, NumberFormat.localeExists);
-    _cells.numbers = NumberFormat.decimalPattern(numbers);
+    final numberFormat = NumberFormat.decimalPattern(
+      intlLocale(locale, NumberFormat.localeExists),
+    );
+    _cells.numbers = numberFormat;
     final days = intlLocale(locale, DateFormat.localeExists);
     _cells.days = days;
     final count = _rows.count ?? 0;
     final lineCount = _lines?.lineCount ?? count;
-    final numberFormat = NumberFormat.decimalPattern(numbers);
     final sort = _liveSort;
     final filter = _liveFilter;
     if (_toLastRow || _toLastField) {
@@ -420,16 +421,15 @@ class _TableBlockState extends State<TableBlock> implements CellDrop {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
         if (down && _down.hasClients) {
-          _scrollingItself = true;
-          _down.jumpTo(
-            (lineCount - math.min(lineCount, _shownRows)) * WsMetrics.rowTable,
+          _silently(
+            () => _down.jumpTo(
+              (lineCount - math.min(lineCount, _shownRows)) *
+                  WsMetrics.rowTable,
+            ),
           );
-          _scrollingItself = false;
         }
         if (sideways && _sideways.hasClients) {
-          _scrollingItself = true;
-          _sideways.jumpTo(_sideways.position.maxScrollExtent);
-          _scrollingItself = false;
+          _silently(() => _sideways.jumpTo(_sideways.position.maxScrollExtent));
         }
       });
     }
@@ -528,7 +528,7 @@ class _TableBlockState extends State<TableBlock> implements CellDrop {
                                 builder: (context, constraints) => _grid(
                                   database.fields,
                                   constraints.maxWidth,
-                                  NumberFormat.decimalPattern(numbers),
+                                  numberFormat,
                                   shownDays(days),
                                   footer: count > 0 || filter != null,
                                   counted: _rowCount(

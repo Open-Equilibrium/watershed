@@ -50,41 +50,6 @@ extension _TableBlockQuery on _TableBlockState {
     _setQuery(_tabWrite(BridgeMutationKind.setTabDate, field: field));
   }
 
-  Widget _sortAnchor(
-    List<BridgeField> fields,
-    Widget Function(VoidCallback toggle, bool open) anchor,
-  ) => QueryAnchor(
-    anchor: anchor,
-    menu: (close) => SortMenu(
-      fields: fields,
-      sort: _liveSort,
-      onSet: _setSort,
-      onClose: close,
-    ),
-  );
-
-  Widget _filterAnchor(
-    List<BridgeField> fields,
-    NumberFormat numbers,
-    String days,
-    Widget Function(VoidCallback toggle, bool open) anchor,
-  ) => QueryAnchor(
-    anchor: anchor,
-    menu: (close) => FilterMenu(
-      fields: [
-        for (final field in fields)
-          if (field.kind != BridgeFieldKind.formula &&
-              field.kind != BridgeFieldKind.button)
-            field,
-      ],
-      filter: _liveFilter,
-      numbers: numbers,
-      locale: days,
-      onSet: _setFilter,
-      onClose: close,
-    ),
-  );
-
   bool _isField(String id) =>
       _database?.fields.any((field) => field.id == id) ?? false;
 
@@ -178,24 +143,26 @@ extension _TableBlockQuery on _TableBlockState {
                   const SizedBox(width: WsMetrics.space2),
                   if (_tab.layout != BridgeLayout.calendar)
                     Flexible(
-                      child: _sortAnchor(
-                        database.fields,
-                        (toggle, _) => SetupControl(
+                      child: QueryAnchor(
+                        anchor: (toggle, _) => SetupControl(
                           key: const Key('table sort'),
                           icon: LucideIcons.arrowDownUp,
                           label: 'Sort',
                           value: sort == null ? null : sortLabel(sort),
                           onTap: toggle,
                         ),
+                        menu: (close) => SortMenu(
+                          fields: database.fields,
+                          sort: _liveSort,
+                          onSet: _setSort,
+                          onClose: close,
+                        ),
                       ),
                     ),
                   const SizedBox(width: WsMetrics.space2),
                   Flexible(
-                    child: _filterAnchor(
-                      database.fields,
-                      numbers,
-                      days,
-                      (toggle, _) => SetupControl(
+                    child: QueryAnchor(
+                      anchor: (toggle, _) => SetupControl(
                         key: const Key('table filter'),
                         icon: LucideIcons.filter,
                         label: 'Filter',
@@ -208,6 +175,19 @@ extension _TableBlockQuery on _TableBlockState {
                                 shownDays(days),
                               ),
                         onTap: toggle,
+                      ),
+                      menu: (close) => FilterMenu(
+                        fields: [
+                          for (final field in database.fields)
+                            if (field.kind != BridgeFieldKind.formula &&
+                                field.kind != BridgeFieldKind.button)
+                              field,
+                        ],
+                        filter: _liveFilter,
+                        numbers: numbers,
+                        locale: days,
+                        onSet: _setFilter,
+                        onClose: close,
                       ),
                     ),
                   ),

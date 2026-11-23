@@ -103,17 +103,7 @@ extension _TableBlockEdits on _TableBlockState {
     final BridgeApplied added;
     _fieldsWriting++;
     try {
-      added = await widget.views.write(
-        mutation(
-          BridgeMutationKind.addField,
-          page: _page,
-          block: _block,
-          text: name,
-          fieldKind: kind,
-          last: true,
-        ),
-        const [],
-      );
+      added = await _addFieldWrite(name, kind);
     } finally {
       _fieldsWriting--;
       if (mounted && _panel.isShowing) _update(() {});

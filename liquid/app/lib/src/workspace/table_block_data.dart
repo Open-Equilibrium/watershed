@@ -96,17 +96,25 @@ extension _TableBlockData on _TableBlockState {
               '${all == 1 ? 'row' : 'rows'}';
   }
 
-  void _setQuery(BridgeMutation change) => unawaited(
-    widget.views.write(change, const []).then((_) {}, onError: (Object _) {}),
-  );
-
-  Future<void> _writeRows(BridgeMutation change) =>
-      widget.views.write(change, const []).then((_) {}, onError: (Object _) {});
+  void _setQuery(BridgeMutation change) => unawaited(_write(change));
 
   Future<void> _writeField(BridgeMutation change) =>
       widget.views.write(change, const []).then((_) {
         if (mounted) unawaited(_read());
       }, onError: (Object _) {});
+
+  Future<BridgeApplied> _addFieldWrite(String text, BridgeFieldKind kind) =>
+      widget.views.write(
+        mutation(
+          BridgeMutationKind.addField,
+          page: _page,
+          block: _block,
+          text: text,
+          fieldKind: kind,
+          last: true,
+        ),
+        const [],
+      );
 
   Future<void> _setCell(BridgeRow row, BridgeField field, BridgeCell cell) =>
       widget.views.write(

@@ -1,22 +1,14 @@
 part of 'table_block.dart';
 
+DateTime _thisMonth() => DateTime(DateTime.now().year, DateTime.now().month);
+
 extension _TableBlockLayouts on _TableBlockState {
   void _shiftMonth(int by) =>
       _update(() => _month = DateTime(_month.year, _month.month + by));
 
   Future<void> _addDateField() async {
     try {
-      final added = await widget.views.write(
-        mutation(
-          BridgeMutationKind.addField,
-          page: _page,
-          block: _block,
-          text: 'Date',
-          fieldKind: BridgeFieldKind.date,
-          last: true,
-        ),
-        const [],
-      );
+      final added = await _addFieldWrite('Date', BridgeFieldKind.date);
       _setDate(added.field);
     } on Object {
       return;
@@ -55,9 +47,7 @@ extension _TableBlockLayouts on _TableBlockState {
         GestureDetector(
           key: const Key('this month'),
           behavior: HitTestBehavior.opaque,
-          onTap: () => _update(
-            () => _month = DateTime(DateTime.now().year, DateTime.now().month),
-          ),
+          onTap: () => _update(() => _month = _thisMonth()),
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: WsMetrics.space1),
             child: Text(
@@ -93,17 +83,7 @@ extension _TableBlockLayouts on _TableBlockState {
 
   Future<void> _addGroupField() async {
     try {
-      final added = await widget.views.write(
-        mutation(
-          BridgeMutationKind.addField,
-          page: _page,
-          block: _block,
-          text: 'Status',
-          fieldKind: BridgeFieldKind.select,
-          last: true,
-        ),
-        const [],
-      );
+      final added = await _addFieldWrite('Status', BridgeFieldKind.select);
       for (final (color, name) in [
         'Not started',
         'In progress',

@@ -168,11 +168,14 @@ extension _TableBlockGrid on _TableBlockState {
     return fields[field].kind == BridgeFieldKind.file ? (row, field) : null;
   }
 
-  void _toTop() {
-    if (!_down.hasClients) return;
+  void _silently(VoidCallback move) {
     _scrollingItself = true;
-    _down.jumpTo(0);
+    move();
     _scrollingItself = false;
+  }
+
+  void _toTop() {
+    if (_down.hasClients) _silently(() => _down.jumpTo(0));
   }
 
   void _scrolled() {
@@ -181,36 +184,28 @@ extension _TableBlockGrid on _TableBlockState {
     _rowHandles.closeMenu();
   }
 
-  void _placed(RenderObject cell) {
-    _scrollingItself = true;
-    cell.showOnScreen();
-    _scrollingItself = false;
-  }
+  void _placed(RenderObject cell) => _silently(() => cell.showOnScreen());
 
   void _reveal(int row, int field) =>
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
-        _scrollingItself = true;
         if (_down.hasClients) {
           final top = (_lines?.lineOf(row) ?? row) * WsMetrics.rowTable;
           final view = _down.position.viewportDimension;
           if (top < _down.offset) {
-            _down.jumpTo(top);
+            _silently(() => _down.jumpTo(top));
           } else if (top + WsMetrics.rowTable > _down.offset + view) {
-            _down.jumpTo(top + WsMetrics.rowTable - view);
+            _silently(() => _down.jumpTo(top + WsMetrics.rowTable - view));
           }
         }
-        _scrollingItself = false;
         if (_sideways.hasClients && field > 0 && field + 1 < _starts.length) {
           final view = _sideways.position.viewportDimension;
           final (left, right) = (_starts[field], _starts[field + 1]);
-          _scrollingItself = true;
           if (left < _sideways.offset + _first) {
-            _sideways.jumpTo(left - _first);
+            _silently(() => _sideways.jumpTo(left - _first));
           } else if (right > _sideways.offset + view) {
-            _sideways.jumpTo(right - view);
+            _silently(() => _sideways.jumpTo(right - view));
           }
-          _scrollingItself = false;
         }
       });
 
