@@ -504,3 +504,57 @@ fn an_undone_and_redone_edit_whose_page_was_purged_cannot_be_reverted() {
         Error::Purged
     );
 }
+
+#[test]
+fn deleting_a_table_for_good_leaves_other_workspace_changes_revertable() {
+    let mut budget = Budget::new();
+    let other = budget
+        .edit(Mutation::CreateArea {
+            name: "Work".into(),
+        })
+        .action;
+    budget.edit(Mutation::DeleteTable {
+        block: budget.table.clone(),
+    });
+    budget
+        .workspace
+        .purge(&owner(), &Purge::Table(budget.table.clone()))
+        .unwrap();
+    let entry = budget
+        .entries()
+        .into_iter()
+        .find(|entry| entry.actions.contains(&other))
+        .unwrap();
+    assert!(entry.revertable);
+    budget
+        .workspace
+        .revert(&owner(), std::slice::from_ref(&other))
+        .unwrap();
+    assert_eq!(budget.workspace.areas().unwrap().len(), 1);
+}
+
+#[test]
+fn an_action_older_than_ten_thousand_others_still_reverts() {
+    let mut budget = Budget::new();
+    let rent = budget.row();
+    let early = budget.set(&rent, 950.0);
+    for at in 0..10_001 {
+        budget.typed(at, "x");
+    }
+    let entry = budget
+        .workspace
+        .entries(&EntryQuery {
+            page: None,
+            actor: None,
+            origin: None,
+            before: None,
+            limit: 10,
+        })
+        .unwrap();
+    assert!(!entry.is_empty());
+    budget
+        .workspace
+        .revert(&owner(), std::slice::from_ref(&early))
+        .unwrap();
+    assert_eq!(budget.amounts(), [Cell::Empty]);
+}

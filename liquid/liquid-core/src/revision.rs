@@ -333,7 +333,12 @@ impl<S: Store> Workspace<S> {
             }
             None => self.store.history(query.before.as_ref(), scan)?,
         };
-        let recent = self.store.history(None, SCAN)?;
+        let oldest: Vec<ActionId> = listed
+            .last()
+            .map(|action| action.id.clone())
+            .into_iter()
+            .collect();
+        let recent = self.reaching(&oldest)?;
         let undone = undone(&recent);
         let known: HashMap<ActionId, Action> = recent
             .into_iter()
@@ -394,7 +399,8 @@ impl<S: Store> Workspace<S> {
                 undone: undone.contains(&action.id),
                 revertable: revertable(&action)
                     && !action.changes.is_empty()
-                    && !undone.contains(&action.id),
+                    && !undone.contains(&action.id)
+                    && self.kept(&action),
                 purged,
                 deleted_table,
             });
@@ -416,8 +422,26 @@ impl<S: Store> Workspace<S> {
         Ok(documents)
     }
 
+    fn reaching(&mut self, ids: &[ActionId]) -> Result<Vec<Action>, Error> {
+        let mut all: Vec<Action> = Vec::new();
+        let mut missing: HashSet<&ActionId> = ids.iter().collect();
+        while !missing.is_empty() {
+            let page = self
+                .store
+                .history(all.last().map(|action| &action.id), 1_000)?;
+            if page.is_empty() {
+                break;
+            }
+            for action in &page {
+                missing.remove(&action.id);
+            }
+            all.extend(page);
+        }
+        Ok(all)
+    }
+
     fn actions(&mut self, ids: &[ActionId]) -> Result<Vec<Action>, Error> {
-        let recent = self.store.history(None, SCAN)?;
+        let recent = self.reaching(ids)?;
         let mut found: Vec<Action> = recent
             .into_iter()
             .filter(|action| ids.contains(&action.id))
@@ -431,7 +455,7 @@ impl<S: Store> Workspace<S> {
 
     pub fn revert(&mut self, actor: &Actor, ids: &[ActionId]) -> Result<Applied, Error> {
         self.permit(actor)?;
-        let recent = self.store.history(None, SCAN)?;
+        let recent = self.reaching(ids)?;
         let carriers: Vec<ActionId> = ids.iter().map(|id| carrier(&recent, id)).collect();
         let actions = self.actions(&carriers)?;
         if actions.iter().any(|action| !revertable(action)) {
@@ -640,6 +664,15 @@ impl<S: Store> Workspace<S> {
         Ok(None)
     }
 
+    fn kept(&mut self, action: &Action) -> bool {
+        action.changes.iter().all(|(document, hash)| {
+            self.doc(document)
+                .ok()
+                .and_then(|doc| doc.get_change_by_hash(hash))
+                .is_some()
+        })
+    }
+
     fn present(&mut self, action: &Action, documents: &[Document]) -> bool {
         action.changes.iter().all(|(document, hash)| {
             !documents.contains(document)
@@ -688,32 +721,49 @@ impl<S: Store> Workspace<S> {
         documents: &[Document],
         to: &ActionId,
     ) -> Result<Vec<(Document, Vec<ChangeHash>)>, Error> {
-        let listed = self.store.history_of(documents, None, SCAN)?;
-        let start = listed
-            .iter()
-            .position(|action| action.id == *to)
-            .ok_or(Error::NotFound)?;
-        let mut heads = Vec::new();
-        for document in documents {
-            let found = listed[start..].iter().find_map(|action| {
-                action
-                    .heads
-                    .iter()
-                    .find(|(kept, _)| kept == document)
-                    .map(|(_, heads)| heads.clone())
-                    .or_else(|| {
-                        action
-                            .changes
-                            .iter()
-                            .find(|(kept, _)| kept == document)
-                            .map(|(_, hash)| vec![*hash])
-                    })
-            });
-            if let Some(found) = found {
-                heads.push((document.clone(), found));
+        let mut found: HashMap<Document, Vec<ChangeHash>> = HashMap::new();
+        let mut reached = false;
+        let mut before: Option<ActionId> = None;
+        while found.len() < documents.len() {
+            let page = self.store.history_of(documents, before.as_ref(), 1_000)?;
+            let Some(last) = page.last() else {
+                break;
+            };
+            before = Some(last.id.clone());
+            for action in page {
+                reached = reached || action.id == *to;
+                if !reached {
+                    continue;
+                }
+                for document in documents {
+                    if found.contains_key(document) {
+                        continue;
+                    }
+                    let heads = action
+                        .heads
+                        .iter()
+                        .find(|(kept, _)| kept == document)
+                        .map(|(_, heads)| heads.clone())
+                        .or_else(|| {
+                            action
+                                .changes
+                                .iter()
+                                .find(|(kept, _)| kept == document)
+                                .map(|(_, hash)| vec![*hash])
+                        });
+                    if let Some(heads) = heads {
+                        found.insert(document.clone(), heads);
+                    }
+                }
             }
         }
-        Ok(heads)
+        if !reached {
+            return Err(Error::NotFound);
+        }
+        Ok(documents
+            .iter()
+            .filter_map(|document| Some((document.clone(), found.remove(document)?)))
+            .collect())
     }
 
     pub fn restore(

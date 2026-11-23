@@ -9,7 +9,7 @@ use crate::{
     Workspace, patch,
 };
 
-const SCAN: usize = 100_000;
+const PAGE: usize = 1_000;
 
 fn kind(operation: &Operation) -> String {
     match operation {
@@ -76,6 +76,7 @@ impl<S: Store> Workspace<S> {
             _ => None,
         };
         let mut rebuilt = Vec::new();
+        let mut touched = Vec::new();
         if removed {
             recorded.writes.push(Write::Remove {
                 document: document.clone(),
@@ -89,7 +90,7 @@ impl<S: Store> Workspace<S> {
             let map = model::child(doc, &ROOT, TABLES).ok_or(Error::NotFound)?;
             let entry = model::child(doc, &map, table.as_str()).ok_or(Error::NotFound)?;
             doc.put(&entry, NAME, "")?;
-            rebuilt.push(Document::Workspace);
+            touched.push(Document::Workspace);
         } else {
             rebuilt.push(document.clone());
         }
@@ -113,32 +114,42 @@ impl<S: Store> Workspace<S> {
                 loaded.databases.clear();
             }
         }
-        let listed = self
-            .store
-            .history_of(std::slice::from_ref(&document), None, SCAN)?;
-        let mut redact: Vec<Action> = listed
-            .into_iter()
-            .filter_map(|kept| redacted(kept, &document, mention.as_deref()))
-            .collect();
-        if let Some(id) = &mention {
-            for kept in self.store.history(None, SCAN)? {
-                if !redact.iter().any(|known| known.id == kept.id)
-                    && let Some(cleared) = redacted(kept, &document, Some(id))
-                {
-                    redact.push(cleared);
+        let mut redact: Vec<Action> = Vec::new();
+        let mut before: Option<ActionId> = None;
+        loop {
+            let listed = match &mention {
+                Some(_) => self.store.history(before.as_ref(), PAGE)?,
+                None => {
+                    self.store
+                        .history_of(std::slice::from_ref(&document), before.as_ref(), PAGE)?
                 }
-            }
+            };
+            let Some(last) = listed.last() else {
+                break;
+            };
+            before = Some(last.id.clone());
+            redact.extend(
+                listed
+                    .into_iter()
+                    .filter_map(|kept| redacted(kept, &document, mention.as_deref())),
+            );
         }
         recorded.redact = redact;
         let mut changed = Vec::new();
         let mut index = Vec::new();
-        for (kept, _) in &action.changes.clone() {
+        let shown: Vec<Document> = action
+            .changes
+            .iter()
+            .map(|(kept, _)| kept.clone())
+            .chain(touched.iter().cloned())
+            .collect();
+        for kept in &shown {
             self.changes_of(kept, &mut changed, &mut index)?;
         }
         if let (true, Purge::Table(table)) = (removed, target) {
             changed.push(crate::Changed::Table(table.clone()));
         }
-        self.record_with(action, &[], Vec::new(), index, recorded)?;
+        self.record_with(action, &touched, Vec::new(), index, recorded)?;
         changed.dedup();
         Ok(Applied {
             action: id,
