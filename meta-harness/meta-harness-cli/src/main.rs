@@ -335,16 +335,37 @@ fn flow_agent(path: Option<std::ffi::OsString>) -> Option<AcpAgent> {
 }
 
 fn pinned_t3() -> Result<PathBuf, String> {
-    if let Some(t3) = std::env::var_os("META_HARNESS_T3") {
-        return Ok(PathBuf::from(t3));
+    let t3 = match std::env::var_os("META_HARNESS_T3") {
+        Some(t3) => PathBuf::from(t3),
+        None => installed_t3()?,
+    };
+    existing(t3)
+}
+
+fn existing(t3: PathBuf) -> Result<PathBuf, String> {
+    if t3.is_file() {
+        Ok(t3)
+    } else {
+        Err(format!(
+            "Could not start T3: no program at {}.",
+            t3.display()
+        ))
     }
+}
+
+fn installed_t3() -> Result<PathBuf, String> {
     let platform = match (std::env::consts::OS, std::env::consts::ARCH) {
         ("macos", "aarch64") => "darwin-arm64",
         ("linux", "x86_64") => "linux-x64",
         ("windows", "x86_64") => "win32-x64",
         (os, arch) => return Err(format!("Meta-Harness has no T3 Code for {os} {arch}.")),
     };
-    Ok(prefix()?
+    let prefix = prefix().map_err(|e| {
+        format!(
+            "{e} For a build that is not installed, set META_HARNESS_T3 to its T3 Code program."
+        )
+    })?;
+    Ok(prefix
         .join("lib/meta-harness")
         .join(format!("t3-{}-{platform}", t3_version()))
         .join(format!("t3{}", std::env::consts::EXE_SUFFIX)))
@@ -690,6 +711,14 @@ mod tests {
                 "{message}"
             );
         }
+    }
+
+    #[test]
+    fn a_missing_t3_program_is_named_and_an_uninstalled_build_is_told_to_set_the_variable() {
+        let missing = existing(PathBuf::from("/no/such/t3")).unwrap_err();
+        assert!(missing.contains("/no/such/t3"), "{missing}");
+        let uninstalled = installed_t3().unwrap_err();
+        assert!(uninstalled.contains("META_HARNESS_T3"), "{uninstalled}");
     }
 
     #[test]
