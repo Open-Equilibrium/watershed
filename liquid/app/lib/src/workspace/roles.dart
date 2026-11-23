@@ -9,7 +9,7 @@ import '../rust/api/workspace.dart';
 import '../theme/icons.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
-import 'automation_editor.dart' show Token;
+import 'automation_tokens.dart' show Token;
 import 'explorer.dart' show untitled;
 import 'table_view_parts.dart' show MoreMenu;
 import 'workspace_state.dart';
