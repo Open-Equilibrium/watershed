@@ -41,8 +41,8 @@ impl Server {
                 .stdout(Stdio::null())
                 .stderr(Stdio::null())
                 .kill_on_drop(true);
-            let mut child =
-                crate::spawn(&mut command).map_err(|e| format!("Could not start T3: {e}"))?;
+            let mut child = crate::spawn(&mut command)
+                .map_err(|e| format!("Could not start T3 at {}: {e}", binary.display()))?;
             let tree = match child.id() {
                 Some(pid) => match crate::platform::hold_tree(pid) {
                     Some(tree) => Some(tree),

@@ -338,7 +338,7 @@ fn dispatch(link: &Link, ack: &mpsc::UnboundedSender<Message>, frame: Value) {
             let result = if frame["exit"]["_tag"] == "Success" {
                 Ok(frame["exit"]["value"].clone())
             } else {
-                Err(frame["exit"]["cause"].to_string())
+                Err(cause_text(&frame["exit"]["cause"]))
             };
             match lock(link).waiters.remove(request_id) {
                 Some(Waiter::Call(reply)) => {
@@ -374,6 +374,23 @@ async fn open(origin: &str, issue: &Issue) -> Result<Socket, String> {
         .map_err(|_| format!("connect {origin}/ws: it did not answer in time"))?
         .map_err(|e| format!("connect {origin}/ws: {e}"))?;
     Ok(socket)
+}
+
+fn cause_text(cause: &Value) -> String {
+    let causes = cause
+        .as_array()
+        .map_or(std::slice::from_ref(cause), Vec::as_slice);
+    causes
+        .iter()
+        .map(|cause| {
+            &cause[if cause["_tag"] == "Die" {
+                "defect"
+            } else {
+                "error"
+            }]
+        })
+        .find_map(|reason| reason["message"].as_str().or(reason.as_str()))
+        .map_or_else(|| cause.to_string(), str::to_owned)
 }
 
 fn request_frame(id: &str, tag: &str, payload: Value) -> Value {
