@@ -56,11 +56,7 @@ impl<S: Store> Workspace<S> {
             .into_iter()
             .find_map(|(document, heads)| (document == shown).then_some(heads));
         let doc = self.doc(&shown)?;
-        let Some(heads) = heads.filter(|heads| {
-            heads
-                .iter()
-                .all(|hash| doc.get_change_by_hash(hash).is_some())
-        }) else {
+        let Some(heads) = heads.filter(|heads| has_all(doc, heads)) else {
             return Ok(documents);
         };
         let then = doc.fork_at(&heads)?;
@@ -138,7 +134,9 @@ impl<S: Store> Workspace<S> {
         let mut reached = false;
         let mut before: Option<ActionId> = None;
         while found.len() < documents.len() {
-            let page = self.store.history_of(documents, before.as_ref(), 1_000)?;
+            let page = self
+                .store
+                .history_of(documents, before.as_ref(), HISTORY_BATCH)?;
             let Some(last) = page.last() else {
                 break;
             };
@@ -190,10 +188,7 @@ impl<S: Store> Workspace<S> {
         let mut targets = Vec::new();
         for (document, target) in self.heads_at(&documents, to)? {
             let doc = self.doc(&document)?;
-            if target
-                .iter()
-                .all(|hash| doc.get_change_by_hash(hash).is_some())
-            {
+            if has_all(doc, &target) {
                 targets.push((document, target));
             } else if document == Document::Page(page.clone()) {
                 return Err(Error::Purged);
@@ -239,19 +234,8 @@ impl<S: Store> Workspace<S> {
             heads: Vec::new(),
             at: 0,
         };
-        let mut changed = Vec::new();
-        let mut index = Vec::new();
-        for document in &touched {
-            if let Some(loaded) = self.docs.get_mut(document) {
-                loaded.order = None;
-                loaded.databases.clear();
-            }
-        }
-        for document in &touched {
-            self.changes_of(document, &mut changed, &mut index)?;
-        }
+        let (changed, index) = self.reindex(&touched)?;
         self.record(action, &touched, Vec::new(), index)?;
-        changed.dedup();
         Ok(Applied {
             action: id,
             created: None,
@@ -287,11 +271,7 @@ impl<S: Store> Workspace<S> {
                 continue;
             };
             let bytes = match targets.get(&document) {
-                Some(heads)
-                    if heads
-                        .iter()
-                        .all(|hash| doc.get_change_by_hash(hash).is_some()) =>
-                {
+                Some(heads) if has_all(doc, heads) => {
                     let mut then = doc.fork_at(heads)?;
                     if let Document::Page(_) = document {
                         let at = then.get_heads();
@@ -307,4 +287,10 @@ impl<S: Store> Workspace<S> {
         }
         Ok(saved)
     }
+}
+
+fn has_all(doc: &AutoCommit, heads: &[ChangeHash]) -> bool {
+    heads
+        .iter()
+        .all(|hash| doc.get_change_by_hash(hash).is_some())
 }

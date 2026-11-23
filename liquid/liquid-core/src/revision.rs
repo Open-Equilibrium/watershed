@@ -66,7 +66,7 @@ pub(crate) fn together(newer: &Action, older: &Action) -> bool {
         && newer.at - older.at <= TYPING_PAUSE_MS
 }
 
-pub(crate) fn undone(newest_first: &[Action]) -> HashSet<ActionId> {
+fn undone(newest_first: &[Action]) -> HashSet<ActionId> {
     let mut undone = HashSet::new();
     for action in newest_first {
         if let Operation::Revert { reverted, .. } = &action.operation
@@ -167,11 +167,10 @@ impl<S: Store> Workspace<S> {
             .map(|action| (action.id.clone(), action))
             .collect();
         let titles = self.page_titles()?;
-        let shown = listed;
         let mut entries: Vec<Entry> = Vec::new();
         let mut more = false;
         let mut last: Option<Action> = None;
-        for action in shown {
+        for action in listed {
             let joins = last.as_ref().is_some_and(|newer| {
                 together(newer, &action)
                     && undone.contains(&newer.id) == undone.contains(&action.id)
@@ -218,7 +217,7 @@ impl<S: Store> Workspace<S> {
         Ok(Entries { entries, more })
     }
 
-    pub(crate) fn title(
+    fn title(
         &mut self,
         action: &Action,
         titles: &HashMap<PageId, String>,
@@ -441,7 +440,7 @@ impl<S: Store> Workspace<S> {
         while !missing.is_empty() {
             let page = self
                 .store
-                .history(all.last().map(|action| &action.id), 1_000)?;
+                .history(all.last().map(|action| &action.id), HISTORY_BATCH)?;
             if page.is_empty() {
                 break;
             }
@@ -473,6 +472,23 @@ impl<S: Store> Workspace<S> {
                 .and_then(|doc| doc.get_change_by_hash(hash))
                 .is_some()
         })
+    }
+
+    pub(crate) fn reindex(
+        &mut self,
+        documents: &[Document],
+    ) -> Result<(Vec<Changed>, Vec<IndexWrite>), Error> {
+        let mut changed = Vec::new();
+        let mut index = Vec::new();
+        for document in documents {
+            if let Some(loaded) = self.docs.get_mut(document) {
+                loaded.order = None;
+                loaded.databases.clear();
+            }
+            self.changes_of(document, &mut changed, &mut index)?;
+        }
+        changed.dedup();
+        Ok((changed, index))
     }
 
     pub(crate) fn changes_of(

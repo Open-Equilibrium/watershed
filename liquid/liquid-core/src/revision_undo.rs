@@ -61,10 +61,11 @@ impl<S: Store> Workspace<S> {
         actions: &[Action],
         kind: RevertKind,
     ) -> Result<Applied, Error> {
-        for action in actions {
-            if action.changes.is_empty() || !self.kept(action) {
-                return Err(Error::Purged);
-            }
+        if actions
+            .iter()
+            .any(|action| action.changes.is_empty() || !self.kept(action))
+        {
+            return Err(Error::Purged);
         }
         let mut steps: Vec<(Document, ChangeHash)> = Vec::new();
         for action in actions {
@@ -159,17 +160,8 @@ impl<S: Store> Workspace<S> {
         documents: &[Document],
         recorded: Recorded,
     ) -> Result<Applied, Error> {
-        let mut changed = Vec::new();
-        let mut index = Vec::new();
-        for document in documents {
-            if let Some(loaded) = self.docs.get_mut(document) {
-                loaded.order = None;
-                loaded.databases.clear();
-            }
-            self.changes_of(document, &mut changed, &mut index)?;
-        }
+        let (changed, index) = self.reindex(documents)?;
         self.record_with(action, &[], Vec::new(), index, recorded)?;
-        changed.dedup();
         Ok(Applied {
             action: id,
             created: None,
