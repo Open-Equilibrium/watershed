@@ -7,6 +7,43 @@ fn linked_environments_setting(home: &Path) -> bool {
         .unwrap_or(false)
 }
 
+#[allow(clippy::result_large_err)]
+async fn silent_peer() -> String {
+    use futures_util::SinkExt;
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("ws://{}", listener.local_addr().unwrap());
+    tokio::spawn(async move {
+        let mut held = Vec::new();
+        while let Ok((socket, _)) = listener.accept().await {
+            let mut pairing = false;
+            let Ok(mut socket) = tokio_tungstenite::accept_hdr_async(
+                socket,
+                |request: &tokio_tungstenite::tungstenite::handshake::server::Request,
+                 response: tokio_tungstenite::tungstenite::handshake::server::Response| {
+                    pairing = request
+                        .headers()
+                        .contains_key(meta_harness_core::api::PAIRING_HEADER);
+                    Ok(response)
+                },
+            )
+            .await
+            else {
+                continue;
+            };
+            if pairing {
+                let answer = r#"{"name":"silent","token":"silent-token","access":"auto"}"#;
+                let _ = socket
+                    .send(tokio_tungstenite::tungstenite::Message::Text(answer.into()))
+                    .await;
+                let _ = socket.close(None).await;
+            } else {
+                held.push(socket);
+            }
+        }
+    });
+    url
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn a_host_links_another_hosts_t3_through_a_tunnel_behind_the_switch_and_removing_it_unlinks_it()
  {
@@ -229,4 +266,21 @@ async fn a_link_made_is_reported_made_even_when_its_time_cannot_be_stored() {
         .await
         .expect("the link is made, so the add reports it");
     assert!(a.hosts().await.unwrap().hosts[0].reachable, "{name}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_peer_that_never_answers_a_link_is_given_up_on_and_holds_no_other_change() {
+    let (dir, _repo, _home) = fixture();
+    let ((_a, a), (_b, b), url_b) = two_hosts(dir.path()).await;
+    let silent = silent_peer().await;
+    let code = b.invite(ClientKind::Host, Access::Auto).await.unwrap();
+    let given_up = tokio::time::timeout(Duration::from_secs(60), a.host_add(&silent, &code, None))
+        .await
+        .expect("the link gives up on a peer that never answers");
+    assert!(given_up.is_err());
+    let code = b.invite(ClientKind::Host, Access::Auto).await.unwrap();
+    let linked = tokio::time::timeout(Duration::from_secs(60), a.host_add(&url_b, &code, None))
+        .await
+        .expect("a link is not held behind the silent one");
+    assert!(linked.is_ok(), "{linked:?}");
 }

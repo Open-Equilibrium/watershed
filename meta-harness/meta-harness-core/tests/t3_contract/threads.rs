@@ -1,4 +1,19 @@
 use super::*;
+use meta_harness_core::{Thread, ThreadEvent};
+
+async fn wait_core(thread: &Thread, done: impl Fn(&Snapshot) -> bool) -> Snapshot {
+    let waited = tokio::time::timeout(Duration::from_secs(60), async {
+        loop {
+            let (snapshot, mut events) = thread.subscribe();
+            if done(&snapshot) {
+                return snapshot;
+            }
+            events.recv().await;
+        }
+    })
+    .await;
+    waited.unwrap_or_else(|_| panic!("not there within a minute: {:#?}", thread.snapshot()))
+}
 
 #[tokio::test(flavor = "multi_thread")]
 async fn a_thread_runs_turns_and_reverts_files_in_its_worktree() {
@@ -157,4 +172,44 @@ async fn a_thread_details_card_reads_t3_and_a_fork_merges_back() {
     assert!(lineage.can_merge);
     fork.merge_back().await.unwrap();
     service.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_snapshot_names_the_events_it_already_contains() {
+    let (_dir, repo, home) = fixture();
+    let host = host(&home).await;
+    let project = host.project(&repo).await.unwrap();
+    let thread = project
+        .start(start("append once", worktree(), Permissions::FullAccess))
+        .await
+        .unwrap();
+    let (before, mut events) = thread.subscribe();
+    wait_core(&thread, completed(1)).await;
+    let received: Vec<ThreadEvent> = std::iter::from_fn(|| events.try_recv().ok()).collect();
+    let after = thread.snapshot();
+    assert!(
+        received
+            .iter()
+            .all(|e| before.sequence < e.sequence && e.sequence <= after.sequence)
+    );
+    assert!(
+        received
+            .windows(2)
+            .all(|pair| pair[0].sequence <= pair[1].sequence)
+    );
+    let finished_before = before
+        .turns
+        .iter()
+        .any(|t| t.status == TurnStatus::Completed);
+    let completions_after = received
+        .iter()
+        .filter(|e| matches!(e.event, AgentEvent::TurnCompleted { .. }))
+        .count();
+    assert_eq!(
+        usize::from(finished_before) + completions_after,
+        1,
+        "the completion is in the snapshot or the stream, exactly once"
+    );
+    assert!(after.transcript.iter().any(|item| item.text == "Appended."));
+    host.shutdown().await;
 }
