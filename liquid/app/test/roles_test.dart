@@ -103,12 +103,12 @@ void main() {
     await tap(tester, find.byKey(const Key('sidebar automations')));
     expect(find.text('Can edit'), findsOneWidget);
     await tap(tester, find.text('Flag large expenses'));
-    expect(find.text('✓ allows every step'), findsOneWidget);
+    expect(find.text('allows every step'), findsOneWidget);
 
     await tap(tester, find.byKey(const Key('token runs as')));
     await tap(tester, find.text('Can view').last);
     final assigned = kit.applied(BridgeMutationKind.setAutomationRole).single;
     expect((assigned.automation, assigned.role), ('a1', canView));
-    expect(find.text('✗ allows no Read on Expenses'), findsOneWidget);
+    expect(find.text('allows no Read on Expenses'), findsOneWidget);
   });
 }

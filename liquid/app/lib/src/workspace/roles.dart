@@ -291,6 +291,12 @@ class _RolesPaneState extends State<RolesPane> {
                             ? untitled
                             : automation.setup.name,
                       ),
+                      deleteIcon: Icon(
+                        LucideIcons.x,
+                        size: 14,
+                        color: ws.textMuted,
+                      ),
+                      deleteButtonTooltipMessage: 'Run as Can edit',
                       onDeleted: role.template == BridgeTemplate.canEdit
                           ? null
                           : () => _assign(automation, canEditRole(_state)),
@@ -767,7 +773,7 @@ class _RunsAsState extends State<RunsAs> {
             .where((known) => known.id == table)
             .firstOrNull
             ?.name;
-        missing = '✗ allows no $capability on ${name ?? 'a deleted Table'}';
+        missing = 'allows no $capability on ${name ?? 'a deleted Table'}';
         break;
       }
     }
@@ -798,9 +804,22 @@ class _RunsAsState extends State<RunsAs> {
           ],
         ),
         if (known)
-          Text(
-            missing ?? '✓ allows every step',
-            style: TextStyle(color: missing == null ? ws.success : ws.danger),
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            spacing: WsMetrics.space1,
+            children: [
+              Icon(
+                missing == null ? LucideIcons.check : LucideIcons.x,
+                size: 14,
+                color: missing == null ? ws.success : ws.danger,
+              ),
+              Text(
+                missing ?? 'allows every step',
+                style: TextStyle(
+                  color: missing == null ? ws.success : ws.danger,
+                ),
+              ),
+            ],
           ),
       ],
     );
