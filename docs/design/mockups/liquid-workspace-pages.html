@@ -117,7 +117,6 @@ link:sv('<path d="M6.5 9.5l3-3"/><path d="M7 4.5l1-1a2.5 2.5 0 013.5 3.5l-1 1M9 
 copy:sv('<rect x="5" y="5" width="8.5" height="8.5" rx="1.5"/><path d="M11 5V3.5c0-.6-.4-1-1-1H3.5c-.6 0-1 .4-1 1V10c0 .6.4 1 1 1H5"/>'),
 tpl:sv('<rect x="2" y="2" width="12" height="12" rx="1.5"/><path d="M2 6h12M6 6v8"/>'),
 cog:sv('<circle cx="8" cy="8" r="2"/><path d="M8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2M3.4 3.4l1.4 1.4M11.2 11.2l1.4 1.4M3.4 12.6l1.4-1.4M11.2 4.8l1.4-1.4"/>'),
-reload:sv('<path d="M13 8a5 5 0 11-1.5-3.5"/><path d="M13 2.5V5h-2.5"/>'),
 back:sv('<path d="M10 3.5L5.5 8l4.5 4.5"/>'),
 };
 const E={budget:'💰',review:'📊',trip:'🧳',road:'🗺️',api:'🧩',plan:'🗓️'};
@@ -138,7 +137,7 @@ ${nav(0,em(E.road),'Roadmap',{on:e('road')})}
 ${nav(0,em(E.api),'API design',{on:e('api')})}
 ${nav(0,I.dir,'docs',{tw:'›',on:e('docs')})}
 <div class="foot">${nav(0,I.zap,'Automations',Object.assign({on:e('auto')},o.att?{r:'⚠ 1',warn:true}:{}))}${nav(0,I.clock,'History',{on:e('hist')})}${nav(0,I.cog,'Settings',{on:e('set')})}</div>
-${o.menu||''}</div>`}
+</div>`}
 function head(crumb,o={}){return `<div class="head"><span class="crumb">${crumb}</span><span class="end">${o.right!==undefined?o.right:`<span class="ib ${o.arr?'on':''}">${I.grid}Arrange</span><span class="ib" title="Page history">${I.clock}</span><span class="ib">${I.more}</span>`}</span></div>`}
 function frame(id,o){document.getElementById(id).innerHTML=`<div class="tbar"><div class="lights"><i style="background:#ff5f57"></i><i style="background:#febc2e"></i><i style="background:#28c840"></i></div></div>
 <div class="body" style="--h:${o.h}px">${side(o.side||{})}<div class="main">${o.head||''}${o.main}</div>${o.over||''}</div>`}
@@ -228,7 +227,7 @@ const pbItem=(ic,label,d,r,on)=>`<div class="it ${on?'on':''}"><span class="ico"
 const pbFoot=`<div class="pbfoot"><span><b>/</b>Blocks</span><span><b>&gt;</b>Actions</span></div>`;
 const pbEmpty=`<div class="pb"><div class="in">${I.srch}<span class="ph">Search or run a command</span></div><div class="ls">
 <div class="lbl">Recent</div>${pbItem(em(E.budget),'Household budget','Private','',1)}${pbItem(em(E.api),'API design','Acme API')}${pbItem(I.file,'bank-export.csv','Private · Source')}
-<div class="lbl">Create</div>${pbItem(I.page,'New Page','in Private','⇧⌘N')}${pbItem(I.dir,'Add Source','File or folder','›')}
+<div class="lbl">Create</div>${pbItem(I.page,'New Page','in Private','⇧⌘N')}${pbItem(I.file,'Add Source: File…','in Private')}${pbItem(I.dir,'Add Source: Folder…','in Private')}
 <div class="lbl">This Page</div>${pbItem(I.grid,'Arrange')}${pbItem(I.clock,'Page history')}
 <div class="lbl">Workspace</div>${pbItem(I.zap,'Automations')}${pbItem(I.clock,'History')}${pbItem(I.cog,'Settings','','⌘,')}</div>${pbFoot}</div>`;
 frame('w-pb1',{h:760,head:head('Private <span>›</span> <b>💰 Household budget</b>'),main:`<div class="pg"><div class="col"><div class="ttl"><span class="tic">💰</span>Household budget</div><div class="prose"><p>October is almost done.</p></div>${dbHead({synced:true})}${dbTable()}</div></div>`,over:`<div class="scrim"></div>${pbEmpty}`});
