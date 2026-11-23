@@ -1,5 +1,7 @@
 use std::path::{Path, PathBuf};
 
+use crate::ignore_missing;
+
 pub const LABEL: &str = "io.github.open-equilibrium.meta-harness";
 const UNIT: &str = "meta-harness.service";
 const TASK: &str = "Meta-Harness";
@@ -228,60 +230,59 @@ impl Manager {
         let folder = self.file.parent().expect("a service file has a folder");
         std::fs::create_dir_all(folder)
             .map_err(|e| format!("Could not create {}: {e}", folder.display()))?;
-        let previous = match std::fs::read(&self.file) {
-            Ok(bytes) => Some(bytes),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
-            Err(e) => return Err(format!("Could not read {}: {e}", self.file.display())),
-        };
-        let had_previous = previous.is_some();
+        let previous = self.read_service()?;
         replace_file(&self.file, &self.encode(&(self.render)(plan)))
             .map_err(|e| format!("Could not write {}: {e}", self.file.display()))?;
-        let started = run_all(&self.start, &mut run).map(|_| ());
-        if let Err(error) = started {
-            let restored = match previous {
-                Some(bytes) => replace_file(&self.file, &bytes),
-                None => match std::fs::remove_file(&self.file) {
-                    Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e),
-                    _ => Ok(()),
-                },
-            };
-            return Err(match restored {
-                Ok(()) => {
-                    let mut message = error;
-                    for failure in run_all(&self.restore, &mut run)
-                        .unwrap_or_else(|e| vec![e])
-                        .into_iter()
-                        .filter(|failure| !not_loaded(failure))
-                    {
-                        message = format!("{message}. {failure}");
-                    }
-                    if had_previous && let Err(failure) = run_all(&self.restart, &mut run) {
-                        message = format!(
-                            "{message}. The previous service did not start again: {failure}"
-                        );
-                    }
-                    message
+        let Err(error) = run_all(&self.start, &mut run) else {
+            return Ok(());
+        };
+        let restored = match &previous {
+            Some(bytes) => replace_file(&self.file, bytes),
+            None => ignore_missing(std::fs::remove_file(&self.file)),
+        };
+        Err(match restored {
+            Ok(()) => {
+                let mut message = error;
+                for failure in run_all(&self.restore, &mut run)
+                    .unwrap_or_else(|e| vec![e])
+                    .into_iter()
+                    .filter(|failure| !not_loaded(failure))
+                {
+                    message = format!("{message}. {failure}");
                 }
-                Err(e) => format!(
-                    "{error}. The previous service file could not be restored: {e} ({})",
-                    self.file.display()
-                ),
-            });
+                if previous.is_some()
+                    && let Err(failure) = run_all(&self.restart, &mut run)
+                {
+                    message =
+                        format!("{message}. The previous service did not start again: {failure}");
+                }
+                message
+            }
+            Err(e) => format!(
+                "{error}. The previous service file could not be restored: {e} ({})",
+                self.file.display()
+            ),
+        })
+    }
+
+    fn read_service(&self) -> Result<Option<Vec<u8>>, String> {
+        match std::fs::read(&self.file) {
+            Ok(bytes) => Ok(Some(bytes)),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(e) => Err(format!("Could not read {}: {e}", self.file.display())),
         }
-        Ok(())
     }
 
     pub fn recorded_home(&self) -> Result<Option<PathBuf>, String> {
-        match std::fs::read(&self.file) {
-            Ok(bytes) => match self.decode(&bytes).and_then(|text| (self.home_of)(&text)) {
-                Some(home) => Ok(Some(PathBuf::from(home))),
-                None => Err(format!(
-                    "The login service file {} does not name its data folder, so nothing was removed.",
-                    self.file.display()
-                )),
-            },
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
-            Err(e) => Err(format!("Could not read {}: {e}", self.file.display())),
+        let Some(bytes) = self.read_service()? else {
+            return Ok(None);
+        };
+        match self.decode(&bytes).and_then(|text| (self.home_of)(&text)) {
+            Some(home) => Ok(Some(PathBuf::from(home))),
+            None => Err(format!(
+                "The login service file {} does not name its data folder, so nothing was removed.",
+                self.file.display()
+            )),
         }
     }
 
@@ -295,12 +296,9 @@ impl Manager {
                 "The login service could not be stopped ({failure}), so nothing was removed. Stop it, then run uninstall again."
             ));
         }
-        match std::fs::remove_file(&self.file) {
-            Err(e) if e.kind() != std::io::ErrorKind::NotFound => {
-                Err(format!("Could not remove {}: {e}", self.file.display()))
-            }
-            _ => Ok(failures),
-        }
+        ignore_missing(std::fs::remove_file(&self.file))
+            .map_err(|e| format!("Could not remove {}: {e}", self.file.display()))?;
+        Ok(failures)
     }
 }
 
@@ -344,10 +342,10 @@ fn replace_file(file: &Path, bytes: &[u8]) -> std::io::Result<()> {
 
 #[cfg(unix)]
 fn sync_directory(file: &Path) -> std::io::Result<()> {
-    let dir = match file.parent() {
-        Some(dir) if !dir.as_os_str().is_empty() => dir,
-        _ => Path::new("."),
-    };
+    let dir = file
+        .parent()
+        .filter(|dir| !dir.as_os_str().is_empty())
+        .unwrap_or(Path::new("."));
     std::fs::File::open(dir)?.sync_all()
 }
 
@@ -486,15 +484,17 @@ fn argument(value: &str) -> String {
     format!("\"{value}{}\"", "\\".repeat(trailing))
 }
 
+fn unxml(value: &str) -> String {
+    value
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&amp;", "&")
+}
+
 fn task_home(text: &str) -> Option<String> {
     let value = text.split_once("--home \"")?.1.split_once('"')?.0;
     let trailing = value.len() - value.trim_end_matches('\\').len();
-    Some(
-        value[..value.len() - trailing / 2]
-            .replace("&lt;", "<")
-            .replace("&gt;", ">")
-            .replace("&amp;", "&"),
-    )
+    Some(unxml(&value[..value.len() - trailing / 2]))
 }
 
 fn systemd_value(value: &str) -> String {
@@ -513,12 +513,7 @@ fn plist_home(text: &str) -> Option<String> {
         .strip_prefix("<string>")?
         .split_once("</string>")?
         .0;
-    Some(
-        value
-            .replace("&lt;", "<")
-            .replace("&gt;", ">")
-            .replace("&amp;", "&"),
-    )
+    Some(unxml(value))
 }
 
 fn unit_home(text: &str) -> Option<String> {

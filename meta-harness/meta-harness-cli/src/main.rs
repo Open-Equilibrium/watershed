@@ -463,17 +463,20 @@ fn uninstall() -> Result<(), String> {
     Ok(())
 }
 
+fn ignore_missing(result: std::io::Result<()>) -> std::io::Result<()> {
+    match result {
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        other => other,
+    }
+}
+
 fn remove_installation(prefix: &Path) -> Result<(), String> {
     for folder in [
         prefix.join("lib/meta-harness"),
         prefix.join("share/meta-harness"),
     ] {
-        match std::fs::remove_dir_all(&folder) {
-            Err(e) if e.kind() != std::io::ErrorKind::NotFound => {
-                return Err(format!("Could not remove {}: {e}", folder.display()));
-            }
-            _ => {}
-        }
+        ignore_missing(std::fs::remove_dir_all(&folder))
+            .map_err(|e| format!("Could not remove {}: {e}", folder.display()))?;
     }
     let program = format!("meta{}", std::env::consts::EXE_SUFFIX);
     for name in [program.clone(), format!("{program}.old")] {
@@ -487,12 +490,7 @@ fn remove_installation(prefix: &Path) -> Result<(), String> {
                 Err(error)
             }
         });
-        match removed {
-            Err(e) if e.kind() != std::io::ErrorKind::NotFound => {
-                return Err(format!("Could not remove {}: {e}", path.display()));
-            }
-            _ => {}
-        }
+        ignore_missing(removed).map_err(|e| format!("Could not remove {}: {e}", path.display()))?;
     }
     for folder in [
         prefix.join("bin"),
