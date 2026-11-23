@@ -9,6 +9,8 @@ use tokio::sync::{Notify, mpsc};
 use tokio_tungstenite::accept_async;
 use tokio_tungstenite::tungstenite::Message;
 
+use crate::t3::Client;
+
 const WAIT: std::time::Duration = std::time::Duration::from_secs(10);
 
 async fn until(expected: String, done: impl Fn() -> bool) {
@@ -144,6 +146,12 @@ impl Fake {
             out,
             stop,
         }
+    }
+
+    pub async fn client(&self) -> Client {
+        Client::connect(&self.origin, || Box::pin(async { Ok("token".to_owned()) }))
+            .await
+            .unwrap()
     }
 
     pub fn push(&self, tag: &str, values: Vec<Value>) {
