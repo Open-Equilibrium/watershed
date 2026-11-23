@@ -1,19 +1,18 @@
 part of 'session_state.dart';
 
 extension SessionHosts on SessionState {
+  OwnConnection _ownConnection(String? address) => OwnConnection(connectTo, (
+    address: address,
+    root: projectOf(address)?.root ?? '',
+  ));
+
   Future<({HostLink link, String? address})> _linkTo(
     String environment, {
     required List<String?> except,
   }) async {
     for (final address in _agents.connected) {
       if (except.contains(address)) continue;
-      final link = VerifiedLink(
-        OwnConnection(connectTo, (
-          address: address,
-          root: projectOf(address)?.root ?? '',
-        )),
-        environment,
-      );
+      final link = VerifiedLink(_ownConnection(address), environment);
       try {
         await link.backend;
         return (link: link, address: address);
@@ -109,7 +108,7 @@ extension SessionHosts on SessionState {
   }) async {
     _agents.put(address, project, machine);
     _setProblem(address, null);
-    if (address == _startAddress && _session == null) _showStartCheckout();
+    _checkoutIfIdle(address);
     final session = _session;
     if (_sessionLost && session != null && address == _sessionAddress) {
       unawaited(open(session.id, address: address));
@@ -124,7 +123,7 @@ extension SessionHosts on SessionState {
       for (final listed in recent.value)
         if (listed.address != address) listed,
     ];
-    if (address == _startAddress && _session == null) _showStartCheckout();
+    _checkoutIfIdle(address);
     onHostLost?.call(address);
   }
 
@@ -132,7 +131,7 @@ extension SessionHosts on SessionState {
     if (_session != null && _sessionAddress == address) await newSession();
     _agents.close(address);
     _setProblem(address, null);
-    if (address == _startAddress && _session == null) _showStartCheckout();
+    _checkoutIfIdle(address);
     await loadStart();
   }
 
@@ -157,6 +156,10 @@ extension SessionHosts on SessionState {
       : hostProblems.value[_sessionAddress];
 
   void _showStartCheckout() => _setGit(project?.git() ?? const NoCheckout());
+
+  void _checkoutIfIdle(String? address) {
+    if (address == _startAddress && _session == null) _showStartCheckout();
+  }
 }
 
 BridgeModelChoice? _firstModel(List<BridgeProvider> providers) {

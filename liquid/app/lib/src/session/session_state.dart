@@ -199,9 +199,8 @@ class SessionState {
   void notify(NoticeLevel level, String text) {
     final next = Notice(level, text, DateTime.now());
     notice.value = next;
-    notices.value = [...notices.value, next].length > noticeLimit
-        ? [...notices.value.skip(1), next]
-        : [...notices.value, next];
+    final all = [...notices.value, next];
+    notices.value = all.length > noticeLimit ? all.skip(1).toList() : all;
   }
 
   void dismissNotice() => notice.value = null;

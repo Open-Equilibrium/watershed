@@ -100,10 +100,7 @@ extension SessionMoves on SessionState {
         if (wake == null || due.isBefore(wake)) wake = due;
       }
       final source = listed.address;
-      final sourceLink = OwnConnection(connectTo, (
-        address: source,
-        root: projectOf(source)?.root ?? '',
-      ));
+      final sourceLink = _ownConnection(source);
       runningMoves.add(moving.transfer);
       final targetLink = (await _linkTo(
         moving.targetEnvironment,
