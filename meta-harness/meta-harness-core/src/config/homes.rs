@@ -255,7 +255,8 @@ fn link(path: &Path, target: &Path) -> Result<(), String> {
     #[cfg(unix)]
     let linked = std::os::unix::fs::symlink(target, path);
     #[cfg(windows)]
-    let linked = std::os::windows::fs::symlink_file(target, path);
+    let linked = std::os::windows::fs::symlink_file(target, path)
+        .or_else(|_| std::fs::hard_link(target, path));
     linked.map_err(|e| failed(path, &e))
 }
 

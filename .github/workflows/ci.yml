@@ -606,9 +606,37 @@ jobs:
 
   # Branch protection requires these two names. Each passes only when every job passed or
   # was skipped because the scope did not select it, so splitting jobs needs no ruleset change.
+  windows:
+    name: Meta-Harness (windows-2025)
+    needs: scope
+    if: needs.scope.outputs.meta_harness == 'true'
+    runs-on: windows-2025
+    steps:
+      - *checkout
+      - *node
+
+      - name: Install pinned T3 Code for Meta-Harness on Windows
+        shell: bash
+        run: |
+          t3="$(node scripts/install-t3.mjs "$RUNNER_TEMP/t3")"
+          echo "META_HARNESS_T3=$t3" >> "$GITHUB_ENV"
+
+      - *rust
+      - *test-tools
+
+      - name: Run Meta-Harness tests on Windows
+        run: >-
+          cargo nextest run
+          --no-fail-fast
+          --config 'target."cfg(all())".runner = ["node", "../../scripts/run-isolated-rust-test.mjs"]'
+          --locked
+          -p meta-harness-core
+          -p meta-harness-cli
+          --all-targets
+
   gates:
     name: Flow Agent gates (${{ matrix.os }}) [${{ github.event_name }}]
-    needs: [scope, checks, test, flow-agent, flow-coverage, m11-evidence, liquid]
+    needs: [scope, checks, test, flow-agent, flow-coverage, m11-evidence, liquid, windows]
     if: always()
     runs-on: ubuntu-24.04
     strategy:
@@ -627,7 +655,7 @@ jobs:
           outputs = scope["outputs"] if scope["result"] == "success" else {}
           selected_by = {"checks": "docs", "test": "product", "flow-agent": "flow_agent",
                          "flow-coverage": "flow_agent", "m11-evidence": "flow_agent",
-                         "liquid": "liquid"}
+                         "liquid": "liquid", "windows": "meta_harness"}
           failed = [job for job, need in needs.items() if need["result"] != "success"
                     and not (need["result"] == "skipped" and outputs.get(selected_by[job]) == "false")]
           print(f"scope: {scope['result']}", *(f"{job}: {need['result']}" for job, need in needs.items()),

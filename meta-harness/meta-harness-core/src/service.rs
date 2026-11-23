@@ -233,10 +233,7 @@ impl Drop for Service {
 pub(crate) fn create_private_dir(path: &Path) -> Result<(), String> {
     std::fs::create_dir_all(path)
         .map_err(|e| format!("Could not create {}: {e}", path.display()))?;
-    #[cfg(unix)]
-    std::fs::set_permissions(path, std::os::unix::fs::PermissionsExt::from_mode(0o700))
-        .map_err(|e| format!("Could not protect {}: {e}", path.display()))?;
-    Ok(())
+    crate::platform::owner_only(path, true)
 }
 
 fn take_lock(home: &Path) -> Result<std::fs::File, String> {
@@ -263,6 +260,8 @@ pub(crate) fn write_private(path: &Path, text: &str) -> Result<(), String> {
     let mut file = options
         .open(&temporary)
         .map_err(|e| format!("Could not write {}: {e}", temporary.display()))?;
+    #[cfg(windows)]
+    crate::platform::owner_only(&temporary, false)?;
     file.write_all(text.as_bytes())
         .and_then(|()| file.sync_all())
         .map_err(|e| format!("Could not write {}: {e}", temporary.display()))?;

@@ -85,6 +85,10 @@ async fn run(args: &[&str]) -> Result<(), String> {
     let home = default_home()?;
     match args {
         ["serve"] => serve(home).await,
+        ["serve", "--home", folder, "--log", log] => {
+            log_to(Path::new(log))?;
+            serve(PathBuf::from(folder)).await
+        }
         ["status"] => {
             let status = connect(&home).await?.status().await?;
             println!("{}", status_text(&status));
@@ -171,6 +175,29 @@ async fn serve(home: PathBuf) -> Result<(), String> {
     );
     stopped().await;
     service.stop().await;
+    Ok(())
+}
+
+#[cfg(unix)]
+fn log_to(_log: &Path) -> Result<(), String> {
+    Err("--log is for the Windows login task; launchd and systemd keep the log.".to_owned())
+}
+
+#[cfg(windows)]
+fn log_to(log: &Path) -> Result<(), String> {
+    use std::os::windows::io::IntoRawHandle;
+    let file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(log)
+        .map_err(|e| format!("Could not open the log {}: {e}", log.display()))?;
+    let handle = file.into_raw_handle();
+    unsafe {
+        windows_sys::Win32::System::Console::SetStdHandle(
+            windows_sys::Win32::System::Console::STD_ERROR_HANDLE,
+            handle,
+        );
+    }
     Ok(())
 }
 
@@ -282,16 +309,19 @@ fn pinned_t3() -> Result<PathBuf, String> {
     let platform = match (std::env::consts::OS, std::env::consts::ARCH) {
         ("macos", "aarch64") => "darwin-arm64",
         ("linux", "x86_64") => "linux-x64",
+        ("windows", "x86_64") => "win32-x64",
         (os, arch) => return Err(format!("Meta-Harness has no T3 Code for {os} {arch}.")),
     };
     Ok(prefix()?
         .join("lib/meta-harness")
         .join(format!("t3-{}-{platform}", t3_version()))
-        .join("t3"))
+        .join(format!("t3{}", std::env::consts::EXE_SUFFIX)))
 }
 
 fn install(home: PathBuf) -> Result<(), String> {
-    let program = prefix()?.join("bin/meta");
+    let program = prefix()?
+        .join("bin")
+        .join(format!("meta{}", std::env::consts::EXE_SUFFIX));
     let plan = login::Plan::new(program, home, |name| std::env::var(name).ok())?;
     login::Manager::current()?.install(&plan, run_step)?;
     if cfg!(target_os = "linux") && !lingering() {

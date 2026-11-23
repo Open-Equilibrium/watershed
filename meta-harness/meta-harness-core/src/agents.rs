@@ -269,9 +269,7 @@ pub(crate) fn unpack(folder: &Path, files: &[CarriedFile]) -> Result<(), String>
         }
         std::fs::write(&target, &bytes)
             .map_err(|e| format!("Could not write {}: {e}", target.display()))?;
-        #[cfg(unix)]
-        std::fs::set_permissions(&target, std::os::unix::fs::PermissionsExt::from_mode(0o600))
-            .map_err(|e| format!("Could not protect {}: {e}", target.display()))?;
+        crate::platform::owner_only(&target, false)?;
     }
     Ok(())
 }
