@@ -500,7 +500,15 @@ async fn an_agent_made_by_chat_names_itself_logs_its_changes_and_answers_a_menti
         s.turns.iter().any(|t| t.status == TurnStatus::Running)
     })
     .await;
-    tokio::time::sleep(Duration::from_millis(500)).await;
+    tokio::time::timeout(Duration::from_secs(30), async {
+        while host.agent_instructions("news-bot").await.unwrap()
+            != "# news-bot\n\nRead the feeds three times.\n"
+        {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    })
+    .await
+    .expect("the stopped routine run rewrites the instructions first");
     thread.stop().await.unwrap();
     let aborted = tokio::time::timeout(Duration::from_secs(30), async {
         loop {
