@@ -88,6 +88,9 @@ async fn run(args: &[&str]) -> Result<(), String> {
     if let ["install", rest @ ..] = args {
         return install_download(rest);
     }
+    if let Some(message) = missing(args) {
+        return Err(message.to_owned());
+    }
     let home = default_home()?;
     match args {
         ["serve"] => serve(home).await,
@@ -110,6 +113,29 @@ async fn run(args: &[&str]) -> Result<(), String> {
         ["uninstall"] => uninstall(),
         _ => Err(format!("unknown command \"{}\"\n{USAGE}", args.join(" "))),
     }
+}
+
+fn missing(args: &[&str]) -> Option<&'static str> {
+    Some(match args {
+        ["config", "propose"] => "meta config propose needs a change file",
+        ["config", "revert"] => "meta config revert needs a revision number",
+        ["config", "approve"] => "meta config approve needs a proposal number",
+        ["config", "reject"] => "meta config reject needs a proposal number",
+        ["host", "add"] => "meta host add needs an address and a pairing code",
+        ["host", "add", _] => "meta host add needs a pairing code",
+        ["host", "remove"] => "meta host remove needs a host name",
+        ["host", "revoke"] => "meta host revoke needs a host name",
+        ["agent", "create"] => "meta agent create needs an agent name",
+        ["agent", "remove"] => "meta agent remove needs an agent name",
+        ["agent", "routines"] => "meta agent routines needs an agent name",
+        ["agent", "routine", "add"] => "meta agent routine add needs an agent name",
+        ["agent", "routine", "remove"] => {
+            "meta agent routine remove needs an agent name and a routine ID"
+        }
+        ["agent", "routine", "remove", _] => "meta agent routine remove needs a routine ID",
+        ["service"] => "meta service needs install or uninstall",
+        _ => return None,
+    })
 }
 
 fn status_text(status: &api::Status) -> String {
@@ -632,6 +658,66 @@ mod tests {
             Some(recorded)
         );
         assert_eq!(data_in_installation(prefix, None, shell), None);
+    }
+
+    #[test]
+    fn a_missing_argument_is_named_without_the_usage() {
+        for (args, message) in [
+            (
+                &["config", "propose"][..],
+                "meta config propose needs a change file",
+            ),
+            (
+                &["config", "revert"],
+                "meta config revert needs a revision number",
+            ),
+            (
+                &["config", "approve"],
+                "meta config approve needs a proposal number",
+            ),
+            (
+                &["config", "reject"],
+                "meta config reject needs a proposal number",
+            ),
+            (
+                &["host", "add"],
+                "meta host add needs an address and a pairing code",
+            ),
+            (
+                &["host", "add", "ws://h:1"],
+                "meta host add needs a pairing code",
+            ),
+            (&["host", "remove"], "meta host remove needs a host name"),
+            (&["host", "revoke"], "meta host revoke needs a host name"),
+            (
+                &["agent", "create"],
+                "meta agent create needs an agent name",
+            ),
+            (
+                &["agent", "remove"],
+                "meta agent remove needs an agent name",
+            ),
+            (
+                &["agent", "routines"],
+                "meta agent routines needs an agent name",
+            ),
+            (
+                &["agent", "routine", "add"],
+                "meta agent routine add needs an agent name",
+            ),
+            (
+                &["agent", "routine", "remove"],
+                "meta agent routine remove needs an agent name and a routine ID",
+            ),
+            (
+                &["agent", "routine", "remove", "bot"],
+                "meta agent routine remove needs a routine ID",
+            ),
+            (&["service"], "meta service needs install or uninstall"),
+        ] {
+            assert_eq!(missing(args), Some(message), "{args:?}");
+        }
+        assert_eq!(missing(&["config", "approve", "1"]), None);
     }
 
     #[test]
