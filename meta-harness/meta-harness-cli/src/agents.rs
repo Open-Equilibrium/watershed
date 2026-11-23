@@ -1,4 +1,5 @@
 use std::path::Path;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use meta_harness_core::{
     ModelChoice, NewAgent, NewRoutine, Permissions, Schedule, ScheduleKind, remote,
@@ -52,12 +53,12 @@ fn new_agent(name: &str, mut args: &[&str]) -> Result<NewAgent, String> {
     while let [flag, value, rest @ ..] = args {
         match *flag {
             "--project" => {
-                root = Some(
-                    std::fs::canonicalize(Path::new(value))
-                        .map_err(|e| format!("The project {value} is not readable: {e}"))?
-                        .to_string_lossy()
-                        .into_owned(),
-                );
+                let path = std::fs::canonicalize(Path::new(value))
+                    .map_err(|e| format!("The project {value} is not readable: {e}"))?;
+                if !path.is_dir() {
+                    return Err(format!("The project {value} is not a folder."));
+                }
+                root = Some(path.to_string_lossy().into_owned());
             }
             "--model" => {
                 let (instance, model_id) = value.split_once('/').ok_or_else(|| {
@@ -118,6 +119,7 @@ fn routine(mut args: &[&str]) -> Result<NewRoutine, String> {
                 rest
             }
             ["--at", time, rest @ ..] => {
+                time_of_day(time)?;
                 choose(
                     &mut schedule,
                     Schedule {
@@ -128,6 +130,7 @@ fn routine(mut args: &[&str]) -> Result<NewRoutine, String> {
                 rest
             }
             ["--once", at, rest @ ..] => {
+                future_instant(at)?;
                 choose(
                     &mut schedule,
                     Schedule {
@@ -165,7 +168,9 @@ fn routine(mut args: &[&str]) -> Result<NewRoutine, String> {
         }
         schedule.weekdays = days;
     }
-    let prompt: String = prompt.ok_or("meta agent routine add needs --prompt TEXT")?;
+    let prompt = prompt
+        .filter(|text| !text.trim().is_empty())
+        .ok_or("meta agent routine add needs a non-empty --prompt TEXT")?;
     Ok(NewRoutine {
         title: title.unwrap_or_else(|| {
             prompt
@@ -214,6 +219,92 @@ fn duration(text: &str) -> Result<u64, String> {
         .ok_or_else(|| format!("{text:?} is shorter than a minute or too long."))
 }
 
+fn time_of_day(text: &str) -> Result<(), String> {
+    let valid = |part: &str, below: u32| {
+        part.len() <= 2
+            && part.bytes().all(|b| b.is_ascii_digit())
+            && part.parse::<u32>().is_ok_and(|n| n < below)
+    };
+    match text.split_once(':') {
+        Some((hour, minute)) if valid(hour, 24) && minute.len() == 2 && valid(minute, 60) => Ok(()),
+        _ => Err(format!(
+            "{text:?} is no time of day such as 07:30, with hours 00 to 23 and minutes 00 to 59."
+        )),
+    }
+}
+
+fn future_instant(text: &str) -> Result<(), String> {
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |elapsed| elapsed.as_secs());
+    match unix_seconds(text) {
+        Some(at) if at > i64::try_from(now).unwrap_or(i64::MAX) => Ok(()),
+        Some(_) => Err(format!("{text:?} is not later than now.")),
+        None => Err(format!(
+            "{text:?} is no date and time with an offset, such as 2026-12-01T07:30:00+01:00."
+        )),
+    }
+}
+
+fn unix_seconds(text: &str) -> Option<i64> {
+    let (date, time) = text.split_once('T')?;
+    let (clock, zone) = time.split_at_checked(8)?;
+    let [year, month, day] = date.split('-').collect::<Vec<_>>()[..] else {
+        return None;
+    };
+    let [hour, minute, second] = clock.split(':').collect::<Vec<_>>()[..] else {
+        return None;
+    };
+    let (year, month, day) = (field(year, 4)?, field(month, 2)?, field(day, 2)?);
+    let (hour, minute, second) = (field(hour, 2)?, field(minute, 2)?, field(second, 2)?);
+    if !(1..=12).contains(&month)
+        || !(1..=days_in_month(year, month)).contains(&day)
+        || hour > 23
+        || minute > 59
+        || second > 59
+    {
+        return None;
+    }
+    let offset = match zone {
+        "Z" => 0,
+        _ => {
+            let (sign, hours_minutes) = zone.split_at_checked(1)?;
+            let (hours, minutes) = hours_minutes.split_once(':')?;
+            let seconds = field(hours, 2)? * 3600 + field(minutes, 2)? * 60;
+            match sign {
+                "+" => seconds,
+                "-" => -seconds,
+                _ => return None,
+            }
+        }
+    };
+    Some(days_from_civil(year, month, day) * 86_400 + hour * 3600 + minute * 60 + second - offset)
+}
+
+fn field(text: &str, width: usize) -> Option<i64> {
+    (text.len() == width && text.bytes().all(|b| b.is_ascii_digit()))
+        .then(|| text.parse().ok())
+        .flatten()
+}
+
+fn days_in_month(year: i64, month: i64) -> i64 {
+    match month {
+        2 if year % 4 == 0 && (year % 100 != 0 || year % 400 == 0) => 29,
+        2 => 28,
+        4 | 6 | 9 | 11 => 30,
+        _ => 31,
+    }
+}
+
+fn days_from_civil(year: i64, month: i64, day: i64) -> i64 {
+    let year = if month <= 2 { year - 1 } else { year };
+    let era = year.div_euclid(400);
+    let year_of_era = year - era * 400;
+    let day_of_year = (153 * ((month + 9) % 12) + 2) / 5 + day - 1;
+    let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
+    era * 146_097 + day_of_era - 719_468
+}
+
 fn weekdays(list: &str) -> Result<Vec<u8>, String> {
     list.split(',')
         .map(|day| {
@@ -232,7 +323,7 @@ fn weekdays(list: &str) -> Result<Vec<u8>, String> {
 mod tests {
     use meta_harness_core::{Permissions, ScheduleKind};
 
-    use super::{new_agent, routine};
+    use super::{new_agent, routine, unix_seconds};
 
     #[test]
     fn an_agent_needs_a_project_and_a_model_and_asks_for_approval_by_default() {
@@ -261,6 +352,8 @@ mod tests {
         assert!(new_agent("news-bot", &["--model", "codex/gpt-6.1"]).is_err());
         assert!(new_agent("news-bot", &["--project", project]).is_err());
         assert!(new_agent("news-bot", &["--project", project, "--model", "gpt"]).is_err());
+        let file = concat!(env!("CARGO_MANIFEST_DIR"), "/Cargo.toml");
+        assert!(new_agent("news-bot", &["--project", file, "--model", "codex/gpt-6.1"]).is_err());
         let full = new_agent(
             "news-bot",
             &[
@@ -329,10 +422,45 @@ mod tests {
                 "Two schedules.",
             ],
             &["--every", "30m", "--every", "1h", "--prompt", "Twice."],
+            &["--every", "30m", "--prompt", ""],
+            &["--every", "30m", "--prompt", "   "],
+            &["--at", "25:00", "--prompt", "Late."],
+            &["--at", "7:60", "--prompt", "Late."],
+            &["--at", "noon", "--prompt", "Late."],
+            &["--at", "7:3", "--prompt", "Late."],
             &["--webhook", "--days", "mon", "--prompt", "Days need --at."],
             &["--at", "07:30", "--days", "someday", "--prompt", "Plan."],
         ] {
             assert!(routine(wrong).is_err(), "{wrong:?} is refused");
         }
+    }
+
+    #[test]
+    fn a_once_routine_takes_a_future_time_with_an_offset() {
+        for wrong in [
+            "2026-12-01T07:30:00",
+            "tomorrow",
+            "2000-01-01T00:00:00Z",
+            "2999-02-29T07:30:00Z",
+            "2999-04-31T07:30:00Z",
+            "2999-12-01T24:00:00Z",
+            "2999-12-01 07:30:00Z",
+        ] {
+            assert!(
+                routine(&["--once", wrong, "--prompt", "Once."]).is_err(),
+                "{wrong} is refused"
+            );
+        }
+        for right in [
+            "2999-12-01T07:30:00Z",
+            "2999-12-01T07:30:00+01:00",
+            "2999-06-01T07:30:00-05:00",
+        ] {
+            let once = routine(&["--once", right, "--prompt", "Once."]).unwrap();
+            assert_eq!(once.schedule.run_at.as_deref(), Some(right));
+        }
+        assert_eq!(unix_seconds("1970-01-01T00:00:00Z"), Some(0));
+        assert_eq!(unix_seconds("2000-03-01T00:00:00Z"), Some(951_868_800));
+        assert_eq!(unix_seconds("2000-03-01T01:00:00+01:00"), Some(951_868_800));
     }
 }
