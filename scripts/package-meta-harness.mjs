@@ -48,7 +48,9 @@ async function sha256(file) {
 function files(folder) {
   return readdirSync(folder, { withFileTypes: true }).flatMap((entry) => {
     const path = join(folder, entry.name);
-    return entry.isDirectory() ? files(path) : entry.isFile() ? [path] : [];
+    if (entry.isDirectory()) return files(path);
+    if (entry.isFile()) return [path];
+    throw new Error(`${path} is neither a file nor a folder, which a Windows ZIP cannot hold`);
   });
 }
 

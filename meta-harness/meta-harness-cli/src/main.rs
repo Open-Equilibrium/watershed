@@ -447,29 +447,38 @@ fn uninstall() -> Result<(), String> {
         ));
     }
     remove_login_service()?;
-    let program = format!("meta{}", std::env::consts::EXE_SUFFIX);
-    for path in [
+    remove_installation(&prefix)?;
+    println!(
+        "Meta-Harness is uninstalled; its data stays in {}.",
+        home.display()
+    );
+    Ok(())
+}
+
+fn remove_installation(prefix: &Path) -> Result<(), String> {
+    for folder in [
         prefix.join("lib/meta-harness"),
         prefix.join("share/meta-harness"),
-        prefix.join("bin").join(&program),
-        prefix.join("bin").join(format!("{program}.old")),
     ] {
-        let removed = if path.is_dir() {
-            std::fs::remove_dir_all(&path)
-        } else {
-            std::fs::remove_file(&path).or_else(|error| {
-                let aside = std::env::temp_dir().join(format!(
-                    "meta-uninstalled-{}{}",
-                    std::process::id(),
-                    std::env::consts::EXE_SUFFIX
-                ));
-                if cfg!(windows) && std::fs::rename(&path, &aside).is_ok() {
-                    Ok(())
-                } else {
-                    Err(error)
-                }
-            })
-        };
+        match std::fs::remove_dir_all(&folder) {
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => {
+                return Err(format!("Could not remove {}: {e}", folder.display()));
+            }
+            _ => {}
+        }
+    }
+    let program = format!("meta{}", std::env::consts::EXE_SUFFIX);
+    for name in [program.clone(), format!("{program}.old")] {
+        let path = prefix.join("bin").join(&name);
+        let removed = std::fs::remove_file(&path).or_else(|error| {
+            let aside = std::env::temp_dir()
+                .join(format!("meta-uninstalled-{}-{name}", std::process::id()));
+            if cfg!(windows) && path.is_file() && std::fs::rename(&path, &aside).is_ok() {
+                Ok(())
+            } else {
+                Err(error)
+            }
+        });
         match removed {
             Err(e) if e.kind() != std::io::ErrorKind::NotFound => {
                 return Err(format!("Could not remove {}: {e}", path.display()));
@@ -481,14 +490,10 @@ fn uninstall() -> Result<(), String> {
         prefix.join("bin"),
         prefix.join("lib"),
         prefix.join("share"),
-        prefix,
+        prefix.to_owned(),
     ] {
         let _ = std::fs::remove_dir(folder);
     }
-    println!(
-        "Meta-Harness is uninstalled; its data stays in {}.",
-        home.display()
-    );
     Ok(())
 }
 
@@ -548,6 +553,37 @@ mod tests {
         assert_eq!(agent.command, flow);
         assert_eq!(agent.args, ["acp"]);
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn uninstall_removes_the_program_and_its_backup_but_never_a_folder_in_their_place() {
+        let mut bytes = [0u8; 8];
+        getrandom::fill(&mut bytes).unwrap();
+        let prefix = std::env::temp_dir().join(format!(
+            "mh-uninstall-{}",
+            bytes.iter().map(|b| format!("{b:02x}")).collect::<String>()
+        ));
+        let program = format!("meta{}", std::env::consts::EXE_SUFFIX);
+        std::fs::create_dir_all(prefix.join("lib/meta-harness/t3")).unwrap();
+        std::fs::create_dir_all(prefix.join("share/meta-harness")).unwrap();
+        std::fs::create_dir_all(prefix.join("bin")).unwrap();
+        std::fs::write(prefix.join("bin").join(&program), "meta").unwrap();
+        std::fs::write(prefix.join("bin").join(format!("{program}.old")), "old").unwrap();
+        remove_installation(&prefix).unwrap();
+        assert!(!prefix.exists());
+
+        let kept = prefix
+            .join("bin")
+            .join(format!("{program}.old"))
+            .join("notes.txt");
+        std::fs::create_dir_all(kept.parent().unwrap()).unwrap();
+        std::fs::write(&kept, "the person's notes").unwrap();
+        assert!(remove_installation(&prefix).is_err());
+        assert_eq!(
+            std::fs::read_to_string(&kept).unwrap(),
+            "the person's notes"
+        );
+        let _ = std::fs::remove_dir_all(&prefix);
     }
 
     #[test]

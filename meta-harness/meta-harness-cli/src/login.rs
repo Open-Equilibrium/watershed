@@ -155,7 +155,7 @@ impl Manager {
                 step("schtasks", &["/End", "/TN", TASK], false),
                 step("schtasks", &["/Delete", "/TN", TASK, "/F"], false),
             ],
-            restore: Vec::new(),
+            restore: vec![step("schtasks", &["/Delete", "/TN", TASK, "/F"], false)],
             restart: vec![
                 step(
                     "schtasks",
@@ -248,7 +248,11 @@ impl Manager {
             return Err(match restored {
                 Ok(()) => {
                     let mut message = error;
-                    for failure in run_all(&self.restore, &mut run).unwrap_or_else(|e| vec![e]) {
+                    for failure in run_all(&self.restore, &mut run)
+                        .unwrap_or_else(|e| vec![e])
+                        .into_iter()
+                        .filter(|failure| !not_loaded(failure))
+                    {
                         message = format!("{message}. {failure}");
                     }
                     if had_previous && let Err(failure) = run_all(&self.restart, &mut run) {
@@ -431,9 +435,9 @@ fn task_user() -> String {
 }
 
 fn task_of(plan: &Plan) -> String {
-    let program = xml(&plan.program.to_string_lossy());
-    let home = xml(&plan.home.to_string_lossy());
-    let log = xml(&plan.log().to_string_lossy());
+    let program = xml(&argument(&plan.program.to_string_lossy()));
+    let home = xml(&argument(&plan.home.to_string_lossy()));
+    let log = xml(&argument(&plan.log().to_string_lossy()));
     let user = xml(&task_user());
     format!(
         r#"<?xml version="1.0" encoding="UTF-16"?>
@@ -469,7 +473,7 @@ fn task_of(plan: &Plan) -> String {
   <Actions Context="Author">
     <Exec>
       <Command>conhost.exe</Command>
-      <Arguments>--headless "{program}" serve --home "{home}" --log "{log}"</Arguments>
+      <Arguments>--headless {program} serve --home {home} --log {log}</Arguments>
     </Exec>
   </Actions>
 </Task>
@@ -477,10 +481,16 @@ fn task_of(plan: &Plan) -> String {
     )
 }
 
+fn argument(value: &str) -> String {
+    let trailing = value.len() - value.trim_end_matches('\\').len();
+    format!("\"{value}{}\"", "\\".repeat(trailing))
+}
+
 fn task_home(text: &str) -> Option<String> {
     let value = text.split_once("--home \"")?.1.split_once('"')?.0;
+    let trailing = value.len() - value.trim_end_matches('\\').len();
     Some(
-        value
+        value[..value.len() - trailing / 2]
             .replace("&lt;", "<")
             .replace("&gt;", ">")
             .replace("&amp;", "&"),
@@ -849,6 +859,43 @@ mod tests {
         assert!(not_loaded(
             "ERROR: The system cannot find the file specified."
         ));
+    }
+
+    #[test]
+    fn a_windows_home_ending_in_a_backslash_keeps_its_closing_quote() {
+        let dir = Dir::new();
+        let manager = Manager::task_scheduler(&dir.0);
+        let home = format!("{}\\", dir.0.join("data").to_string_lossy());
+        let plan = Plan::new(dir.0.join("bin/meta"), PathBuf::from(&home), |_| None).unwrap();
+        manager.install(&plan, |_| Ok(())).unwrap();
+        let task = manager
+            .decode(&std::fs::read(&manager.file).unwrap())
+            .unwrap();
+        assert!(
+            task.contains(&format!("--home \"{home}\\\" --log")),
+            "{task}"
+        );
+        assert_eq!(manager.recorded_home(), Ok(Some(PathBuf::from(home))));
+    }
+
+    #[test]
+    fn a_failed_first_windows_task_install_deletes_the_task_it_created() {
+        let dir = Dir::new();
+        let manager = Manager::task_scheduler(&dir.0);
+        let mut ran = Vec::new();
+        let result = manager.install(&plan(&dir.0), |step| {
+            ran.push(step.args.join(" "));
+            if step.args[0] == "/Run" {
+                Err("Access is denied.".to_owned())
+            } else if step.args[0] == "/End" {
+                Err("ERROR: The system cannot find the file specified.".to_owned())
+            } else {
+                Ok(())
+            }
+        });
+        assert_eq!(result, Err("Access is denied.".to_owned()));
+        assert_eq!(ran.last().unwrap(), "/Delete /TN Meta-Harness /F");
+        assert!(!manager.file.exists());
     }
 
     #[test]

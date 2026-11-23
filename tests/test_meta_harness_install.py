@@ -245,6 +245,19 @@ class PackagerTest(unittest.TestCase):
                 for relative, contents in expected.items():
                     self.assertEqual(bundle.read(files[relative]), contents, relative)
 
+    def test_a_windows_download_refuses_a_t3_folder_with_a_symlink_inside(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            target = "win32-x64"
+            t3 = root / "fixtures" / f"t3-{T3_VERSION}-{target}"
+            write(t3 / "t3.exe", b"synthetic T3 program")
+            (t3 / "helper").symlink_to("t3.exe")
+            output = root / "download"
+            result = run_packager(root, target, output, t3=t3)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("neither a file nor a folder", result.stderr)
+            self.assertFalse(output.exists(), result.stderr)
+
     def test_a_symlinked_t3_folder_is_packed_as_the_folder_it_names(self):
         for target in PLATFORMS:
             with self.subTest(platform=target), tempfile.TemporaryDirectory() as temporary:
