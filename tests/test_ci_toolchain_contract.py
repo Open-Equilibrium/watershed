@@ -21,9 +21,9 @@ TEST_ISOLATION = (
 )
 ACTION_PINS = {
     "actions/checkout": "3d3c42e5aac5ba805825da76410c181273ba90b1",
-    "actions/setup-node": "820762786026740c76f36085b0efc47a31fe5020",
-    "actions/upload-artifact": "043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
-    "taiki-e/install-action": "83ac0ad63c0167e6f06796fab0fce28db1bf3db0",
+    "actions/setup-node": "949feb2413d6458794dcd2491c4babbbce0c15c1",
+    "actions/upload-artifact": "cf430e030ddbb5b0abf93d22962f4752f3646cd9",
+    "taiki-e/install-action": "75a7c0f87bd666af3cdb75c5b9e9d03ab6044e6f",
 }
 UBUNTU = "matrix.os == 'ubuntu-24.04'"
 MAC = "matrix.os == 'xcode-27'"
