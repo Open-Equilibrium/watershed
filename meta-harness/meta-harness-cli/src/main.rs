@@ -447,15 +447,28 @@ fn uninstall() -> Result<(), String> {
         ));
     }
     remove_login_service()?;
+    let program = format!("meta{}", std::env::consts::EXE_SUFFIX);
     for path in [
         prefix.join("lib/meta-harness"),
         prefix.join("share/meta-harness"),
-        prefix.join("bin/meta"),
+        prefix.join("bin").join(&program),
+        prefix.join("bin").join(format!("{program}.old")),
     ] {
         let removed = if path.is_dir() {
             std::fs::remove_dir_all(&path)
         } else {
-            std::fs::remove_file(&path)
+            std::fs::remove_file(&path).or_else(|error| {
+                let aside = std::env::temp_dir().join(format!(
+                    "meta-uninstalled-{}{}",
+                    std::process::id(),
+                    std::env::consts::EXE_SUFFIX
+                ));
+                if cfg!(windows) && std::fs::rename(&path, &aside).is_ok() {
+                    Ok(())
+                } else {
+                    Err(error)
+                }
+            })
         };
         match removed {
             Err(e) if e.kind() != std::io::ErrorKind::NotFound => {

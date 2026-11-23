@@ -1,6 +1,8 @@
 use std::path::{Path, PathBuf};
 
 const NOTICES: [&str; 3] = ["LICENSE", "LICENSE-t3code", "THIRD_PARTY_NOTICES.md"];
+const MOVE_TRIES: u32 = 60;
+const MOVE_WAIT: std::time::Duration = std::time::Duration::from_millis(500);
 
 pub fn bundle_info(bundle: &Path) -> Result<(String, String), String> {
     let text = std::fs::read_to_string(bundle.join("bundle-info")).map_err(|_| {
@@ -55,9 +57,26 @@ pub fn install_files(bundle: &Path, prefix: &Path, platform: &str) -> Result<Pat
     let _ = std::fs::remove_dir_all(&stage);
     copy_tree(t3_source, &stage)?;
     let installed = lib.join(name);
-    let _ = std::fs::remove_dir_all(&installed);
+    let aside = lib.join(format!(".{}.old", name.to_string_lossy()));
+    let _ = std::fs::remove_dir_all(&aside);
+    if installed.exists() {
+        let mut tries = 0;
+        while let Err(error) = std::fs::rename(&installed, &aside) {
+            tries += 1;
+            if tries >= MOVE_TRIES {
+                let _ = std::fs::remove_dir_all(&stage);
+                return Err(format!(
+                    "The running Meta-Harness still holds {} ({error}), so nothing was \
+                     replaced. Stop it with `meta service uninstall` and install again.",
+                    installed.display()
+                ));
+            }
+            std::thread::sleep(MOVE_WAIT);
+        }
+    }
     std::fs::rename(&stage, &installed)
         .map_err(|e| format!("Could not place {}: {e}", installed.display()))?;
+    let _ = std::fs::remove_dir_all(&aside);
     for old in std::fs::read_dir(&lib)
         .map_err(|e| format!("Could not read {}: {e}", lib.display()))?
         .filter_map(Result::ok)

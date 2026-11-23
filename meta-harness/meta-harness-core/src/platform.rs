@@ -45,7 +45,12 @@ pub(crate) fn kill(pid: u32) {
 }
 
 #[cfg(unix)]
-pub(crate) fn runs(pid: u32, binary: &Path, arguments: &[&str]) -> bool {
+pub(crate) fn runs(
+    pid: u32,
+    binary: &Path,
+    arguments: &[&str],
+    _written: Option<std::time::SystemTime>,
+) -> bool {
     let Ok(output) = std::process::Command::new("ps")
         .args(["-o", "command=", "-p", &pid.to_string()])
         .output()
@@ -64,10 +69,20 @@ pub(crate) fn matches_command(command: &str, binary: &Path, arguments: &[&str]) 
 }
 
 #[cfg(windows)]
-pub(crate) fn runs(pid: u32, binary: &Path, _arguments: &[&str]) -> bool {
-    windows::image(pid).is_some_and(|image| {
+pub(crate) fn runs(
+    pid: u32,
+    binary: &Path,
+    _arguments: &[&str],
+    written: Option<std::time::SystemTime>,
+) -> bool {
+    let same = windows::image(pid).is_some_and(|image| {
         std::fs::canonicalize(image).ok() == std::fs::canonicalize(binary).ok()
-    })
+    });
+    let older = match (windows::started(pid), written) {
+        (Some(started), Some(written)) => started <= written,
+        _ => false,
+    };
+    same && older
 }
 
 #[cfg(unix)]
@@ -230,6 +245,28 @@ mod windows {
                 let process = Handle(process);
                 TerminateProcess(process.0, 1);
             }
+        }
+    }
+
+    pub(super) fn started(pid: u32) -> Option<std::time::SystemTime> {
+        use windows_sys::Win32::Foundation::FILETIME;
+        use windows_sys::Win32::System::Threading::GetProcessTimes;
+        const UNIX_EPOCH_IN_TICKS: u64 = 116_444_736_000_000_000;
+        unsafe {
+            let process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+            if process.is_null() {
+                return None;
+            }
+            let process = Handle(process);
+            let mut times: [FILETIME; 4] = std::mem::zeroed();
+            let [created, exited, kernel, user] = &mut times;
+            if GetProcessTimes(process.0, created, exited, kernel, user) == 0 {
+                return None;
+            }
+            let ticks =
+                (u64::from(created.dwHighDateTime) << 32) | u64::from(created.dwLowDateTime);
+            let since = ticks.checked_sub(UNIX_EPOCH_IN_TICKS)?;
+            Some(std::time::UNIX_EPOCH + std::time::Duration::from_nanos(since.saturating_mul(100)))
         }
     }
 

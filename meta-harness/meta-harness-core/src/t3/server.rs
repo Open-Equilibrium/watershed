@@ -124,7 +124,10 @@ async fn issue(binary: PathBuf, home: PathBuf, wait: Duration) -> Result<String,
 
 async fn stop_left_behind(binary: &Path, home: &Path) {
     let runtime = home.join("userdata").join("server-runtime.json");
-    let Some(pid) = std::fs::read_to_string(runtime)
+    let written = std::fs::metadata(&runtime)
+        .and_then(|meta| meta.modified())
+        .ok();
+    let Some(pid) = std::fs::read_to_string(&runtime)
         .ok()
         .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
         .and_then(|value| value["pid"].as_u64())
@@ -141,7 +144,7 @@ async fn stop_left_behind(binary: &Path, home: &Path) {
         "--base-dir",
         &base,
     ];
-    let runs_t3 = || crate::platform::runs(pid, binary, &arguments);
+    let runs_t3 = || crate::platform::runs(pid, binary, &arguments, written);
     if !runs_t3() {
         return;
     }
