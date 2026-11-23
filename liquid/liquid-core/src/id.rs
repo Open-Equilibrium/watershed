@@ -58,6 +58,7 @@ ids! {
     OptionId,
     ElementId,
     LineId,
+    AutomationId,
     #[derive(Default)]
     TabId,
 }

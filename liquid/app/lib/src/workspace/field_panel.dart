@@ -16,6 +16,7 @@ String fieldKindName(BridgeFieldKind kind) => switch (kind) {
   BridgeFieldKind.checkbox => 'Checkbox',
   BridgeFieldKind.file => 'File',
   BridgeFieldKind.formula => 'Formula',
+  BridgeFieldKind.button => 'Button',
 };
 
 IconData fieldKindIcon(BridgeFieldKind kind) => switch (kind) {
@@ -26,6 +27,7 @@ IconData fieldKindIcon(BridgeFieldKind kind) => switch (kind) {
   BridgeFieldKind.checkbox => LucideIcons.squareCheck,
   BridgeFieldKind.file => LucideIcons.paperclip,
   BridgeFieldKind.formula => LucideIcons.functionSquare,
+  BridgeFieldKind.button => LucideIcons.mousePointerClick,
 };
 
 class FieldPanel extends StatefulWidget {

@@ -50,6 +50,7 @@ double _width(BridgeFieldKind kind) => switch (kind) {
   BridgeFieldKind.checkbox => 72,
   BridgeFieldKind.file => 180,
   BridgeFieldKind.formula => 120,
+  BridgeFieldKind.button => 120,
 };
 
 class TableBlock extends StatefulWidget {
@@ -312,6 +313,7 @@ class _TableBlockState extends State<TableBlock> implements CellDrop {
         database: database,
         read: _state.read,
         write: (change) => widget.views.write(change, const []),
+        press: (row, field) => _state.press(_block, row, field),
         numbers: numbers,
         days: days,
       );
@@ -791,7 +793,9 @@ class _TableBlockState extends State<TableBlock> implements CellDrop {
     menu: (close) => FilterMenu(
       fields: [
         for (final field in fields)
-          if (field.kind != BridgeFieldKind.formula) field,
+          if (field.kind != BridgeFieldKind.formula &&
+              field.kind != BridgeFieldKind.button)
+            field,
       ],
       filter: _liveFilter,
       numbers: numbers,
@@ -2075,6 +2079,18 @@ class _TableBlockState extends State<TableBlock> implements CellDrop {
                             row != null) {
                           return _cells.editor(context, field);
                         }
+                        if (field.kind == BridgeFieldKind.button &&
+                            row != null) {
+                          return Align(
+                            alignment: Alignment.centerLeft,
+                            child: CellButton(
+                              label: field.name,
+                              onPressed: () => unawaited(
+                                _state.press(_block, row.id, field.id),
+                              ),
+                            ),
+                          );
+                        }
                         return Align(
                           alignment: switch (field.kind) {
                             BridgeFieldKind.number ||
@@ -2136,7 +2152,8 @@ class _TableBlockState extends State<TableBlock> implements CellDrop {
                               ),
                             ),
                           )
-                        : index == fields.length
+                        : index == fields.length ||
+                              fields[index].kind == BridgeFieldKind.button
                         ? const SizedBox.shrink()
                         : _totalCell(fields[index], numbers),
                   ),

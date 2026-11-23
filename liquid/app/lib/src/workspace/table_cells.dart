@@ -50,6 +50,46 @@ String intlLocale(Locale locale, bool Function(String) exists) {
 Widget cellText(String text, {TextStyle? style}) =>
     Text(text, maxLines: 1, overflow: TextOverflow.ellipsis, style: style);
 
+class CellButton extends StatelessWidget {
+  const CellButton({super.key, required this.label, required this.onPressed});
+
+  final String label;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    final ws = context.ws;
+    return InkWell(
+      borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
+      onTap: onPressed,
+      child: Container(
+        height: 22,
+        padding: const EdgeInsets.symmetric(horizontal: WsMetrics.space2),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
+          border: Border.all(color: ws.borderStrong),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(LucideIcons.mousePointerClick, size: 12, color: ws.textMuted),
+            const SizedBox(width: WsMetrics.space1),
+            Flexible(
+              child: cellText(
+                label.isEmpty ? 'Button' : label,
+                style: TextStyle(
+                  fontSize: WsMetrics.fsCompact,
+                  color: ws.textMuted,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class CellView extends StatelessWidget {
   const CellView({
     super.key,

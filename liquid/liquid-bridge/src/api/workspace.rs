@@ -1,8 +1,9 @@
 use liquid_core::{
-    AreaId, AttachmentId, BlockId, Changed, Error, FieldId, LineId, Mutation, PageId, Place, RowId,
-    TabId, TextStyle, Tile, ViewId,
+    AreaId, AttachmentId, AutomationId, BlockId, Changed, Error, FieldId, LineId, Mutation, PageId,
+    Place, RowId, TabId, TextStyle, Tile, ViewId,
 };
 
+use super::automation::{BridgeAutomationSetup, BridgeRan, BridgeWorkspaceAutomation};
 use super::calculation::{BridgeLine, BridgeLineSetup};
 use super::chart::{BridgeChart, BridgeChartSetup};
 use super::database::{
@@ -72,6 +73,10 @@ pub enum BridgeMutationKind {
     RemoveRow,
     MoveRow,
     SetCell,
+    CreateAutomation,
+    SetAutomation,
+    SetAutomationOn,
+    RemoveAutomation,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -152,6 +157,9 @@ pub struct BridgeMutation {
     pub line_setup: Option<BridgeLineSetup>,
     pub total: Option<BridgeTotal>,
     pub chart: Option<BridgeChartSetup>,
+    pub automation: Option<String>,
+    pub automation_setup: Option<BridgeAutomationSetup>,
+    pub on: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -167,6 +175,8 @@ pub struct BridgeApplied {
     pub tab: Option<String>,
     pub elements: Vec<String>,
     pub line: Option<String>,
+    pub automation: Option<String>,
+    pub ran: Vec<BridgeRan>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -188,6 +198,7 @@ pub enum BridgeQueryKind {
     Search,
     Tables,
     TableViews,
+    Automations,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -319,6 +330,7 @@ pub struct BridgeAnswer {
     pub totals: Vec<BridgeComputed>,
     pub chart: Option<BridgeChart>,
     pub follows: Vec<BridgeResource>,
+    pub automations: Vec<BridgeWorkspaceAutomation>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -330,6 +342,7 @@ pub enum BridgeResourceKind {
     Block,
     Tables,
     Table,
+    Automations,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -410,6 +423,13 @@ impl BridgeMutation {
             .to_core())
     }
 
+    fn automation_setup(&self) -> Result<liquid_core::AutomationSetup, String> {
+        self.automation_setup
+            .as_ref()
+            .ok_or("automation_setup is missing")?
+            .to_core()
+    }
+
     fn place<T>(&self, parse: fn(&str) -> Option<T>) -> Result<Place<T>, String> {
         match (self.last, optional_id(&self.after, parse, "after")?) {
             (true, Some(_)) => Err("after and last cannot both be set".into()),
@@ -437,6 +457,7 @@ impl BridgeMutation {
         let row = || id(&self.row, RowId::parse, "row");
         let view = || id(&self.view, ViewId::parse, "view");
         let tab = || id(&self.tab, TabId::parse, "tab");
+        let automation = || id(&self.automation, AutomationId::parse, "automation");
         let tabs = || {
             self.tabs
                 .iter()
@@ -734,6 +755,20 @@ impl BridgeMutation {
                 field: field()?,
                 value: self.cell.as_ref().ok_or("cell is missing")?.to_core()?,
             },
+            BridgeMutationKind::CreateAutomation => Mutation::CreateAutomation {
+                setup: Box::new(self.automation_setup()?),
+            },
+            BridgeMutationKind::SetAutomation => Mutation::SetAutomation {
+                automation: automation()?,
+                setup: Box::new(self.automation_setup()?),
+            },
+            BridgeMutationKind::SetAutomationOn => Mutation::SetAutomationOn {
+                automation: automation()?,
+                on: self.on,
+            },
+            BridgeMutationKind::RemoveAutomation => Mutation::RemoveAutomation {
+                automation: automation()?,
+            },
         })
     }
 }
@@ -749,7 +784,7 @@ impl BridgeResource {
             BridgeResourceKind::Pages => (area()?, None, None),
             BridgeResourceKind::Views => (None, page()?, None),
             BridgeResourceKind::Block => (None, page()?, block()?),
-            BridgeResourceKind::Tables => (None, None, None),
+            BridgeResourceKind::Tables | BridgeResourceKind::Automations => (None, None, None),
             BridgeResourceKind::Table => (None, None, block()?),
         };
         Ok(Self {
@@ -783,6 +818,7 @@ impl BridgeResource {
                 Some(block.to_string()),
             ),
             Changed::Tables => (BridgeResourceKind::Tables, None, None, None),
+            Changed::Automations => (BridgeResourceKind::Automations, None, None, None),
             Changed::Table(block) => (
                 BridgeResourceKind::Table,
                 None,

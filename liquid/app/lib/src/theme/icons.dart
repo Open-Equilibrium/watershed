@@ -111,4 +111,8 @@ abstract final class LucideIcons {
   static const sigma = IconData(0xe201, fontFamily: _family);
   static const equal = IconData(0xe1bd, fontFamily: _family);
   static const functionSquare = IconData(0xe22d, fontFamily: _family);
+  static const zap = IconData(0xe1b4, fontFamily: _family);
+  static const mousePointerClick = IconData(0xe120, fontFamily: _family);
+  static const bell = IconData(0xe059, fontFamily: _family);
+  static const arrowLeft = IconData(0xe048, fontFamily: _family);
 }

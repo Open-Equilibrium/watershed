@@ -1,7 +1,7 @@
 use automerge::ChangeHash;
 use serde::{Deserialize, Serialize};
 
-use crate::{ActionId, Actor, AreaId, BlockId, Mutation, Origin, PageId};
+use crate::{ActionId, Actor, AreaId, AutomationId, BlockId, Mutation, Origin, PageId};
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Permission {
@@ -12,6 +12,10 @@ pub enum Permission {
 pub enum Operation {
     CreateWorkspace,
     Mutation(Mutation),
+    Run {
+        automation: AutomationId,
+        cause: Option<ActionId>,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]

@@ -1,4 +1,5 @@
 mod attachment;
+mod automation;
 mod calculation;
 mod chart;
 mod database;
@@ -17,6 +18,10 @@ mod total;
 mod workspace;
 
 pub use attachment::{Attachment, AttachmentId, MAX_ATTACHMENT, Media, PART, Upload};
+pub use automation::{
+    Attention, Automation, AutomationSetup, LastRun, MAX_AUTOMATION_TEXT, MAX_AUTOMATIONS,
+    MAX_CONDITIONS, MAX_STEPS, Ran, Step, Trigger,
+};
 pub use calculation::{
     Calculation, Line, LineSetup, LineStyle, MAX_DEPTH, MAX_LABEL, MAX_LINES, Used,
 };
@@ -38,8 +43,8 @@ pub use formula::{
 };
 pub use history::{Action, Document, Operation, Permission};
 pub use id::{
-    ActionId, AreaId, BlockId, ElementId, FieldId, LineId, OptionId, PageId, PersonId, RowId,
-    TabId, ViewId,
+    ActionId, AreaId, AutomationId, BlockId, ElementId, FieldId, LineId, OptionId, PageId,
+    PersonId, RowId, TabId, ViewId,
 };
 pub use model::{Area, BlockKind, Code, GRID_COLUMNS, PageEntry, TableEntry, Tile, View};
 pub use mutation::{

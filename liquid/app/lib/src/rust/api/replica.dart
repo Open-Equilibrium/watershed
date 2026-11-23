@@ -4,6 +4,7 @@
 // ignore_for_file: invalid_use_of_internal_member, unused_import, unnecessary_import
 
 import '../frb_generated.dart';
+import 'automation.dart';
 import 'calculation.dart';
 import 'chart.dart';
 import 'database.dart';
@@ -14,7 +15,7 @@ import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
 import 'workspace.dart';
 
-// These functions are ignored because they are not marked as `pub`: `notify`, `open_lock`, `open_with`, `read`, `release_unfollowed`, `row_query`, `state`, `take_lock`, `watch`
+// These functions are ignored because they are not marked as `pub`: `notify`, `open_lock`, `open_with`, `read`, `release_unfollowed`, `reported`, `row_query`, `state`, `take_lock`, `watch`
 // These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `Inner`, `ReplicaLock`
 // These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `drop`
 
@@ -30,6 +31,12 @@ abstract class LiquidWorkspace implements RustOpaqueInterface {
 
   static Future<LiquidWorkspace> open({required String dir}) =>
       RustLib.instance.api.crateApiReplicaLiquidWorkspaceOpen(dir: dir);
+
+  Future<List<BridgeRan>> press({
+    required String table,
+    required String row,
+    required String field,
+  });
 
   Future<BridgeAnswer> query({required BridgeQuery query});
 
@@ -48,4 +55,6 @@ abstract class LiquidWorkspace implements RustOpaqueInterface {
     required PlatformInt64 subscription,
     required BridgeResource resource,
   });
+
+  Future<BridgeRan> test({required String automation});
 }
