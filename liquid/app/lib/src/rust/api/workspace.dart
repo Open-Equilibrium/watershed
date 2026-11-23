@@ -248,7 +248,7 @@ class BridgeChange {
           seq == other.seq;
 }
 
-enum BridgeFound { page, table, text }
+enum BridgeFound { page, table, text, source }
 
 class BridgeHit {
   final BridgeFound found;

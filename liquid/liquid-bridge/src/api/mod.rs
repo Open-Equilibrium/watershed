@@ -15,5 +15,6 @@ pub(crate) mod record;
 pub mod replica;
 pub mod role;
 pub mod session;
+pub mod source;
 pub mod thread;
 pub mod workspace;

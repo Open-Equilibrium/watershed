@@ -191,6 +191,7 @@ fn a_chart_s_setup_crosses_and_its_points_come_back() {
         table: None,
         page: Some(page.clone()),
         block: Some(report),
+        source: None,
         group: None,
         value: BridgeChartValue::Count,
         field: None,

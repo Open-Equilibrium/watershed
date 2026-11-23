@@ -289,6 +289,7 @@ pub enum BridgeFound {
     Page,
     Table,
     Text,
+    Source,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

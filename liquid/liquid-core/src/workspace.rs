@@ -130,6 +130,12 @@ impl<S: Store> Workspace<S> {
         }
         let mut complete = true;
         for area in self.areas()? {
+            let sources: Vec<IndexWrite> = self
+                .sources(&area.id)?
+                .iter()
+                .map(|source| crate::source::source_entry(&source.id, Some(&source.name)))
+                .collect();
+            self.store.index(&sources, None)?;
             for page in self.pages(&area.id)? {
                 let mut writes = vec![page_entry(&page.id, &page.title)];
                 match self.page_text(&page.id) {
@@ -208,6 +214,13 @@ impl<S: Store> Workspace<S> {
                 writes.push(page_entry(page, title));
             }
             (Mutation::RenamePage { page, title }, _) => writes.push(page_entry(page, title)),
+            (Mutation::AddSource { name, .. }, Some(Created::Source(source)))
+            | (Mutation::RenameSource { source, name }, _) => {
+                writes.push(crate::source::source_entry(source, Some(name)));
+            }
+            (Mutation::RemoveSource { source }, _) => {
+                writes.push(crate::source::source_entry(source, None));
+            }
             (
                 Mutation::AddTextBlock { page, .. } | Mutation::SplitTextBlock { page, .. },
                 Some(Created::Block { block, .. }),
@@ -690,6 +703,14 @@ impl<S: Store> Workspace<S> {
                 title,
             } => self.write_create_page(area, parent.as_ref(), title),
             Mutation::RenamePage { page, title } => self.write_rename_page(page, title),
+            Mutation::AddSource {
+                area,
+                parent,
+                name,
+                kind,
+            } => self.write_add_source(area, parent.as_ref(), name, *kind),
+            Mutation::RenameSource { source, name } => self.write_source(source, Some(name)),
+            Mutation::RemoveSource { source } => self.write_source(source, None),
             Mutation::AddTextBlock { page, after, text } => {
                 self.write_add_text_block(page, after.as_ref(), text)
             }
@@ -761,8 +782,13 @@ impl<S: Store> Workspace<S> {
                 Ok(written)
             }
             Mutation::SetChart { page, block, setup } => {
-                chart::set(self, page, block, setup)?;
-                Ok(block_changed(page, block, None))
+                let areas = chart::set(self, page, block, setup)?;
+                let mut written = block_changed(page, block, None);
+                for area in areas {
+                    written.touched.push(Document::Area(area.clone()));
+                    written.changed.push(Changed::Pages(area));
+                }
+                Ok(written)
             }
             Mutation::AddLine {
                 page,

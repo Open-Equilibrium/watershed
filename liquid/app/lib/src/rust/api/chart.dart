@@ -55,6 +55,7 @@ class BridgeChartSetup {
   final String? table;
   final String? page;
   final String? block;
+  final String? source;
   final String? group;
   final BridgeChartValue value;
   final String? field;
@@ -64,6 +65,7 @@ class BridgeChartSetup {
     this.table,
     this.page,
     this.block,
+    this.source,
     this.group,
     required this.value,
     this.field,
@@ -75,6 +77,7 @@ class BridgeChartSetup {
       table.hashCode ^
       page.hashCode ^
       block.hashCode ^
+      source.hashCode ^
       group.hashCode ^
       value.hashCode ^
       field.hashCode;
@@ -88,6 +91,7 @@ class BridgeChartSetup {
           table == other.table &&
           page == other.page &&
           block == other.block &&
+          source == other.source &&
           group == other.group &&
           value == other.value &&
           field == other.field;

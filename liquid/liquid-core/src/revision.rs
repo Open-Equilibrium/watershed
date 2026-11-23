@@ -9,8 +9,8 @@ use crate::store::Store;
 use crate::workspace::{Recorded, header, page_entry, table_entry};
 use crate::{
     Action, ActionId, Actor, Applied, BlockId, BlockKind, Changed, Document, Error, IndexWrite,
-    MemoryStore, Mutation, Operation, Origin, PageId, Permission, Purge, RevertKind, Workspace,
-    patch,
+    MemoryStore, Mutation, Operation, Origin, PageId, Permission, Purge, RevertKind, SourceId,
+    Workspace, patch,
 };
 
 pub const TYPING_PAUSE_MS: i64 = 3_000;
@@ -250,6 +250,14 @@ impl<S: Store> Workspace<S> {
                 Mutation::RenamePage { title, .. } => {
                     format!("Renamed a Page to {}", quoted(title))
                 }
+                Mutation::AddSource { name, .. } => format!("Added the Source {}", quoted(name)),
+                Mutation::RenameSource { name, .. } => {
+                    format!("Renamed a Source to {}", quoted(name))
+                }
+                Mutation::RemoveSource { source } => match self.any_source_name(source) {
+                    Some(name) => format!("Removed the Source {}", quoted(&name)),
+                    None => "Removed a Source".into(),
+                },
                 Mutation::AddTextBlock { page: on, .. }
                 | Mutation::EditText { page: on, .. }
                 | Mutation::SplitTextBlock { page: on, .. }
@@ -704,6 +712,15 @@ impl<S: Store> Workspace<S> {
                 changed.push(Changed::Pages(area.clone()));
                 for page in self.pages(area)? {
                     index.push(page_entry(&page.id, &page.title));
+                }
+                let doc = self.doc(document)?;
+                let live = crate::source::entries(doc);
+                for id in crate::source::all_ids(doc) {
+                    let name = live
+                        .iter()
+                        .find(|source| source.id.as_str() == id)
+                        .map(|source| source.name.as_str());
+                    index.push(crate::source::source_entry(&SourceId::stored(&id), name));
                 }
             }
             Document::Page(page) => {

@@ -244,6 +244,7 @@ impl LiquidWorkspace {
                 answer.automation = Some(automation.to_string());
             }
             Some(Created::Role(role)) => answer.role = Some(role.to_string()),
+            Some(Created::Source(_)) => {}
             Some(Created::Elements(elements)) => {
                 answer.elements = elements.iter().map(ToString::to_string).collect();
             }
@@ -474,6 +475,7 @@ impl LiquidWorkspace {
                     (Found::Page, BridgeFound::Page),
                     (Found::Table, BridgeFound::Table),
                     (Found::Text, BridgeFound::Text),
+                    (Found::Source, BridgeFound::Source),
                 ] {
                     for hit in workspace.search(text, found, limit).map_err(message)? {
                         answer.hits.push(BridgeHit {

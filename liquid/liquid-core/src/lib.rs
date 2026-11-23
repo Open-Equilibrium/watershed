@@ -16,6 +16,7 @@ mod revision;
 mod role;
 mod search;
 mod sort_key;
+mod source;
 mod store;
 mod tab;
 mod total;
@@ -48,7 +49,7 @@ pub use formula::{
 pub use history::{Action, Document, Operation, Permission, Purge, RevertKind};
 pub use id::{
     ActionId, AreaId, AutomationId, BlockId, ElementId, FieldId, LineId, OptionId, PageId,
-    PersonId, RoleId, RowId, TabId, ViewId,
+    PersonId, RoleId, RowId, SourceId, TabId, ViewId,
 };
 pub use model::{Area, BlockKind, Code, GRID_COLUMNS, PageEntry, TableEntry, Tile, View};
 pub use mutation::{
@@ -61,6 +62,10 @@ pub use role::{
     Template,
 };
 pub use search::{Found, Hit, INDEX_VERSION, IndexEntry, IndexWrite, search_words};
+pub use source::{
+    Column, FileEntry, MAX_SOURCE_FILE, Shown, SourceEntry, SourceFile, SourceKind, SourceTable,
+    SourceUser,
+};
 pub use store::{Commit, MemoryStore, Store, Write};
 pub use tab::{Layout, MAX_TABS, Tab, TabSetup};
 pub use total::{FieldTotal, Total};

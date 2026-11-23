@@ -6,8 +6,8 @@ use crate::MAX_OPTIONS;
 use crate::model::{self, BLOCKS, KIND};
 use crate::store::Store;
 use crate::{
-    BlockId, BlockKind, Cell, Document, Error, FieldId, FieldKind, LineStyle, PageId, RowQuery,
-    Used, Value, Workspace,
+    AreaId, BlockId, BlockKind, Cell, Document, Error, FieldId, FieldKind, LineStyle, PageId,
+    RowQuery, SourceId, SourceTable, Used, Value, Workspace,
 };
 
 const SETUP: &str = "chart";
@@ -26,6 +26,7 @@ pub enum ChartKind {
 pub enum ChartSource {
     Table(BlockId),
     Calculation { page: PageId, block: BlockId },
+    Source(SourceId),
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -87,7 +88,8 @@ pub(crate) fn set<S: Store>(
     page: &PageId,
     block: &BlockId,
     setup: &ChartSetup,
-) -> Result<(), Error> {
+) -> Result<Vec<AreaId>, Error> {
+    let mut areas = Vec::new();
     match &setup.source {
         Some(ChartSource::Table(table)) => {
             let database = workspace.database(table)?.ok_or(Error::NotFound)?;
@@ -117,12 +119,40 @@ pub(crate) fn set<S: Store>(
             let doc = workspace.doc(&Document::Page(page.clone()))?;
             model::of_kind(doc, block.as_str(), BlockKind::Calculation).ok_or(Error::NotFound)?;
         }
+        Some(ChartSource::Source(source)) => {
+            let (_, table) = workspace.source_table(source)?;
+            let column = |id: &FieldId| {
+                table
+                    .columns
+                    .iter()
+                    .find(|column| column.id == *id)
+                    .ok_or(Error::NotFound)
+            };
+            if let Some(group) = &setup.group {
+                column(group)?;
+            }
+            if let ChartValue::Sum(field) | ChartValue::Average(field) = &setup.value
+                && !column(field)?.number
+            {
+                return Err(Error::WrongKind);
+            }
+        }
         None => {}
     }
     let doc = workspace.doc(&Document::Page(page.clone()))?;
+    let before = stored(doc, block).ok_or(Error::NotFound)?.source;
     let entry = model::of_kind(doc, block.as_str(), BlockKind::Chart).ok_or(Error::NotFound)?;
     doc.put(&entry, SETUP, encode(setup)?)?;
-    Ok(())
+    if let Some(ChartSource::Source(source)) = before
+        && setup.source != Some(ChartSource::Source(source.clone()))
+        && let Ok(area) = workspace.use_source(&source, page, block, false)
+    {
+        areas.push(area);
+    }
+    if let Some(ChartSource::Source(source)) = &setup.source {
+        areas.push(workspace.use_source(source, page, block, true)?);
+    }
+    Ok(areas)
 }
 
 pub(crate) fn read<S: Store>(
@@ -143,6 +173,13 @@ pub(crate) fn read<S: Store>(
                 uses.push(Used::Table(table.clone()));
                 (Some(database.name), points)
             }
+        },
+        Some(ChartSource::Source(source)) => match workspace.source_table(source) {
+            Ok((name, table)) => {
+                let points = source_points(&name, &table, &setup);
+                (Some(name), points)
+            }
+            Err(_) => (workspace.source_name(source).ok(), Vec::new()),
         },
         Some(ChartSource::Calculation { page, block }) => {
             let name = workspace
@@ -285,4 +322,67 @@ fn number(row: &crate::Row, field: &FieldId) -> Option<f64> {
                 _ => None,
             }),
     }
+}
+
+fn source_points(name: &str, table: &SourceTable, setup: &ChartSetup) -> Vec<ChartPoint> {
+    let at = |id: &FieldId| table.columns.iter().position(|column| column.id == *id);
+    let group = setup.group.as_ref().and_then(at);
+    let value = match &setup.value {
+        ChartValue::Count => None,
+        ChartValue::Sum(field) | ChartValue::Average(field) => match at(field) {
+            Some(at) => Some(at),
+            None => return Vec::new(),
+        },
+    };
+    let mut labels: Vec<String> = Vec::new();
+    let mut sums: Vec<(f64, usize)> = Vec::new();
+    for row in &table.rows {
+        let label = group.map_or_else(|| name.to_string(), |at| row[at].trim().to_string());
+        let slot = match labels.iter().position(|known| *known == label) {
+            Some(slot) => slot,
+            None if labels.len() < MAX_CHART_POINTS => {
+                labels.push(label);
+                sums.push((0.0, 0));
+                labels.len() - 1
+            }
+            None => continue,
+        };
+        let number = match value {
+            None => Some(1.0),
+            Some(at) => crate::source::number(&row[at]),
+        };
+        if let Some(number) = number {
+            sums[slot].0 += number;
+            sums[slot].1 += 1;
+        }
+    }
+    let mut points: Vec<ChartPoint> = labels
+        .into_iter()
+        .zip(sums)
+        .map(|(label, (sum, count))| ChartPoint {
+            label: if label.is_empty() {
+                "Empty".into()
+            } else {
+                label
+            },
+            value: match setup.value {
+                ChartValue::Average(_) if count > 0 => sum / count as f64,
+                _ => sum,
+            },
+        })
+        .collect();
+    let dated = |label: &str| {
+        let bytes = label.as_bytes();
+        bytes.len() == 10
+            && bytes[4] == b'-'
+            && bytes[7] == b'-'
+            && bytes
+                .iter()
+                .enumerate()
+                .all(|(at, byte)| at == 4 || at == 7 || byte.is_ascii_digit())
+    };
+    if points.iter().all(|point| dated(&point.label)) {
+        points.sort_by(|a, b| a.label.cmp(&b.label));
+    }
+    points
 }

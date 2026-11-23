@@ -1,5 +1,5 @@
 use liquid_core::{
-    BlockId, Chart, ChartKind, ChartSetup, ChartSource, ChartValue, FieldId, PageId,
+    BlockId, Chart, ChartKind, ChartSetup, ChartSource, ChartValue, FieldId, PageId, SourceId,
 };
 
 use super::workspace::id;
@@ -24,6 +24,7 @@ pub struct BridgeChartSetup {
     pub table: Option<String>,
     pub page: Option<String>,
     pub block: Option<String>,
+    pub source: Option<String>,
     pub group: Option<String>,
     pub value: BridgeChartValue,
     pub field: Option<String>,
@@ -44,18 +45,23 @@ pub struct BridgeChart {
 
 impl BridgeChartSetup {
     pub(crate) fn to_core(&self) -> Result<ChartSetup, String> {
-        let source = match (&self.table, &self.page, &self.block) {
-            (Some(_), None, None) => Some(ChartSource::Table(id(
+        let source = match (&self.table, &self.page, &self.block, &self.source) {
+            (Some(_), None, None, None) => Some(ChartSource::Table(id(
                 &self.table,
                 BlockId::parse,
                 "table",
             )?)),
-            (None, Some(_), Some(_)) => Some(ChartSource::Calculation {
+            (None, Some(_), Some(_), None) => Some(ChartSource::Calculation {
                 page: id(&self.page, PageId::parse, "page")?,
                 block: id(&self.block, BlockId::parse, "block")?,
             }),
-            (None, None, None) => None,
-            _ => return Err("a chart reads one Table or one Calculation Block".into()),
+            (None, None, None, Some(_)) => Some(ChartSource::Source(id(
+                &self.source,
+                SourceId::parse,
+                "source",
+            )?)),
+            (None, None, None, None) => None,
+            _ => return Err("a chart reads one Table, Calculation Block or Source".into()),
         };
         let field = || id(&self.field, FieldId::parse, "field");
         Ok(ChartSetup {
@@ -79,12 +85,13 @@ impl BridgeChartSetup {
     }
 
     fn of(setup: &ChartSetup) -> Self {
-        let (table, page, block) = match &setup.source {
-            Some(ChartSource::Table(table)) => (Some(table.to_string()), None, None),
+        let (table, page, block, source) = match &setup.source {
+            Some(ChartSource::Table(table)) => (Some(table.to_string()), None, None, None),
             Some(ChartSource::Calculation { page, block }) => {
-                (None, Some(page.to_string()), Some(block.to_string()))
+                (None, Some(page.to_string()), Some(block.to_string()), None)
             }
-            None => (None, None, None),
+            Some(ChartSource::Source(source)) => (None, None, None, Some(source.to_string())),
+            None => (None, None, None, None),
         };
         let (value, field) = match &setup.value {
             ChartValue::Count => (BridgeChartValue::Count, None),
@@ -100,6 +107,7 @@ impl BridgeChartSetup {
             table,
             page,
             block,
+            source,
             group: setup.group.as_ref().map(ToString::to_string),
             value,
             field,
