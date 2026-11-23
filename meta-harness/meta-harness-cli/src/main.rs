@@ -661,6 +661,38 @@ mod tests {
     }
 
     #[test]
+    fn the_not_running_message_holds_for_a_terminal_serve_and_the_login_service() {
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        let home = std::env::temp_dir().join(format!("meta-not-running-{}", std::process::id()));
+        std::fs::create_dir_all(&home).unwrap();
+        let no_file = runtime
+            .block_on(remote::Host::connect(&home, CLIENT))
+            .err()
+            .unwrap();
+        let refused = runtime
+            .block_on(remote::Host::connect_to(
+                "ws://127.0.0.1:1",
+                "token",
+                CLIENT,
+            ))
+            .err()
+            .unwrap();
+        let _ = std::fs::remove_dir_all(&home);
+        for message in [no_file, refused] {
+            assert!(
+                message.starts_with("Meta-Harness is not running"),
+                "{message}"
+            );
+            assert!(!message.contains("Install"), "{message}");
+            assert!(
+                message.contains("\"meta serve\"")
+                    && message.contains("for the login service, whose log is service.log"),
+                "{message}"
+            );
+        }
+    }
+
+    #[test]
     fn status_names_the_serve_process_and_the_t3_release() {
         let status = api::Status {
             t3_version: "0.1.11".to_owned(),

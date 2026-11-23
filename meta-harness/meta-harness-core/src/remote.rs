@@ -65,9 +65,9 @@ impl Endpoint {
             Self::File(path) => {
                 let text = std::fs::read_to_string(path).map_err(|_| {
                     format!(
-                        "Meta-Harness is not running: {} is missing. Install Meta-Harness. Start \
-                         it with \"meta serve\", or \"meta service install\" for the login service; \
-                         its log is service.log in the data folder.",
+                        "Meta-Harness is not running: {} is missing. Start it with \"meta serve\", \
+                         or with \"meta service install\" for the login service, whose log is \
+                         service.log in the data folder.",
                         path.display()
                     )
                 })?;
@@ -156,38 +156,41 @@ impl Host {
                 (api::CLIENT_HEADER, self.inner.client.as_str()),
             ],
         )?;
-        let (socket, _) = tokio::time::timeout(TIMEOUT, tokio_tungstenite::connect_async_with_config(
-            request,
-            Some(crate::api::socket_config()),
-            false,
-        ))
-            .await
-            .map_err(|_| format!("Could not reach Meta-Harness at {url}: it did not answer in time."))?
-            .map_err(|e| match e {
-                tokio_tungstenite::tungstenite::Error::Io(io)
-                    if io.kind() == std::io::ErrorKind::ConnectionRefused =>
-                {
-                    format!(
-                        "Meta-Harness is not running: nothing answers at {url}. Start it with \
-                         \"meta serve\", or \"meta service install\" for the login service; its log \
-                         is service.log in the data folder."
-                    )
-                }
-                tokio_tungstenite::tungstenite::Error::Http(response)
-                    if response.status() == StatusCode::UPGRADE_REQUIRED =>
-                {
-                    refused_version(&response)
-                }
-                tokio_tungstenite::tungstenite::Error::Http(response)
-                    if response.status() == StatusCode::UNAUTHORIZED =>
-                {
-                    format!(
-                        "Meta-Harness at {url} no longer accepts this device's pairing; pair this \
+        let (socket, _) = tokio::time::timeout(
+            TIMEOUT,
+            tokio_tungstenite::connect_async_with_config(
+                request,
+                Some(crate::api::socket_config()),
+                false,
+            ),
+        )
+        .await
+        .map_err(|_| format!("Could not reach Meta-Harness at {url}: it did not answer in time."))?
+        .map_err(|e| match e {
+            tokio_tungstenite::tungstenite::Error::Io(io)
+                if io.kind() == std::io::ErrorKind::ConnectionRefused =>
+            {
+                format!(
+                    "Meta-Harness is not running: nothing answers at {url}. Start it with \
+                         \"meta serve\", or with \"meta service install\" for the login service, \
+                         whose log is service.log in the data folder."
+                )
+            }
+            tokio_tungstenite::tungstenite::Error::Http(response)
+                if response.status() == StatusCode::UPGRADE_REQUIRED =>
+            {
+                refused_version(&response)
+            }
+            tokio_tungstenite::tungstenite::Error::Http(response)
+                if response.status() == StatusCode::UNAUTHORIZED =>
+            {
+                format!(
+                    "Meta-Harness at {url} no longer accepts this device's pairing; pair this \
                          device again."
-                    )
-                }
-                e => format!("Could not reach Meta-Harness at {url}: {e}"),
-            })?;
+                )
+            }
+            e => format!("Could not reach Meta-Harness at {url}: {e}"),
+        })?;
         let (mut sink, mut frames) = socket.split();
         let (out, mut outgoing) = mpsc::unbounded_channel::<Message>();
         let waiters: Arc<Mutex<Option<HashMap<u64, Waiter>>>> =
