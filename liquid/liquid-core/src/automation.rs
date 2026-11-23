@@ -274,6 +274,11 @@ impl<S: Store> Workspace<S> {
     }
 
     fn check_value(&mut self, table: &BlockId, field: &FieldId, value: &Cell) -> Result<(), Error> {
+        if let Cell::Text(text) | Cell::Date(text) = value
+            && text.chars().count() > MAX_AUTOMATION_TEXT
+        {
+            return Err(Error::TooLong);
+        }
         let doc = self.table_doc(table)?;
         let kind = database::check_cell(doc, table, field, value)?;
         match (kind, value) {

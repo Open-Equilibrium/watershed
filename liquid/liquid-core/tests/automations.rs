@@ -2,8 +2,8 @@
 
 use liquid_core::{
     Actor, Applied, Attention, AutomationId, AutomationSetup, BlockId, Cell, Changed, Created,
-    Error, FieldId, FieldKind, Filter, MAX_CONDITIONS, Match, MemoryStore, Mutation, Operation,
-    Origin, PersonId, Place, Request, RowId, RowQuery, Step, Trigger,
+    Error, FieldId, FieldKind, Filter, MAX_AUTOMATION_TEXT, MAX_CONDITIONS, Match, MemoryStore,
+    Mutation, Operation, Origin, PersonId, Place, Request, RowId, RowQuery, Step, Trigger,
 };
 
 type Workspace = liquid_core::Workspace<MemoryStore>;
@@ -442,6 +442,12 @@ fn a_setup_must_name_fields_of_the_right_kind_and_stay_within_bounds() {
     let mut setup = budget.flag_large();
     setup.trigger = None;
     broken.push((setup, Error::NotFound));
+    let mut setup = budget.flag_large();
+    setup.steps = vec![Step::Set {
+        field: budget.item.clone(),
+        value: Cell::Text("x".repeat(MAX_AUTOMATION_TEXT + 1)),
+    }];
+    broken.push((setup, Error::TooLong));
     for (setup, error) in broken {
         let name = format!("{:?}", setup.steps);
         assert_eq!(budget.create(setup).unwrap_err(), error, "{name}");
