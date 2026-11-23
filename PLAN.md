@@ -18,7 +18,6 @@ Approved after the dependency audit of 2026-11-23.
 
 - The `serde-saphyr` trial against the hostile corpus, before the first Flow Agent release (ADR-0318).
 - A supported OpenSSL for SQLCipher before Liquid builds for Linux, Windows or Android (ADR-0319).
-- T3 Code past 0.1.9 through the contract tests (ADR-0281), for Node 26.13.1 or later.
 - Before Android: keyring-core with a store per platform. Before Windows or Android: native_toolchain_rust 1.1.1 or later in the lock.
 - Before each product's first release: third-party notices in every bundle for SQLCipher, OpenSSL and the linked Rust crates.
 

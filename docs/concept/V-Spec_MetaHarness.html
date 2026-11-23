@@ -304,7 +304,7 @@ meta uninstall</code></pre>
         <li><strong>Authority:</strong> the caller's mode limits the remote work, so a subagent never exceeds its parent (ADR-0223); a plan-mode agent cannot start full-access work.</li>
         <li><strong>Below full access</strong> linked work changes only threads of its own origin and no projects, settings or schedules, and setup scripts are skipped; it can still read every thread on that host. At full access it runs as the receiving host's user, unfenced, still stamped with its origin.</li>
         <li><strong>The person</strong> sees each child under its parent in Liquid and can stop it.</li>
-        <li><strong>Constraints of T3 0.1.9 that the link relies on:</strong>
+        <li><strong>Constraints of the pinned T3 that the link relies on:</strong>
           <ul>
             <li><strong>Address:</strong> <code>t3 environment link</code> accepts plain http only on loopback or Tailscale names and https elsewhere; it refuses loopback only when a person picks a known machine in T3's UI. The tunnel must keep the HTTP <code>Host</code> header unchanged, because the receiving T3 binds the link's OAuth token to it, and each peer keeps a stable local port, because T3 refuses the same peer at a second address while a link lives.</li>
             <li><strong>Pairing:</strong> <code>t3 auth pairing create --json</code> mints a single-use code valid for 5 minutes; linking needs no approval on either side. The link's session lasts 30 days, then Meta-Harness pairs again.</li>
