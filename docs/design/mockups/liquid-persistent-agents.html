@@ -34,7 +34,7 @@
 .sw::after{content:"";position:absolute;right:2px;top:2px;width:12px;height:12px;border-radius:50%;background:#fff}
 .sw.off{background:var(--ws-border-strong)}.sw.off::after{right:auto;left:2px}
 hr.d{border:0;height:1px;background:var(--ws-border);margin:6px 0}
-.dlg{position:relative;width:660px;margin:24px auto;background:var(--ws-canvas);border-radius:12px;box-shadow:var(--ws-shadow);overflow:hidden;font-size:var(--ws-fs-ui)}
+.dlg{position:relative;width:min(660px,100%);margin:24px auto;background:var(--ws-canvas);border-radius:12px;box-shadow:var(--ws-shadow);overflow:hidden;font-size:var(--ws-fs-ui)}
 .dlg .mh{font-size:15px}
 .form{padding:16px 20px;display:flex;flex-direction:column;gap:14px}
 .fld{display:flex;align-items:center;gap:12px}
@@ -89,7 +89,7 @@ hr.d{border:0;height:1px;background:var(--ws-border);margin:6px 0}
 <div>
 <h3 class="sec">A · Sidebar and an agent's Chat</h3>
 <p class="sub">An <b>Agents</b> section sits above <b>Threads</b>. Each row shows the agent's state, in the words the session rows use, or when it next wakes up. Selecting an agent opens its current thread in the usual Chat. The session card gains an <b>Agent</b> section above T3's Automations, which list the agent's routines; each setting is edited where it is shown.</p>
-<div class="stage"><div class="win"><div class="tbar"><div class="lights"><i style="background:#ff5f57"></i><i style="background:#febc2e"></i><i style="background:#28c840"></i></div></div>
+<div class="stage"><div class="scaler"><div class="win" data-w="1180"><div class="tbar"><div class="lights"><i style="background:#ff5f57"></i><i style="background:#febc2e"></i><i style="background:#28c840"></i></div></div>
 <div class="body">
 <div class="side">
 <div class="wsw"><span class="av">W</span>Watershed</div>
@@ -129,13 +129,13 @@ hr.d{border:0;height:1px;background:var(--ws-border);margin:6px 0}
 </div>
 </div>
 </div>
-</div></div></div>
+</div></div></div></div>
 </div>
 
 <div>
 <h3 class="sec">B · A new agent starts as a Chat</h3>
 <p class="sub"><b>+</b> beside Agents opens an empty agent Chat: project, model and permission mode are picked in the composer as for a new thread, the mode starting at Approval required, so an agent that is not watched asks before it acts. Starters fill the composer, as Grok's templates do. The first message is the job.</p>
-<div class="stage"><div class="win"><div class="tbar"><div class="lights"><i style="background:#ff5f57"></i><i style="background:#febc2e"></i><i style="background:#28c840"></i></div></div>
+<div class="stage"><div class="scaler"><div class="win" data-w="1180"><div class="tbar"><div class="lights"><i style="background:#ff5f57"></i><i style="background:#febc2e"></i><i style="background:#28c840"></i></div></div>
 <div class="body">
 <div class="side">
 <div class="wsw"><span class="av">W</span>Watershed</div>
@@ -156,13 +156,13 @@ hr.d{border:0;height:1px;background:var(--ws-border);margin:6px 0}
 <div class="comp"><span class="ph">Describe the agent's job…</span><div class="bar"><span class="pick">watershed ⌄</span><span class="pick">Codex · gpt-6.1 ⌄</span><span class="pick">Approval required ⌄</span><span class="send">↑</span></div></div>
 </div></div>
 </div>
-</div></div></div>
+</div></div></div></div>
 </div>
 
 <div>
 <h3 class="sec">C · The agent configures itself, visibly</h3>
 <p class="sub">After the first message the agent names itself, saves its instructions and sets its routines; each change is a line in the Chat with <b>Open</b> or <b>Undo</b>, and a routine has <b>Run now</b>, as Grok Bot shows routine and setting events in its transcript. Later changes work the same way: “also on Sundays”, “stop the digest”, “be shorter”.</p>
-<div class="stage"><div class="win"><div class="tbar"><div class="lights"><i style="background:#ff5f57"></i><i style="background:#febc2e"></i><i style="background:#28c840"></i></div></div>
+<div class="stage"><div class="scaler"><div class="win" data-w="1180"><div class="tbar"><div class="lights"><i style="background:#ff5f57"></i><i style="background:#febc2e"></i><i style="background:#28c840"></i></div></div>
 <div class="body">
 <div class="side">
 <div class="wsw"><span class="av">W</span>Watershed</div>
@@ -192,13 +192,13 @@ hr.d{border:0;height:1px;background:var(--ws-border);margin:6px 0}
 <div class="comp"><span class="ph">Message news-bot…</span><div class="bar"><span class="pick">Codex · gpt-6.1 ⌄</span><span class="send">↑</span></div></div>
 </div></div>
 </div>
-</div></div></div>
+</div></div></div></div>
 </div>
 
 <div>
 <h3 class="sec">D · What it did while you were away</h3>
 <p class="sub">Each routine run is a turn headed by its routine's name and time. The sidebar row counts runs you have not seen; the Chat opens at a <b>Since your last visit</b> line, as Duet keeps finished work ready for review. A run that needs you shows as <b>Waiting for you</b> on the row and as T3's approval in the Chat.</p>
-<div class="stage"><div class="win"><div class="tbar"><div class="lights"><i style="background:#ff5f57"></i><i style="background:#febc2e"></i><i style="background:#28c840"></i></div></div>
+<div class="stage"><div class="scaler"><div class="win" data-w="1180"><div class="tbar"><div class="lights"><i style="background:#ff5f57"></i><i style="background:#febc2e"></i><i style="background:#28c840"></i></div></div>
 <div class="body">
 <div class="side">
 <div class="wsw"><span class="av">W</span>Watershed</div>
@@ -223,13 +223,13 @@ hr.d{border:0;height:1px;background:var(--ws-border);margin:6px 0}
 <div class="comp"><span class="ph">Message news-bot…</span><div class="bar"><span class="pick">Codex · gpt-6.1 ⌄</span><span class="send">↑</span></div></div>
 </div></div>
 </div>
-</div></div></div>
+</div></div></div></div>
 </div>
 
 <div>
 <h3 class="sec">E · Tagging an agent in another Chat</h3>
 <p class="sub"><b>@</b> as the composer's first character lists the agents beside the running Flow instances. The message and that Chat's conversation go to the agent's own thread as a turn, with its instructions and memory; its answer appears here, from the agent, with <b>Open</b> to its thread.</p>
-<div class="stage"><div class="win"><div class="tbar"><div class="lights"><i style="background:#ff5f57"></i><i style="background:#febc2e"></i><i style="background:#28c840"></i></div></div>
+<div class="stage"><div class="scaler"><div class="win" data-w="1180"><div class="tbar"><div class="lights"><i style="background:#ff5f57"></i><i style="background:#febc2e"></i><i style="background:#28c840"></i></div></div>
 <div class="body">
 <div class="side">
 <div class="wsw"><span class="av">W</span>Watershed</div>
@@ -258,7 +258,7 @@ hr.d{border:0;height:1px;background:var(--ws-border);margin:6px 0}
 <div class="comp"><span>@</span><div class="bar"><span class="pick">Claude · opus-5.5 ⌄</span><span class="send">↑</span></div></div>
 </div></div>
 </div>
-</div></div></div>
+</div></div></div></div>
 </div>
 
 <div>
@@ -297,5 +297,9 @@ hr.d{border:0;height:1px;background:var(--ws-border);margin:6px 0}
 <li>A webhook URL reaches only this host, because T3 listens on loopback. Public URLs come with host links through the Liquid account (ADR-0285), as does sharing an agent with a team (ADR-0283).</li>
 </ul>
 </div>
+<script>
+function fit(){document.querySelectorAll('.scaler').forEach(sc=>{const w=sc.firstElementChild,W=+w.dataset.w,s=Math.min(1,(sc.parentElement.clientWidth-32)/W);w.style.width=W+'px';w.style.transform=`scale(${s})`;sc.style.width=W*s+'px';sc.style.height=w.offsetHeight*s+'px'})}
+addEventListener('load',fit);addEventListener('resize',fit);
+</script>
 </body>
 </html>
