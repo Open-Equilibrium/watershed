@@ -357,10 +357,18 @@ fn install_download(args: &[&str]) -> Result<(), String> {
         .and_then(Path::parent)
         .map(Path::to_path_buf)
         .ok_or("meta install runs from the bin folder of an unpacked download.")?;
-    let _ = std::process::Command::new("schtasks")
-        .args(["/End", "/TN", "Meta-Harness"])
-        .output();
-    let program = install::install_files(&bundle, &prefix, "win32-x64")?;
+    let task = |step: &str| {
+        std::process::Command::new("schtasks")
+            .args([step, "/TN", "Meta-Harness"])
+            .output()
+            .is_ok_and(|output| output.status.success())
+    };
+    let ended = task("/End");
+    let installed = install::install_files(&bundle, &prefix, "win32-x64");
+    if ended && (installed.is_err() || !service) {
+        task("/Run");
+    }
+    let program = installed?;
     if service {
         let status = std::process::Command::new(&program)
             .args(["service", "install"])
