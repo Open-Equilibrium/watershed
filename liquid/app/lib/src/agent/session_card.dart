@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../diff/turn_scope.dart';
@@ -8,7 +10,9 @@ import '../shortcuts/keymap.dart';
 import '../theme/icons.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
+import 'agent_dialogs.dart';
 import 'branch_menu.dart';
+import 'card_agent.dart';
 import 'changes_row.dart';
 import 'card_automations.dart';
 import 'card_environment.dart';
@@ -106,6 +110,7 @@ class _SessionCardState extends State<SessionCard> {
                       widget.state.contextWindow,
                       widget.state.servers,
                       widget.state.automations,
+                      widget.state.agents.open,
                       widget.state.lineage,
                       widget.state.limits,
                       widget.state.hostName,
@@ -148,6 +153,7 @@ class _SessionCardState extends State<SessionCard> {
     final automations = shown.shows(CardItem.automations)
         ? state.automations.value
         : const <BridgeAutomation>[];
+    final agent = state.agents.composing.value ? null : state.agents.open.value;
     final lineage = state.lineage.value;
     final hasLineage =
         shown.shows(CardItem.lineage) &&
@@ -171,6 +177,7 @@ class _SessionCardState extends State<SessionCard> {
       hasChanges,
       servers.isNotEmpty,
       automations.isNotEmpty,
+      agent != null,
       hasLineage,
       hasSideChats,
       hasStatistics,
@@ -202,6 +209,7 @@ class _SessionCardState extends State<SessionCard> {
         hasChanges ||
         servers.isNotEmpty ||
         automations.isNotEmpty ||
+        agent != null ||
         hasLineage ||
         hasSideChats ||
         hasStatistics ||
@@ -228,12 +236,21 @@ class _SessionCardState extends State<SessionCard> {
             ServersSection(state: state, servers: servers, divided: divided),
       );
     }
-    if (full && automations.isNotEmpty) {
+    if (agent != null) {
+      add(
+        (divided) =>
+            AgentSection(state: state, hosted: agent, divided: divided),
+      );
+    }
+    if (full && (automations.isNotEmpty || agent != null)) {
       add(
         (divided) => AutomationsSection(
           state: state,
           tasks: automations,
           divided: divided,
+          onAdd: agent == null || state.agents.earlier
+              ? null
+              : () => unawaited(showAddRoutine(context, state.agents)),
         ),
       );
     }

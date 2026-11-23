@@ -1,3 +1,4 @@
+pub mod agents;
 pub mod automation;
 pub mod calculation;
 pub mod chart;

@@ -3,6 +3,7 @@
 
 // ignore_for_file: unused_import, unused_element, unnecessary_import, duplicate_ignore, invalid_use_of_internal_member, annotate_overrides, non_constant_identifier_names, curly_braces_in_flow_control_structures, prefer_const_literals_to_create_immutables, unused_field
 
+import 'api/agents.dart';
 import 'api/automation.dart';
 import 'api/calculation.dart';
 import 'api/chart.dart';
@@ -81,7 +82,7 @@ class RustLib extends BaseEntrypoint<RustLibApi, RustLibApiImpl, RustLibWire> {
   String get codegenVersion => '2.13.0';
 
   @override
-  int get rustContentHash => 888917647;
+  int get rustContentHash => 1733187744;
 
   static const kDefaultExternalLibraryLoaderConfig =
       ExternalLibraryLoaderConfig(
@@ -96,6 +97,80 @@ abstract class RustLibApi extends BaseApi {
   Future<BridgeHostProject> crateApiSessionAgentHostAddHostProject({
     required AgentHost that,
     required String root,
+  });
+
+  Future<List<BridgeAgentChange>> crateApiSessionAgentHostAgentChanges({
+    required AgentHost that,
+    required String name,
+  });
+
+  Future<String> crateApiSessionAgentHostAgentInstructions({
+    required AgentHost that,
+    required String name,
+  });
+
+  Future<String> crateApiSessionAgentHostAgentMention({
+    required AgentHost that,
+    required String name,
+    required String root,
+    required String thread,
+    required String text,
+  });
+
+  Future<List<BridgeMention>> crateApiSessionAgentHostAgentMentions({
+    required AgentHost that,
+    required String thread,
+  });
+
+  Future<String> crateApiSessionAgentHostAgentRemove({
+    required AgentHost that,
+    required String name,
+  });
+
+  Future<BridgeAddedRoutine> crateApiSessionAgentHostAgentRoutineAdd({
+    required AgentHost that,
+    required String name,
+    required String title,
+    required String prompt,
+    required BridgeSchedule schedule,
+  });
+
+  Future<void> crateApiSessionAgentHostAgentRoutineRemove({
+    required AgentHost that,
+    required String name,
+    required String id,
+  });
+
+  Future<void> crateApiSessionAgentHostAgentSetInstructions({
+    required AgentHost that,
+    required String name,
+    required String text,
+  });
+
+  Future<BridgeAgent> crateApiSessionAgentHostAgentStart({
+    required AgentHost that,
+    required String root,
+    required BridgeModelChoice model,
+    required BridgePermissions permissions,
+    required String request,
+  });
+
+  Future<void> crateApiSessionAgentHostAgentUndo({
+    required AgentHost that,
+    required String name,
+    required PlatformInt64 change,
+  });
+
+  Future<BridgeAgent> crateApiSessionAgentHostAgentUpdate({
+    required AgentHost that,
+    required String name,
+    String? rename,
+    BridgeModelChoice? model,
+    BridgePermissions? permissions,
+  });
+
+  Future<List<BridgeAgent>> crateApiSessionAgentHostAgents({
+    required AgentHost that,
   });
 
   Future<void> crateApiSessionAgentHostBringConfiguration({
@@ -445,6 +520,8 @@ abstract class RustLibApi extends BaseApi {
     required AgentSession that,
   });
 
+  Future<void> crateApiSessionAgentSessionVisit({required AgentSession that});
+
   Future<String?> crateApiSessionAgentSessionWorktree({
     required AgentSession that,
   });
@@ -746,6 +823,490 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
+  Future<List<BridgeAgentChange>> crateApiSessionAgentHostAgentChanges({
+    required AgentHost that,
+    required String name,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerAgentHost(
+            that,
+            serializer,
+          );
+          sse_encode_String(name, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 2,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_list_bridge_agent_change,
+          decodeErrorData: sse_decode_String,
+        ),
+        constMeta: kCrateApiSessionAgentHostAgentChangesConstMeta,
+        argValues: [that, name],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiSessionAgentHostAgentChangesConstMeta =>
+      const TaskConstMeta(
+        debugName: "AgentHost_agent_changes",
+        argNames: ["that", "name"],
+      );
+
+  @override
+  Future<String> crateApiSessionAgentHostAgentInstructions({
+    required AgentHost that,
+    required String name,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerAgentHost(
+            that,
+            serializer,
+          );
+          sse_encode_String(name, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 3,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_String,
+          decodeErrorData: sse_decode_String,
+        ),
+        constMeta: kCrateApiSessionAgentHostAgentInstructionsConstMeta,
+        argValues: [that, name],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiSessionAgentHostAgentInstructionsConstMeta =>
+      const TaskConstMeta(
+        debugName: "AgentHost_agent_instructions",
+        argNames: ["that", "name"],
+      );
+
+  @override
+  Future<String> crateApiSessionAgentHostAgentMention({
+    required AgentHost that,
+    required String name,
+    required String root,
+    required String thread,
+    required String text,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerAgentHost(
+            that,
+            serializer,
+          );
+          sse_encode_String(name, serializer);
+          sse_encode_String(root, serializer);
+          sse_encode_String(thread, serializer);
+          sse_encode_String(text, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 4,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_String,
+          decodeErrorData: sse_decode_String,
+        ),
+        constMeta: kCrateApiSessionAgentHostAgentMentionConstMeta,
+        argValues: [that, name, root, thread, text],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiSessionAgentHostAgentMentionConstMeta =>
+      const TaskConstMeta(
+        debugName: "AgentHost_agent_mention",
+        argNames: ["that", "name", "root", "thread", "text"],
+      );
+
+  @override
+  Future<List<BridgeMention>> crateApiSessionAgentHostAgentMentions({
+    required AgentHost that,
+    required String thread,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerAgentHost(
+            that,
+            serializer,
+          );
+          sse_encode_String(thread, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 5,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_list_bridge_mention,
+          decodeErrorData: sse_decode_String,
+        ),
+        constMeta: kCrateApiSessionAgentHostAgentMentionsConstMeta,
+        argValues: [that, thread],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiSessionAgentHostAgentMentionsConstMeta =>
+      const TaskConstMeta(
+        debugName: "AgentHost_agent_mentions",
+        argNames: ["that", "thread"],
+      );
+
+  @override
+  Future<String> crateApiSessionAgentHostAgentRemove({
+    required AgentHost that,
+    required String name,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerAgentHost(
+            that,
+            serializer,
+          );
+          sse_encode_String(name, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 6,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_String,
+          decodeErrorData: sse_decode_String,
+        ),
+        constMeta: kCrateApiSessionAgentHostAgentRemoveConstMeta,
+        argValues: [that, name],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiSessionAgentHostAgentRemoveConstMeta =>
+      const TaskConstMeta(
+        debugName: "AgentHost_agent_remove",
+        argNames: ["that", "name"],
+      );
+
+  @override
+  Future<BridgeAddedRoutine> crateApiSessionAgentHostAgentRoutineAdd({
+    required AgentHost that,
+    required String name,
+    required String title,
+    required String prompt,
+    required BridgeSchedule schedule,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerAgentHost(
+            that,
+            serializer,
+          );
+          sse_encode_String(name, serializer);
+          sse_encode_String(title, serializer);
+          sse_encode_String(prompt, serializer);
+          sse_encode_box_autoadd_bridge_schedule(schedule, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 7,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_bridge_added_routine,
+          decodeErrorData: sse_decode_String,
+        ),
+        constMeta: kCrateApiSessionAgentHostAgentRoutineAddConstMeta,
+        argValues: [that, name, title, prompt, schedule],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiSessionAgentHostAgentRoutineAddConstMeta =>
+      const TaskConstMeta(
+        debugName: "AgentHost_agent_routine_add",
+        argNames: ["that", "name", "title", "prompt", "schedule"],
+      );
+
+  @override
+  Future<void> crateApiSessionAgentHostAgentRoutineRemove({
+    required AgentHost that,
+    required String name,
+    required String id,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerAgentHost(
+            that,
+            serializer,
+          );
+          sse_encode_String(name, serializer);
+          sse_encode_String(id, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 8,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_unit,
+          decodeErrorData: sse_decode_String,
+        ),
+        constMeta: kCrateApiSessionAgentHostAgentRoutineRemoveConstMeta,
+        argValues: [that, name, id],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiSessionAgentHostAgentRoutineRemoveConstMeta =>
+      const TaskConstMeta(
+        debugName: "AgentHost_agent_routine_remove",
+        argNames: ["that", "name", "id"],
+      );
+
+  @override
+  Future<void> crateApiSessionAgentHostAgentSetInstructions({
+    required AgentHost that,
+    required String name,
+    required String text,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerAgentHost(
+            that,
+            serializer,
+          );
+          sse_encode_String(name, serializer);
+          sse_encode_String(text, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 9,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_unit,
+          decodeErrorData: sse_decode_String,
+        ),
+        constMeta: kCrateApiSessionAgentHostAgentSetInstructionsConstMeta,
+        argValues: [that, name, text],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiSessionAgentHostAgentSetInstructionsConstMeta =>
+      const TaskConstMeta(
+        debugName: "AgentHost_agent_set_instructions",
+        argNames: ["that", "name", "text"],
+      );
+
+  @override
+  Future<BridgeAgent> crateApiSessionAgentHostAgentStart({
+    required AgentHost that,
+    required String root,
+    required BridgeModelChoice model,
+    required BridgePermissions permissions,
+    required String request,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerAgentHost(
+            that,
+            serializer,
+          );
+          sse_encode_String(root, serializer);
+          sse_encode_box_autoadd_bridge_model_choice(model, serializer);
+          sse_encode_bridge_permissions(permissions, serializer);
+          sse_encode_String(request, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 10,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_bridge_agent,
+          decodeErrorData: sse_decode_String,
+        ),
+        constMeta: kCrateApiSessionAgentHostAgentStartConstMeta,
+        argValues: [that, root, model, permissions, request],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiSessionAgentHostAgentStartConstMeta =>
+      const TaskConstMeta(
+        debugName: "AgentHost_agent_start",
+        argNames: ["that", "root", "model", "permissions", "request"],
+      );
+
+  @override
+  Future<void> crateApiSessionAgentHostAgentUndo({
+    required AgentHost that,
+    required String name,
+    required PlatformInt64 change,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerAgentHost(
+            that,
+            serializer,
+          );
+          sse_encode_String(name, serializer);
+          sse_encode_i_64(change, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 11,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_unit,
+          decodeErrorData: sse_decode_String,
+        ),
+        constMeta: kCrateApiSessionAgentHostAgentUndoConstMeta,
+        argValues: [that, name, change],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiSessionAgentHostAgentUndoConstMeta =>
+      const TaskConstMeta(
+        debugName: "AgentHost_agent_undo",
+        argNames: ["that", "name", "change"],
+      );
+
+  @override
+  Future<BridgeAgent> crateApiSessionAgentHostAgentUpdate({
+    required AgentHost that,
+    required String name,
+    String? rename,
+    BridgeModelChoice? model,
+    BridgePermissions? permissions,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerAgentHost(
+            that,
+            serializer,
+          );
+          sse_encode_String(name, serializer);
+          sse_encode_opt_String(rename, serializer);
+          sse_encode_opt_box_autoadd_bridge_model_choice(model, serializer);
+          sse_encode_opt_box_autoadd_bridge_permissions(
+            permissions,
+            serializer,
+          );
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 12,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_bridge_agent,
+          decodeErrorData: sse_decode_String,
+        ),
+        constMeta: kCrateApiSessionAgentHostAgentUpdateConstMeta,
+        argValues: [that, name, rename, model, permissions],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiSessionAgentHostAgentUpdateConstMeta =>
+      const TaskConstMeta(
+        debugName: "AgentHost_agent_update",
+        argNames: ["that", "name", "rename", "model", "permissions"],
+      );
+
+  @override
+  Future<List<BridgeAgent>> crateApiSessionAgentHostAgents({
+    required AgentHost that,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerAgentHost(
+            that,
+            serializer,
+          );
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 13,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_list_bridge_agent,
+          decodeErrorData: sse_decode_String,
+        ),
+        constMeta: kCrateApiSessionAgentHostAgentsConstMeta,
+        argValues: [that],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiSessionAgentHostAgentsConstMeta =>
+      const TaskConstMeta(debugName: "AgentHost_agents", argNames: ["that"]);
+
+  @override
   Future<void> crateApiSessionAgentHostBringConfiguration({
     required AgentHost that,
     required AgentHost from,
@@ -770,7 +1331,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 2,
+            funcId: 14,
             port: port_,
           );
         },
@@ -810,7 +1371,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 3,
+            funcId: 15,
             port: port_,
           );
         },
@@ -851,7 +1412,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 4,
+            funcId: 16,
             port: port_,
           );
         },
@@ -883,7 +1444,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 5,
+            funcId: 17,
             port: port_,
           );
         },
@@ -914,7 +1475,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 6,
+            funcId: 18,
             port: port_,
           );
         },
@@ -951,7 +1512,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 7,
+            funcId: 19,
             port: port_,
           );
         },
@@ -987,7 +1548,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 8,
+            funcId: 20,
             port: port_,
           );
         },
@@ -1023,7 +1584,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 9,
+            funcId: 21,
             port: port_,
           );
         },
@@ -1059,7 +1620,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 10,
+            funcId: 22,
             port: port_,
           );
         },
@@ -1097,7 +1658,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 11,
+            funcId: 23,
             port: port_,
           );
         },
@@ -1140,7 +1701,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 12,
+            funcId: 24,
             port: port_,
           );
         },
@@ -1178,7 +1739,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 13,
+            funcId: 25,
             port: port_,
           );
         },
@@ -1218,7 +1779,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 14,
+            funcId: 26,
             port: port_,
           );
         },
@@ -1256,7 +1817,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 15,
+            funcId: 27,
             port: port_,
           );
         },
@@ -1293,7 +1854,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 16,
+            funcId: 28,
             port: port_,
           );
         },
@@ -1328,7 +1889,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 17,
+            funcId: 29,
             port: port_,
           );
         },
@@ -1364,7 +1925,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 18,
+            funcId: 30,
             port: port_,
           );
         },
@@ -1400,7 +1961,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 19,
+            funcId: 31,
             port: port_,
           );
         },
@@ -1440,7 +2001,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 20,
+            funcId: 32,
             port: port_,
           );
         },
@@ -1480,7 +2041,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 21,
+            funcId: 33,
             port: port_,
           );
         },
@@ -1516,7 +2077,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 22,
+            funcId: 34,
             port: port_,
           );
         },
@@ -1552,7 +2113,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 23,
+            funcId: 35,
             port: port_,
           );
         },
@@ -1591,7 +2152,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 24,
+            funcId: 36,
             port: port_,
           );
         },
@@ -1638,7 +2199,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 25,
+            funcId: 37,
             port: port_,
           );
         },
@@ -1675,7 +2236,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 26,
+            funcId: 38,
             port: port_,
           );
         },
@@ -1715,7 +2276,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 27,
+            funcId: 39,
             port: port_,
           );
         },
@@ -1754,7 +2315,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
             pdeCallFfi(
               generalizedFrbRustBinding,
               serializer,
-              funcId: 28,
+              funcId: 40,
               port: port_,
             );
           },
@@ -1792,7 +2353,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 29,
+            funcId: 41,
             port: port_,
           );
         },
@@ -1829,7 +2390,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 30,
+            funcId: 42,
             port: port_,
           );
         },
@@ -1867,7 +2428,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 31,
+            funcId: 43,
             port: port_,
           );
         },
@@ -1905,7 +2466,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 32,
+            funcId: 44,
             port: port_,
           );
         },
@@ -1941,7 +2502,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 33,
+            funcId: 45,
             port: port_,
           );
         },
@@ -1977,7 +2538,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 34,
+            funcId: 46,
             port: port_,
           );
         },
@@ -2015,7 +2576,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 35,
+            funcId: 47,
             port: port_,
           );
         },
@@ -2055,7 +2616,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 36,
+            funcId: 48,
             port: port_,
           );
         },
@@ -2096,7 +2657,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
             pdeCallFfi(
               generalizedFrbRustBinding,
               serializer,
-              funcId: 37,
+              funcId: 49,
               port: port_,
             );
           },
@@ -2134,7 +2695,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 38,
+            funcId: 50,
             port: port_,
           );
         },
@@ -2174,7 +2735,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 39,
+            funcId: 51,
             port: port_,
           );
         },
@@ -2212,7 +2773,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 40,
+            funcId: 52,
             port: port_,
           );
         },
@@ -2248,7 +2809,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 41,
+            funcId: 53,
             port: port_,
           );
         },
@@ -2280,7 +2841,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 42,
+            funcId: 54,
             port: port_,
           );
         },
@@ -2316,7 +2877,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
             pdeCallFfi(
               generalizedFrbRustBinding,
               serializer,
-              funcId: 43,
+              funcId: 55,
               port: port_,
             );
           },
@@ -2354,7 +2915,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 44,
+            funcId: 56,
             port: port_,
           );
         },
@@ -2390,7 +2951,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 45,
+            funcId: 57,
             port: port_,
           );
         },
@@ -2426,7 +2987,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 46,
+            funcId: 58,
             port: port_,
           );
         },
@@ -2462,7 +3023,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 47,
+            funcId: 59,
             port: port_,
           );
         },
@@ -2495,7 +3056,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 48,
+            funcId: 60,
             port: port_,
           );
         },
@@ -2535,7 +3096,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 49,
+            funcId: 61,
             port: port_,
           );
         },
@@ -2581,7 +3142,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 50,
+            funcId: 62,
             port: port_,
           );
         },
@@ -2632,7 +3193,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 51,
+            funcId: 63,
             port: port_,
           );
         },
@@ -2672,7 +3233,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 52,
+            funcId: 64,
             port: port_,
           );
         },
@@ -2712,7 +3273,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 53,
+            funcId: 65,
             port: port_,
           );
         },
@@ -2750,7 +3311,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 54,
+            funcId: 66,
             port: port_,
           );
         },
@@ -2790,7 +3351,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 55,
+            funcId: 67,
             port: port_,
           );
         },
@@ -2828,7 +3389,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 56,
+            funcId: 68,
             port: port_,
           );
         },
@@ -2870,7 +3431,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
             pdeCallFfi(
               generalizedFrbRustBinding,
               serializer,
-              funcId: 57,
+              funcId: 69,
               port: port_,
             );
           },
@@ -2908,7 +3469,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 58,
+            funcId: 70,
             port: port_,
           );
         },
@@ -2944,7 +3505,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 59,
+            funcId: 71,
             port: port_,
           );
         },
@@ -2984,7 +3545,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 60,
+            funcId: 72,
             port: port_,
           );
         },
@@ -3024,7 +3585,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 61,
+            funcId: 73,
             port: port_,
           );
         },
@@ -3062,7 +3623,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 62,
+            funcId: 74,
             port: port_,
           );
         },
@@ -3100,7 +3661,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 63,
+            funcId: 75,
             port: port_,
           );
         },
@@ -3136,7 +3697,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 64,
+            funcId: 76,
             port: port_,
           );
         },
@@ -3172,7 +3733,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 65,
+            funcId: 77,
             port: port_,
           );
         },
@@ -3206,7 +3767,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 66,
+            funcId: 78,
             port: port_,
           );
         },
@@ -3243,7 +3804,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 67,
+            funcId: 79,
             port: port_,
           );
         },
@@ -3281,7 +3842,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 68,
+            funcId: 80,
             port: port_,
           );
         },
@@ -3317,7 +3878,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 69,
+            funcId: 81,
             port: port_,
           );
         },
@@ -3353,7 +3914,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 70,
+            funcId: 82,
             port: port_,
           );
         },
@@ -3392,7 +3953,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 71,
+            funcId: 83,
             port: port_,
           );
         },
@@ -3436,7 +3997,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 72,
+            funcId: 84,
             port: port_,
           );
         },
@@ -3472,7 +4033,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 73,
+            funcId: 85,
             port: port_,
           );
         },
@@ -3505,7 +4066,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 74,
+            funcId: 86,
             port: port_,
           );
         },
@@ -3527,6 +4088,37 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
+  Future<void> crateApiSessionAgentSessionVisit({required AgentSession that}) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerAgentSession(
+            that,
+            serializer,
+          );
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 87,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_unit,
+          decodeErrorData: sse_decode_String,
+        ),
+        constMeta: kCrateApiSessionAgentSessionVisitConstMeta,
+        argValues: [that],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiSessionAgentSessionVisitConstMeta =>
+      const TaskConstMeta(debugName: "AgentSession_visit", argNames: ["that"]);
+
+  @override
   Future<String?> crateApiSessionAgentSessionWorktree({
     required AgentSession that,
   }) {
@@ -3541,7 +4133,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 75,
+            funcId: 88,
             port: port_,
           );
         },
@@ -3577,7 +4169,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 76,
+            funcId: 89,
             port: port_,
           );
         },
@@ -3613,7 +4205,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 77,
+            funcId: 90,
             port: port_,
           );
         },
@@ -3651,7 +4243,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 78,
+            funcId: 91,
             port: port_,
           );
         },
@@ -3691,7 +4283,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 79,
+            funcId: 92,
             port: port_,
           );
         },
@@ -3731,7 +4323,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 80,
+            funcId: 93,
             port: port_,
           );
         },
@@ -3769,7 +4361,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 81,
+            funcId: 94,
             port: port_,
           );
         },
@@ -3803,7 +4395,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 82,
+            funcId: 95,
             port: port_,
           );
         },
@@ -3842,7 +4434,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 83,
+            funcId: 96,
             port: port_,
           );
         },
@@ -3876,7 +4468,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 84,
+            funcId: 97,
             port: port_,
           );
         },
@@ -3911,7 +4503,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 85,
+            funcId: 98,
             port: port_,
           );
         },
@@ -3949,7 +4541,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 86,
+            funcId: 99,
             port: port_,
           );
         },
@@ -3991,7 +4583,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 87,
+            funcId: 100,
             port: port_,
           );
         },
@@ -4028,7 +4620,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 88,
+            funcId: 101,
             port: port_,
           );
         },
@@ -4075,7 +4667,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
             pdeCallFfi(
               generalizedFrbRustBinding,
               serializer,
-              funcId: 89,
+              funcId: 102,
               port: port_,
             );
           },
@@ -4118,7 +4710,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 90,
+            funcId: 103,
             port: port_,
           );
         },
@@ -4154,7 +4746,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 91,
+            funcId: 104,
             port: port_,
           );
         },
@@ -4189,7 +4781,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 92,
+            funcId: 105,
             port: port_,
           );
         },
@@ -4227,7 +4819,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 93,
+            funcId: 106,
             port: port_,
           );
         },
@@ -4267,7 +4859,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 94,
+            funcId: 107,
             port: port_,
           );
         },
@@ -4306,7 +4898,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
             pdeCallFfi(
               generalizedFrbRustBinding,
               serializer,
-              funcId: 95,
+              funcId: 108,
               port: port_,
             );
           },
@@ -4342,7 +4934,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 96,
+            funcId: 109,
             port: port_,
           );
         },
@@ -4380,7 +4972,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 97,
+            funcId: 110,
             port: port_,
           );
         },
@@ -4421,7 +5013,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
             pdeCallFfi(
               generalizedFrbRustBinding,
               serializer,
-              funcId: 98,
+              funcId: 111,
               port: port_,
             );
           },
@@ -4461,7 +5053,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 99,
+            funcId: 112,
             port: port_,
           );
         },
@@ -4499,7 +5091,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 100,
+            funcId: 113,
             port: port_,
           );
         },
@@ -4532,7 +5124,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 101,
+            funcId: 114,
             port: port_,
           );
         },
@@ -4572,7 +5164,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 102,
+            funcId: 115,
             port: port_,
           );
         },
@@ -4610,7 +5202,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 103,
+            funcId: 116,
             port: port_,
           );
         },
@@ -4648,7 +5240,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 104,
+            funcId: 117,
             port: port_,
           );
         },
@@ -4688,7 +5280,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 105,
+            funcId: 118,
             port: port_,
           );
         },
@@ -4726,7 +5318,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 106,
+            funcId: 119,
             port: port_,
           );
         },
@@ -4766,7 +5358,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 107,
+            funcId: 120,
             port: port_,
           );
         },
@@ -4809,7 +5401,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
             pdeCallFfi(
               generalizedFrbRustBinding,
               serializer,
-              funcId: 108,
+              funcId: 121,
               port: port_,
             );
           },
@@ -4849,7 +5441,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 109,
+            funcId: 122,
             port: port_,
           );
         },
@@ -4879,7 +5471,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 110,
+            funcId: 123,
             port: port_,
           );
         },
@@ -4909,7 +5501,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 111,
+            funcId: 124,
             port: port_,
           );
         },
@@ -4937,7 +5529,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 112,
+            funcId: 125,
             port: port_,
           );
         },
@@ -4972,7 +5564,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 113,
+            funcId: 126,
             port: port_,
           );
         },
@@ -5002,7 +5594,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 114,
+            funcId: 127,
             port: port_,
           );
         },
@@ -5035,7 +5627,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 115,
+            funcId: 128,
             port: port_,
           );
         },
@@ -5399,6 +5991,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  BridgeAutomation dco_decode_box_autoadd_bridge_automation(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return dco_decode_bridge_automation(raw);
+  }
+
+  @protected
   BridgeAutomationSetup dco_decode_box_autoadd_bridge_automation_setup(
     dynamic raw,
   ) {
@@ -5529,6 +6127,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  BridgePermissions dco_decode_box_autoadd_bridge_permissions(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return dco_decode_bridge_permissions(raw);
+  }
+
+  @protected
   BridgeQuery dco_decode_box_autoadd_bridge_query(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return dco_decode_bridge_query(raw);
@@ -5544,6 +6148,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   BridgeResource dco_decode_box_autoadd_bridge_resource(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return dco_decode_bridge_resource(raw);
+  }
+
+  @protected
+  BridgeSchedule dco_decode_box_autoadd_bridge_schedule(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return dco_decode_bridge_schedule(raw);
   }
 
   @protected
@@ -5592,6 +6202,62 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   PlatformInt64 dco_decode_box_autoadd_i_64(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return dco_decode_i_64(raw);
+  }
+
+  @protected
+  BridgeAddedRoutine dco_decode_bridge_added_routine(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 2)
+      throw Exception('unexpected arr length: expect 2 but see ${arr.length}');
+    return BridgeAddedRoutine(
+      id: dco_decode_String(arr[0]),
+      webhook: dco_decode_opt_String(arr[1]),
+    );
+  }
+
+  @protected
+  BridgeAgent dco_decode_bridge_agent(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 10)
+      throw Exception('unexpected arr length: expect 10 but see ${arr.length}');
+    return BridgeAgent(
+      id: dco_decode_String(arr[0]),
+      name: dco_decode_String(arr[1]),
+      named: dco_decode_bool(arr[2]),
+      root: dco_decode_String(arr[3]),
+      model: dco_decode_bridge_model_choice(arr[4]),
+      permissions: dco_decode_bridge_permissions(arr[5]),
+      memory: dco_decode_String(arr[6]),
+      thread: dco_decode_String(arr[7]),
+      threads: dco_decode_list_String(arr[8]),
+      nextRunMs: dco_decode_opt_box_autoadd_i_64(arr[9]),
+    );
+  }
+
+  @protected
+  BridgeAgentChange dco_decode_bridge_agent_change(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 8)
+      throw Exception('unexpected arr length: expect 8 but see ${arr.length}');
+    return BridgeAgentChange(
+      id: dco_decode_i_64(arr[0]),
+      thread: dco_decode_String(arr[1]),
+      turn: dco_decode_opt_box_autoadd_i_64(arr[2]),
+      kind: dco_decode_bridge_agent_change_kind(arr[3]),
+      before: dco_decode_opt_String(arr[4]),
+      after: dco_decode_opt_String(arr[5]),
+      routine: dco_decode_opt_box_autoadd_bridge_automation(arr[6]),
+      undone: dco_decode_bool(arr[7]),
+    );
+  }
+
+  @protected
+  BridgeAgentChangeKind dco_decode_bridge_agent_change_kind(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return BridgeAgentChangeKind.values[raw as int];
   }
 
   @protected
@@ -6240,8 +6906,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   BridgeItem dco_decode_bridge_item(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 8)
-      throw Exception('unexpected arr length: expect 8 but see ${arr.length}');
+    if (arr.length != 10)
+      throw Exception('unexpected arr length: expect 10 but see ${arr.length}');
     return BridgeItem(
       id: dco_decode_i_64(arr[0]),
       kind: dco_decode_bridge_item_kind(arr[1]),
@@ -6251,6 +6917,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       failed: dco_decode_bool(arr[5]),
       durationMs: dco_decode_opt_box_autoadd_i_64(arr[6]),
       steps: dco_decode_list_bridge_task_step(arr[7]),
+      routine: dco_decode_opt_String(arr[8]),
+      opening: dco_decode_bridge_opening(arr[9]),
     );
   }
 
@@ -6418,6 +7086,24 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       mediaType: dco_decode_String(arr[1]),
       attachment: dco_decode_String(arr[2]),
       size: dco_decode_i_64(arr[3]),
+    );
+  }
+
+  @protected
+  BridgeMention dco_decode_bridge_mention(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 8)
+      throw Exception('unexpected arr length: expect 8 but see ${arr.length}');
+    return BridgeMention(
+      agent: dco_decode_String(arr[0]),
+      name: dco_decode_String(arr[1]),
+      thread: dco_decode_String(arr[2]),
+      message: dco_decode_String(arr[3]),
+      text: dco_decode_String(arr[4]),
+      createdMs: dco_decode_i_64(arr[5]),
+      answered: dco_decode_bool(arr[6]),
+      answer: dco_decode_String(arr[7]),
     );
   }
 
@@ -6598,6 +7284,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   BridgeMutationKind dco_decode_bridge_mutation_kind(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return BridgeMutationKind.values[raw as int];
+  }
+
+  @protected
+  BridgeOpening dco_decode_bridge_opening(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return BridgeOpening.values[raw as int];
   }
 
   @protected
@@ -7066,8 +7758,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   BridgeThreadSummary dco_decode_bridge_thread_summary(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 10)
-      throw Exception('unexpected arr length: expect 10 but see ${arr.length}');
+    if (arr.length != 11)
+      throw Exception('unexpected arr length: expect 11 but see ${arr.length}');
     return BridgeThreadSummary(
       id: dco_decode_String(arr[0]),
       title: dco_decode_String(arr[1]),
@@ -7079,6 +7771,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       movable: dco_decode_bool(arr[7]),
       harnessKnown: dco_decode_bool(arr[8]),
       moving: dco_decode_opt_box_autoadd_bridge_moving(arr[9]),
+      visitedMs: dco_decode_opt_box_autoadd_i_64(arr[10]),
     );
   }
 
@@ -7311,6 +8004,18 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  List<BridgeAgent> dco_decode_list_bridge_agent(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return (raw as List<dynamic>).map(dco_decode_bridge_agent).toList();
+  }
+
+  @protected
+  List<BridgeAgentChange> dco_decode_list_bridge_agent_change(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return (raw as List<dynamic>).map(dco_decode_bridge_agent_change).toList();
+  }
+
+  @protected
   List<BridgeApprovalOption> dco_decode_list_bridge_approval_option(
     dynamic raw,
   ) {
@@ -7440,6 +8145,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   List<BridgeMedia> dco_decode_list_bridge_media(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return (raw as List<dynamic>).map(dco_decode_bridge_media).toList();
+  }
+
+  @protected
+  List<BridgeMention> dco_decode_list_bridge_mention(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return (raw as List<dynamic>).map(dco_decode_bridge_mention).toList();
   }
 
   @protected
@@ -7681,6 +8392,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  BridgeAutomation? dco_decode_opt_box_autoadd_bridge_automation(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return raw == null ? null : dco_decode_box_autoadd_bridge_automation(raw);
+  }
+
+  @protected
   BridgeAutomationSetup? dco_decode_opt_box_autoadd_bridge_automation_setup(
     dynamic raw,
   ) {
@@ -7813,6 +8530,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   BridgePace? dco_decode_opt_box_autoadd_bridge_pace(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return raw == null ? null : dco_decode_box_autoadd_bridge_pace(raw);
+  }
+
+  @protected
+  BridgePermissions? dco_decode_opt_box_autoadd_bridge_permissions(
+    dynamic raw,
+  ) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return raw == null ? null : dco_decode_box_autoadd_bridge_permissions(raw);
   }
 
   @protected
@@ -8255,6 +8980,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  BridgeAutomation sse_decode_box_autoadd_bridge_automation(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return (sse_decode_bridge_automation(deserializer));
+  }
+
+  @protected
   BridgeAutomationSetup sse_decode_box_autoadd_bridge_automation_setup(
     SseDeserializer deserializer,
   ) {
@@ -8417,6 +9150,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  BridgePermissions sse_decode_box_autoadd_bridge_permissions(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return (sse_decode_bridge_permissions(deserializer));
+  }
+
+  @protected
   BridgeQuery sse_decode_box_autoadd_bridge_query(
     SseDeserializer deserializer,
   ) {
@@ -8438,6 +9179,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     return (sse_decode_bridge_resource(deserializer));
+  }
+
+  @protected
+  BridgeSchedule sse_decode_box_autoadd_bridge_schedule(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return (sse_decode_bridge_schedule(deserializer));
   }
 
   @protected
@@ -8496,6 +9245,79 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   PlatformInt64 sse_decode_box_autoadd_i_64(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     return (sse_decode_i_64(deserializer));
+  }
+
+  @protected
+  BridgeAddedRoutine sse_decode_bridge_added_routine(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_id = sse_decode_String(deserializer);
+    var var_webhook = sse_decode_opt_String(deserializer);
+    return BridgeAddedRoutine(id: var_id, webhook: var_webhook);
+  }
+
+  @protected
+  BridgeAgent sse_decode_bridge_agent(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_id = sse_decode_String(deserializer);
+    var var_name = sse_decode_String(deserializer);
+    var var_named = sse_decode_bool(deserializer);
+    var var_root = sse_decode_String(deserializer);
+    var var_model = sse_decode_bridge_model_choice(deserializer);
+    var var_permissions = sse_decode_bridge_permissions(deserializer);
+    var var_memory = sse_decode_String(deserializer);
+    var var_thread = sse_decode_String(deserializer);
+    var var_threads = sse_decode_list_String(deserializer);
+    var var_nextRunMs = sse_decode_opt_box_autoadd_i_64(deserializer);
+    return BridgeAgent(
+      id: var_id,
+      name: var_name,
+      named: var_named,
+      root: var_root,
+      model: var_model,
+      permissions: var_permissions,
+      memory: var_memory,
+      thread: var_thread,
+      threads: var_threads,
+      nextRunMs: var_nextRunMs,
+    );
+  }
+
+  @protected
+  BridgeAgentChange sse_decode_bridge_agent_change(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_id = sse_decode_i_64(deserializer);
+    var var_thread = sse_decode_String(deserializer);
+    var var_turn = sse_decode_opt_box_autoadd_i_64(deserializer);
+    var var_kind = sse_decode_bridge_agent_change_kind(deserializer);
+    var var_before = sse_decode_opt_String(deserializer);
+    var var_after = sse_decode_opt_String(deserializer);
+    var var_routine = sse_decode_opt_box_autoadd_bridge_automation(
+      deserializer,
+    );
+    var var_undone = sse_decode_bool(deserializer);
+    return BridgeAgentChange(
+      id: var_id,
+      thread: var_thread,
+      turn: var_turn,
+      kind: var_kind,
+      before: var_before,
+      after: var_after,
+      routine: var_routine,
+      undone: var_undone,
+    );
+  }
+
+  @protected
+  BridgeAgentChangeKind sse_decode_bridge_agent_change_kind(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var inner = sse_decode_i_32(deserializer);
+    return BridgeAgentChangeKind.values[inner];
   }
 
   @protected
@@ -9250,6 +10072,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_failed = sse_decode_bool(deserializer);
     var var_durationMs = sse_decode_opt_box_autoadd_i_64(deserializer);
     var var_steps = sse_decode_list_bridge_task_step(deserializer);
+    var var_routine = sse_decode_opt_String(deserializer);
+    var var_opening = sse_decode_bridge_opening(deserializer);
     return BridgeItem(
       id: var_id,
       kind: var_kind,
@@ -9259,6 +10083,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       failed: var_failed,
       durationMs: var_durationMs,
       steps: var_steps,
+      routine: var_routine,
+      opening: var_opening,
     );
   }
 
@@ -9458,6 +10284,29 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       mediaType: var_mediaType,
       attachment: var_attachment,
       size: var_size,
+    );
+  }
+
+  @protected
+  BridgeMention sse_decode_bridge_mention(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_agent = sse_decode_String(deserializer);
+    var var_name = sse_decode_String(deserializer);
+    var var_thread = sse_decode_String(deserializer);
+    var var_message = sse_decode_String(deserializer);
+    var var_text = sse_decode_String(deserializer);
+    var var_createdMs = sse_decode_i_64(deserializer);
+    var var_answered = sse_decode_bool(deserializer);
+    var var_answer = sse_decode_String(deserializer);
+    return BridgeMention(
+      agent: var_agent,
+      name: var_name,
+      thread: var_thread,
+      message: var_message,
+      text: var_text,
+      createdMs: var_createdMs,
+      answered: var_answered,
+      answer: var_answer,
     );
   }
 
@@ -9697,6 +10546,13 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     // Codec=Sse (Serialization based), see doc to use other codecs
     var inner = sse_decode_i_32(deserializer);
     return BridgeMutationKind.values[inner];
+  }
+
+  @protected
+  BridgeOpening sse_decode_bridge_opening(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var inner = sse_decode_i_32(deserializer);
+    return BridgeOpening.values[inner];
   }
 
   @protected
@@ -10220,6 +11076,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_movable = sse_decode_bool(deserializer);
     var var_harnessKnown = sse_decode_bool(deserializer);
     var var_moving = sse_decode_opt_box_autoadd_bridge_moving(deserializer);
+    var var_visitedMs = sse_decode_opt_box_autoadd_i_64(deserializer);
     return BridgeThreadSummary(
       id: var_id,
       title: var_title,
@@ -10231,6 +11088,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       movable: var_movable,
       harnessKnown: var_harnessKnown,
       moving: var_moving,
+      visitedMs: var_visitedMs,
     );
   }
 
@@ -10488,6 +11346,32 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var ans_ = <String>[];
     for (var idx_ = 0; idx_ < len_; ++idx_) {
       ans_.add(sse_decode_String(deserializer));
+    }
+    return ans_;
+  }
+
+  @protected
+  List<BridgeAgent> sse_decode_list_bridge_agent(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    var len_ = sse_decode_i_32(deserializer);
+    var ans_ = <BridgeAgent>[];
+    for (var idx_ = 0; idx_ < len_; ++idx_) {
+      ans_.add(sse_decode_bridge_agent(deserializer));
+    }
+    return ans_;
+  }
+
+  @protected
+  List<BridgeAgentChange> sse_decode_list_bridge_agent_change(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    var len_ = sse_decode_i_32(deserializer);
+    var ans_ = <BridgeAgentChange>[];
+    for (var idx_ = 0; idx_ < len_; ++idx_) {
+      ans_.add(sse_decode_bridge_agent_change(deserializer));
     }
     return ans_;
   }
@@ -10768,6 +11652,20 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var ans_ = <BridgeMedia>[];
     for (var idx_ = 0; idx_ < len_; ++idx_) {
       ans_.add(sse_decode_bridge_media(deserializer));
+    }
+    return ans_;
+  }
+
+  @protected
+  List<BridgeMention> sse_decode_list_bridge_mention(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    var len_ = sse_decode_i_32(deserializer);
+    var ans_ = <BridgeMention>[];
+    for (var idx_ = 0; idx_ < len_; ++idx_) {
+      ans_.add(sse_decode_bridge_mention(deserializer));
     }
     return ans_;
   }
@@ -11217,6 +12115,19 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  BridgeAutomation? sse_decode_opt_box_autoadd_bridge_automation(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    if (sse_decode_bool(deserializer)) {
+      return (sse_decode_box_autoadd_bridge_automation(deserializer));
+    } else {
+      return null;
+    }
+  }
+
+  @protected
   BridgeAutomationSetup? sse_decode_opt_box_autoadd_bridge_automation_setup(
     SseDeserializer deserializer,
   ) {
@@ -11472,6 +12383,19 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
 
     if (sse_decode_bool(deserializer)) {
       return (sse_decode_box_autoadd_bridge_pace(deserializer));
+    } else {
+      return null;
+    }
+  }
+
+  @protected
+  BridgePermissions? sse_decode_opt_box_autoadd_bridge_permissions(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    if (sse_decode_bool(deserializer)) {
+      return (sse_decode_box_autoadd_bridge_permissions(deserializer));
     } else {
       return null;
     }
@@ -12075,6 +12999,15 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_box_autoadd_bridge_automation(
+    BridgeAutomation self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_bridge_automation(self, serializer);
+  }
+
+  @protected
   void sse_encode_box_autoadd_bridge_automation_setup(
     BridgeAutomationSetup self,
     SseSerializer serializer,
@@ -12264,6 +13197,15 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_box_autoadd_bridge_permissions(
+    BridgePermissions self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_bridge_permissions(self, serializer);
+  }
+
+  @protected
   void sse_encode_box_autoadd_bridge_query(
     BridgeQuery self,
     SseSerializer serializer,
@@ -12288,6 +13230,15 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_bridge_resource(self, serializer);
+  }
+
+  @protected
+  void sse_encode_box_autoadd_bridge_schedule(
+    BridgeSchedule self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_bridge_schedule(self, serializer);
   }
 
   @protected
@@ -12360,6 +13311,56 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_i_64(self, serializer);
+  }
+
+  @protected
+  void sse_encode_bridge_added_routine(
+    BridgeAddedRoutine self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_String(self.id, serializer);
+    sse_encode_opt_String(self.webhook, serializer);
+  }
+
+  @protected
+  void sse_encode_bridge_agent(BridgeAgent self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_String(self.id, serializer);
+    sse_encode_String(self.name, serializer);
+    sse_encode_bool(self.named, serializer);
+    sse_encode_String(self.root, serializer);
+    sse_encode_bridge_model_choice(self.model, serializer);
+    sse_encode_bridge_permissions(self.permissions, serializer);
+    sse_encode_String(self.memory, serializer);
+    sse_encode_String(self.thread, serializer);
+    sse_encode_list_String(self.threads, serializer);
+    sse_encode_opt_box_autoadd_i_64(self.nextRunMs, serializer);
+  }
+
+  @protected
+  void sse_encode_bridge_agent_change(
+    BridgeAgentChange self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_64(self.id, serializer);
+    sse_encode_String(self.thread, serializer);
+    sse_encode_opt_box_autoadd_i_64(self.turn, serializer);
+    sse_encode_bridge_agent_change_kind(self.kind, serializer);
+    sse_encode_opt_String(self.before, serializer);
+    sse_encode_opt_String(self.after, serializer);
+    sse_encode_opt_box_autoadd_bridge_automation(self.routine, serializer);
+    sse_encode_bool(self.undone, serializer);
+  }
+
+  @protected
+  void sse_encode_bridge_agent_change_kind(
+    BridgeAgentChangeKind self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.index, serializer);
   }
 
   @protected
@@ -12949,6 +13950,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_bool(self.failed, serializer);
     sse_encode_opt_box_autoadd_i_64(self.durationMs, serializer);
     sse_encode_list_bridge_task_step(self.steps, serializer);
+    sse_encode_opt_String(self.routine, serializer);
+    sse_encode_bridge_opening(self.opening, serializer);
   }
 
   @protected
@@ -13103,6 +14106,19 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_String(self.mediaType, serializer);
     sse_encode_String(self.attachment, serializer);
     sse_encode_i_64(self.size, serializer);
+  }
+
+  @protected
+  void sse_encode_bridge_mention(BridgeMention self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_String(self.agent, serializer);
+    sse_encode_String(self.name, serializer);
+    sse_encode_String(self.thread, serializer);
+    sse_encode_String(self.message, serializer);
+    sse_encode_String(self.text, serializer);
+    sse_encode_i_64(self.createdMs, serializer);
+    sse_encode_bool(self.answered, serializer);
+    sse_encode_String(self.answer, serializer);
   }
 
   @protected
@@ -13263,6 +14279,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     BridgeMutationKind self,
     SseSerializer serializer,
   ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.index, serializer);
+  }
+
+  @protected
+  void sse_encode_bridge_opening(BridgeOpening self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_i_32(self.index, serializer);
   }
@@ -13673,6 +14695,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_bool(self.movable, serializer);
     sse_encode_bool(self.harnessKnown, serializer);
     sse_encode_opt_box_autoadd_bridge_moving(self.moving, serializer);
+    sse_encode_opt_box_autoadd_i_64(self.visitedMs, serializer);
   }
 
   @protected
@@ -13868,6 +14891,30 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_i_32(self.length, serializer);
     for (final item in self) {
       sse_encode_String(item, serializer);
+    }
+  }
+
+  @protected
+  void sse_encode_list_bridge_agent(
+    List<BridgeAgent> self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.length, serializer);
+    for (final item in self) {
+      sse_encode_bridge_agent(item, serializer);
+    }
+  }
+
+  @protected
+  void sse_encode_list_bridge_agent_change(
+    List<BridgeAgentChange> self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.length, serializer);
+    for (final item in self) {
+      sse_encode_bridge_agent_change(item, serializer);
     }
   }
 
@@ -14120,6 +15167,18 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_i_32(self.length, serializer);
     for (final item in self) {
       sse_encode_bridge_media(item, serializer);
+    }
+  }
+
+  @protected
+  void sse_encode_list_bridge_mention(
+    List<BridgeMention> self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.length, serializer);
+    for (final item in self) {
+      sse_encode_bridge_mention(item, serializer);
     }
   }
 
@@ -14548,6 +15607,19 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_opt_box_autoadd_bridge_automation(
+    BridgeAutomation? self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    sse_encode_bool(self != null, serializer);
+    if (self != null) {
+      sse_encode_box_autoadd_bridge_automation(self, serializer);
+    }
+  }
+
+  @protected
   void sse_encode_opt_box_autoadd_bridge_automation_setup(
     BridgeAutomationSetup? self,
     SseSerializer serializer,
@@ -14808,6 +15880,19 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_opt_box_autoadd_bridge_permissions(
+    BridgePermissions? self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    sse_encode_bool(self != null, serializer);
+    if (self != null) {
+      sse_encode_box_autoadd_bridge_permissions(self, serializer);
+    }
+  }
+
+  @protected
   void sse_encode_opt_box_autoadd_bridge_request(
     BridgeRequest? self,
     SseSerializer serializer,
@@ -14978,6 +16063,105 @@ class AgentHostImpl extends RustOpaque implements AgentHost {
       .instance
       .api
       .crateApiSessionAgentHostAddHostProject(that: this, root: root);
+
+  Future<List<BridgeAgentChange>> agentChanges({required String name}) =>
+      RustLib.instance.api.crateApiSessionAgentHostAgentChanges(
+        that: this,
+        name: name,
+      );
+
+  Future<String> agentInstructions({required String name}) => RustLib
+      .instance
+      .api
+      .crateApiSessionAgentHostAgentInstructions(that: this, name: name);
+
+  Future<String> agentMention({
+    required String name,
+    required String root,
+    required String thread,
+    required String text,
+  }) => RustLib.instance.api.crateApiSessionAgentHostAgentMention(
+    that: this,
+    name: name,
+    root: root,
+    thread: thread,
+    text: text,
+  );
+
+  Future<List<BridgeMention>> agentMentions({required String thread}) => RustLib
+      .instance
+      .api
+      .crateApiSessionAgentHostAgentMentions(that: this, thread: thread);
+
+  Future<String> agentRemove({required String name}) => RustLib.instance.api
+      .crateApiSessionAgentHostAgentRemove(that: this, name: name);
+
+  Future<BridgeAddedRoutine> agentRoutineAdd({
+    required String name,
+    required String title,
+    required String prompt,
+    required BridgeSchedule schedule,
+  }) => RustLib.instance.api.crateApiSessionAgentHostAgentRoutineAdd(
+    that: this,
+    name: name,
+    title: title,
+    prompt: prompt,
+    schedule: schedule,
+  );
+
+  Future<void> agentRoutineRemove({required String name, required String id}) =>
+      RustLib.instance.api.crateApiSessionAgentHostAgentRoutineRemove(
+        that: this,
+        name: name,
+        id: id,
+      );
+
+  Future<void> agentSetInstructions({
+    required String name,
+    required String text,
+  }) => RustLib.instance.api.crateApiSessionAgentHostAgentSetInstructions(
+    that: this,
+    name: name,
+    text: text,
+  );
+
+  Future<BridgeAgent> agentStart({
+    required String root,
+    required BridgeModelChoice model,
+    required BridgePermissions permissions,
+    required String request,
+  }) => RustLib.instance.api.crateApiSessionAgentHostAgentStart(
+    that: this,
+    root: root,
+    model: model,
+    permissions: permissions,
+    request: request,
+  );
+
+  Future<void> agentUndo({
+    required String name,
+    required PlatformInt64 change,
+  }) => RustLib.instance.api.crateApiSessionAgentHostAgentUndo(
+    that: this,
+    name: name,
+    change: change,
+  );
+
+  Future<BridgeAgent> agentUpdate({
+    required String name,
+    String? rename,
+    BridgeModelChoice? model,
+    BridgePermissions? permissions,
+  }) => RustLib.instance.api.crateApiSessionAgentHostAgentUpdate(
+    that: this,
+    name: name,
+    rename: rename,
+    model: model,
+    permissions: permissions,
+  );
+
+  Future<List<BridgeAgent>> agents() =>
+      RustLib.instance.api.crateApiSessionAgentHostAgents(that: this);
 
   Future<void> bringConfiguration({
     required AgentHost from,
@@ -15377,6 +16561,9 @@ class AgentSessionImpl extends RustOpaque implements AgentSession {
 
   Future<BridgeUsageLimits?> usageLimits() =>
       RustLib.instance.api.crateApiSessionAgentSessionUsageLimits(that: this);
+
+  Future<void> visit() =>
+      RustLib.instance.api.crateApiSessionAgentSessionVisit(that: this);
 
   Future<String?> worktree() =>
       RustLib.instance.api.crateApiSessionAgentSessionWorktree(that: this);

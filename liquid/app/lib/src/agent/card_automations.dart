@@ -82,17 +82,34 @@ class AutomationsSection extends StatelessWidget {
     required this.state,
     required this.tasks,
     required this.divided,
+    this.onAdd,
   });
 
   final SessionState state;
   final List<BridgeAutomation> tasks;
   final bool divided;
+  final VoidCallback? onAdd;
 
   @override
   Widget build(BuildContext context) => CardSection(
     divided: divided,
     children: [
-      const CardHeading(title: 'Automations'),
+      CardHeading(
+        title: 'Automations',
+        trailing: onAdd == null
+            ? null
+            : InkWell(
+                key: const Key('add-routine'),
+                onTap: onAdd,
+                child: Text(
+                  'Add routine',
+                  style: TextStyle(
+                    color: context.ws.accent,
+                    fontSize: WsMetrics.fsSmall,
+                  ),
+                ),
+              ),
+      ),
       for (final task in tasks) _AutomationRow(state: state, task: task),
     ],
   );

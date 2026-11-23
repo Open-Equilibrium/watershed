@@ -13,8 +13,10 @@ import '../session/session_state.dart';
 import '../theme/icons.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
+import 'agent_chat.dart';
 import 'input_lane.dart';
 import 'sidebar.dart';
+import 'new_agent_page.dart';
 import 'start_page.dart';
 import 'task_list_row.dart';
 
@@ -109,10 +111,17 @@ class _ChatViewState extends State<ChatView> {
     return InputLane(
       input: widget.input,
       child: ListenableBuilder(
-        listenable: Listenable.merge([state.items, state.request]),
+        listenable: Listenable.merge([
+          state.items,
+          state.request,
+          state.agents.mentions,
+          state.agents.composing,
+        ]),
         builder: (context, _) {
           final items = state.items.value;
+          if (state.agents.composing.value) return NewAgentPage(state: state);
           if (items.isEmpty) return StartPage(state: state, info: widget.info);
+          final extras = agentExtras(state, items);
           final request = state.request.value;
           final approval = request?.approval;
           final offset = approval == null ? 0 : 1;
@@ -155,21 +164,35 @@ class _ChatViewState extends State<ChatView> {
                     child: Padding(
                       padding: const EdgeInsets.only(bottom: WsMetrics.space4),
                       child: RepaintBoundary(
-                        child: switch (item.marker) {
-                          final text? => MoveMarker(text),
-                          null => switch (item.turnEnd) {
-                            final turn? => TurnChanges(
-                              turn: turn,
-                              onOpenDiff: widget.onOpenDiff == null
-                                  ? null
-                                  : () => widget.onOpenDiff!(turn.number),
-                              onRevert: () => unawaited(
-                                confirmRevert(context, state, turn.number),
-                              ),
-                            ),
-                            null => ItemTile(item: item, state: state),
-                          },
-                        },
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            if (extras.divider.contains(item.id))
+                              const SinceLastVisit(),
+                            if (item.routine != null)
+                              RoutineHeading(state: state, item: item),
+                            switch (item.marker) {
+                              final text? => MoveMarker(text),
+                              null => switch (item.turnEnd) {
+                                final turn? => TurnChanges(
+                                  turn: turn,
+                                  onOpenDiff: widget.onOpenDiff == null
+                                      ? null
+                                      : () => widget.onOpenDiff!(turn.number),
+                                  onRevert: () => unawaited(
+                                    confirmRevert(context, state, turn.number),
+                                  ),
+                                ),
+                                null => ItemTile(item: item, state: state),
+                              },
+                            },
+                            if (extras.lastOfTurn.contains(item.id))
+                              AgentTurnLines(state: state, turn: item.turn),
+                            for (final mention
+                                in extras.mentionsAfter[item.id] ?? const [])
+                              MentionBlock(state: state, mention: mention),
+                          ],
+                        ),
                       ),
                     ),
                   ),
@@ -357,6 +380,9 @@ class ItemTile extends StatelessWidget {
       listenable: Listenable.merge([item.text, item.outcome]),
       builder: (context, _) {
         final text = item.text.value;
+        if (item.opening != BridgeOpening.none && text.isEmpty) {
+          return OpeningLine(state: state, item: item);
+        }
         return switch (item.kind) {
           BridgeItemKind.userMessage => _HoverActions(
             end: true,

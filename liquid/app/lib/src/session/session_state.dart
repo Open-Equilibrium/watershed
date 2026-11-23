@@ -12,6 +12,7 @@ import '../rust/api/moves.dart';
 import '../rust/api/session.dart';
 import '../rust/api/thread.dart';
 import 'agent_host_set.dart';
+import 'agents_state.dart';
 import 'move_rule.dart';
 import 'move_settle.dart';
 import 'task_tree.dart';
@@ -56,6 +57,10 @@ class SessionState {
   }
 
   final _agents = AgentHostSet();
+
+  late final agents = AgentsState(this);
+
+  final lastVisit = ValueNotifier<int?>(null);
 
   String hostNameOf(String? address) => _agents.nameOf(address);
 
@@ -300,6 +305,7 @@ class SessionState {
           return newer != 0 ? newer : left.$1.compareTo(right.$1);
         });
       recent.value = [for (final (_, listed) in sorted) listed];
+      unawaited(agents.load());
       unawaited(recoverMoves());
     }
     try {
@@ -501,6 +507,7 @@ class SessionState {
   }
 
   Future<void> newSession() async {
+    agents.composing.value = false;
     _switchRequests++;
     await _detach();
     worktree.value = null;
@@ -521,7 +528,11 @@ class SessionState {
     final session = _session;
     try {
       if (session != null) {
-        await session.send(text, steer: steer);
+        if (!await agents.mention(text)) await session.send(text, steer: steer);
+        return;
+      }
+      if (agents.composing.value) {
+        await agents.start(text);
         return;
       }
       final chosen = model.value;
@@ -874,6 +885,11 @@ class SessionState {
         }
         _session = next;
         _sessionAddress = address;
+        lastVisit.value = recent.value
+            .where((listed) => listed.thread.id == next.id)
+            .firstOrNull
+            ?.thread
+            .visitedMs;
         _syncMoving();
         _sessionLost = false;
         _updateSessionProblem();
@@ -910,6 +926,8 @@ class SessionState {
         unawaited(readStatistics());
         unawaited(readChanges());
         unawaited(_follow(next, host, generation));
+        unawaited(agents.attached(next.id, address));
+        unawaited(next.visit().catchError((Object _) {}));
       }),
     );
   }
@@ -925,6 +943,8 @@ class SessionState {
     }
     _follows.clear();
     _session?.close();
+    agents.detached();
+    lastVisit.value = null;
     _sessionAddress = null;
     _sessionLost = false;
     servers.value = const [];
@@ -1118,6 +1138,8 @@ class SessionState {
     turn: turn,
     tool: item.tool,
     target: item.target,
+    routine: item.routine,
+    opening: item.opening,
   )..steps.value = item.steps;
 
   void _setTurns(List<BridgeTurn> read) {
@@ -1219,6 +1241,9 @@ class SessionState {
           BridgeEventKind.turnCompleted ||
           BridgeEventKind.turnAborted:
         unawaited(_readTurns(ended: event.kind != BridgeEventKind.turnStarted));
+        if (event.kind == BridgeEventKind.turnCompleted) {
+          unawaited(agents.turnEnded());
+        }
       case BridgeEventKind.itemStarted:
         final view = _view(event.item!, event.turn ?? 0);
         _byId[view.id] = view;

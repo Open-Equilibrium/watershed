@@ -12,10 +12,10 @@ use meta_harness_core::{
     MovePhase, Service, ServiceConfig, remote, t3_version,
 };
 use meta_harness_core::{
-    AcpAgent, AgentEvent, GitAction, GitActionRequest, GitProgress, Group, Harness, Host,
-    HostConfig, ItemDetail, ItemKind, LineCount, ModelChoice, NewAgent, NewRoutine, Permissions,
-    Relation, Request, Schedule, ScheduleKind, Snapshot, StartThread, StepStatus, TaskStep, Thread,
-    ThreadEvent, TurnStatus, Workspace,
+    AcpAgent, AgentChange, AgentChangeKind, AgentEvent, GitAction, GitActionRequest, GitProgress,
+    Group, Harness, Host, HostConfig, ItemDetail, ItemKind, LineCount, ModelChoice, NewAgent,
+    NewRoutine, Permissions, Relation, Request, Schedule, ScheduleKind, Snapshot, StartThread,
+    StepStatus, TaskStep, Thread, ThreadEvent, TurnStatus, Workspace,
 };
 
 const AGENT: &str = "scripted";
@@ -300,11 +300,12 @@ async fn a_persistent_agent_moves_to_a_fresh_thread_with_its_routines_when_its_c
     let (service, host) = start_service(&home).await;
     let created = host
         .agent_create(NewAgent {
-            name: "news-bot".to_owned(),
+            name: Some("news-bot".to_owned()),
             root: repo.to_string_lossy().into_owned(),
             model: start("", Workspace::Checkout, Permissions::FullAccess).model,
             permissions: Permissions::FullAccess,
             instructions: "Keep the news page current.".to_owned(),
+            request: None,
         })
         .await
         .unwrap();
@@ -346,7 +347,15 @@ async fn a_persistent_agent_moves_to_a_fresh_thread_with_its_routines_when_its_c
 
     assert!(created.memory.is_dir());
     assert_ne!(moved.thread, created.thread);
-    let opening = &opened.transcript[0].text;
+    assert_eq!(
+        opened.transcript[0].detail,
+        ItemDetail::Opening { handoff: true }
+    );
+    assert_eq!(
+        opened.transcript[0].text, "",
+        "Liquid shows no opening text"
+    );
+    let opening = &opened.turns[0].prompt;
     assert!(opening.contains("Keep the news page current."), "{opening}");
     assert!(opening.contains(&created.memory.display().to_string()));
     assert!(opening.contains("Imported conversation history"));
@@ -366,6 +375,114 @@ async fn a_persistent_agent_moves_to_a_fresh_thread_with_its_routines_when_its_c
     let next = project.open(&moved.thread).await.unwrap();
     assert!(next.automations().await.unwrap().current().is_empty());
     assert!(created.memory.is_dir(), "the memory stays");
+    service.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_agent_made_by_chat_names_itself_logs_its_changes_and_answers_a_mention() {
+    let (_dir, repo, home) = fixture();
+    let (service, host) = start_service(&home).await;
+    let model = start("", Workspace::Checkout, Permissions::FullAccess).model;
+    let created = host
+        .agent_create(NewAgent {
+            name: None,
+            root: repo.to_string_lossy().into_owned(),
+            model,
+            permissions: Permissions::FullAccess,
+            instructions: String::new(),
+            request: Some("instruct".to_owned()),
+        })
+        .await
+        .unwrap();
+    let project = host.project(&repo).await.unwrap();
+    let thread = project.open(&created.thread).await.unwrap();
+    let opened = wait(&thread, completed(1)).await;
+    assert_eq!(
+        opened.transcript[0].text, "instruct",
+        "Liquid shows the person's words"
+    );
+    let named = tokio::time::timeout(Duration::from_secs(30), async {
+        loop {
+            let agents = host.agents().await.unwrap();
+            if agents[0].named {
+                return agents[0].clone();
+            }
+            tokio::time::sleep(Duration::from_millis(200)).await;
+        }
+    })
+    .await
+    .expect("the agent names itself after its first turn");
+    assert_eq!(named.name, "news-bot");
+    assert_eq!(named.memory, created.memory);
+    let kinds = |changes: Vec<AgentChange>| changes.into_iter().map(|c| c.kind).collect::<Vec<_>>();
+    let changes = host.agent_changes("news-bot").await.unwrap();
+    assert_eq!(
+        kinds(changes.clone()),
+        [AgentChangeKind::Name, AgentChangeKind::Instructions]
+    );
+    assert_eq!(changes[1].turn, Some(1));
+
+    host.agent_routine_add(
+        "news-bot",
+        NewRoutine {
+            title: "Morning".to_owned(),
+            prompt: "Check the feeds.".to_owned(),
+            schedule: Schedule {
+                kind: ScheduleKind::Interval,
+                every_ms: Some(3_600_000),
+                time_of_day: None,
+                weekdays: Vec::new(),
+                run_at: None,
+            },
+        },
+    )
+    .await
+    .unwrap();
+    host.agent_undo("news-bot", changes[1].id).await.unwrap();
+    assert_eq!(host.agent_instructions("news-bot").await.unwrap(), "");
+    assert!(host.agent_undo("news-bot", changes[1].id).await.is_err());
+    let after = host.agent_changes("news-bot").await.unwrap();
+    assert_eq!(
+        after.len(),
+        2,
+        "the person's own changes are not the agent's"
+    );
+    assert!(after[1].undone);
+
+    let chat = project
+        .start(start(
+            "Fix the move dialog",
+            Workspace::Checkout,
+            Permissions::FullAccess,
+        ))
+        .await
+        .unwrap();
+    wait(&chat, completed(1)).await;
+    let message = host
+        .agent_mention(
+            "news-bot",
+            &repo.to_string_lossy(),
+            chat.id(),
+            "Is main green?",
+        )
+        .await
+        .unwrap();
+    let answered = wait(&thread, completed(2)).await;
+    assert!(answered.turns[1].prompt.contains("Is main green?"));
+    assert!(answered.turns[1].prompt.contains("t3-context://v1/thread/"));
+    let mentions = host.agent_mentions(chat.id()).await.unwrap();
+    assert_eq!(
+        (
+            mentions[0].name.as_str(),
+            mentions[0].message.as_str(),
+            mentions[0].answered,
+            mentions[0].answer.as_str()
+        ),
+        ("news-bot", message.as_str(), true, "Done.")
+    );
+
+    host.agent_remove("news-bot").await.unwrap();
+    assert!(host.agent_mentions(chat.id()).await.unwrap().is_empty());
     service.stop().await;
 }
 

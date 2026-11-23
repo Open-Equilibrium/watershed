@@ -15,6 +15,7 @@ pub(crate) mod details;
 pub(crate) mod lineage;
 pub(crate) mod move_out;
 
+pub(crate) use details::routine;
 pub use details::{
     Automation, LocalServer, Pace, RunStatus, Schedule, ScheduleKind, UsageLimits, UsageWindow,
 };
@@ -248,14 +249,14 @@ impl Thread {
     }
 
     pub async fn send(&self, text: &str, steer: bool) -> Result<(), String> {
-        self.post(&fresh_id("msg"), text, steer, false).await
+        self.post(&fresh_id("msg"), text, steer, false, None).await
     }
 
     pub(crate) async fn send_once(&self, id: &str, text: &str, steer: bool) -> Result<(), String> {
         if self.state().projection.prompts().contains_key(id) {
             return Ok(());
         }
-        self.post(id, text, steer, false).await
+        self.post(id, text, steer, false, None).await
     }
 
     pub(crate) fn message_status(&self, id: &str) -> Option<TurnStatus> {
@@ -271,7 +272,7 @@ impl Thread {
         if self.state().projection.prompts().contains_key(id) {
             return Ok(());
         }
-        self.post(id, text, false, true).await
+        self.post(id, text, false, true, None).await
     }
 
     async fn post(
@@ -280,6 +281,7 @@ impl Thread {
         text: &str,
         steer: bool,
         queue_only: bool,
+        context: Option<Value>,
     ) -> Result<(), String> {
         let running = self.state().projection.runs.iter().any(|run| {
             matches!(
@@ -304,7 +306,55 @@ impl Thread {
         if let Some(intent) = intent {
             command["deliveryIntent"] = json!(intent);
         }
+        if let Some(context) = context {
+            command["context"] = context;
+        }
         self.dispatch(command).await
+    }
+
+    pub(crate) async fn post_with_context(
+        &self,
+        id: &str,
+        text: &str,
+        context: Value,
+    ) -> Result<(), String> {
+        self.post(id, text, false, false, Some(context)).await
+    }
+
+    pub async fn visit(&self) -> Result<(), String> {
+        self.dispatch(json!({
+            "type": "thread.visit",
+            "visitedAt": crate::t3::iso(crate::config::now_ms()),
+            "opened": true,
+        }))
+        .await
+    }
+
+    pub(crate) fn reply_to(&self, message: &str) -> Option<(bool, String)> {
+        let state = self.state();
+        let projection = &state.projection;
+        let run = projection
+            .runs
+            .iter()
+            .find(|run| run["userMessageId"] == message)?;
+        let ended = matches!(
+            run["status"].as_str(),
+            Some("completed" | "failed" | "cancelled" | "interrupted")
+        );
+        let text = projection
+            .turn_items
+            .iter()
+            .rev()
+            .filter(|item| item["runId"] == run["id"] && item["type"] == "assistant_message")
+            .find_map(|item| item["text"].as_str())
+            .unwrap_or_default()
+            .to_owned();
+        Some((ended, text))
+    }
+
+    pub(crate) async fn set_title(&self, title: &str) -> Result<(), String> {
+        self.dispatch(json!({"type": "thread.metadata.update", "title": title}))
+            .await
     }
 
     pub async fn stop(&self) -> Result<(), String> {
@@ -874,11 +924,37 @@ fn turn_of(projection: &Projection, record: &Value) -> TurnId {
 }
 
 fn text_of(item: &Value) -> &str {
-    ["text", "output", "aggregatedOutput", "message"]
+    let text = ["text", "output", "aggregatedOutput", "message"]
         .iter()
         .find_map(|key| item[*key].as_str())
         .or_else(|| item["failure"]["message"].as_str())
-        .unwrap_or_default()
+        .unwrap_or_default();
+    if opening(item).is_some() {
+        crate::agents::spoken(text).unwrap_or_default()
+    } else {
+        text
+    }
+}
+
+fn opening(item: &Value) -> Option<u64> {
+    if item["type"] != "user_message" {
+        return None;
+    }
+    crate::agents::opening_generation(item["messageId"].as_str()?)
+}
+
+fn message_detail(item: &Value) -> ItemDetail {
+    if let Some(task) = item["scheduledTaskId"].as_str() {
+        ItemDetail::Routine {
+            task: task.to_owned(),
+        }
+    } else if let Some(generation) = opening(item) {
+        ItemDetail::Opening {
+            handoff: generation > 0,
+        }
+    } else {
+        ItemDetail::None
+    }
 }
 
 pub(crate) fn status_of(item: &Value) -> ItemStatus {
@@ -908,7 +984,7 @@ pub(crate) fn describe(item: &Value) -> Option<(ItemKind, ItemDetail)> {
         target: target.unwrap_or_default(),
     };
     Some(match item["type"].as_str()? {
-        "user_message" => (ItemKind::UserMessage, ItemDetail::None),
+        "user_message" => (ItemKind::UserMessage, message_detail(item)),
         "assistant_message" => (ItemKind::AssistantMessage, ItemDetail::None),
         "reasoning" => (ItemKind::Reasoning, ItemDetail::None),
         "command_execution" => (

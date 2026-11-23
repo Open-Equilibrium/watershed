@@ -4,6 +4,7 @@
 // ignore_for_file: invalid_use_of_internal_member, unused_import, unnecessary_import
 
 import '../frb_generated.dart';
+import 'agents.dart';
 import 'details.dart';
 import 'events.dart';
 import 'git.dart';
@@ -13,13 +14,60 @@ import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
 import 'thread.dart';
 
-// These functions are ignored because they are not marked as `pub`: `answers_devices`, `connect_remote_with`, `export_record_to`, `new`, `permissions_of`, `pump`, `range_diff`, `resubscribe`, `run`, `spawn_stream`, `subscribe_again`, `summary`
+// These functions are ignored because they are not marked as `pub`: `answers_devices`, `connect_remote_with`, `export_record_to`, `new`, `pump`, `range_diff`, `resubscribe`, `run`, `spawn_stream`, `subscribe_again`, `summary`
 // These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `drop`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
 // These functions are ignored (category: IgnoreBecauseExplicitAttribute): `automations_with`, `events_with`, `follow`, `forward`, `lineage_with`, `servers_with`
 
 // Rust type: RustOpaqueMoi<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<AgentHost>>
 abstract class AgentHost implements RustOpaqueInterface {
   Future<BridgeHostProject> addHostProject({required String root});
+
+  Future<List<BridgeAgentChange>> agentChanges({required String name});
+
+  Future<String> agentInstructions({required String name});
+
+  Future<String> agentMention({
+    required String name,
+    required String root,
+    required String thread,
+    required String text,
+  });
+
+  Future<List<BridgeMention>> agentMentions({required String thread});
+
+  Future<String> agentRemove({required String name});
+
+  Future<BridgeAddedRoutine> agentRoutineAdd({
+    required String name,
+    required String title,
+    required String prompt,
+    required BridgeSchedule schedule,
+  });
+
+  Future<void> agentRoutineRemove({required String name, required String id});
+
+  Future<void> agentSetInstructions({
+    required String name,
+    required String text,
+  });
+
+  Future<BridgeAgent> agentStart({
+    required String root,
+    required BridgeModelChoice model,
+    required BridgePermissions permissions,
+    required String request,
+  });
+
+  Future<void> agentUndo({required String name, required PlatformInt64 change});
+
+  Future<BridgeAgent> agentUpdate({
+    required String name,
+    String? rename,
+    BridgeModelChoice? model,
+    BridgePermissions? permissions,
+  });
+
+  Future<List<BridgeAgent>> agents();
 
   Future<void> bringConfiguration({
     required AgentHost from,
@@ -222,6 +270,8 @@ abstract class AgentSession implements RustOpaqueInterface {
 
   Future<BridgeUsageLimits?> usageLimits();
 
+  Future<void> visit();
+
   Future<String?> worktree();
 }
 
@@ -395,6 +445,7 @@ class BridgeThreadSummary {
   final bool movable;
   final bool harnessKnown;
   final BridgeMoving? moving;
+  final PlatformInt64? visitedMs;
 
   const BridgeThreadSummary({
     required this.id,
@@ -407,6 +458,7 @@ class BridgeThreadSummary {
     required this.movable,
     required this.harnessKnown,
     this.moving,
+    this.visitedMs,
   });
 
   @override
@@ -420,7 +472,8 @@ class BridgeThreadSummary {
       archived.hashCode ^
       movable.hashCode ^
       harnessKnown.hashCode ^
-      moving.hashCode;
+      moving.hashCode ^
+      visitedMs.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -436,5 +489,6 @@ class BridgeThreadSummary {
           archived == other.archived &&
           movable == other.movable &&
           harnessKnown == other.harnessKnown &&
-          moving == other.moving;
+          moving == other.moving &&
+          visitedMs == other.visitedMs;
 }

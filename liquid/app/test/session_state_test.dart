@@ -1254,6 +1254,7 @@ void main() {
               ended: true,
               failed: false,
               steps: const [],
+              opening: BridgeOpening.none,
             ),
             turn: 1,
             text: text,
