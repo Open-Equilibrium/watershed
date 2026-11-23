@@ -40,6 +40,7 @@ pub struct BridgeAgentChange {
     pub after: Option<String>,
     pub routine: Option<BridgeAutomation>,
     pub undone: bool,
+    pub held: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -114,6 +115,10 @@ impl AgentHost {
             .into_iter()
             .map(change)
             .collect())
+    }
+
+    pub fn agent_apply(&self, name: String, change: i64) -> Result<(), String> {
+        run(self.host.agent_apply(&name, change))
     }
 
     pub fn agent_undo(&self, name: String, change: i64) -> Result<(), String> {
@@ -202,6 +207,7 @@ fn change(change: AgentChange) -> BridgeAgentChange {
             .routine
             .and_then(|routine| convert::automations(vec![routine]).pop()),
         undone: change.undone,
+        held: change.held,
     }
 }
 

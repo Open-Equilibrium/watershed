@@ -331,8 +331,6 @@ impl Thread {
         task["threadMode"] = json!("continue");
         if existing {
             task["requireExisting"] = json!(true);
-        } else if let Some(fields) = task.as_object_mut() {
-            fields.remove("id");
         }
         let answer = self.client.call("scheduledTasks.upsert", task).await?;
         Ok(crate::agents::routine_copy(&answer["task"]))

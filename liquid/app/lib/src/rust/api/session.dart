@@ -22,6 +22,11 @@ import 'thread.dart';
 abstract class AgentHost implements RustOpaqueInterface {
   Future<BridgeHostProject> addHostProject({required String root});
 
+  Future<void> agentApply({
+    required String name,
+    required PlatformInt64 change,
+  });
+
   Future<List<BridgeAgentChange>> agentChanges({required String name});
 
   Future<String> agentInstructions({required String name});

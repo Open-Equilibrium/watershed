@@ -101,6 +101,7 @@ abstract interface class ProjectBackend {
   Future<void> agentSetInstructions(String name, String text);
   Future<List<BridgeAgentChange>> agentChanges(String name);
   Future<void> agentUndo(String name, int change);
+  Future<void> agentApply(String name, int change);
   Future<BridgeAddedRoutine> agentRoutineAdd(
     String name,
     String title,
@@ -357,6 +358,9 @@ class RustProjectBackend implements ProjectBackend {
   @override
   Future<void> agentUndo(String name, int change) =>
       _host.agentUndo(name: name, change: change);
+  @override
+  Future<void> agentApply(String name, int change) =>
+      _host.agentApply(name: name, change: change);
   @override
   Future<BridgeAddedRoutine> agentRoutineAdd(
     String name,
