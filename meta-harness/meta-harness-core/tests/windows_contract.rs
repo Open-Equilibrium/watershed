@@ -138,8 +138,11 @@ async fn a_windows_host_runs_a_turn_keeps_its_token_private_and_stops_t3_with_it
     })
     .await;
     assert_eq!(
-        std::fs::read_to_string(repo.join("contract.txt")).unwrap(),
-        "first\n"
+        std::fs::read_to_string(repo.join("contract.txt"))
+            .unwrap()
+            .lines()
+            .collect::<Vec<_>>(),
+        ["first"]
     );
 
     thread.send("wait", false).await.unwrap();

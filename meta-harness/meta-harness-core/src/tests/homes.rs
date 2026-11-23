@@ -138,9 +138,9 @@ fn t3_runs_claude_code_and_codex_in_the_homes_and_keeps_its_other_settings() {
                                 {"name": "HTTPS_PROXY", "value": "p", "sensitive": false},
                                 {"name": "CLAUDE_SECURESTORAGE_CONFIG_DIR", "value": "",
                                  "sensitive": false}],
-                            "config": {"binaryPath": "/bin/claude", "homePath": "/m/harness/claude",
+                            "config": {"binaryPath": "/bin/claude", "homePath": homes.claude,
                                        "launchArgs": "--mcp-config \"/m/harness/claude/mcp.json\""}},
-            "codex": {"driver": "codex", "config": {"homePath": "/m/harness/codex"}},
+            "codex": {"driver": "codex", "config": {"homePath": homes.codex}},
             "scripted": {"driver": "acpRegistry", "config": {"commandPath": "/x"}},
         })
     );
