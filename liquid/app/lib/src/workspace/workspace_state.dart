@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 
+import '../rust/api/automation.dart';
 import '../rust/api/calculation.dart';
 import '../rust/api/chart.dart';
 import '../rust/api/database.dart';
@@ -48,6 +49,9 @@ BridgeMutation mutation(
   BridgeLineSetup? lineSetup,
   BridgeTotal? total,
   BridgeChartSetup? chart,
+  String? automation,
+  BridgeAutomationSetup? automationSetup,
+  bool on = false,
 }) => BridgeMutation(
   kind: kind,
   area: area,
@@ -82,6 +86,9 @@ BridgeMutation mutation(
   lineSetup: lineSetup,
   total: total,
   chart: chart,
+  automation: automation,
+  automationSetup: automationSetup,
+  on_: on,
 );
 
 BridgeQuery query(
@@ -119,6 +126,14 @@ typedef CopiedView = ({
   String title,
   List<BridgeTab> tabs,
 });
+
+@immutable
+class Notice {
+  const Notice(this.id, this.text);
+
+  final int id;
+  final String text;
+}
 
 class EditChain {
   Object? refused;
@@ -209,6 +224,59 @@ class WorkspaceState {
 
   final tables = ValueNotifier<List<BridgeTable>>(const []);
 
+  final automations = ValueNotifier<List<BridgeWorkspaceAutomation>>(const []);
+
+  final notices = ValueNotifier<List<Notice>>(const []);
+
+  static const noticeShown = Duration(seconds: 5);
+
+  var _notices = 0;
+
+  final _noticeTimers = <Timer>{};
+
+  void _notice(String text) {
+    if (_disposed) return;
+    final notice = Notice(_notices++, text);
+    notices.value = [...notices.value, notice];
+    late final Timer shown;
+    shown = Timer(noticeShown, () {
+      _noticeTimers.remove(shown);
+      notices.value = [
+        for (final kept in notices.value)
+          if (kept != notice) kept,
+      ];
+    });
+    _noticeTimers.add(shown);
+  }
+
+  void _ran(List<BridgeRan> ran) {
+    for (final run in ran) {
+      if (run.failure case final failure?) {
+        _notice('“${run.name}” did not run: $failure');
+      } else {
+        run.notices.forEach(_notice);
+      }
+    }
+  }
+
+  Future<void> press(String table, String row, String field) async {
+    await _applied;
+    try {
+      _ran(await workspace.press(table: table, row: row, field: field));
+    } on Object catch (error) {
+      report('Liquid did not run this button: $error');
+    }
+  }
+
+  Future<void> testAutomation(String automation) async {
+    await _applied;
+    try {
+      _ran([await workspace.test(automation: automation)]);
+    } on Object catch (error) {
+      report('Liquid did not test this Automation: $error');
+    }
+  }
+
   final open = ValueNotifier<OpenPage?>(null);
 
   final currentPage = ValueNotifier<PageViews?>(null);
@@ -294,6 +362,7 @@ class WorkspaceState {
         .then(
           (applied) {
             _show(change: null, read: null);
+            _ran(applied.ran);
             return applied;
           },
           onError: (Object error) {
@@ -328,6 +397,11 @@ class WorkspaceState {
     _listen(const BridgeResource(kind: BridgeResourceKind.areas), areas);
     final tables = _Reread(_readTables);
     _listen(const BridgeResource(kind: BridgeResourceKind.tables), tables);
+    final automations = _Reread(_readAutomations);
+    _listen(
+      const BridgeResource(kind: BridgeResourceKind.automations),
+      automations,
+    );
     _listen(
       const BridgeResource(kind: BridgeResourceKind.workspace),
       _Reread(_readNamed),
@@ -406,6 +480,11 @@ class WorkspaceState {
       read.addAll(answer.tables);
     } while (read.length < count);
     if (!_disposed) tables.value = read;
+  }
+
+  Future<void> _readAutomations() async {
+    final answer = await read(query(BridgeQueryKind.automations));
+    if (!_disposed) automations.value = answer.automations;
   }
 
   Future<void> rename(String page, String title) =>
@@ -512,8 +591,13 @@ class WorkspaceState {
     final followed = [..._followed];
     _followed.clear();
     await Future.wait(followed.map((subscription) => subscription.cancel()));
+    for (final timer in _noticeTimers) {
+      timer.cancel();
+    }
     areas.dispose();
     tables.dispose();
+    automations.dispose();
+    notices.dispose();
     named.dispose();
     folded.dispose();
     open.dispose();

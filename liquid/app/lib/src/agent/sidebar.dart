@@ -58,6 +58,7 @@ class Sidebar extends StatelessWidget {
     this.workspaces,
     this.agentProblem,
     this.onSettings,
+    this.onAutomations,
     this.onSearch,
     this.onNewSession,
     this.onShowSession,
@@ -74,6 +75,8 @@ class Sidebar extends StatelessWidget {
 
   final String? agentProblem;
   final VoidCallback? onSettings;
+
+  final VoidCallback? onAutomations;
 
   final VoidCallback? onSearch;
 
@@ -235,44 +238,99 @@ class Sidebar extends StatelessWidget {
               ],
             ),
           ),
-          if (onSettings case final onSettings?)
-            Material(
-              type: MaterialType.transparency,
-              child: Tooltip(
-                message: 'Settings',
-                child: Shortcuts(
-                  shortcuts: activateKeys,
-                  child: InkWell(
-                    onTap: onSettings,
-                    borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
-                    child: Container(
-                      height: WsMetrics.rowSide,
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: WsMetrics.space3,
-                      ),
-                      child: Row(
-                        children: [
-                          Icon(
-                            LucideIcons.settings,
-                            size: 14,
-                            color: ws.textMuted,
-                          ),
-                          const SizedBox(width: WsMetrics.space3),
-                          Expanded(
-                            child: Text(
-                              'Settings',
-                              style: TextStyle(color: ws.textMuted),
+          if ((workspace, onAutomations) case (
+            final workspace?,
+            final onAutomations?,
+          ))
+            ValueListenableBuilder(
+              valueListenable: workspace.automations,
+              builder: (context, automations, _) {
+                final attention = automations
+                    .where((automation) => automation.attention != null)
+                    .length;
+                return _FootRow(
+                  key: const Key('sidebar automations'),
+                  icon: LucideIcons.zap,
+                  label: 'Automations',
+                  onTap: onAutomations,
+                  trailing: attention == 0
+                      ? null
+                      : Row(
+                          mainAxisSize: MainAxisSize.min,
+                          spacing: WsMetrics.space1,
+                          children: [
+                            Icon(
+                              LucideIcons.triangleAlert,
+                              size: 12,
+                              color: ws.warning,
                             ),
-                          ),
-                          Hint(Keymap.of(context).label(Command.settings)),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-              ),
+                            Text(
+                              '$attention',
+                              style: TextStyle(
+                                fontSize: WsMetrics.fsSmall,
+                                color: ws.warning,
+                              ),
+                            ),
+                          ],
+                        ),
+                );
+              },
+            ),
+          if (onSettings case final onSettings?)
+            _FootRow(
+              icon: LucideIcons.settings,
+              label: 'Settings',
+              onTap: onSettings,
+              trailing: Hint(Keymap.of(context).label(Command.settings)),
             ),
         ],
+      ),
+    );
+  }
+}
+
+class _FootRow extends StatelessWidget {
+  const _FootRow({
+    super.key,
+    required this.icon,
+    required this.label,
+    required this.onTap,
+    this.trailing,
+  });
+
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+  final Widget? trailing;
+
+  @override
+  Widget build(BuildContext context) {
+    final ws = context.ws;
+    return Material(
+      type: MaterialType.transparency,
+      child: Tooltip(
+        message: label,
+        child: Shortcuts(
+          shortcuts: activateKeys,
+          child: InkWell(
+            onTap: onTap,
+            borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
+            child: Container(
+              height: WsMetrics.rowSide,
+              padding: const EdgeInsets.symmetric(horizontal: WsMetrics.space3),
+              child: Row(
+                children: [
+                  Icon(icon, size: 14, color: ws.textMuted),
+                  const SizedBox(width: WsMetrics.space3),
+                  Expanded(
+                    child: Text(label, style: TextStyle(color: ws.textMuted)),
+                  ),
+                  ?trailing,
+                ],
+              ),
+            ),
+          ),
+        ),
       ),
     );
   }

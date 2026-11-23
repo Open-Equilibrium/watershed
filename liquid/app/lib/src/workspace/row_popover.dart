@@ -25,6 +25,7 @@ class TableData {
     required this.database,
     required this.read,
     required this.write,
+    required this.press,
     required this.numbers,
     required this.days,
   });
@@ -34,6 +35,7 @@ class TableData {
   final BridgeDatabase database;
   final Future<BridgeAnswer> Function(BridgeQuery query) read;
   final Future<BridgeApplied> Function(BridgeMutation change) write;
+  final Future<void> Function(String row, String field) press;
   final NumberFormat numbers;
   final String days;
 
@@ -376,6 +378,14 @@ class _RowPopoverState extends State<RowPopover> {
               _picks[field.id]?.show();
             },
             child: Align(alignment: Alignment.centerLeft, child: shown),
+          ),
+        );
+      case BridgeFieldKind.button:
+        return Align(
+          alignment: Alignment.centerLeft,
+          child: CellButton(
+            label: field.name,
+            onPressed: () => unawaited(_data.press(widget.row.id, field.id)),
           ),
         );
       case BridgeFieldKind.formula:

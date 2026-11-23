@@ -24,6 +24,8 @@ import '../shortcuts/shortcut_store.dart';
 import '../theme/icons.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
+import '../workspace/automations.dart';
+import '../workspace/notices.dart';
 import '../workspace/power_bar.dart';
 import '../workspace/page_view.dart';
 import '../workspace/table_page.dart';
@@ -243,6 +245,7 @@ class _AgentShellState extends State<AgentShell> {
     HardwareKeyboard.instance.removeHandler(_liquidTap);
     _liquidAlone?.cancel();
     _powerBar.dispose();
+    _automations.dispose();
     widget.workspace?.open.removeListener(_pageOpened);
     _lifecycle.dispose();
     widget.state?.draft.removeListener(_applyDraft);
@@ -360,6 +363,8 @@ class _AgentShellState extends State<AgentShell> {
   };
 
   final _powerBar = ValueNotifier(false);
+
+  final _automations = ValueNotifier(false);
 
   Timer? _liquidAlone;
 
@@ -485,6 +490,9 @@ class _AgentShellState extends State<AgentShell> {
                       workspaces: widget.workspaces,
                       agentProblem: widget.agentProblem,
                       onSettings: _toggleSettings,
+                      onAutomations: widget.workspace == null
+                          ? null
+                          : () => _automations.value = true,
                       onSearch: widget.workspace == null
                           ? null
                           : () => _powerBar.value = true,
@@ -579,12 +587,22 @@ class _AgentShellState extends State<AgentShell> {
   Widget _withPowerBar(Widget child) {
     final workspace = widget.workspace;
     if (workspace == null) return child;
-    return ValueListenableBuilder(
-      valueListenable: _powerBar,
-      builder: (context, open, _) => Stack(
+    return ListenableBuilder(
+      listenable: Listenable.merge([_powerBar, _automations]),
+      builder: (context, _) => Stack(
         children: [
           child,
-          if (open)
+          if (_automations.value)
+            Positioned.fill(
+              child: AutomationsDialog(
+                state: workspace,
+                onClose: () {
+                  _automations.value = false;
+                  _focus.requestFocus();
+                },
+              ),
+            ),
+          if (_powerBar.value)
             Positioned.fill(
               child: PowerBar(
                 state: workspace,
@@ -596,6 +614,9 @@ class _AgentShellState extends State<AgentShell> {
                 onSettings: _toggleSettings,
               ),
             ),
+          Positioned.fill(
+            child: IgnorePointer(child: Notices(state: workspace)),
+          ),
         ],
       ),
     );
