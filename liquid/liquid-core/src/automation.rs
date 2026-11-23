@@ -652,6 +652,8 @@ impl<S: Store> Workspace<S> {
                 cause,
             },
             changes: Vec::new(),
+            heads: Vec::new(),
+            at: 0,
         };
         self.record(action, &touched, Vec::new(), Vec::new())?;
         Ok(id)

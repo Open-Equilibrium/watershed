@@ -10,6 +10,9 @@ mod id;
 mod model;
 mod mutation;
 mod order;
+mod patch;
+mod purge;
+mod revision;
 mod role;
 mod search;
 mod sort_key;
@@ -42,7 +45,7 @@ pub use formula::{
     Failure, Formula, MAX_FORMULA, MAX_NESTING, MAX_TEXT, Operand, Reference, Resolve, Syntax,
     Value,
 };
-pub use history::{Action, Document, Operation, Permission};
+pub use history::{Action, Document, Operation, Permission, Purge, RevertKind};
 pub use id::{
     ActionId, AreaId, AutomationId, BlockId, ElementId, FieldId, LineId, OptionId, PageId,
     PersonId, RoleId, RowId, TabId, ViewId,
@@ -52,6 +55,7 @@ pub use mutation::{
     Actor, Applied, Cell, Changed, Created, Error, FieldKind, Mutation, Origin, Place, Request,
     TextStyle,
 };
+pub use revision::{Entry, EntryQuery, SAVE_POINT_GAP_MS, TYPING_PAUSE_MS, Version};
 pub use role::{
     Allows, Capability, Grant, MAX_GRANTS, MAX_ROLE_NAME, MAX_ROLES, Role, RoleSetup, Target,
     Template,

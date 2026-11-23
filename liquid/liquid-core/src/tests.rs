@@ -124,6 +124,15 @@ impl Store for Flaky {
         self.inner.history(before, limit)
     }
 
+    fn history_of(
+        &mut self,
+        documents: &[Document],
+        before: Option<&ActionId>,
+        limit: usize,
+    ) -> Result<Vec<Action>, Error> {
+        self.inner.history_of(documents, before, limit)
+    }
+
     fn put_part(&mut self, upload: &str, index: u64, bytes: &[u8]) -> Result<(), Error> {
         if self.failing {
             return Err(Error::Storage("disk full".into()));

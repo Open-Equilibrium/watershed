@@ -87,6 +87,12 @@
     <div class="stage"><div class="scaler"><div class="win" id="w-ver" data-w="1240"></div></div></div>
   </section>
   <section>
+    <h3 class="sec">3b · Deleting for good</h3>
+    <p class="sub">Until now History keeps every text ever written, deleted text included (ADR-0250). "Delete earlier versions…" in Page history's menu, and in a Table's menu, keeps the Page or Table as it is now and removes everything only its earlier versions hold, from this device, for good. A deleted Table's History entry offers "Delete for good…". Both need Manage on what they delete, ask first and say what can no longer be brought back; their own History entry stays, without content, and can never be deleted itself. Retention rules and legal holds that keep content a company must keep follow with sync, on the Sync Server. History keeps that the changes happened, without what they were: their entries say "content deleted for good" and cannot be reverted, and a purged Table shows as "a deleted Table". Nothing syncs yet, so this covers the one device; with sync it needs its own design (client architecture, risk "Purge").</p>
+    <div class="stage"><div class="scaler"><div class="win bare" id="w-purge" data-w="1240"></div></div></div>
+    <div class="stage" style="margin-top:16px"><div class="scaler"><div class="win" id="w-purged" data-w="1240"></div></div></div>
+  </section>
+  <section>
     <h3 class="sec">4 · Workspace settings</h3>
     <p class="sub">The Settings dialog keeps the approved App sections and adds a Workspace group: General, with the name and the areas, beside the built Roles section. Each area's menu in the Explorer also renames it.</p>
     <div class="stage"><div class="scaler"><div class="win" id="w-set" data-w="1240"></div></div></div>
@@ -239,6 +245,35 @@ ${dbHead({synced:true})}<div class="tbl" style="--cols:96px 1fr 120px 110px"><di
 ${rows.slice(1,4).map(r=>`<div class="tr"><span>${r[0]}</span><span>${r[1]}</span><span><span class="tag ${r[3]}">${r[2]}</span></span><span class="num">€ ${r[4]}</span></div>`).join('')}</div>
 <div class="cap">Struck through: added since this version; restoring removes it.</div>
 </div></div>${vlist}</div></div>`,{w:1080})});
+
+// 3b · Deleting for good
+const purgeVer=`<div class="dlg" style="flex:none"><h4>Delete the earlier versions of “Household budget”?</h4>
+<p>The Page stays as it is now. Its earlier versions, and everything only they still hold, such as deleted text, leave this device for good.</p>
+<div class="flist">
+<div class="frow"><span class="ico">${I.clock}</span>6 versions, back to 30 Oct<span class="r">removed</span></div>
+<div class="frow"><span class="ico">${I.undo}</span>14 History entries<span class="r">kept, without their content</span></div>
+<div class="frow"><span class="ico">${I.db}</span>Expenses<span class="r">keeps its versions; delete them in its menu</span></div></div>
+<p>None of these changes can be reverted afterwards, and Restore version starts from now.</p>
+<div class="acts"><span class="btn dngp">Delete earlier versions</span><span class="sp"></span><span class="btn">Cancel <kbd>esc</kbd></span></div></div>`;
+const purgeTable=`<div class="dlg" style="flex:none"><h4>Delete “Bills” for good?</h4>
+<p>The Table was deleted today at 11:02. Its 12 rows and every earlier version of it leave this device for good.</p>
+<div class="flist">
+<div class="frow"><span class="ico">${I.undo}</span>Deleted Table “Bills”<span class="r">can no longer be reverted</span></div>
+<div class="frow"><span class="ico">${I.undo}</span>23 earlier History entries<span class="r">kept, as “a deleted Table”</span></div></div>
+<div class="acts"><span class="btn dngp">Delete for good</span><span class="sp"></span><span class="btn">Cancel <kbd>esc</kbd></span></div></div>`;
+document.getElementById('w-purge').innerHTML=`<div style="display:flex;gap:40px;align-items:flex-start">${purgeVer}${purgeTable}</div>`;
+const purgedList=`<div class="hl"><div class="flt"><span class="sel">All Pages<span class="c">⌄</span></span><span class="sel">Anyone<span class="c">⌄</span></span><span class="sel">Any origin<span class="c">⌄</span></span></div>
+<div style="overflow:hidden;flex:1">
+<div class="hday">Today</div>
+${he('11:20','Deleted the earlier versions of “Household budget”',`${you}<span>·</span><span class="org">App</span>`,1)}
+${he('11:02','Deleted a Table for good',`${you}<span>·</span><span class="org">App</span>`)}
+${he('10:30','<span style="color:var(--ws-text-faint)">Edited text · content deleted for good</span>',`${you}<span>·</span><span class="org">App</span><span>Household budget</span>`)}
+${he('10:12','<span style="color:var(--ws-text-faint)">Changed a deleted Table</span>',`${you}<span>·</span><span class="org">App</span>`)}
+</div></div>`;
+const purgedDetail=`<div class="hd2"><div style="display:flex;align-items:center;gap:10px"><h2>Edited text</h2><span style="margin-left:auto;opacity:.45" class="btn">${I.undo}Revert…</span></div>
+<div class="kv"><span class="l">By</span><span>You, in the app</span><span class="l">When</span><span>Today 10:30</span></div>
+<div class="cap">Its content was deleted for good at 11:20 with the earlier versions of Household budget, so it cannot be reverted.</div></div>`;
+frame('w-purged',{h:420,side:{sel:'hist'},head:bgHead,main:bgPage,over:modal('History',`<div class="hist">${purgedList}${purgedDetail}</div>`,{w:1060})});
 
 const snav=(on)=>`<div class="snav"><div class="h">App</div><div class="it">Appearance</div><div class="it">Shortcuts</div><div class="it">Diff</div><div class="h">Workspace</div><div class="it ${on=='gen'?'on':''}">General</div><div class="it ${on=='roles'?'on':''}">Roles</div></div>`;
 // 4 · Settings

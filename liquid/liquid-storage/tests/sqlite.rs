@@ -390,3 +390,52 @@ fn a_replica_written_by_the_openssl_build_still_opens() {
         .unwrap();
     assert!(problems.is_empty(), "{problems:?}");
 }
+
+#[test]
+fn a_page_s_earlier_versions_deleted_for_good_stay_gone_after_a_reopen() {
+    let scratch = Scratch::new("purge");
+    let (mut workspace, page, block) = lisbon(&scratch.db());
+    let secret = apply(
+        &mut workspace,
+        Mutation::EditText {
+            page: page.clone(),
+            block: block.clone(),
+            at: 0,
+            delete: 0,
+            insert: "hunter2 ".into(),
+        },
+    );
+    assert!(secret.is_none());
+    let typed = workspace.history(None, 1).unwrap().remove(0).id;
+    apply(
+        &mut workspace,
+        Mutation::EditText {
+            page: page.clone(),
+            block: block.clone(),
+            at: 0,
+            delete: 8,
+            insert: String::new(),
+        },
+    );
+    workspace
+        .purge(&owner(), &liquid_core::Purge::Page(page.clone()))
+        .unwrap();
+    drop(workspace);
+
+    let mut store = Sqlite::open(&scratch.db(), &KEY).unwrap();
+    let touching = store
+        .history_of(&[Document::Page(page.clone())], None, 100)
+        .unwrap();
+    assert!(matches!(touching[0].operation, Operation::Purge { .. }));
+    let mut workspace = Workspace::open(store).unwrap();
+    assert_eq!(
+        workspace.text(&page, &block).unwrap().unwrap(),
+        "Five days in Lisbon"
+    );
+    let records = serde_json::to_string(&workspace.history(None, 100).unwrap()).unwrap();
+    assert!(!records.contains("hunter2"));
+    assert_eq!(
+        workspace.revert(&owner(), &[typed]).unwrap_err(),
+        Error::Purged
+    );
+}

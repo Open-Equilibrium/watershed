@@ -37,9 +37,9 @@ pub struct Workspace<S: Store> {
 
 pub(crate) struct Loaded {
     pub doc: AutoCommit,
-    chunks: usize,
-    order: Option<Order>,
-    databases: HashMap<BlockId, database::Index>,
+    pub(crate) chunks: usize,
+    pub(crate) order: Option<Order>,
+    pub(crate) databases: HashMap<BlockId, database::Index>,
 }
 
 pub(crate) struct Written {
@@ -82,6 +82,8 @@ impl<S: Store> Workspace<S> {
             permission: Permission::Owner,
             operation: Operation::CreateWorkspace,
             changes: Vec::new(),
+            heads: Vec::new(),
+            at: 0,
         };
         this.record(
             action,
@@ -146,7 +148,7 @@ impl<S: Store> Workspace<S> {
         self.store.index(&tables, complete.then_some(INDEX_VERSION))
     }
 
-    fn page_text(&mut self, page: &PageId) -> Result<Vec<IndexWrite>, Error> {
+    pub(crate) fn page_text(&mut self, page: &PageId) -> Result<Vec<IndexWrite>, Error> {
         let blocks: Vec<BlockId> = self
             .views(page, 0, usize::MAX)?
             .into_iter()
@@ -276,6 +278,8 @@ impl<S: Store> Workspace<S> {
             permission,
             operation: Operation::Mutation(request.mutation),
             changes: Vec::new(),
+            heads: Vec::new(),
+            at: 0,
         };
         self.record(action, &written.touched, written.new, index)?;
         let ran = match (trigger, &written.created) {
@@ -1062,7 +1066,7 @@ impl<S: Store> Workspace<S> {
         ))
     }
 
-    fn area_of(&mut self, page: &PageId) -> Result<AreaId, Error> {
+    pub(crate) fn area_of(&mut self, page: &PageId) -> Result<AreaId, Error> {
         for area in model::areas(self.doc(&Document::Workspace)?) {
             let area_doc = self.doc(&Document::Area(area.id.clone()))?;
             if model::live(area_doc, PAGES, page.as_str()).is_some() {
@@ -1768,11 +1772,25 @@ impl<S: Store> Workspace<S> {
 
     pub(crate) fn record(
         &mut self,
-        mut action: Action,
+        action: Action,
         touched: &[Document],
         new: Vec<(Document, AutoCommit)>,
         index: Vec<IndexWrite>,
     ) -> Result<(), Error> {
+        self.record_with(action, touched, new, index, Recorded::default())
+    }
+
+    pub(crate) fn record_with(
+        &mut self,
+        mut action: Action,
+        touched: &[Document],
+        new: Vec<(Document, AutoCommit)>,
+        index: Vec<IndexWrite>,
+        recorded: Recorded,
+    ) -> Result<(), Error> {
+        action.at = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_or(0, |elapsed| elapsed.as_millis() as i64);
         for (document, doc) in new {
             let loaded = Loaded {
                 doc,
@@ -1786,7 +1804,14 @@ impl<S: Store> Workspace<S> {
         let time = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map_or(0, |elapsed| elapsed.as_secs() as i64);
-        let mut writes = Vec::new();
+        let mut writes = recorded.writes;
+        for (document, hash, chunk) in recorded.merged {
+            action.changes.push((document.clone(), hash));
+            if let Some(loaded) = self.docs.get_mut(&document) {
+                loaded.chunks += 1;
+            }
+            writes.push(Write::Append { document, chunk });
+        }
         for document in touched {
             let Some(loaded) = self.docs.get_mut(document) else {
                 continue;
@@ -1809,19 +1834,44 @@ impl<S: Store> Workspace<S> {
                 loaded.chunks += 1;
             }
         }
+        let mut documents: Vec<Document> = action
+            .changes
+            .iter()
+            .map(|(document, _)| document.clone())
+            .collect();
+        documents.sort_by_key(Document::key);
+        documents.dedup();
+        for document in documents {
+            if let Some(loaded) = self.docs.get_mut(&document) {
+                action.heads.push((document, loaded.doc.get_heads()));
+            }
+        }
         let commit = Commit {
             action: &action,
             writes,
             index,
+            redact: recorded.redact,
         };
         if let Err(error) = self.store.commit(&commit) {
-            for document in touched {
+            for document in touched.iter().chain(&recorded.dropped) {
                 self.docs.remove(document);
             }
             return Err(error);
         }
         Ok(())
     }
+}
+
+#[derive(Default)]
+pub(crate) struct Recorded {
+    pub(crate) merged: Vec<(Document, automerge::ChangeHash, Vec<u8>)>,
+    pub(crate) writes: Vec<Write>,
+    pub(crate) redact: Vec<Action>,
+    pub(crate) dropped: Vec<Document>,
+}
+
+pub(crate) fn header(action: &Action) -> String {
+    serde_json::to_string(&Header::of(action)).expect("a serializable header")
 }
 
 fn trigger(mutation: &Mutation) -> Option<(crate::Trigger, Option<RowId>)> {
@@ -1858,7 +1908,7 @@ fn add_text_block(
     Ok((block, view))
 }
 
-fn page_entry(page: &PageId, title: &str) -> IndexWrite {
+pub(crate) fn page_entry(page: &PageId, title: &str) -> IndexWrite {
     IndexWrite {
         found: Found::Page,
         id: page.to_string(),
@@ -1869,7 +1919,7 @@ fn page_entry(page: &PageId, title: &str) -> IndexWrite {
     }
 }
 
-fn table_entry(table: &BlockId, name: Option<&str>) -> IndexWrite {
+pub(crate) fn table_entry(table: &BlockId, name: Option<&str>) -> IndexWrite {
     IndexWrite {
         found: Found::Table,
         id: table.to_string(),
