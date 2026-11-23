@@ -81,7 +81,7 @@ for raw in sys.stdin:
             "protocolVersion": 1, "agentCapabilities": {"loadSession": False}, "authMethods": [],
             "agentInfo": {"name": "scripted", "version": "0.0.1"}}})
     elif method == "session/new":
-        sid = f"s{len(sessions) + 1}"
+        sid = f"s{os.getpid()}-{len(sessions) + 1}"
         sessions[sid] = params.get("cwd") or os.getcwd()
         cancelled[sid] = threading.Event()
         send({"jsonrpc": "2.0", "id": mid, "result": {"sessionId": sid}})
@@ -91,7 +91,7 @@ for raw in sys.stdin:
         text = "".join(p.get("text", "") for p in params.get("prompt", []) if p.get("type") == "text")
         lines = [line.split("<")[0].strip() for line in text.splitlines()]
         handoff = "Imported conversation history from the previous host" in text
-        script = "" if handoff else next((line for line in lines if line.startswith(("append ", "stream ")) or line in ("ask", "wait", "plan", "fill")), "")
+        script = "" if handoff else next((line for line in reversed(lines) if line.startswith(("append ", "stream ")) or line in ("ask", "wait", "plan", "fill")), "")
         threading.Thread(target=prompt, args=(mid, sid, script)).start()
     elif method == "session/cancel":
         cancelled[params["sessionId"]].set()

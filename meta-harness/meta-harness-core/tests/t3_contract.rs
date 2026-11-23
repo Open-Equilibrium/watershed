@@ -2963,6 +2963,12 @@ async fn concurrent_repeats_of_one_move_out_return_the_same_package() {
     let (service_a, host_a) = start_codex(&dir.path().join("host-a")).await;
     let project_a = host_a.project(&repo_a).await.unwrap();
     let thread = project_a.start(codex_start("append first")).await.unwrap();
+    wait(&thread, completed(1)).await;
+    thread.send("wait", false).await.unwrap();
+    wait(&thread, |s| {
+        s.turns.iter().any(|t| t.status == TurnStatus::Running)
+    })
+    .await;
     thread.send("append second", false).await.unwrap();
     wait(&thread, |s| {
         s.turns.iter().any(|t| t.status == TurnStatus::Queued)

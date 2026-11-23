@@ -1,5 +1,5 @@
 # The T3 Code release Meta-Harness pins (ADR-0281) and the SHA-256 of each archive the
 # release's SHA256SUMS lists. An upgrade changes this file after the contract tests pass.
-version 0.1.9
-darwin-arm64 7d2eb8c0687b70ca03a9d35498381852d3792983589e82d1fb1831c08f0b2301
-linux-x64 0141025335da334759cecd8db3483e09772f3600ca03674698524e7d94291362
+version 0.1.11
+darwin-arm64 4bc22e16a2e48d868ad8c4b9d6c8e031be1c566ce31c28267955c2986a70e95f
+linux-x64 2b691c07f5bcb5adea4a863d5324aae7db21bd6d82280cec7787836dcaa013e1
