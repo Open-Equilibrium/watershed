@@ -604,8 +604,6 @@ jobs:
         working-directory: liquid/app
         run: xcodebuild test -workspace macos/Runner.xcworkspace -scheme Runner -destination 'platform=macOS'
 
-  # Branch protection requires these two names. Each passes only when every job passed or
-  # was skipped because the scope did not select it, so splitting jobs needs no ruleset change.
   windows:
     name: Meta-Harness (windows-2025)
     needs: scope
@@ -634,6 +632,8 @@ jobs:
           -p meta-harness-cli
           --all-targets
 
+  # Branch protection requires these two names. Each passes only when every job passed or
+  # was skipped because the scope did not select it, so splitting jobs needs no ruleset change.
   gates:
     name: Flow Agent gates (${{ matrix.os }}) [${{ github.event_name }}]
     needs: [scope, checks, test, flow-agent, flow-coverage, m11-evidence, liquid, windows]

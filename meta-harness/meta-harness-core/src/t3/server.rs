@@ -43,7 +43,16 @@ impl Server {
                 .kill_on_drop(true);
             let mut child =
                 crate::spawn(&mut command).map_err(|e| format!("Could not start T3: {e}"))?;
-            let tree = child.id().and_then(crate::platform::hold_tree);
+            let tree = match child.id() {
+                Some(pid) => match crate::platform::hold_tree(pid) {
+                    Some(tree) => Some(tree),
+                    None => {
+                        let _ = child.kill().await;
+                        return Err("Could not hold T3 and its agents in one job".to_owned());
+                    }
+                },
+                None => None,
+            };
             match wait_for_origin(&runtime, &mut child).await? {
                 Some(origin) => {
                     return Ok(Self {
