@@ -31,7 +31,7 @@ fn facts() -> Facts {
 }
 
 #[test]
-fn a_seal_and_its_pending_pause_are_recorded_together_or_not_at_all() {
+fn a_seal_and_its_pending_pause_are_recorded_together_or_not_at_all_and_the_pause_waits() {
     let db = db();
     host_move::begin(&db, "t1", "/repo", "tr-1", ("addr", "studio", "env"), 10).unwrap();
     host_move::hand(&db, "tr-1", "{}", 11).unwrap();
@@ -47,23 +47,10 @@ fn a_seal_and_its_pending_pause_are_recorded_together_or_not_at_all() {
     );
     db.execute_batch("DROP TRIGGER refuse_pause").unwrap();
     host_move::seal(&db, "tr-1", "studio", 13).unwrap();
-    assert_eq!(
-        host_move::pauses_pending(&db).unwrap(),
-        vec![("t1".to_owned(), "/repo".to_owned())]
-    );
-}
-
-#[test]
-fn a_pause_that_did_not_finish_stays_pending_until_it_is_done() {
-    let db = db();
-    host_move::begin(&db, "t1", "/repo", "tr-1", ("addr", "studio", "env"), 10).unwrap();
-    host_move::hand(&db, "tr-1", "{}", 11).unwrap();
-    host_move::seal(&db, "tr-1", "studio", 12).unwrap();
-    host_move::seal(&db, "tr-1", "studio", 13).unwrap();
-    assert_eq!(
-        host_move::pauses_pending(&db).unwrap(),
-        vec![("t1".to_owned(), "/repo".to_owned())]
-    );
+    let pending = vec![("t1".to_owned(), "/repo".to_owned())];
+    assert_eq!(host_move::pauses_pending(&db).unwrap(), pending);
+    host_move::seal(&db, "tr-1", "studio", 14).unwrap();
+    assert_eq!(host_move::pauses_pending(&db).unwrap(), pending);
     host_move::pause_done(&db, "t1").unwrap();
     assert!(host_move::pauses_pending(&db).unwrap().is_empty());
 }
@@ -100,6 +87,12 @@ fn a_session_moves_only_when_it_is_claude_code_or_codex_and_nothing_blocks_it() 
         )
     );
     assert_eq!(
+        blocked(|f| f.queued_attachments = true, None).as_deref(),
+        Some(
+            "A queued message has attachments, which a move does not carry, so the session cannot move yet."
+        )
+    );
+    assert_eq!(
         blocked(|_| {}, Some(State::Moving)).as_deref(),
         Some("This session is already moving to another host.")
     );
@@ -107,6 +100,9 @@ fn a_session_moves_only_when_it_is_claude_code_or_codex_and_nothing_blocks_it() 
         blocked(|_| {}, Some(State::Sealed)).as_deref(),
         Some("This session has already moved to another host.")
     );
+    assert!(!host_move::check(&facts(), None).moved);
+    assert!(!host_move::check(&facts(), Some(State::Moving)).moved);
+    assert!(host_move::check(&facts(), Some(State::Sealed)).moved);
 }
 
 #[test]
@@ -226,23 +222,11 @@ fn a_handoff_over_the_budget_is_refused_with_its_size_in_bytes() {
 }
 
 #[test]
-fn a_session_with_an_attached_queued_message_cannot_move_yet() {
-    let mut facts = facts();
-    facts.queued_attachments = true;
-    assert_eq!(
-        host_move::check(&facts, None).blocked.as_deref(),
-        Some(
-            "A queued message has attachments, which a move does not carry, so the session cannot move yet."
-        )
-    );
-}
-
-#[test]
 fn a_remote_that_carries_a_credential_blocks_the_move_and_an_ssh_user_does_not() {
-    let blocked = |remote: &str| {
+    let check = |remote: &str| {
         let mut facts = facts();
         facts.remote_url = Some(remote.to_owned());
-        host_move::check(&facts, None).blocked
+        host_move::check(&facts, None)
     };
     for remote in [
         "git@example.invalid:acme/app.git",
@@ -250,7 +234,7 @@ fn a_remote_that_carries_a_credential_blocks_the_move_and_an_ssh_user_does_not()
         "https://example.invalid/acme/app.git",
         "ssh://git@[::1]/acme/app.git",
     ] {
-        assert_eq!(blocked(remote), None, "{remote}");
+        assert_eq!(check(remote).blocked, None, "{remote}");
     }
     for remote in [
         "https://ghp_token@example.invalid/acme/app.git",
@@ -260,31 +244,16 @@ fn a_remote_that_carries_a_credential_blocks_the_move_and_an_ssh_user_does_not()
         "https::https://token@example.invalid/acme/app.git",
         "ext::ssh example.invalid git-upload-pack acme/app.git",
     ] {
-        assert!(blocked(remote).is_some(), "{remote}");
+        let checked = check(remote);
+        assert!(checked.blocked.is_some(), "{remote}");
+        assert_eq!(checked.remote_url, None, "{remote}");
     }
-    let mut helper = facts();
-    helper.remote_url = Some("https::https://token@example.invalid/acme/app.git".to_owned());
-    assert_eq!(host_move::check(&helper, None).remote_url, None);
-}
-
-#[test]
-fn a_check_omits_a_remote_that_carries_a_credential() {
-    let mut facts = facts();
-    facts.remote_url = Some("https://ghp_token@example.invalid/acme/app.git".to_owned());
-    let check = host_move::check(&facts, None);
-    assert_eq!(check.remote_url, None);
-    assert!(check.blocked.is_some());
     assert_eq!(
-        host_move::check(&self::facts(), None).remote_url.as_deref(),
+        check("git@example.invalid:acme/app.git")
+            .remote_url
+            .as_deref(),
         Some("git@example.invalid:acme/app.git")
     );
-}
-
-#[test]
-fn a_check_says_whether_the_session_has_already_moved() {
-    assert!(!host_move::check(&facts(), None).moved);
-    assert!(!host_move::check(&facts(), Some(State::Moving)).moved);
-    assert!(host_move::check(&facts(), Some(State::Sealed)).moved);
 }
 
 #[test]
@@ -314,8 +283,7 @@ fn an_arrival_row_is_kept_per_transfer() {
 
 #[test]
 fn a_transfer_serves_only_the_session_that_began_it() {
-    let db = Connection::open_in_memory().unwrap();
-    db.execute_batch(SCHEMA).unwrap();
+    let db = db();
     host_move::begin(&db, "t1", "/repo", "tr-1", ("addr", "studio", "env"), 10).unwrap();
 
     assert_eq!(host_move::owned_by(&db, "tr-1", "t1"), Ok(()));
