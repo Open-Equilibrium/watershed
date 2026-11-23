@@ -439,3 +439,31 @@ fn a_page_s_earlier_versions_deleted_for_good_stay_gone_after_a_reopen() {
         Error::Purged
     );
 }
+
+#[test]
+fn a_version_before_an_undo_restores_from_the_disk() {
+    let scratch = Scratch::new("restore");
+    let (mut workspace, page, block) = lisbon(&scratch.db());
+    apply(
+        &mut workspace,
+        Mutation::EditText {
+            page: page.clone(),
+            block: block.clone(),
+            at: 0,
+            delete: 0,
+            insert: "Ours: ".into(),
+        },
+    );
+    let typed = workspace.history(None, 1).unwrap().remove(0).id;
+    workspace.undo(&owner()).unwrap().unwrap();
+    workspace.redo(&owner()).unwrap().unwrap();
+    workspace
+        .revert(&owner(), std::slice::from_ref(&typed))
+        .unwrap();
+    workspace.close_page(&page);
+    workspace.restore(&owner(), &page, &typed).unwrap();
+    assert_eq!(
+        workspace.text(&page, &block).unwrap().unwrap(),
+        "Ours: Five days in Lisbon"
+    );
+}

@@ -5,6 +5,7 @@ mod convert;
 mod database;
 mod details;
 mod drawing;
+mod history;
 mod hosts;
 mod media;
 mod moves;

@@ -3,10 +3,12 @@ use std::path::Path;
 use std::sync::{Mutex, MutexGuard};
 
 use liquid_core::{
-    Actor, AreaId, AutomationId, BlockId, BlockKind, Created, Document, Error, FieldId, Found,
-    Origin, PageId, PersonId, Ran, Request, RowId, RowQuery, Workspace,
+    Actor, Applied, AreaId, AutomationId, BlockId, BlockKind, Created, Document, Error, FieldId,
+    Found, Origin, PageId, PersonId, Ran, Request, RowId, RowQuery, Workspace,
 };
 use liquid_storage::Sqlite;
+
+use crate::replica_store::Replica;
 
 use super::automation::{BridgeRan, BridgeWorkspaceAutomation};
 use super::calculation::BridgeLine;
@@ -29,13 +31,14 @@ use crate::subscriptions::Subscriptions;
 #[flutter_rust_bridge::frb(opaque)]
 pub struct LiquidWorkspace {
     inner: Mutex<Inner>,
-    _lock: ReplicaLock,
+    _lock: Option<ReplicaLock>,
+    read_only: bool,
 }
 
 struct ReplicaLock(File);
 
 pub(super) struct Inner {
-    pub(super) workspace: Workspace<Sqlite>,
+    pub(super) workspace: Workspace<Replica>,
     subscriptions: Subscriptions,
 }
 
@@ -109,10 +112,11 @@ impl LiquidWorkspace {
         take_lock(&lock)?;
         let path = dir.join("replica.db");
         let key = replica_key(dir, keys, path.exists())?;
-        let workspace = match Workspace::open(Sqlite::open(&path, &key).map_err(message)?) {
+        let disk = Replica::Disk(Sqlite::open(&path, &key).map_err(message)?);
+        let workspace = match Workspace::open(disk) {
             Ok(workspace) => workspace,
             Err(Error::NotFound) => {
-                let store = Sqlite::open(&path, &key).map_err(message)?;
+                let store = Replica::Disk(Sqlite::open(&path, &key).map_err(message)?);
                 Workspace::create(PersonId::new(random_hex()?), store).map_err(message)?
             }
             Err(error) => return Err(message(error)),
@@ -122,11 +126,68 @@ impl LiquidWorkspace {
                 workspace,
                 subscriptions: Subscriptions::default(),
             }),
-            _lock: ReplicaLock(lock),
+            _lock: Some(ReplicaLock(lock)),
+            read_only: false,
         })
     }
 
+    #[flutter_rust_bridge::frb(ignore)]
+    pub(crate) fn version(documents: Vec<(Document, Vec<u8>)>) -> Result<LiquidWorkspace, String> {
+        let store = Replica::Version(liquid_core::MemoryStore::holding(documents));
+        Ok(Self {
+            inner: Mutex::new(Inner {
+                workspace: Workspace::open(store).map_err(message)?,
+                subscriptions: Subscriptions::default(),
+            }),
+            _lock: None,
+            read_only: true,
+        })
+    }
+
+    #[flutter_rust_bridge::frb(ignore)]
+    pub(crate) fn change(
+        &self,
+        change: impl FnOnce(&mut Workspace<Replica>, &Actor) -> Result<Applied, Error>,
+    ) -> Result<String, Error> {
+        if self.read_only {
+            return Err(Error::NotAllowed);
+        }
+        let mut inner = self.state().map_err(Error::Storage)?;
+        let actor = Actor::Person(inner.workspace.owner().clone());
+        let applied = change(&mut inner.workspace, &actor);
+        if let Ok(applied) = &applied {
+            for changed in &applied.changed {
+                inner.notify(BridgeResource::of(changed));
+            }
+        }
+        inner.release_unfollowed();
+        applied.map(|applied| applied.action.to_string())
+    }
+
+    #[flutter_rust_bridge::frb(ignore)]
+    pub(crate) fn change_maybe(
+        &self,
+        change: impl FnOnce(&mut Workspace<Replica>, &Actor) -> Result<Option<Applied>, Error>,
+    ) -> Result<bool, String> {
+        let mut done = false;
+        let outcome = self.change(|workspace, actor| match change(workspace, actor)? {
+            Some(applied) => {
+                done = true;
+                Ok(applied)
+            }
+            None => Err(Error::NoChange),
+        });
+        match outcome {
+            Ok(_) => Ok(done),
+            Err(Error::NoChange) => Ok(false),
+            Err(error) => Err(message(error)),
+        }
+    }
+
     pub fn apply(&self, mutation: BridgeMutation) -> Result<BridgeApplied, String> {
+        if self.read_only {
+            return Err("a version is read-only".into());
+        }
         let mutation = mutation.to_core()?;
         let mut inner = self.state()?;
         let actor = Actor::Person(inner.workspace.owner().clone());
@@ -238,7 +299,7 @@ impl LiquidWorkspace {
     }
 
     fn read(
-        workspace: &mut Workspace<Sqlite>,
+        workspace: &mut Workspace<Replica>,
         query: &BridgeQuery,
         start: usize,
         limit: usize,

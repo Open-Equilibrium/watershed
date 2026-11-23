@@ -72,6 +72,26 @@ pub(crate) fn undone(newest_first: &[Action]) -> HashSet<ActionId> {
     undone
 }
 
+fn reverter<'a>(recent: &'a [Action], id: &ActionId) -> Option<&'a Action> {
+    recent.iter().find(|action| {
+        matches!(&action.operation, Operation::Revert { reverted, .. } if reverted.contains(id))
+    })
+}
+
+fn carrier(recent: &[Action], id: &ActionId) -> ActionId {
+    let mut current = id.clone();
+    for _ in 0..recent.len() {
+        let Some(undo) = reverter(recent, &current) else {
+            break;
+        };
+        let Some(redo) = reverter(recent, &undo.id) else {
+            break;
+        };
+        current = redo.id.clone();
+    }
+    current
+}
+
 fn revertable(action: &Action) -> bool {
     matches!(
         action.operation,
@@ -360,7 +380,9 @@ impl<S: Store> Workspace<S> {
                 title: self.title(&action, &titles, &known),
                 page: page_of(&action),
                 undone: undone.contains(&action.id),
-                revertable: revertable(&action) && !undone.contains(&action.id),
+                revertable: revertable(&action)
+                    && !action.changes.is_empty()
+                    && !undone.contains(&action.id),
                 purged,
             });
             last = Some(action);
@@ -396,7 +418,9 @@ impl<S: Store> Workspace<S> {
 
     pub fn revert(&mut self, actor: &Actor, ids: &[ActionId]) -> Result<Applied, Error> {
         self.permit(actor)?;
-        let actions = self.actions(ids)?;
+        let recent = self.store.history(None, SCAN)?;
+        let carriers: Vec<ActionId> = ids.iter().map(|id| carrier(&recent, id)).collect();
+        let actions = self.actions(&carriers)?;
         if actions.iter().any(|action| !revertable(action)) {
             return Err(Error::Purged);
         }
@@ -411,6 +435,9 @@ impl<S: Store> Workspace<S> {
     ) -> Result<Applied, Error> {
         let mut steps: Vec<(Document, ChangeHash)> = Vec::new();
         for action in actions {
+            if action.changes.is_empty() {
+                return Err(Error::Purged);
+            }
             for (document, hash) in &action.changes {
                 let doc = self.doc(document).map_err(|_| Error::Purged)?;
                 let change = doc.get_change_by_hash(hash).ok_or(Error::Purged)?;
@@ -746,6 +773,14 @@ impl<S: Store> Workspace<S> {
         page: &PageId,
         to: &ActionId,
     ) -> Result<Workspace<MemoryStore>, Error> {
+        Workspace::open(MemoryStore::holding(self.version_documents(page, to)?))
+    }
+
+    pub fn version_documents(
+        &mut self,
+        page: &PageId,
+        to: &ActionId,
+    ) -> Result<Vec<(Document, Vec<u8>)>, Error> {
         let mut documents = vec![Document::Workspace];
         for area in self.areas()? {
             documents.push(Document::Area(area.id));
@@ -770,6 +805,6 @@ impl<S: Store> Workspace<S> {
             };
             saved.push((document, bytes));
         }
-        Workspace::open(MemoryStore::holding(saved))
+        Ok(saved)
     }
 }

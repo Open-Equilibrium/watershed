@@ -180,7 +180,10 @@ fn a_revert_records_a_new_action_that_undoes_only_the_one_it_reverts() {
     let first = budget.set(&rent, 950.0);
     budget.set(&food, 84.2);
 
-    let reverted = budget.workspace.revert(&owner(), std::slice::from_ref(&first)).unwrap();
+    let reverted = budget
+        .workspace
+        .revert(&owner(), std::slice::from_ref(&first))
+        .unwrap();
     assert!(
         reverted
             .changed
@@ -421,4 +424,73 @@ fn a_deleted_table_deleted_for_good_leaves_only_that_it_was() {
         .collect();
     assert_eq!(titles[0], "Deleted a Table for good");
     assert!(titles.iter().all(|title| !title.contains("Expenses")));
+}
+
+#[test]
+fn an_undone_edit_stays_undone_once_its_page_loads_again() {
+    let mut budget = Budget::new();
+    budget.typed(0, "Rent");
+    budget.workspace.close_page(&budget.page.clone());
+    budget.workspace.undo(&owner()).unwrap().unwrap();
+    budget.workspace.close_page(&budget.page.clone());
+    assert_eq!(budget.text(), "");
+}
+
+#[test]
+fn reverting_an_edit_that_was_undone_and_redone_reverts_what_now_carries_it() {
+    let mut budget = Budget::new();
+    let typed = budget.typed(0, "Rent");
+    budget.workspace.undo(&owner()).unwrap().unwrap();
+    budget.workspace.redo(&owner()).unwrap().unwrap();
+    assert_eq!(budget.text(), "Rent");
+    budget
+        .workspace
+        .revert(&owner(), std::slice::from_ref(&typed))
+        .unwrap();
+    assert_eq!(budget.text(), "");
+    let entry = budget
+        .entries()
+        .into_iter()
+        .find(|entry| entry.actions.contains(&typed))
+        .unwrap();
+    assert!(entry.undone);
+}
+
+#[test]
+fn a_version_before_an_undo_and_a_revert_can_be_restored() {
+    let mut budget = Budget::new();
+    let typed = budget.typed(0, "Rent");
+    budget.workspace.undo(&owner()).unwrap().unwrap();
+    budget.workspace.redo(&owner()).unwrap().unwrap();
+    budget
+        .workspace
+        .revert(&owner(), std::slice::from_ref(&typed))
+        .unwrap();
+    assert_eq!(budget.text(), "");
+    let page = budget.page.clone();
+    budget.workspace.close_page(&page);
+    let versions = budget.workspace.versions(&page).unwrap();
+    budget.workspace.preview(&page, &versions[0].after).unwrap();
+    budget.workspace.close_page(&page);
+    budget.workspace.restore(&owner(), &page, &typed).unwrap();
+    assert_eq!(budget.text(), "Rent");
+}
+
+#[test]
+fn an_undone_and_redone_edit_whose_page_was_purged_cannot_be_reverted() {
+    let mut budget = Budget::new();
+    let typed = budget.typed(0, "Rent");
+    budget.workspace.undo(&owner()).unwrap().unwrap();
+    budget.workspace.redo(&owner()).unwrap().unwrap();
+    budget
+        .workspace
+        .purge(&owner(), &Purge::Page(budget.page.clone()))
+        .unwrap();
+    assert_eq!(
+        budget
+            .workspace
+            .revert(&owner(), std::slice::from_ref(&typed))
+            .unwrap_err(),
+        Error::Purged
+    );
 }

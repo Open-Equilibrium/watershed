@@ -411,6 +411,10 @@ pub(crate) fn message(error: Error) -> String {
             format!("its Role allows no {capability} on “{table}”")
         }
         Error::Changed => "the file changed while it was added; add it again".into(),
+        Error::Conflict => {
+            "a later change touched the same thing; restore a version instead".into()
+        }
+        Error::Purged => "its content was deleted for good".into(),
         Error::Random => "the random source failed".into(),
         Error::Document(message) | Error::Storage(message) => message,
     }

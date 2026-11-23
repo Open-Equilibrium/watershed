@@ -9,6 +9,7 @@ import 'calculation.dart';
 import 'chart.dart';
 import 'database.dart';
 import 'drawing.dart';
+import 'history.dart';
 import 'media.dart';
 
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
@@ -16,7 +17,7 @@ import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 import 'role.dart';
 import 'workspace.dart';
 
-// These functions are ignored because they are not marked as `pub`: `notify`, `open_lock`, `open_with`, `read`, `release_unfollowed`, `reported`, `row_query`, `state`, `take_lock`, `watch`
+// These functions are ignored because they are not marked as `pub`: `change_maybe`, `change`, `notify`, `open_lock`, `open_with`, `read`, `release_unfollowed`, `reported`, `row_query`, `state`, `take_lock`, `version`, `watch`
 // These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `Inner`, `ReplicaLock`
 // These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `drop`
 
@@ -30,6 +31,8 @@ abstract class LiquidWorkspace implements RustOpaqueInterface {
 
   Future<void> close({required PlatformInt64 subscription});
 
+  Future<List<BridgeEntry>> history({required BridgeEntryQuery asked});
+
   static Future<LiquidWorkspace> open({required String dir}) =>
       RustLib.instance.api.crateApiReplicaLiquidWorkspaceOpen(dir: dir);
 
@@ -39,13 +42,23 @@ abstract class LiquidWorkspace implements RustOpaqueInterface {
     required String field,
   });
 
+  Future<LiquidWorkspace> preview({required String page, required String to});
+
+  Future<void> purge({String? page, String? table});
+
   Future<BridgeAnswer> query({required BridgeQuery query});
 
   Future<Uint8List> readAttachment({required String attachment});
 
+  Future<bool> redo();
+
   Future<void> remember({required String key, String? value});
 
   Future<String?> remembered({required String key});
+
+  Future<void> restore({required String page, required String to});
+
+  Future<BridgeReverted> revert({required List<String> actions});
 
   Future<void> saveAttachment({
     required String attachment,
@@ -58,4 +71,8 @@ abstract class LiquidWorkspace implements RustOpaqueInterface {
   });
 
   Future<BridgeRan> test({required String automation});
+
+  Future<bool> undo();
+
+  Future<List<BridgeVersion>> versions({required String page});
 }
