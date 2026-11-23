@@ -360,9 +360,9 @@ async fn a_routine_wakes_the_profile_thread_and_moves_with_it_to_the_next_one() 
     assert_eq!(upserts[1]["requireExisting"], true);
     assert_eq!(upserts[1]["schedule"], bound_task("x", "y")["schedule"]);
     assert!(upserts[1].get("lastRunStatus").is_none());
-    assert!(
-        upserts[2].get("id").is_none(),
-        "a restored routine is saved anew"
+    assert_eq!(
+        upserts[2]["id"], "task-1",
+        "a restored routine keeps its id"
     );
     assert!(upserts[2].get("requireExisting").is_none());
 }

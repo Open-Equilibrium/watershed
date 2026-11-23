@@ -450,28 +450,42 @@ async fn notice(
     thread: &Thread,
     turn: Option<u64>,
 ) -> Result<(), String> {
-    let now = Snapshot {
-        instructions: agents::instructions(agent)?,
-        routines: thread.routine_tasks().await?,
-        fresh: false,
-    };
+    let now = snapshot(agent, thread).await?;
     let seen = agents::seen(&shared.store.db(), &agent.id)?;
-    let held = turn.is_none_or(|turn| started_by_routine(thread, turn));
-    let mut found = agents::differences(&seen, &now);
-    found.retain(|(kind, _, after)| {
-        *kind != AgentChangeKind::Name || after.as_deref() != Some(agent.name.as_str())
-    });
-    if held {
-        for (kind, before, after) in found.iter().rev() {
-            if *kind != AgentChangeKind::Name {
-                restore(shared, agent, *kind, after, before).await?;
-            }
-        }
-    } else {
-        agents::set_seen(&shared.store.db(), &agent.id, &now)?;
+    if seen.fresh {
+        return agents::set_seen(&shared.store.db(), &agent.id, &now);
     }
-    for change in found {
-        if !held && let (AgentChangeKind::Name, Some(name)) = (change.0, &change.2) {
+    let routine = turn.is_none_or(|turn| started_by_routine(thread, turn));
+    let pending: Vec<_> = agents::changes(&shared.store.db(), &agent.id)?
+        .into_iter()
+        .filter(|change| change.held && !change.undone)
+        .map(|change| (change.kind, change.before, change.after))
+        .collect();
+    let (held, kept): (Vec<_>, Vec<_>) = agents::differences(&seen, &now)
+        .into_iter()
+        .filter(|(kind, _, after)| {
+            *kind != AgentChangeKind::Name || after.as_deref() != Some(agent.name.as_str())
+        })
+        .partition(|change| routine || pending.contains(change));
+    for change in &held {
+        if !pending.contains(change) {
+            agents::record(
+                &shared.store.db(),
+                &agent.id,
+                thread.id(),
+                turn,
+                true,
+                change.clone(),
+            )?;
+        }
+    }
+    for (kind, before, after) in held.iter().rev() {
+        if *kind != AgentChangeKind::Name {
+            restore(shared, agent, *kind, after, before).await?;
+        }
+    }
+    for change in kept {
+        if let (AgentChangeKind::Name, Some(name)) = (change.0, &change.2) {
             if agents::rename(&shared.store.db(), &shared.home, &agent.id, name).is_err() {
                 continue;
             }
@@ -482,11 +496,20 @@ async fn notice(
             &agent.id,
             thread.id(),
             turn,
-            held,
+            false,
             change,
         )?;
     }
-    Ok(())
+    let settled = snapshot(agent, thread).await?;
+    agents::set_seen(&shared.store.db(), &agent.id, &settled)
+}
+
+async fn snapshot(agent: &Agent, thread: &Thread) -> Result<Snapshot, String> {
+    Ok(Snapshot {
+        instructions: agents::instructions(agent)?,
+        routines: thread.routine_tasks().await?,
+        fresh: false,
+    })
 }
 
 fn started_by_routine(thread: &Thread, turn: u64) -> bool {
