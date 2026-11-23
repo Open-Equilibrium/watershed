@@ -167,6 +167,20 @@ void main() {
     expect(condition.matches, BridgeMatch.above);
     expect(condition.value?.number, 500);
 
+    await choose(tester, 'condition field 0', 'Paid');
+    final paid = lastSetup(kit).conditions.single;
+    expect(
+      (paid.field, paid.matches, paid.value?.checked),
+      ('paid', BridgeMatch.is_, true),
+    );
+    expect(find.byKey(const Key('token test 0')), findsOneWidget);
+    expect(find.text('is checked'), findsOneWidget);
+    await choose(tester, 'condition field 0', 'Amount');
+    await choose(tester, 'test 0', 'is more than');
+    await tester.enterText(find.byKey(const Key('value 0')), '500');
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await tester.pumpAndSettle();
+
     await choose(tester, 'add action', 'show a notification');
     await tester.enterText(
       find.byKey(const Key('message 0')),
@@ -251,5 +265,21 @@ void main() {
     await tester.pumpAndSettle();
     expect(kit.applied(BridgeMutationKind.setAutomationOn).last.on_, isFalse);
     await tester.pump(const Duration(seconds: 6));
+  });
+
+  testWidgets('a refused new Automation shows why and stays in the list', (
+    tester,
+  ) async {
+    final kit = PageKit();
+    await showBudget(tester, kit);
+    await openAutomations(tester);
+    kit.fake.refuseKinds = {BridgeMutationKind.createAutomation};
+    await tester.tap(find.text('New Automation'));
+    await tester.pumpAndSettle();
+    expect(
+      find.textContaining('Liquid did not save this change'),
+      findsOneWidget,
+    );
+    expect(find.text('New Automation'), findsOneWidget);
   });
 }

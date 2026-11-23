@@ -101,6 +101,15 @@ BridgeCell? _firstValue(BridgeField field) => switch (field.kind) {
   _ => _cell(BridgeCellKind.text, text: ''),
 };
 
+BridgeFilter _firstCondition(BridgeField field) =>
+    field.kind == BridgeFieldKind.checkbox
+    ? BridgeFilter(
+        field: field.id,
+        matches: BridgeMatch.is_,
+        value: _cell(BridgeCellKind.checkbox, checked: true),
+      )
+    : BridgeFilter(field: field.id, matches: BridgeMatch.notEmpty);
+
 bool _needsValue(BridgeMatch match) => switch (match) {
   BridgeMatch.empty || BridgeMatch.notEmpty || BridgeMatch.between => false,
   _ => true,
@@ -573,20 +582,7 @@ class _AutomationEditorState extends State<AutomationEditor> {
                               () => _write(
                                 conditions: [
                                   ...setup.conditions,
-                                  BridgeFilter(
-                                    field: field.id,
-                                    matches:
-                                        field.kind == BridgeFieldKind.checkbox
-                                        ? BridgeMatch.is_
-                                        : BridgeMatch.notEmpty,
-                                    value:
-                                        field.kind == BridgeFieldKind.checkbox
-                                        ? _cell(
-                                            BridgeCellKind.checkbox,
-                                            checked: true,
-                                          )
-                                        : null,
-                                  ),
+                                  _firstCondition(field),
                                 ],
                               ),
                             ),
@@ -794,10 +790,7 @@ class _AutomationEditorState extends State<AutomationEditor> {
               (
                 known.name,
                 known.id == condition.field,
-                () => _setCondition(
-                  index,
-                  BridgeFilter(field: known.id, matches: BridgeMatch.notEmpty),
-                ),
+                () => _setCondition(index, _firstCondition(known)),
               ),
           ],
         ),

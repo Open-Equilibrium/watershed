@@ -104,12 +104,17 @@ class _AutomationsDialogState extends State<AutomationsDialog> {
   }
 
   Future<void> _create() async {
-    final created = await _state.apply(
-      mutation(
-        BridgeMutationKind.createAutomation,
-        automationSetup: newAutomation,
-      ),
-    );
+    final BridgeApplied created;
+    try {
+      created = await _state.apply(
+        mutation(
+          BridgeMutationKind.createAutomation,
+          automationSetup: newAutomation,
+        ),
+      );
+    } on Object {
+      return;
+    }
     if (mounted) setState(() => _open = created.automation);
   }
 
