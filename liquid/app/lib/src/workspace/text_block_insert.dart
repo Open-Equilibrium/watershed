@@ -3,14 +3,17 @@ part of 'text_block.dart';
 extension _TextBlockInsert on _TextBlockState {
   Future<void> _choose(SlashCommand choice) async {
     _closeMenu();
-    _set('', 0);
-    _send('');
+    _clear();
     if (choice.style case final style?) {
       if (style != _style) _restyle(style);
       return;
     }
-    if (choice.block == BridgeBlockKind.code) return _turnIntoCode();
-    if (choice.block == BridgeBlockKind.math) return _turnIntoMath();
+    if (choice.block == BridgeBlockKind.code) {
+      return _turnInto(BridgeBlockKind.code);
+    }
+    if (choice.block == BridgeBlockKind.math) {
+      return _turnInto(BridgeBlockKind.math);
+    }
     if (choice.block == BridgeBlockKind.media) return _addMedia(_pickFiles);
     if (choice.block == BridgeBlockKind.whiteboard) {
       return _addBlock(BridgeMutationKind.addWhiteboardBlock, 'Whiteboard');
@@ -89,18 +92,9 @@ extension _TextBlockInsert on _TextBlockState {
       views.moveCaret(Caret(added.view!, 0));
     }
     try {
-      Future<void> boundary(String view, bool starts) => views.write(
-        mutation(
-          BridgeMutationKind.setSectionBoundary,
-          page: _page,
-          view: view,
-          boundary: starts,
-        ),
-        const [],
-      );
       if (view.boundary) {
-        await boundary(added.view!, true);
-        if (last) await boundary(view.id, false);
+        await _boundary(views, added.view!, true);
+        if (last) await _boundary(views, view.id, false);
       }
       if (!last) {
         await views.write(
@@ -190,20 +184,22 @@ extension _TextBlockInsert on _TextBlockState {
   Future<void> _handOverSection(String added, {required bool last}) async {
     final view = widget.view;
     if (!view.boundary) return;
-    Future<void> boundary(String at, bool starts) => widget.views.write(
-      mutation(
-        BridgeMutationKind.setSectionBoundary,
-        page: _page,
-        view: at,
-        boundary: starts,
-      ),
-      const [],
-    );
     try {
-      await boundary(added, true);
-      if (last) await boundary(view.id, false);
+      await _boundary(widget.views, added, true);
+      if (last) await _boundary(widget.views, view.id, false);
     } on Object catch (_) {}
   }
+
+  Future<void> _boundary(PageViews views, String at, bool starts) =>
+      views.write(
+        mutation(
+          BridgeMutationKind.setSectionBoundary,
+          page: _page,
+          view: at,
+          boundary: starts,
+        ),
+        const [],
+      );
 
   Future<void> _addBlock(BridgeMutationKind kind, String name) async {
     final views = widget.views;

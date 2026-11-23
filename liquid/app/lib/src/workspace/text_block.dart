@@ -339,16 +339,15 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
     final text = _text.text;
     if (text == stored) return;
     if (mathTyped(text, stored, _text.selection.baseOffset)) {
-      _set('', 0);
-      _send('');
-      _turnIntoMath();
+      _clear();
+      _turnInto(BridgeBlockKind.math);
       return;
     }
     if (codeTyped(text, stored, _text.selection.baseOffset)) {
       final rest = text.substring(codeShortcut.length);
       _set(rest, 0);
       _send(rest);
-      _turnIntoCode();
+      _turnInto(BridgeBlockKind.code);
       return;
     }
     if (shortcutTyped(text, stored, _text.selection.baseOffset, _style) case (
@@ -367,8 +366,7 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
       index: widget.index,
       boundary: widget.view.boundary,
     )) {
-      _set('', 0);
-      _send('');
+      _clear();
       _write(
         mutation(
           BridgeMutationKind.setSectionBoundary,
@@ -381,6 +379,11 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
     }
     _send(text);
     _offer(text, stored);
+  }
+
+  void _clear() {
+    _set('', 0);
+    _send('');
   }
 
   void _send(String text) {
@@ -400,22 +403,17 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
         .then<void>((_) {}, onError: (Object _) {}),
   );
 
-  void _turnIntoCode() {
+  void _turnInto(BridgeBlockKind kind) {
     _write(
-      mutation(BridgeMutationKind.turnIntoCode, page: _page, block: block),
+      mutation(
+        kind == BridgeBlockKind.code
+            ? BridgeMutationKind.turnIntoCode
+            : BridgeMutationKind.turnIntoMath,
+        page: _page,
+        block: block,
+      ),
     );
-    widget.views.moveCaret(
-      Caret(widget.view.id, 0, kind: BridgeBlockKind.code),
-    );
-  }
-
-  void _turnIntoMath() {
-    _write(
-      mutation(BridgeMutationKind.turnIntoMath, page: _page, block: block),
-    );
-    widget.views.moveCaret(
-      Caret(widget.view.id, 0, kind: BridgeBlockKind.math),
-    );
+    widget.views.moveCaret(Caret(widget.view.id, 0, kind: kind));
   }
 
   void _toggleToDo() {
