@@ -102,7 +102,26 @@ jobs:
       - name: Install check tools
         uses: taiki-e/install-action@83ac0ad63c0167e6f06796fab0fce28db1bf3db0 # v2.87.22
         with:
-          tool: cargo-audit@0.22.2,cargo-deny@0.20.2,lychee@0.24.2
+          tool: cargo-audit@0.22.2,cargo-deny@0.20.2
+
+      - name: Install pinned lychee
+        shell: bash
+        env:
+          LYCHEE_VERSION: 0.24.2
+          # The SHA-256 of each lychee archive for that release.
+          LYCHEE_LINUX_SHA256: 1f4e0ef7f6554a6ed33dd7ac144fb2e1bbed98598e7af973042fc5cd43951c9a
+          LYCHEE_MACOS_ARM64_SHA256: c9d3740ea2d891854d37116c9fba840f37b6e7c89d330e7db84ac333631c4977
+        run: |
+          case "$RUNNER_OS-$RUNNER_ARCH" in
+            Linux-X64) target=x86_64-unknown-linux-gnu; sha="$LYCHEE_LINUX_SHA256" ;;
+            macOS-ARM64) target=aarch64-apple-darwin; sha="$LYCHEE_MACOS_ARM64_SHA256" ;;
+            *) echo "no pinned lychee archive for $RUNNER_OS-$RUNNER_ARCH"; exit 1 ;;
+          esac
+          archive="lychee-$target.tar.gz"
+          curl -fsSL -o "$RUNNER_TEMP/$archive" "https://github.com/lycheeverse/lychee/releases/download/lychee-v$LYCHEE_VERSION/$archive"
+          echo "$sha  $RUNNER_TEMP/$archive" | shasum -a 256 --check --strict
+          tar -xzf "$RUNNER_TEMP/$archive" -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/lychee-$target" >> "$GITHUB_PATH"
 
       - name: Check formatting
         if: needs.scope.outputs.product == 'true'
@@ -513,9 +532,25 @@ jobs:
 
       # Its own job, so Flutter's tool directory never reaches the PATH of a privileged step.
       - name: Install pinned Flutter
-        uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
-        with:
-          flutter-version-file: liquid/app/pubspec.yaml
+        shell: bash
+        env:
+          # The SHA-256 of each Flutter archive for the release liquid/app/pubspec.yaml pins.
+          FLUTTER_LINUX_SHA256: 25ed8c3c29d51a7353f2a944310b478af8214920639524b19c50a19e6c044c5a
+          FLUTTER_MACOS_ARM64_SHA256: 6545b85938745dc5070e9faf2adf70233c1811009d87fe6d27bfcda5a04b7698
+        run: |
+          version="$(sed -n 's/^  flutter: //p' liquid/app/pubspec.yaml)"
+          case "$RUNNER_OS-$RUNNER_ARCH" in
+            Linux-X64) archive="flutter_linux_$version-stable.tar.xz"; folder=linux; sha="$FLUTTER_LINUX_SHA256" ;;
+            macOS-ARM64) archive="flutter_macos_arm64_$version-stable.zip"; folder=macos; sha="$FLUTTER_MACOS_ARM64_SHA256" ;;
+            *) echo "no pinned Flutter archive for $RUNNER_OS-$RUNNER_ARCH"; exit 1 ;;
+          esac
+          curl -fsSL -o "$RUNNER_TEMP/$archive" "https://storage.googleapis.com/flutter_infra_release/releases/stable/$folder/$archive"
+          echo "$sha  $RUNNER_TEMP/$archive" | shasum -a 256 --check --strict
+          case "$archive" in
+            *.zip) unzip -q "$RUNNER_TEMP/$archive" -d "$RUNNER_TEMP" ;;
+            *) tar -xJf "$RUNNER_TEMP/$archive" -C "$RUNNER_TEMP" ;;
+          esac
+          echo "$RUNNER_TEMP/flutter/bin" >> "$GITHUB_PATH"
 
       - name: Check the Liquid app
         if: matrix.os == 'ubuntu-24.04'

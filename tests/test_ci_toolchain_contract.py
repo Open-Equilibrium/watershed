@@ -23,7 +23,6 @@ ACTION_PINS = {
     "actions/checkout": "3d3c42e5aac5ba805825da76410c181273ba90b1",
     "actions/setup-node": "820762786026740c76f36085b0efc47a31fe5020",
     "actions/upload-artifact": "043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
-    "subosito/flutter-action": "1a449444c387b1966244ae4d4f8c696479add0b2",
     "taiki-e/install-action": "83ac0ad63c0167e6f06796fab0fce28db1bf3db0",
 }
 UBUNTU = "matrix.os == 'ubuntu-24.04'"
@@ -326,6 +325,24 @@ class CiWorkflowContractTest(unittest.TestCase):
             self.assertEqual(sha, ACTION_PINS[action])
             seen.add(action)
         self.assertEqual(seen, set(ACTION_PINS))
+
+    def test_downloaded_tools_are_checked_against_pinned_hashes(self) -> None:
+        workflow = workflow_text()
+        for step, pins in (
+            ("Install pinned Flutter", ("FLUTTER_LINUX_SHA256", "FLUTTER_MACOS_ARM64_SHA256")),
+            ("Install pinned lychee", ("LYCHEE_LINUX_SHA256", "LYCHEE_MACOS_ARM64_SHA256")),
+        ):
+            block = "\n".join(step_lines(workflow, step))
+            for pin in pins:
+                self.assertRegex(block, pin + r": [0-9a-f]{64}\n", step)
+            run = step_run(workflow, step)
+            self.assertIn('curl -fsSL -o "$RUNNER_TEMP/$archive"', run, step)
+            self.assertIn('echo "$sha  $RUNNER_TEMP/$archive" | shasum -a 256 --check --strict', run, step)
+        self.assertIn(
+            "version=\"$(sed -n 's/^  flutter: //p' liquid/app/pubspec.yaml)\"",
+            step_run(workflow, "Install pinned Flutter"),
+        )
+        self.assertNotIn("lychee@", workflow)
 
     def test_a_newer_run_supersedes_its_branch_or_pull_request_but_not_main(self) -> None:
         lines = workflow_text().splitlines()
