@@ -427,3 +427,40 @@ fn an_agent_of_the_earlier_store_keeps_its_folder_threads_and_routines() {
         "routines it had before are not the agent's new changes"
     );
 }
+
+#[test]
+fn a_change_log_of_the_first_release_learns_to_hold_changes() {
+    let home = Dir::new();
+    let store = Store::open(&home.join("meta-harness.sqlite")).unwrap();
+    store
+        .db()
+        .execute_batch(
+            "DROP TABLE agent_change;
+             CREATE TABLE agent_change (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, agent TEXT NOT NULL, thread TEXT NOT NULL,
+                turn INTEGER, kind TEXT NOT NULL, before TEXT, after TEXT,
+                created_ms INTEGER NOT NULL, undone INTEGER NOT NULL DEFAULT 0);",
+        )
+        .unwrap();
+    let agent = agents::create(&store.db(), &home, &new_agent("news-bot"), "thread-1").unwrap();
+
+    agents::migrate(&store.db(), &home).unwrap();
+    agents::record(
+        &store.db(),
+        &agent.id,
+        "thread-1",
+        Some(3),
+        true,
+        (
+            AgentChangeKind::Instructions,
+            Some(String::new()),
+            Some("# news-bot\n".to_owned()),
+        ),
+    )
+    .unwrap();
+
+    let held = &agents::changes(&store.db(), &agent.id).unwrap()[0];
+    assert!(held.held);
+    agents::mark_applied(&store.db(), held.id).unwrap();
+    assert!(!agents::changes(&store.db(), &agent.id).unwrap()[0].held);
+}
