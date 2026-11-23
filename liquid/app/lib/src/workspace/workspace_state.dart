@@ -1,5 +1,7 @@
 import 'dart:async';
+import 'dart:io';
 
+import 'package:file_selector/file_selector.dart';
 import 'package:flutter/foundation.dart';
 
 import '../rust/api/automation.dart';
@@ -8,6 +10,7 @@ import '../rust/api/chart.dart';
 import '../rust/api/database.dart';
 import '../rust/api/replica.dart';
 import '../rust/api/role.dart';
+import '../rust/api/source.dart';
 import '../settings_file.dart';
 import '../rust/api/drawing.dart';
 import '../rust/api/workspace.dart';
@@ -148,9 +151,22 @@ class EditChain {
 
 @immutable
 class OpenPage {
-  const OpenPage(this.area, this.page, {this.fresh = false}) : table = null;
+  const OpenPage(this.area, this.page, {this.fresh = false})
+    : table = null,
+      source = null,
+      inside = '';
 
-  const OpenPage.table(String this.table) : area = '', page = '', fresh = false;
+  const OpenPage.table(String this.table)
+    : area = '',
+      page = '',
+      fresh = false,
+      source = null,
+      inside = '';
+
+  const OpenPage.source(this.area, String this.source, {this.inside = ''})
+    : page = '',
+      fresh = false,
+      table = null;
 
   final String area;
   final String page;
@@ -158,6 +174,35 @@ class OpenPage {
   final bool fresh;
 
   final String? table;
+
+  final String? source;
+
+  final String inside;
+}
+
+abstract final class SourcePlatform {
+  static Future<String?> Function() pickFile = () async =>
+      (await openFile())?.path;
+
+  static Future<String?> Function() pickFolder = getDirectoryPath;
+
+  static Stream<void> Function(String path) watch = (path) {
+    try {
+      return switch (FileSystemEntity.typeSync(path)) {
+        FileSystemEntityType.directory => Directory(
+          path,
+        ).watch(recursive: true),
+        FileSystemEntityType.notFound => const Stream.empty(),
+        _ => File(path).parent.watch().where(
+          (event) =>
+              event.path == path ||
+              (event is FileSystemMoveEvent && event.destination == path),
+        ),
+      };
+    } on FileSystemException {
+      return const Stream.empty();
+    }
+  };
 }
 
 class _Reread {
@@ -362,6 +407,51 @@ class WorkspaceState {
 
   ValueListenable<List<BridgePage>> pages(String area) =>
       _trees.putIfAbsent(area, () => ValueNotifier(const []));
+
+  final _sources = <String, ValueNotifier<List<BridgeSource>>>{};
+
+  ValueListenable<List<BridgeSource>> sources(String area) =>
+      _sources.putIfAbsent(area, () => ValueNotifier(const []));
+
+  Stream<void> watchSource(String source) async* {
+    final path = await workspace.sourcePath(sourceId: source);
+    if (path != null) yield* SourcePlatform.watch(path);
+  }
+
+  Future<void> addSource(String area, {required bool folder}) async {
+    final path = await (folder
+        ? SourcePlatform.pickFolder()
+        : SourcePlatform.pickFile());
+    if (path == null) return;
+    try {
+      final source = await workspace.addSource(area: area, path: path);
+      if (_disposed) return;
+      open.value = OpenPage.source(area, source);
+    } on Object catch (error) {
+      report('Liquid did not add this Source: $error');
+    }
+  }
+
+  Future<void> locateSource(String source, {required bool folder}) async {
+    final path = await (folder
+        ? SourcePlatform.pickFolder()
+        : SourcePlatform.pickFile());
+    if (path == null) return;
+    try {
+      await workspace.locateSource(sourceId: source, path: path);
+    } on Object catch (error) {
+      report('Liquid did not use this file: $error');
+    }
+  }
+
+  Future<void> removeSource(String source) async {
+    try {
+      await workspace.removeSource(sourceId: source);
+      if (open.value?.source == source) open.value = null;
+    } on Object catch (error) {
+      report('Liquid did not remove this Source: $error');
+    }
+  }
 
   void report(String problem) => _show(change: problem, read: _readFailed);
 
@@ -586,7 +676,10 @@ class WorkspaceState {
       if (answer.pages.isEmpty) break;
       read.addAll(answer.pages);
     } while (read.length < count);
-    if (!_disposed) _trees[area]!.value = read;
+    final sources = await workspace.sources(area: area);
+    if (_disposed) return;
+    _trees[area]!.value = read;
+    (this.sources(area) as ValueNotifier<List<BridgeSource>>).value = sources;
   }
 
   final finishing = <VoidCallback>{};
@@ -648,6 +741,9 @@ class WorkspaceState {
     problem.dispose();
     for (final tree in _trees.values) {
       tree.dispose();
+    }
+    for (final sources in _sources.values) {
+      sources.dispose();
     }
   }
 }

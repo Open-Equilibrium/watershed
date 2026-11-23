@@ -153,7 +153,9 @@ void main() {
     await tester.pumpAndSettle();
     await tester.pumpAndSettle();
 
-    await tester.tap(find.byTooltip('New Page'));
+    await tester.tap(find.byTooltip('New Page or Source'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('new page')));
     await tester.pumpAndSettle();
     await tester.pumpAndSettle();
     expect(inSidebar('Untitled'), findsOneWidget);

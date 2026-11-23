@@ -9,6 +9,7 @@ import 'package:liquid/src/rust/api/history.dart';
 import 'package:liquid/src/rust/api/media.dart';
 import 'package:liquid/src/rust/api/replica.dart';
 import 'package:liquid/src/rust/api/role.dart';
+import 'package:liquid/src/rust/api/source.dart';
 import 'package:liquid/src/rust/api/drawing.dart';
 import 'package:liquid/src/rust/api/workspace.dart';
 
@@ -72,6 +73,9 @@ class FakeWorkspace implements LiquidWorkspace {
     BridgeChartSetup(:final table?) => databases[table]?.name,
     BridgeChartSetup(:final page?, :final block?) =>
       views[page]?.where((view) => view.block == block).firstOrNull?.title,
+    BridgeChartSetup(:final source?) => [
+      for (final listed in sourceList.values) ...listed,
+    ].where((known) => known.id == source).firstOrNull?.name,
     _ => null,
   };
 
@@ -1866,6 +1870,129 @@ class FakeWorkspace implements LiquidWorkspace {
       attachment: _attachment(bytes),
     );
   }
+
+  final sourceList = <String, List<BridgeSource>>{};
+  final sourcePaths = <String, String>{};
+  final sourceFiles = <(String, String), BridgeSourceFile>{};
+  final sourceFolders = <(String, String), List<BridgeFileEntry>>{};
+  final sourceUserList = <String, List<BridgeSourceUser>>{};
+  final located = <(String, String)>[];
+
+  static BridgeSourceFile missingFile = BridgeSourceFile(
+    read: BridgeRead.missing,
+    name: '',
+    path: '',
+    size: BigInt.zero,
+    shown: BridgeFileView.other,
+    columns: const [],
+    rows: const [],
+  );
+
+  String? _areaOfSource(String source) {
+    for (final MapEntry(:key, :value) in sourceList.entries) {
+      if (value.any((known) => known.id == source)) return key;
+    }
+    return null;
+  }
+
+  void _sourcesChanged(String area) =>
+      _changed(BridgeResource(kind: BridgeResourceKind.pages, area: area));
+
+  @override
+  Future<List<BridgeSource>> sources({required String area}) async =>
+      sourceList[area] ?? const [];
+
+  @override
+  Future<String?> sourcePath({required String sourceId}) async =>
+      sourcePaths[sourceId];
+
+  @override
+  Future<String> addSource({
+    required String area,
+    String? parent,
+    required String path,
+  }) async {
+    final id = _id();
+    final folder = sourceFolders.containsKey((path, ''));
+    sourceList[area] = [
+      ...?sourceList[area],
+      BridgeSource(
+        id: id,
+        parent: parent,
+        name: path.split('/').last,
+        kind: folder ? BridgeSourceKind.folder : BridgeSourceKind.file,
+      ),
+    ];
+    sourcePaths[id] = path;
+    if (sourceFiles[(path, '')] case final file?) sourceFiles[(id, '')] = file;
+    for (final MapEntry(:key, :value) in [...sourceFolders.entries]) {
+      if (key.$1 == path) sourceFolders[(id, key.$2)] = value;
+    }
+    for (final MapEntry(:key, :value) in [...sourceFiles.entries]) {
+      if (key.$1 == path) sourceFiles[(id, key.$2)] = value;
+    }
+    _sourcesChanged(area);
+    return id;
+  }
+
+  @override
+  Future<void> renameSource({
+    required String sourceId,
+    required String name,
+  }) async {
+    final area = _areaOfSource(sourceId)!;
+    sourceList[area] = [
+      for (final known in sourceList[area]!)
+        known.id == sourceId
+            ? BridgeSource(
+                id: known.id,
+                parent: known.parent,
+                name: name,
+                kind: known.kind,
+              )
+            : known,
+    ];
+    _sourcesChanged(area);
+  }
+
+  @override
+  Future<void> removeSource({required String sourceId}) async {
+    final area = _areaOfSource(sourceId)!;
+    sourceList[area] = [
+      for (final known in sourceList[area]!)
+        if (known.id != sourceId) known,
+    ];
+    _sourcesChanged(area);
+  }
+
+  @override
+  Future<void> locateSource({
+    required String sourceId,
+    required String path,
+  }) async {
+    located.add((sourceId, path));
+    sourcePaths[sourceId] = path;
+  }
+
+  @override
+  Future<BridgeFolder> sourceFolder({
+    required String sourceId,
+    required String inside,
+  }) async => switch (sourceFolders[(sourceId, inside)]) {
+    final entries? => BridgeFolder(read: BridgeRead.read, entries: entries),
+    null => const BridgeFolder(read: BridgeRead.missing, entries: []),
+  };
+
+  @override
+  Future<BridgeSourceFile> sourceFile({
+    required String sourceId,
+    required String inside,
+  }) async => sourceFiles[(sourceId, inside)] ?? missingFile;
+
+  @override
+  Future<List<BridgeSourceUser>> sourceUsers({
+    required String sourceId,
+  }) async => sourceUserList[sourceId] ?? const [];
 
   @override
   Future<Uint8List> readAttachment({required String attachment}) async =>

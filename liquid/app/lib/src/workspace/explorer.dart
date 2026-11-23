@@ -8,6 +8,8 @@ import '../rust/api/workspace.dart';
 import '../theme/icons.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
+import '../rust/api/source.dart';
+import 'source_page.dart' show sourceIcon;
 import 'workspace_state.dart';
 
 const untitled = 'Untitled';
@@ -259,6 +261,83 @@ class _Area extends StatefulWidget {
 
 class _AreaState extends State<_Area> {
   final _expanded = <String>{};
+  final _folders = <String, List<BridgeFileEntry>>{};
+
+  String _key(String source, String inside) => 'source:$source:$inside';
+
+  Future<void> _unfold(String source, String inside) async {
+    final key = _key(source, inside);
+    if (!_expanded.remove(key)) {
+      _expanded.add(key);
+      try {
+        final folder = await widget.state.workspace.sourceFolder(
+          sourceId: source,
+          inside: inside,
+        );
+        _folders[key] = folder.entries;
+      } on Object catch (error) {
+        widget.state.readFailed(error);
+      }
+    }
+    if (mounted) setState(() {});
+  }
+
+  void _sourceRows(
+    List<Widget> rows,
+    BridgeSource source,
+    String inside,
+    int depth,
+    OpenPage? opened,
+  ) {
+    final key = _key(source.id, inside);
+    final folder = inside.isEmpty
+        ? source.kind == BridgeSourceKind.folder
+        : true;
+    final name = inside.isEmpty ? source.name : inside.split('/').last;
+    rows.add(
+      _SourceRow(
+        key: ValueKey(key),
+        name: name,
+        icon: sourceIcon(name, folder: folder),
+        depth: depth,
+        folder: folder,
+        expanded: _expanded.contains(key),
+        selected: opened?.source == source.id && opened?.inside == inside,
+        onOpen: () => widget.state.open.value = OpenPage.source(
+          widget.area.id,
+          source.id,
+          inside: inside,
+        ),
+        onToggle: () => unawaited(_unfold(source.id, inside)),
+      ),
+    );
+    if (!folder || !_expanded.contains(key)) return;
+    for (final entry in _folders[key] ?? const <BridgeFileEntry>[]) {
+      final path = inside.isEmpty ? entry.name : '$inside/${entry.name}';
+      if (entry.folder) {
+        _sourceRows(rows, source, path, depth + 1, opened);
+      } else {
+        rows.add(
+          _SourceRow(
+            key: ValueKey(_key(source.id, path)),
+            name: entry.name,
+            icon: sourceIcon(entry.name, folder: false),
+            depth: depth + 1,
+            folder: false,
+            expanded: false,
+            selected: opened?.source == source.id && opened?.inside == path,
+            onOpen: () => widget.state.open.value = OpenPage.source(
+              widget.area.id,
+              source.id,
+              inside: path,
+            ),
+            onToggle: () {},
+          ),
+        );
+      }
+    }
+  }
+
   bool _hovered = false;
   bool _focused = false;
 
@@ -321,19 +400,48 @@ class _AreaState extends State<_Area> {
             trailing: Opacity(
               opacity: _hovered || _focused ? 1 : 0,
               alwaysIncludeSemantics: true,
-              child: Tooltip(
-                message: 'New Page',
-                child: InkWell(
-                  borderRadius: BorderRadius.circular(WsMetrics.radiusSm),
-                  onFocusChange: (focused) =>
-                      setState(() => _focused = focused),
-                  onTap: _newPage,
-                  child: Padding(
-                    padding: const EdgeInsets.all(WsMetrics.space1),
-                    child: Icon(
-                      LucideIcons.plus,
-                      size: 14,
-                      color: ws.textMuted,
+              child: MenuAnchor(
+                menuChildren: [
+                  MenuItemButton(
+                    key: const Key('new page'),
+                    leadingIcon: Icon(LucideIcons.file, size: 14),
+                    onPressed: _newPage,
+                    child: const Text('New Page'),
+                  ),
+                  const Divider(height: 1),
+                  MenuItemButton(
+                    key: const Key('add source file'),
+                    leadingIcon: Icon(LucideIcons.file, size: 14),
+                    onPressed: () => unawaited(
+                      widget.state.addSource(widget.area.id, folder: false),
+                    ),
+                    child: const Text('Source: File…'),
+                  ),
+                  MenuItemButton(
+                    key: const Key('add source folder'),
+                    leadingIcon: Icon(LucideIcons.folder, size: 14),
+                    onPressed: () => unawaited(
+                      widget.state.addSource(widget.area.id, folder: true),
+                    ),
+                    child: const Text('Source: Folder…'),
+                  ),
+                ],
+                builder: (context, controller, _) => Tooltip(
+                  message: 'New Page or Source',
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(WsMetrics.radiusSm),
+                    onFocusChange: (focused) =>
+                        setState(() => _focused = focused),
+                    onTap: () => controller.isOpen
+                        ? controller.close()
+                        : controller.open(),
+                    child: Padding(
+                      padding: const EdgeInsets.all(WsMetrics.space1),
+                      child: Icon(
+                        LucideIcons.plus,
+                        size: 14,
+                        color: ws.textMuted,
+                      ),
                     ),
                   ),
                 ),
@@ -345,15 +453,40 @@ class _AreaState extends State<_Area> {
           ListenableBuilder(
             listenable: Listenable.merge([
               widget.state.pages(widget.area.id),
+              widget.state.sources(widget.area.id),
               widget.state.open,
             ]),
             builder: (context, _) {
               final tree = widget.state.pages(widget.area.id).value;
-              final open = widget.state.open.value?.page;
+              final opened = widget.state.open.value;
+              final open = opened?.page;
               final parents = {for (final page in tree) page.id: page.parent};
               final depths = <String, int>{};
               final rows = <Widget>[];
+              final sources = widget.state.sources(widget.area.id).value;
+              bool shownUnder(String? parent) {
+                for (var at = parent; at != null; at = parents[at]) {
+                  if (!_expanded.contains(at)) return false;
+                }
+                return true;
+              }
+
+              void sourcesOf(String? parent, int depth) {
+                if (!shownUnder(parent)) return;
+                for (final source in sources) {
+                  if (source.parent == parent) {
+                    _sourceRows(rows, source, '', depth, opened);
+                  }
+                }
+              }
+
+              final pending = <String>[];
               for (final (index, page) in tree.indexed) {
+                while (pending.isNotEmpty && pending.last != page.parent) {
+                  final closed = pending.removeLast();
+                  sourcesOf(closed, (depths[closed] ?? 0) + 1);
+                }
+                pending.add(page.id);
                 final depth = depths[page.id] = page.parent == null
                     ? 0
                     : (depths[page.parent] ?? 0) + 1;
@@ -363,8 +496,9 @@ class _AreaState extends State<_Area> {
                 }
                 if (!shown) continue;
                 final nests =
-                    index + 1 < tree.length &&
-                    tree[index + 1].parent == page.id;
+                    (index + 1 < tree.length &&
+                        tree[index + 1].parent == page.id) ||
+                    sources.any((source) => source.parent == page.id);
                 rows.add(
                   _PageRow(
                     key: ValueKey(page.id),
@@ -384,6 +518,11 @@ class _AreaState extends State<_Area> {
                   ),
                 );
               }
+              while (pending.isNotEmpty) {
+                final closed = pending.removeLast();
+                sourcesOf(closed, (depths[closed] ?? 0) + 1);
+              }
+              sourcesOf(null, 0);
               return Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: rows,
@@ -490,6 +629,97 @@ class _PageRow extends StatelessWidget {
                 ],
               ),
             ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _SourceRow extends StatelessWidget {
+  const _SourceRow({
+    super.key,
+    required this.name,
+    required this.icon,
+    required this.depth,
+    required this.folder,
+    required this.expanded,
+    required this.selected,
+    required this.onOpen,
+    required this.onToggle,
+  });
+
+  final String name;
+  final IconData icon;
+  final int depth;
+  final bool folder;
+  final bool expanded;
+  final bool selected;
+  final VoidCallback onOpen;
+  final VoidCallback onToggle;
+
+  @override
+  Widget build(BuildContext context) {
+    final ws = context.ws;
+    return Semantics(
+      selected: selected,
+      child: InkWell(
+        onTap: onOpen,
+        borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
+        child: Ink(
+          height: WsMetrics.rowSide,
+          padding: EdgeInsets.only(
+            left: WsMetrics.space3 + depth * 18,
+            right: WsMetrics.space3,
+          ),
+          decoration: BoxDecoration(
+            color: selected ? ws.selected : null,
+            borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
+          ),
+          child: Row(
+            children: [
+              SizedBox(
+                width: 12,
+                child: folder
+                    ? Semantics(
+                        label: expanded ? 'Collapse' : 'Expand',
+                        button: true,
+                        child: InkWell(
+                          key: const Key('source disclosure'),
+                          onTap: onToggle,
+                          borderRadius: BorderRadius.circular(
+                            WsMetrics.radiusSm,
+                          ),
+                          child: Icon(
+                            expanded
+                                ? LucideIcons.chevronDown
+                                : LucideIcons.chevronRight,
+                            size: 11,
+                            color: ws.textFaint,
+                          ),
+                        ),
+                      )
+                    : null,
+              ),
+              const SizedBox(width: WsMetrics.space2),
+              SizedBox(
+                width: 18,
+                child: Icon(icon, size: 14, color: ws.textFaint),
+              ),
+              const SizedBox(width: WsMetrics.space2),
+              Expanded(
+                child: Text(
+                  name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: selected ? ws.text : ws.textMuted,
+                    fontSize: WsMetrics.fsSide,
+                    height: WsMetrics.lhSide / WsMetrics.fsSide,
+                  ),
+                ),
+              ),
+            ],
           ),
         ),
       ),

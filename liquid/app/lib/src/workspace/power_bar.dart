@@ -13,6 +13,8 @@ import 'media_block.dart';
 import 'page_views.dart';
 import 'slash_commands.dart';
 import 'table_pickers.dart';
+import '../rust/api/source.dart';
+import 'source_page.dart' show sourceIcon;
 import 'workspace_state.dart';
 
 const _width = 560.0;
@@ -143,6 +145,22 @@ class _PowerBarState extends State<PowerBar> {
 
   String? get _areaName => _nameOf(_state.open.value?.area);
 
+  String? get _sourceArea {
+    final open = _state.open.value?.area;
+    return open != null && open.isNotEmpty
+        ? open
+        : _state.areas.value.firstOrNull?.id;
+  }
+
+  ({String area, BridgeSource source})? _sourceOf(String id) {
+    for (final area in _state.areas.value) {
+      for (final source in _state.sources(area.id).value) {
+        if (source.id == id) return (area: area.id, source: source);
+      }
+    }
+    return null;
+  }
+
   String? _nameOf(String? area) {
     return _state.areas.value
         .where((shown) => shown.id == area)
@@ -170,6 +188,16 @@ class _PowerBarState extends State<PowerBar> {
         keys: Keymap.of(context).label(Command.newPage),
         run: () async => widget.onNewPage(),
       ),
+      if (_sourceArea case final area?)
+        for (final folder in [false, true])
+          (
+            group: 'Workspace',
+            icon: folder ? LucideIcons.folder : LucideIcons.file,
+            label: folder ? 'Add Source: Folder…' : 'Add Source: File…',
+            detail: 'in ${_nameOf(area)}',
+            keys: null,
+            run: () => _state.addSource(area, folder: folder),
+          ),
       (
         group: 'Workspace',
         icon: LucideIcons.settings,
@@ -326,6 +354,22 @@ class _PowerBarState extends State<PowerBar> {
               keys: null,
               run: () async {
                 if (tables.containsKey(hit.id)) _state.openTable(hit.id);
+              },
+            ),
+            BridgeFound.source => (
+              group: 'Sources',
+              icon: sourceIcon(
+                hit.text,
+                folder:
+                    _sourceOf(hit.id)?.source.kind == BridgeSourceKind.folder,
+              ),
+              label: hit.text,
+              detail: _nameOf(_sourceOf(hit.id)?.area),
+              keys: null,
+              run: () async {
+                if (_sourceOf(hit.id) case final found?) {
+                  _state.open.value = OpenPage.source(found.area, hit.id);
+                }
               },
             ),
             BridgeFound.text => (
