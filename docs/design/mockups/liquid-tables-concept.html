@@ -35,9 +35,6 @@ p.sub{margin:0 0 10px;font-size:13px;color:var(--muted-foreground);line-height:1
 .ico{width:16px;flex:none;display:inline-flex;justify-content:center;color:var(--ws-text-faint)}
 .ib{height:28px;min-width:28px;padding:0 6px;border-radius:6px;display:inline-flex;align-items:center;justify-content:center;gap:6px;color:var(--ws-text-muted);font-size:13px;box-sizing:border-box}
 .ib.on{background:var(--ws-hover);color:var(--ws-text)}
-.chips{display:flex;gap:6px;align-items:center;font-size:13px}
-.fchip{display:inline-flex;align-items:center;gap:6px;height:24px;padding:0 8px;border-radius:12px;color:var(--ws-accent);background:var(--ws-accent-subtle);font-size:13px;white-space:nowrap}
-.fchip.add{background:none;color:var(--ws-text-faint)}
 .tbl{border-radius:8px;box-shadow:0 0 0 1px var(--ws-border);overflow:hidden;font-size:14px;position:relative}
 .tr{display:grid;grid-template-columns:var(--cols);height:var(--ws-row-table);align-items:center;box-shadow:inset 0 -1px 0 var(--ws-border);white-space:nowrap;position:relative}
 .tr>span{padding:0 10px;overflow:hidden;text-overflow:ellipsis;height:100%;display:flex;align-items:center;gap:6px;box-sizing:border-box}
@@ -60,51 +57,20 @@ p.sub{margin:0 0 10px;font-size:13px;color:var(--muted-foreground);line-height:1
 .cb{width:14px;height:14px;border-radius:3px;box-shadow:inset 0 0 0 1.5px var(--ws-border-strong);display:inline-grid;place-items:center;font-size:10px;flex:none}
 .cb.on{background:var(--ws-accent);box-shadow:none;color:var(--ws-on-accent)}
 .pop{position:absolute;z-index:3;border-radius:8px;background:var(--ws-surface);box-shadow:var(--ws-shadow);padding:6px;display:flex;flex-direction:column;gap:1px;font-size:14px;box-sizing:border-box}
-.pop .lbl{font-size:12px;color:var(--ws-text-faint);padding:6px 8px 2px}
-.pop .it{display:flex;gap:10px;align-items:center;min-height:30px;padding:0 8px;border-radius:6px;white-space:nowrap;color:var(--ws-text)}
-.pop .it.on{background:var(--ws-hover)}
-.pop .it .r{margin-left:auto;color:var(--ws-text-faint);font-size:12px}
-.pop .it.dng{color:var(--ws-danger)}.pop .it.dng .ico{color:var(--ws-danger)}
-.pop .it .bi{width:28px;height:28px;border-radius:6px;box-shadow:inset 0 0 0 1px var(--ws-border);display:grid;place-items:center;color:var(--ws-text-muted);flex:none}
-.pop .it .tx{display:flex;flex-direction:column;line-height:18px;padding:4px 0}
-.pop .it .tx small{color:var(--ws-text-faint);font-size:12px}
 .pop hr{border:0;height:1px;background:var(--ws-border);margin:4px 2px}
-.pop .inp{height:30px;border-radius:6px;box-shadow:inset 0 0 0 1px var(--ws-border-strong);display:flex;align-items:center;padding:0 8px;margin:2px 2px 4px;font-size:14px;background:var(--ws-canvas)}
-.pop .inp.on{box-shadow:inset 0 0 0 1.5px var(--ws-accent)}
-.pop .tagsin{min-height:34px;display:flex;flex-wrap:wrap;gap:4px;align-items:center;padding:4px 8px;margin:-6px -6px 4px;background:var(--ws-subtle);border-radius:8px 8px 0 0;box-shadow:inset 0 -1px 0 var(--ws-border)}
-.cal{display:grid;grid-template-columns:repeat(7,32px);gap:2px;padding:4px 6px 6px;font-size:12px;text-align:center}
-.cal span{height:28px;display:grid;place-items:center;border-radius:6px;color:var(--ws-text)}
-.cal span.dim{color:var(--ws-text-faint)}
-.cal span.h{color:var(--ws-text-faint);height:22px}
-.cal span.on{background:var(--ws-accent);color:var(--ws-on-accent)}
-.cal span.today{color:var(--ws-danger);font-weight:600}
-.calh{display:flex;align-items:center;justify-content:space-between;padding:4px 8px;font-size:13px;font-weight:500}
-.calh span{color:var(--ws-text-faint);display:flex;gap:10px}
-.btn{height:28px;padding:0 10px;border-radius:6px;background:var(--ws-canvas);box-shadow:inset 0 0 0 1px var(--ws-border-strong);color:var(--ws-text);font-size:13px;display:inline-flex;align-items:center;gap:8px;font-weight:500;white-space:nowrap}
-.btn.dngp{background:var(--ws-danger);color:var(--ws-on-accent);box-shadow:none}
-.scrim{position:absolute;inset:0;background:rgba(15,15,15,.24);z-index:2}
-.dlg{position:absolute;left:50%;top:120px;transform:translateX(-50%);z-index:4;width:420px;box-sizing:border-box;border-radius:12px;background:var(--ws-surface);box-shadow:var(--ws-shadow);padding:16px;display:flex;flex-direction:column;gap:12px;font-size:13px;line-height:20px}
-.dlg h4{margin:0;font-size:16px;line-height:22px;font-weight:600}
-.dlg p{margin:0;color:var(--ws-text-muted)}
-.dlg .acts{display:flex;gap:8px;justify-content:flex-end}
 .gal{display:grid;align-items:start;grid-template-columns:repeat(auto-fill,minmax(min(100%,400px),1fr));gap:16px}
 .gcell{padding:14px 16px 16px;border-radius:12px;background:var(--ws-canvas);box-shadow:var(--ws-shadow);display:flex;flex-direction:column;gap:10px;font-family:var(--ws-font-ui);color:var(--ws-text);font-size:14px;line-height:20px;position:relative}
 .gcell h4{margin:0;font-size:13px;font-weight:600}
 .gcell .cap{font-size:12px;line-height:18px;color:var(--ws-text-faint)}
 .gcell .room{position:relative}
-.sw{display:grid;grid-template-columns:repeat(5,1fr);gap:8px}
-.sw div{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--ws-text-faint)}
 .maps{border-collapse:collapse;font-size:13px;line-height:1.5;width:100%;max-width:900px}
 .maps td,.maps th{padding:6px 10px;text-align:left;vertical-align:top;border-bottom:1px solid var(--ws-border)}
 .maps th{color:var(--muted-foreground);font-weight:500;font-size:12px}
 kbd{font-family:var(--ws-font-mono);font-size:11.5px;padding:0 5px;border-radius:4px;border:1px solid var(--ws-border-strong);line-height:18px;color:var(--ws-text-muted)}
-.qs,.notes{font-size:13px;line-height:1.6;margin:0;padding-left:18px;max-width:900px}.qs li,.notes li{margin:0 0 8px}
-.qs .opt{display:block;color:var(--muted-foreground)}
+.qs{font-size:13px;line-height:1.6;margin:0;padding-left:18px;max-width:900px}.qs li{margin:0 0 8px}
 h4.qh{margin:14px 0 6px;font-size:13px}
 .scroll{position:absolute;left:12px;right:12px;bottom:4px;height:4px;border-radius:2px;background:var(--ws-border)}
 .scroll i{display:block;width:55%;margin-left:40%;height:100%;border-radius:2px;background:var(--ws-border-strong)}
-.vscroll{position:absolute;right:3px;top:36px;bottom:68px;width:4px;border-radius:2px;background:var(--ws-border)}
-.vscroll i{display:block;height:12%;margin-top:30%;border-radius:2px;background:var(--ws-border-strong)}
 .pin .tr>span:first-child{box-shadow:4px 0 6px -4px rgba(0,0,0,.25);position:relative;z-index:1}
 .vchip{display:inline-flex;align-items:center;gap:4px;height:24px;padding:0 8px;border-radius:6px;color:var(--ws-text-muted);font-size:13px;background:var(--ws-subtle)}
 .tr.tot>span{gap:6px}.tr.tot .tl{color:var(--ws-text-faint)}.tr.tot b{color:var(--ws-text);font-weight:600}
@@ -124,7 +90,7 @@ h4.qh{margin:14px 0 6px;font-size:13px}
   </div>
   <section>
     <h1>Liquid Workspace: Tables, formulas and reports</h1>
-    <p class="sub">A concept approved by the maintainer on 2026-11-03 (ADR-0244): one table concept for Notion's databases and Excel's workflow, with formulas that need no arranging. It builds on the built Table View and the approved <a href="liquid-workspace-blocks.html">Blocks</a> mockups, ADR-0235's formula language (Excel's function names, references as chips bound to stable IDs) and ADR-0242/0243. Excel's own answer to "database or sheet" is its <i>Tables</i> (Ctrl+T): typed columns, calculated columns, a total row and references by name. Liquid's table is that, with Notion's Views on top. The total row, formula fields and the Calculation Block are built; the <a href="../../concept/V-Spec_Liquid.html#logic">V-Spec</a> holds their rules. Left of them: a footer cell may take its own formula, and a grouped View adds the total row per group as subtotals.</p>
+    <p class="sub">A concept approved by the maintainer on 2026-11-03 (ADR-0244): one table concept for Notion's databases and Excel's workflow, with formulas that need no arranging. It builds on the built Table View and the approved <a href="liquid-workspace-blocks.html">Blocks</a> mockups, ADR-0315's formula language (Excel's function names, references as chips bound to stable IDs) and ADR-0242/0243. Excel's own answer to "database or sheet" is its <i>Tables</i> (Ctrl+T): typed columns, calculated columns, a total row and references by name. Liquid's table is that, with Notion's Views on top. The total row, formula fields and the Calculation Block are built; the <a href="../../concept/V-Spec_Liquid.html#logic">V-Spec</a> holds their rules. Left of them: a footer cell may take its own formula, and a grouped View adds the total row per group as subtotals.</p>
   </section>
   <section>
     <h3 class="sec">1 · One concept: a Table with Views</h3>
@@ -133,21 +99,16 @@ h4.qh{margin:14px 0 6px;font-size:13px}
     <h4 class="qh">The same capabilities as a Notion database</h4>
     <div class="wrapx"><table class="maps">
       <tr><th>Notion database</th><th>Liquid Table</th><th>When</th></tr>
-      <tr><td>Properties: text, number, select, date, checkbox</td><td>Fields of the same kinds</td><td>Done in the core and bridge</td></tr>
       <tr><td>Multi-select, person, URL, email, phone, status, created/edited time and by</td><td>Further field kinds</td><td>With their slices; not yet planned in detail</td></tr>
       <tr><td>Files &amp; media</td><td>File field</td><td>With attachments</td></tr>
       <tr><td>Relation</td><td>Link to a row, also of another Table</td><td>With Connections</td></tr>
       <tr><td>Rollup</td><td>A formula over linked rows, e.g. <code>SUM(Trips.Cost)</code></td><td>With links to rows</td></tr>
-      <tr><td>Formula property</td><td>Formula field</td><td>Done</td></tr>
       <tr><td>Button property</td><td>Button field running an Automation</td><td>With Automations</td></tr>
-      <tr><td>Views: table, board, calendar (list, gallery, timeline, chart)</td><td>A View's tabs, laid out as Table, Board or Calendar; charts are Chart Blocks fed by a Connection</td><td>Done; more layouts later</td></tr>
-      <tr><td>Sort, filter per View</td><td>One sort and one filter per tab</td><td>Done</td></tr>
+      <tr><td>Views: table, board, calendar (list, gallery, timeline, chart)</td><td>A View's tabs, laid out as Table, Board or Calendar; a Chart reads a Table directly</td><td>Done; more layouts later</td></tr>
       <tr><td>Group per View</td><td>Per tab, by a Select or Checkbox field; group subtotals</td><td>Done; subtotals left</td></tr>
       <tr><td>Calculate in the footer</td><td>Total row</td><td>Done; a cell's own formula left</td></tr>
       <tr><td>Each row is a Page with its own content</td><td>Decided, item 3</td><td>—</td></tr>
-      <tr><td>Linked view of a database on another Page</td><td>A View of the same Block on another Page (ADR-0235)</td><td>Views on several Pages</td></tr>
-      <tr><td>Row and page permissions</td><td>Roles per area and Block (ADR-0223)</td><td>Roles slice</td></tr>
-      <tr><td>Database automations</td><td>Automations on row events</td><td>Automations slice</td></tr>
+      <tr><td>Linked view of a database on another Page</td><td>A View of the same Block on another Page (ADR-0309)</td><td>Views on several Pages</td></tr>
     </table></div>
   </section>
   <section>
@@ -216,7 +177,6 @@ const hd=`<div class="tr hd">${f.map((x,i)=>`<span class="${o.hdOn==i?'on':''}">
 const body=rows.map((r,ri)=>`<div class="tr ${o.hov==ri?'hov':''}">${o.hov==ri&&!o.noHandle?`<div class="handle"><span>${I.plus}</span><span class="${o.handleOn?'on':''}">${I.drag}</span></div>`:''}${f.map((x,i)=>cell(x[1],r[i],{cls:(o.on&&o.on[0]==ri&&o.on[1]==i)?(o.edit?'cell-on':'cell-sel'):''})).join('')}<span></span></div>`).join('');
 const more=o.more?`<div class="tr more"><span style="grid-column:1/-1;gap:8px">${I.down}Load more<span class="ph" style="font-size:12px">· ${o.more}</span></span></div>`:'';
 return `<div class="tbl ${o.pin?'pin':''}" style="--cols:${cols(f)}">${hd}${body}${more}<div class="tr add"><span style="grid-column:1/-1">${I.plus}&nbsp;New</span></div><div class="tr foot"><span style="grid-column:1/-1">${o.count||rows.length+' rows'}</span></div>${o.scroll?'<div class="scroll"><i></i></div>':''}</div>`}
-const bhead=(o={})=>`<div class="bh"><span class="ico">${I.db}</span><b ${o.ph?'class="ph"':''}>${o.name||'Expenses'}</b>${o.caret?'<span class="caret"></span>':''}<span class="end">${o.tools===false?'':`<span class="ib ${o.sortOn?'on':''}" title="Sort">${I.sort}</span><span class="ib ${o.filterOn?'on':''}" title="Filter">${I.filter}</span><span class="ib">${I.more}</span>`}</span></div>`;
 function win(id,o){document.getElementById(id).innerHTML=`<div class="head"><span class="crumb">Private <span>›</span> <b>💰 Household budget</b></span></div><div class="pg" style="--h:${o.h}px"><div class="col"><div class="ttl">💰 Household budget</div>${o.main}</div>${o.over||''}</div>`}
 const intro=`<div class="prose"><p>October is almost done; here is what went out.</p></div>`;
 
