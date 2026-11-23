@@ -288,20 +288,6 @@ pub(super) async fn carry(
     }
 }
 
-pub(super) fn arrival_free(
-    shared: &Shared,
-    carry: &crate::agents::AgentCarry,
-    thread: &str,
-) -> Result<(), String> {
-    match agents::get(&shared.store.db(), &shared.home, &carry.name)? {
-        Some(agent) if agent.thread != thread => Err(format!(
-            "An agent named {} already exists on this host; rename one of them before the move.",
-            carry.name
-        )),
-        _ => Ok(()),
-    }
-}
-
 pub(super) async fn adopt(
     shared: &Arc<Shared>,
     root: &str,

@@ -200,6 +200,13 @@ async fn depart_once(
         reconcile(thread, &shared.store, transfer).await?;
     }
     let facts = thread.move_facts().await?;
+    let fresh = host_move::phase(&shared.store.db(), transfer)?.is_none();
+    if fresh
+        && let Some(agent) = super::agents::move_facts(shared, thread).await?
+        && let Some(reason) = crate::agents::too_large(agent.memory_bytes)
+    {
+        return Err(reason);
+    }
     let entry = {
         let _gate = shared.moves.write().await;
         let db = shared.store.db();
@@ -428,9 +435,6 @@ async fn arrive(
             None => crate::t3::fresh_id("thread"),
         };
         host_move::within_budget(&package)?;
-        if let Some(carry) = &package.agent {
-            super::agents::arrival_free(shared, carry, &thread_id)?;
-        }
         let sealed = host_move::sealed_threads(&shared.store.db())?;
         let thread = project
             .move_in(&package, &thread_id, &sealed, || {
