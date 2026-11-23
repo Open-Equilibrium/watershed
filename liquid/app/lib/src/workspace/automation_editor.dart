@@ -128,6 +128,10 @@ class _AutomationEditorState extends State<AutomationEditor> {
     }());
   }
 
+  void _mutate(BridgeMutation change) => unawaited(
+    _state.apply(change).then<void>((_) {}, onError: (Object _) {}),
+  );
+
   void _write({
     String? name,
     BridgeTrigger? trigger,
@@ -135,21 +139,17 @@ class _AutomationEditorState extends State<AutomationEditor> {
     List<BridgeStep>? steps,
   }) {
     final setup = _setup;
-    unawaited(
-      _state
-          .apply(
-            mutation(
-              BridgeMutationKind.setAutomation,
-              automation: widget.automation,
-              automationSetup: BridgeAutomationSetup(
-                name: name ?? setup.name,
-                trigger: trigger ?? setup.trigger,
-                conditions: conditions ?? setup.conditions,
-                steps: steps ?? setup.steps,
-              ),
-            ),
-          )
-          .then<void>((_) {}, onError: (Object _) {}),
+    _mutate(
+      mutation(
+        BridgeMutationKind.setAutomation,
+        automation: widget.automation,
+        automationSetup: BridgeAutomationSetup(
+          name: name ?? setup.name,
+          trigger: trigger ?? setup.trigger,
+          conditions: conditions ?? setup.conditions,
+          steps: steps ?? setup.steps,
+        ),
+      ),
     );
   }
 
@@ -223,16 +223,12 @@ class _AutomationEditorState extends State<AutomationEditor> {
                   key: const Key('automation on'),
                   materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
                   value: automation.on_,
-                  onChanged: (on) => unawaited(
-                    _state
-                        .apply(
-                          mutation(
-                            BridgeMutationKind.setAutomationOn,
-                            automation: widget.automation,
-                            on: on,
-                          ),
-                        )
-                        .then<void>((_) {}, onError: (Object _) {}),
+                  onChanged: (on) => _mutate(
+                    mutation(
+                      BridgeMutationKind.setAutomationOn,
+                      automation: widget.automation,
+                      on: on,
+                    ),
                   ),
                 ),
               ),
@@ -243,15 +239,11 @@ class _AutomationEditorState extends State<AutomationEditor> {
                 (
                   LucideIcons.trash,
                   'Delete Automation',
-                  () => unawaited(
-                    _state
-                        .apply(
-                          mutation(
-                            BridgeMutationKind.removeAutomation,
-                            automation: widget.automation,
-                          ),
-                        )
-                        .then<void>((_) {}, onError: (Object _) {}),
+                  () => _mutate(
+                    mutation(
+                      BridgeMutationKind.removeAutomation,
+                      automation: widget.automation,
+                    ),
                   ),
                 ),
               ],
@@ -283,11 +275,7 @@ class _AutomationEditorState extends State<AutomationEditor> {
                         label: 'and',
                         add: true,
                         choices: [
-                          for (final field in _fields(
-                            (field) =>
-                                field.kind != BridgeFieldKind.formula &&
-                                field.kind != BridgeFieldKind.button,
-                          ))
+                          for (final field in _fields(_conditionable))
                             (
                               field.name,
                               false,

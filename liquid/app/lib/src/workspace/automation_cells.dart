@@ -98,6 +98,10 @@ bool _needsValue(BridgeMatch match) => switch (match) {
   _ => true,
 };
 
+bool _conditionable(BridgeField field) =>
+    field.kind != BridgeFieldKind.formula &&
+    field.kind != BridgeFieldKind.button;
+
 final _braced = RegExp(r'\{([^{}]+)\}');
 
 String shownMessage(String stored, BridgeDatabase? database) =>

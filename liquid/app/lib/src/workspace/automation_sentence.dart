@@ -48,10 +48,8 @@ extension _SentenceEditing on _AutomationEditorState {
     );
   }
 
-  List<BridgeField> _fields(bool Function(BridgeField) keep) => [
-    for (final field in _database?.fields ?? const <BridgeField>[])
-      if (keep(field)) field,
-  ];
+  Iterable<BridgeField> _fields(bool Function(BridgeField) keep) =>
+      (_database?.fields ?? const <BridgeField>[]).where(keep);
 
   BridgeField? _fieldOf(String? id) =>
       _database?.fields.where((field) => field.id == id).firstOrNull;
@@ -105,8 +103,7 @@ extension _SentenceEditing on _AutomationEditorState {
         for (final known in _fields(
           (known) => kind == BridgeTriggerKind.clicked
               ? known.kind == BridgeFieldKind.button
-              : known.kind != BridgeFieldKind.formula &&
-                    known.kind != BridgeFieldKind.button,
+              : _conditionable(known),
         ))
           (known.name, known.id == _field, () => _setTrigger(field: known.id)),
       ],
@@ -175,11 +172,7 @@ extension _SentenceEditing on _AutomationEditorState {
           reference: true,
           danger: field == null,
           choices: [
-            for (final known in _fields(
-              (known) =>
-                  known.kind != BridgeFieldKind.formula &&
-                  known.kind != BridgeFieldKind.button,
-            ))
+            for (final known in _fields(_conditionable))
               (
                 known.name,
                 known.id == condition.field,
