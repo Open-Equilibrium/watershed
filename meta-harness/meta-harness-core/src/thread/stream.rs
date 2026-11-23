@@ -1,9 +1,18 @@
+use std::collections::HashMap;
+
 use serde_json::Value;
 
 use super::record::{describe, duration, pending, status_of, text_of, turn_of, turns, usage_of};
 use super::{ChatItem, Snapshot, State, ThreadEvent};
-use crate::event::{AgentEvent, ItemDetail, RequestId, TurnId};
+use crate::event::{AgentEvent, ItemDetail, ItemId, RequestId, TurnId};
 use crate::t3::{Change, Projection};
+
+fn item_id(items: &mut HashMap<String, ItemId>, id: &Value) -> ItemId {
+    let next = ItemId(items.len() as u64 + 1);
+    *items
+        .entry(id.as_str().unwrap_or_default().to_owned())
+        .or_insert(next)
+}
 
 pub(super) fn restore(state: &mut State, snapshot: &Value) {
     state.projection = Projection::from_snapshot(&snapshot["projection"]);
@@ -82,7 +91,7 @@ fn translate(state: &mut State, change: Change, payload: &Value) -> Vec<AgentEve
                 return Vec::new();
             };
             let turn = turn_of(&state.projection, payload);
-            let item = state.item(&payload["id"]);
+            let item = item_id(&mut state.items, &payload["id"]);
             let mut events = Vec::new();
             match before.as_ref().and_then(describe) {
                 None => events.push(AgentEvent::ItemStarted {
@@ -143,7 +152,10 @@ fn translate(state: &mut State, change: Change, payload: &Value) -> Vec<AgentEve
 }
 
 pub(super) fn snapshot(state: &mut State) -> Snapshot {
-    let projection = state.projection.clone();
+    let sequence = state.sequence;
+    let State {
+        projection, items, ..
+    } = state;
     let transcript = projection
         .inherited
         .iter()
@@ -156,8 +168,8 @@ pub(super) fn snapshot(state: &mut State) -> Snapshot {
         .filter_map(|item| {
             let (kind, detail) = describe(item)?;
             Some(ChatItem {
-                id: state.item(&item["id"]),
-                turn: turn_of(&projection, item),
+                id: item_id(items, &item["id"]),
+                turn: turn_of(projection, item),
                 kind,
                 detail,
                 text: text_of(item).to_owned(),
@@ -168,13 +180,13 @@ pub(super) fn snapshot(state: &mut State) -> Snapshot {
         })
         .collect();
     Snapshot {
-        sequence: state.sequence,
-        turns: turns(&projection),
+        sequence,
+        turns: turns(projection),
         transcript,
         requests: projection
             .turn_items
             .iter()
-            .filter_map(|item| pending(&projection, item))
+            .filter_map(|item| pending(projection, item))
             .collect(),
     }
 }

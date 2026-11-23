@@ -8,6 +8,13 @@ use crate::event::{
 use crate::git::count;
 use crate::t3::{Projection, millis, prompt_of};
 
+pub(super) fn active(run: &Value) -> bool {
+    matches!(
+        run["status"].as_str(),
+        Some("starting" | "running" | "waiting")
+    )
+}
+
 pub(super) fn run_id(runs: &[Value], matches: impl Fn(&Value) -> bool) -> Option<Value> {
     runs.iter().find(|r| matches(r)).map(|r| r["id"].clone())
 }

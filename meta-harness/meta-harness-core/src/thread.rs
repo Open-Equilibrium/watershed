@@ -23,8 +23,8 @@ pub use details::{
     Automation, LocalServer, Pace, RunStatus, Schedule, ScheduleKind, UsageLimits, UsageWindow,
 };
 pub use lineage::{Group, Lineage, LineageChanges, LineageRow, Relation};
+use record::{active, predecessor, ready_checkpoint, run_id, turn_status, turns};
 pub(crate) use record::{describe, duration, failed, usage_of};
-use record::{predecessor, ready_checkpoint, run_id, turn_status, turns};
 use stream::{apply, restore, snapshot};
 
 const BACKLOG: usize = 4096;
@@ -101,14 +101,6 @@ impl State {
                 .inspect(|watch| watch.notify_one())
                 .is_some()
         });
-    }
-
-    fn item(&mut self, id: &Value) -> ItemId {
-        let next = ItemId(self.items.len() as u64 + 1);
-        *self
-            .items
-            .entry(id.as_str().unwrap_or_default().to_owned())
-            .or_insert(next)
     }
 }
 
@@ -287,12 +279,7 @@ impl Thread {
         queue_only: bool,
         context: Option<Value>,
     ) -> Result<(), String> {
-        let running = self.state().projection.runs.iter().any(|run| {
-            matches!(
-                run["status"].as_str(),
-                Some("starting" | "running" | "waiting")
-            )
-        });
+        let running = self.state().projection.runs.iter().any(active);
         let (mode, intent) = match (running, steer, queue_only) {
             (_, _, true) | (true, false, _) => (json!({"type": "queue_after_active"}), None),
             (true, true, _) => (json!({"type": "start_immediately"}), Some("steer")),
@@ -497,12 +484,7 @@ impl Thread {
                 r["ordinal"].as_u64() == Some(turn) && r["status"] == "queued"
             })
             .ok_or(format!("Turn {turn} is not queued."))?;
-            let running = run_id(runs, |r| {
-                matches!(
-                    r["status"].as_str(),
-                    Some("starting" | "running" | "waiting")
-                )
-            });
+            let running = run_id(runs, active);
             (queued, running)
         };
         match running {
