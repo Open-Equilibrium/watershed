@@ -144,6 +144,33 @@
         <p><strong>Recommendation:</strong> B, if the cross-area overview is still missing.</p>
       </details>
 
+      <details id="d-116" class="decision wide">
+        <summary><h3>D-116 - The Editor For A Section's Text</h3></summary>
+        <p><strong>Status:</strong> Open; both spikes reported, A on 2026-11-22 and C on 2026-11-23 (branch <code>spike/liquid-section-editor</code>, its README compares them), and a person still has to type German dead keys and Japanese on a real Mac with each.</p>
+        <p><strong>Problem:</strong> A Section becomes one rich text with paragraph markers (ADR-0322), so selection, ⏎ and ⌫ work across Paragraphs as in Google Docs. Flutter's <code>TextField</code>, which each Text Block uses today, shows one plain text with one style; it cannot show several Paragraphs with their own styles and marks in one selection. Liquid needs a text editor that can, with input methods (IME) for accents and Asian scripts, and typing that stays responsive.</p>
+        <p><strong>Question:</strong> Which editor shows and edits a Section?</p>
+        <div class="dia">
+          <div class="opt rec"><h4>A: super_editor <span class="tag">Recommended to spike first</span></h4>
+            <div class="b">Superlist's document editor, MIT</div>
+            <ul><li>Pro: selection across Paragraphs, its own IME layer and replaceable components; Liquid maps Automerge's spans onto its document.</li><li>Con: a large dependency still in 0.3 pre-releases, whose IME code has needed fixes on newer Flutter.</li></ul>
+          </div>
+          <div class="opt"><h4>B: appflowy_editor</h4>
+            <div class="b">AppFlowy's Notion-like editor, MPL-2.0 or AGPL-3.0</div>
+            <ul><li>Pro: mature in a product like Liquid, with toggles and nesting.</li><li>Con: each Paragraph is its own node, as in Notion, and its document model and Delta format would sit between Liquid and Automerge.</li></ul>
+          </div>
+          <div class="opt"><h4>C: Liquid's own editor</h4>
+            <div class="b">on Flutter's text layout and input client</div>
+            <ul><li>Pro: no dependency; Automerge's spans drive it directly.</li><li>Con: the most work; IME, caret, selection and accessibility are built by hand.</li></ul>
+          </div>
+        </div>
+        <p><strong>Spike of A:</strong> bound to a Section's Automerge text, selection crosses Paragraphs by mouse and keyboard, ⏎ adds a marker, ⇧⏎ breaks a line and ⌫ removes a marker, a split or join on one device and an edit on another merge into the right Paragraphs, and composed IME text reaches the core once committed. The expand rules, ⌘B, ⌘I and typed <code>**x**</code> work; the Markdown at the caret, two caret stops and ⌘\ would be built. Toggles were not tried; list and task indentation exist. Keeping the core in step costs about 0.1 ms a keystroke. Against it: every Paragraph is laid out, so in a Section of 1,000 Paragraphs a keystroke builds a 3.3 ms frame and ⏎ a 21 ms one, longer than a 60 Hz frame (100 Paragraphs: 0.8 and 2.1 ms); <code>attributed_text</code> 0.4.7 drops bold from the last character when bold covers two adjacent bold spans; 0.3 has been a pre-release since 2024, and its runtime dependencies include its test tools, one of them discontinued.</p>
+        <p><strong>Maintenance of A (2026-11-23):</strong> the project lives at <code>Flutter-Bounty-Hunters/super_editor</code>; pub.dev links Superlist's fork of January 2026, where Superlist keeps its own IME fixes. 116 of the 119 commits of the last six months come from one person, priorities follow paying customers, no stable release has shipped since 0.2.7 (June 2024), and no package since June 2026. 290 issues are open; a Japanese IME bug from March 2026 has no answer, and Windows IME has been reported broken since 2022. Its code is about 97,000 lines of Dart, twice the Liquid app, so carrying patches means keeping a fork.</p>
+        <p><strong>Spike of C:</strong> about 1,000 lines of Dart send each edit as the core's own op. It passes the same scenarios, including the Markdown of the styled word at the caret, two caret stops and ⌘\, and 8 × 1,500 randomized edits without a difference between editor and core. It builds only visible Paragraphs, so frames stay flat: at 10,000 Paragraphs a keystroke builds a 0.3 ms frame and ⏎ a 1.2 ms one. Still to build: accessibility, double and triple click, scrolling to the caret, copy and paste, undo, spellcheck, a context menu, right-to-left text and touch handles.</p>
+        <p><strong>For either editor:</strong> an Automerge mark costs about 25 µs against 5 µs for a splice and stays in history, so the core marks only where Automerge's expand rules differ from what the editor wants. Of the ways to read marks, only <code>spans</code> is sound: <code>marks</code> slows down superlinearly once hundreds of marks sit on one character (<a href="https://github.com/automerge/automerge/issues/1737">automerge#1737</a>), and <code>get_marks</code> counts elements rather than UTF-16 units (<a href="https://github.com/automerge/automerge/issues/1592">automerge#1592</a>).</p>
+        <p><strong>Recommendation:</strong> C. It meets the criterion without upstream bugs, keeps frames flat for long Sections, and is code Liquid owns at a hundredth of A's size; its remaining features are the price. A would be a fork Liquid keeps, and B repeats the per-Paragraph model ADR-0322 leaves.</p>
+        <p><strong>Acceptance criterion:</strong> on macOS, in a Section of 1,000 Paragraphs bound to Automerge's spans, a mouse selection and ⇧ with the arrows cross Paragraphs; ⏎, ⇧⏎ and ⌫ add, break and remove as ADR-0322 says; German dead keys and Japanese IME compose; marks behave as the <a href="../design/mockups/liquid-text-formatting.html">formatting mockup</a> shows; toggles and indentation fit the markers' parents; and the time per keystroke is recorded.</p>
+      </details>
+
     </div>
   </section>
 

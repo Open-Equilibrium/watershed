@@ -150,7 +150,7 @@ Canonical terms. Use these exactly; do not introduce synonyms. Tool names are fi
 
 - **Workspace** — Top-level owner of Pages, Blocks, Sources, Connections, Automations, Roles, History and settings.
 - **Page** — Liquid's authored surface: an ordered composition of Block Views with responsive layout metadata. A Page starts as an empty flow and may later be arranged on a grid.
-- **Block** — A canonical, typed and addressable unit of content or functionality, such as text, database, code, calculation, media, whiteboard, App or Chat. A text toggle is formatting inside a Text Block, not a Block Type.
+- **Block** — A canonical, typed and addressable unit of content or functionality, such as text, database, code, calculation, media, whiteboard, App or Chat. A text toggle is formatting inside a Section, not a Block Type.
 - **Block Type** — The versioned behavior, state contract, supported Views, ports/actions, permissions and responsive capabilities shared by Blocks of one kind.
 - **View** — One placement or representation of a Block. Several Views may expose the same Block on different Pages and stay synchronized because they share canonical Block state. Duplicating creates a new Block; adding a View does not. A View of a Table has its own title and View tabs.
 - **View tab** — One tab of a View of a Table, as Notion's database views: its own name, layout (Table, Board or Calendar), group, sort and filter over the View's Table. The UI says tab; the app's tabs (ADR-0241) are another thing.
@@ -161,7 +161,7 @@ Canonical terms. Use these exactly; do not introduce synonyms. Tool names are fi
 - **Explorer** — Liquid's primary Workspace navigation surface, listing Pages and Sources as peer entries.
 - **Page template** — A reusable starting composition of Blocks, Views, Connections and Automations for one use case, saved from Arrange mode; it creates an ordinary Page, asking by default for the Chats it shows (ADR-0241).
 - **PowerBar** — Liquid's command and creation surface for finding Workspace objects, adding Blocks and invoking permitted actions. Without a prefix it searches and jumps; `/` adds a Block, `>` lists actions and `@` is kept for people, as the approved [Pages mockups](docs/design/mockups/liquid-workspace-pages.html) show (ADR-0236).
-- **Slash commands** — The commands `/` lists in a menu at the caret in an empty Text Block, as in Notion and T3 Code: the Blocks to add, filtered by what follows `/`. The PowerBar's `/` lists the same ([Pages mockups](docs/design/mockups/liquid-workspace-pages.html)).
+- **Slash commands** — The commands `/` lists in a menu at the caret in an empty Paragraph, as in Notion and T3 Code: the Blocks to add, filtered by what follows `/`. The PowerBar's `/` lists the same ([Pages mockups](docs/design/mockups/liquid-workspace-pages.html)).
 - **Liquid key** — Caps Lock when the user opts in: a tap opens Liquid from any app, holding it in Liquid reveals shortcuts and ⇪ plus a key runs a Liquid command.
 - **Shortcut profile** — Liquid's set of shortcuts: Liquid key, Standard (⌘ only) or Custom.
 - **Reveal key** — The key whose hold shows contextual shortcut hints: the Liquid key while it is on, ⌘ otherwise.
@@ -197,10 +197,11 @@ Canonical terms. Use these exactly; do not introduce synonyms. Tool names are fi
 - **Compliance replica** — A replica a company runs with its own key for search, legal hold and data-loss checks (ADR-0228).
 - **Recovery key** — The second way to regain a Workspace's keys when no signed-in device can approve a new one. Area keys are also wrapped for it, and the person or their company holds it (ADR-0228).
 - **Headless replica** — A Liquid replica without UI, on a server for Automations and schedules or on a separate agent host. It holds only the Workspaces enabled for it and, once selective replication follows the complete M3 replicas, only the areas its Roles allow (ADR-0255).
-- **Text Block** — One paragraph, heading, list item, to-do or quote; ⏎ ends it and starts the next.
+- **Text Block** — Today's implementation of one Paragraph as a Block of its own, which Sections replace (ADR-0322).
+- **Paragraph** — A body text, heading, list item, to-do or quote inside a Section, ended by ⏎, which starts the next; ⇧⏎ breaks its line without ending it (ADR-0322).
 - **Table** — The Block of typed fields and rows, kept in a document of its own, listed in the sidebar's Tables section and shown on Pages through Views, whose View tabs lay it out as Table, Board or Calendar (ADR-0309, ADR-0311). The core calls it the Database Block (ADR-0244).
 - **Home Page** — The Page a Block was made on, whose document stores the Block. A Table has none.
-- **Code Block** — A Block of code with syntax colors that Liquid never runs; a Text Block turns into one with ``` or the slash command Code (ADR-0302).
+- **Code Block** — A Block of code with syntax colors that Liquid never runs; a Paragraph turns into one with ``` or the slash command Code (ADR-0302).
 - **Media Block** — A Block that shows an image or a file, kept as an attachment (ADR-0305).
 - **Whiteboard Block** — A Block whose Drawing lies on a canvas without edges, drawn on in place (ADR-0306).
 - **Drawing** — The strokes, shapes and text of a Whiteboard Block, or the ink on an annotated Media Block's pages, each an element that merges on its own (ADR-0306, ADR-0307).
@@ -211,7 +212,7 @@ Canonical terms. Use these exactly; do not introduce synonyms. Tool names are fi
 - **Button field** — A Table field that shows a button in each row and holds no value; clicking it runs the Automations it starts (ADR-0317).
 - **Total row** — A Table tab's footer: its row count and, per field, a total over the rows the tab shows (ADR-0244).
 - **Calculation Block** — A Block of lines that each pair a label with a value or formula, laid out as labels left and values right, for reports in Excel's layout (ADR-0244).
-- **Section** — Consecutive Text Blocks up to `---`, a Block of another type or the Page's edge; Arrange mode places it as one tile, inside which its Text Blocks can be arranged in columns. It is layout only and owns no content, rights or Views (ADR-0235).
+- **Section** — The Block of text: its Paragraphs up to `---`, a Block of another type or the Page's edge, kept as one rich text; Arrange mode places it as one tile (ADR-0322).
 - **Chat** — Liquid's one kind of conversation, as in WhatsApp: one-to-one or a group, whose participants are people or agents alike; a Block that Pages can show. A planned replacement for separate agent sessions and projects (ADR-0239, ADR-0241).
 - **Inbox** — Liquid's one list of what needs the person, from every Chat and Table: agents' approvals and questions, mentions, direct messages and tasks due soon, ordered by when they are due (ADR-0241).
 - **Arrange mode** — The explicit Page state that reveals the responsive grid and resize/reorder handles. Outside Arrange mode, a Page never arranged stays a content-first flow, and an arranged Page shows its tiles.
