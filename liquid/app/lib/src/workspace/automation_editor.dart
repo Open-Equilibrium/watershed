@@ -668,7 +668,7 @@ class _AutomationEditorState extends State<AutomationEditor> {
                         final owner? =>
                           '${tableName(_state, owner)} · deleted together with it',
                         null =>
-                          'Workspace · stays when Blocks it uses are deleted',
+                          'Workspace · stays when Tables it uses are deleted',
                       },
                     ),
                     ('Last run', lastRun(automation.last)),
@@ -1023,8 +1023,8 @@ class _Attention extends StatelessWidget {
     final ws = context.ws;
     final reason = switch (attention) {
       BridgeAttention(kind: BridgeAttentionKind.tableDeleted, :final table) =>
-        'Turned off: its Database “$table” was deleted. Choose another '
-            'Database, then turn it on.',
+        'Turned off: its Table “$table” was deleted. Choose another Table, '
+            'then turn it on.',
       BridgeAttention(:final table, :final field) =>
         'Turned off: its field “$field” of “$table” was removed, with the '
             'conditions and actions that used it. Choose another field where '

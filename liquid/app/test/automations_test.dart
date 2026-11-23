@@ -129,7 +129,7 @@ void main() {
     await tester.tap(find.text('Monthly summary'));
     await tester.pumpAndSettle();
     expect(
-      find.textContaining('Turned off: its Database “Bills” was deleted'),
+      find.textContaining('Turned off: its Table “Bills” was deleted'),
       findsOneWidget,
     );
     await tester.tap(find.byKey(const Key('automation on')));

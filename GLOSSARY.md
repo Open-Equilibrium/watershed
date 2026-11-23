@@ -155,7 +155,8 @@ Canonical terms. Use these exactly; do not introduce synonyms. Tool names are fi
 - **View** — One placement or representation of a Block. Several Views may expose the same Block on different Pages and stay synchronized because they share canonical Block state. Duplicating creates a new Block; adding a View does not. A View of a Table has its own title and View tabs.
 - **View tab** — One tab of a View of a Table, as Notion's database views: its own name, layout (Table, Board or Calendar), group, sort and filter over the View's Table. The UI says tab; the app's tabs (ADR-0241) are another thing.
 - **Connection** — An explicit typed and permissioned data/action relation among Blocks and Sources. It addresses stable objects and ports independently of active View or layout; visual proximity never grants access.
-- **Automation** — A Workspace-owned event/condition/action rule over Liquid objects and permitted external actions. It is distinct from Meta-Harness agent scheduling and orchestration.
+- **Automation** — A Workspace event/condition/step rule over Liquid objects and permitted external actions; one that uses only its trigger's Table belongs to that Table and is deleted with it. It is distinct from Meta-Harness agent scheduling and orchestration.
+- **Needs attention** — The status of an Automation that a deleted Table or a removed field broke; it stays off until repaired (ADR-0317).
 - **Source** — An external or shared resource addressable from a Workspace. Sources appear beside Pages in the Explorer and use the same open/navigation flow, but are not authored Pages internally.
 - **Explorer** — Liquid's primary Workspace navigation surface, listing Pages and Sources as peer entries.
 - **Page template** — A reusable starting composition of Blocks, Views, Connections and Automations for one use case, saved from Arrange mode; it creates an ordinary Page, asking by default for the Chats it shows (ADR-0241).
