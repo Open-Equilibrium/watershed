@@ -801,7 +801,11 @@ fn a_purge_that_fails_keeps_the_page_s_history() {
 
     workspace.store.history_failing = true;
     let owner = Actor::Person(PersonId::new("benni"));
-    assert!(workspace.purge(&owner, &crate::Purge::Page(page.clone())).is_err());
+    assert!(
+        workspace
+            .purge(&owner, &crate::Purge::Page(page.clone()))
+            .is_err()
+    );
     workspace.store.history_failing = false;
     workspace.revert(&owner, &[typed]).unwrap();
     assert_eq!(workspace.text(&page, &block).unwrap().unwrap(), "Five days");
