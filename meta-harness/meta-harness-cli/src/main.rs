@@ -182,10 +182,19 @@ async fn config(host: &remote::Host, args: &[&str]) -> Result<(), String> {
         ["revert", revision] => print(&host.propose_revert(number(revision)?).await?),
         ["pending"] => print(&host.pending().await?),
         ["approve", proposal] => print(&host.approve(number(proposal)?).await?),
-        ["reject", proposal] => host.reject(number(proposal)?).await,
+        ["reject", proposal] => {
+            let number = number(proposal)?;
+            host.reject(number).await?;
+            println!("{}", rejected(number));
+            Ok(())
+        }
         ["log"] => print(&host.log().await?),
         _ => Err(format!("unknown config command\n{USAGE}")),
     }
+}
+
+fn rejected(number: u64) -> String {
+    format!("Rejected proposal {number}.")
 }
 
 async fn serve(home: PathBuf) -> Result<(), String> {
@@ -679,6 +688,11 @@ mod tests {
             Some(recorded)
         );
         assert_eq!(data_in_installation(prefix, None, shell), None);
+    }
+
+    #[test]
+    fn a_rejection_is_confirmed_on_one_line() {
+        assert_eq!(rejected(4), "Rejected proposal 4.");
     }
 
     #[test]
