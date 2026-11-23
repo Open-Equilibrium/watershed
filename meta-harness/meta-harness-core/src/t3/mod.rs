@@ -2,7 +2,7 @@ mod cli;
 mod client;
 mod live;
 mod projection;
-mod server;
+pub(crate) mod server;
 
 pub use live::Watch;
 

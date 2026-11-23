@@ -15,7 +15,7 @@ use tokio_tungstenite::tungstenite::handshake::server::{ErrorResponse, Request, 
 
 mod admit;
 mod agents;
-mod listener;
+pub(crate) mod listener;
 mod moves;
 pub(crate) mod transfers;
 

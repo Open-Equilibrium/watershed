@@ -408,15 +408,24 @@ pub(crate) fn get(db: &Connection, home: &Path, key: &str) -> Result<Option<Agen
     .transpose()
 }
 
+fn update(
+    db: &Connection,
+    id: &str,
+    sql: &str,
+    params: impl rusqlite::Params,
+) -> Result<(), String> {
+    let changed = db.execute(sql, params).map_err(failed)?;
+    found(changed, id)
+}
+
 pub(crate) fn advance(db: &Connection, id: &str, next: &str) -> Result<(), String> {
-    let changed = db
-        .execute(
-            "UPDATE agent_profile SET previous = thread, thread = ?2, generation = generation + 1
-             WHERE id = ?1",
-            params![id, next],
-        )
-        .map_err(failed)?;
-    found(changed, id)?;
+    update(
+        db,
+        id,
+        "UPDATE agent_profile SET previous = thread, thread = ?2, generation = generation + 1
+         WHERE id = ?1",
+        params![id, next],
+    )?;
     db.execute(
         "INSERT INTO agent_thread (agent, thread, generation)
          SELECT id, thread, generation FROM agent_profile WHERE id = ?1",
@@ -427,13 +436,12 @@ pub(crate) fn advance(db: &Connection, id: &str, next: &str) -> Result<(), Strin
 }
 
 pub(crate) fn settle(db: &Connection, id: &str) -> Result<(), String> {
-    let changed = db
-        .execute(
-            "UPDATE agent_profile SET previous = NULL WHERE id = ?1",
-            [id],
-        )
-        .map_err(failed)?;
-    found(changed, id)
+    update(
+        db,
+        id,
+        "UPDATE agent_profile SET previous = NULL WHERE id = ?1",
+        [id],
+    )
 }
 
 pub(crate) fn rename(db: &Connection, home: &Path, id: &str, name: &str) -> Result<(), String> {
@@ -441,13 +449,12 @@ pub(crate) fn rename(db: &Connection, home: &Path, id: &str, name: &str) -> Resu
     if get(db, home, name)?.is_some_and(|other| other.id != id) {
         return Err(format!("An agent named {name} already exists."));
     }
-    let changed = db
-        .execute(
-            "UPDATE agent_profile SET name = ?2, named = 1 WHERE id = ?1",
-            params![id, name],
-        )
-        .map_err(failed)?;
-    found(changed, id)
+    update(
+        db,
+        id,
+        "UPDATE agent_profile SET name = ?2, named = 1 WHERE id = ?1",
+        params![id, name],
+    )
 }
 
 pub(crate) fn set_model(
@@ -456,13 +463,12 @@ pub(crate) fn set_model(
     model: &ModelChoice,
     permissions: Permissions,
 ) -> Result<(), String> {
-    let changed = db
-        .execute(
-            "UPDATE agent_profile SET model = ?2, permissions = ?3 WHERE id = ?1",
-            params![id, to_json(model)?, to_json(&permissions)?],
-        )
-        .map_err(failed)?;
-    found(changed, id)
+    update(
+        db,
+        id,
+        "UPDATE agent_profile SET model = ?2, permissions = ?3 WHERE id = ?1",
+        params![id, to_json(model)?, to_json(&permissions)?],
+    )
 }
 
 pub(crate) fn threads(db: &Connection, id: &str) -> Result<Vec<String>, String> {
@@ -474,10 +480,7 @@ pub(crate) fn threads(db: &Connection, id: &str) -> Result<Vec<String>, String> 
 }
 
 pub(crate) fn remove(db: &Connection, id: &str) -> Result<(), String> {
-    let changed = db
-        .execute("DELETE FROM agent_profile WHERE id = ?1", [id])
-        .map_err(failed)?;
-    found(changed, id)?;
+    update(db, id, "DELETE FROM agent_profile WHERE id = ?1", [id])?;
     for table in ["agent_thread", "agent_change", "agent_mention"] {
         db.execute(&format!("DELETE FROM {table} WHERE agent = ?1"), [id])
             .map_err(failed)?;
@@ -603,13 +606,12 @@ pub(crate) fn migrate(db: &Connection, home: &Path) -> Result<(), String> {
 }
 
 pub(crate) fn set_seen(db: &Connection, id: &str, seen: &Snapshot) -> Result<(), String> {
-    let changed = db
-        .execute(
-            "UPDATE agent_profile SET seen_instructions = ?2, seen_routines = ?3 WHERE id = ?1",
-            params![id, seen.instructions, to_json(&seen.routines)?],
-        )
-        .map_err(failed)?;
-    found(changed, id)
+    update(
+        db,
+        id,
+        "UPDATE agent_profile SET seen_instructions = ?2, seen_routines = ?3 WHERE id = ?1",
+        params![id, seen.instructions, to_json(&seen.routines)?],
+    )
 }
 
 pub(crate) fn routine_copy(task: &Value) -> Value {
