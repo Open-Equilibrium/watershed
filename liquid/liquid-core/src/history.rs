@@ -6,6 +6,7 @@ use crate::{ActionId, Actor, AreaId, AutomationId, BlockId, Mutation, Origin, Pa
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Permission {
     Owner,
+    Role(crate::RoleId),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

@@ -18,6 +18,7 @@ const SETUP: &str = "setup";
 const ON: &str = "on";
 const ATTENTION: &str = "attention";
 const LAST: &str = "last";
+const ROLE: &str = "role";
 
 pub const MAX_AUTOMATIONS: usize = 500;
 pub const MAX_CONDITIONS: usize = 20;
@@ -84,6 +85,7 @@ pub struct Automation {
     pub attention: Option<Attention>,
     pub last: Option<LastRun>,
     pub owner: Option<BlockId>,
+    pub role: crate::RoleId,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -211,6 +213,9 @@ pub(crate) fn read(doc: &AutoCommit) -> Vec<Automation> {
                 on: listed.get(ON) == Some("true"),
                 attention: decode(doc, &entry, ATTENTION),
                 last: decode(doc, &entry, LAST),
+                role: listed
+                    .get(ROLE)
+                    .map_or_else(|| crate::Template::CanEdit.id(), crate::RoleId::stored),
                 setup,
             })
         })
@@ -367,6 +372,40 @@ impl<S: Store> Workspace<S> {
         }
         doc.put(&entry, ON, on)?;
         Ok(written())
+    }
+
+    pub(crate) fn write_automation_role(
+        &mut self,
+        automation: &AutomationId,
+        role: &crate::RoleId,
+    ) -> Result<Written, Error> {
+        self.role(role)?;
+        let doc = self.doc(&Document::Workspace)?;
+        let entry = entry(doc, automation)?;
+        doc.put(&entry, ROLE, role.as_str())?;
+        Ok(written())
+    }
+
+    fn permitted(&mut self, automation: &Automation, table: &BlockId) -> Result<(), Error> {
+        let mut needs = vec![(crate::Capability::Read, table.clone())];
+        for step in &automation.setup.steps {
+            match step {
+                Step::Set { .. } => needs.push((crate::Capability::Apply, table.clone())),
+                Step::AddRow { table: to, .. } => {
+                    needs.push((crate::Capability::Apply, to.clone()));
+                }
+                Step::Notify { .. } => {}
+            }
+        }
+        for (capability, table) in needs {
+            if !self.allows(&automation.role, &table)?.allows(capability) {
+                return Err(Error::Denied {
+                    capability,
+                    table: self.table_name(&table)?.unwrap_or_default(),
+                });
+            }
+        }
+        Ok(())
     }
 
     pub(crate) fn write_remove_automation(
@@ -564,6 +603,7 @@ impl<S: Store> Workspace<S> {
             .ok_or(Error::NotFound)?
             .table()
             .clone();
+        self.permitted(automation, &table)?;
         let mut touched = vec![Document::Workspace];
         let mut last = LastRun {
             at: now(),
@@ -606,7 +646,7 @@ impl<S: Store> Workspace<S> {
             id: id.clone(),
             actor: Actor::Automation(automation.id.clone()),
             origin: Origin::Automation,
-            permission: Permission::Owner,
+            permission: Permission::Role(automation.role.clone()),
             operation: Operation::Run {
                 automation: automation.id.clone(),
                 cause,

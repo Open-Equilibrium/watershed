@@ -10,6 +10,7 @@ mod id;
 mod model;
 mod mutation;
 mod order;
+mod role;
 mod search;
 mod sort_key;
 mod store;
@@ -44,12 +45,16 @@ pub use formula::{
 pub use history::{Action, Document, Operation, Permission};
 pub use id::{
     ActionId, AreaId, AutomationId, BlockId, ElementId, FieldId, LineId, OptionId, PageId,
-    PersonId, RowId, TabId, ViewId,
+    PersonId, RoleId, RowId, TabId, ViewId,
 };
 pub use model::{Area, BlockKind, Code, GRID_COLUMNS, PageEntry, TableEntry, Tile, View};
 pub use mutation::{
     Actor, Applied, Cell, Changed, Created, Error, FieldKind, Mutation, Origin, Place, Request,
     TextStyle,
+};
+pub use role::{
+    Allows, Capability, Grant, MAX_GRANTS, MAX_ROLE_NAME, MAX_ROLES, Role, RoleSetup, Target,
+    Template,
 };
 pub use search::{Found, Hit, INDEX_VERSION, IndexEntry, IndexWrite, search_words};
 pub use store::{Commit, MemoryStore, Store, Write};

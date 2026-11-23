@@ -423,6 +423,27 @@ pub enum Mutation {
     RemoveAutomation {
         automation: AutomationId,
     },
+    SetAutomationRole {
+        automation: AutomationId,
+        role: crate::RoleId,
+    },
+    CreateRole {
+        setup: crate::RoleSetup,
+    },
+    SetRole {
+        role: crate::RoleId,
+        setup: crate::RoleSetup,
+    },
+    RemoveRole {
+        role: crate::RoleId,
+    },
+    ProtectTable {
+        table: BlockId,
+        roles: Vec<crate::RoleId>,
+    },
+    UnprotectTable {
+        table: BlockId,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -445,6 +466,7 @@ pub enum Created {
     Elements(Vec<crate::ElementId>),
     Line(crate::LineId),
     Automation(AutomationId),
+    Role(crate::RoleId),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -457,6 +479,7 @@ pub enum Changed {
     Tables,
     Table(BlockId),
     Automations,
+    Roles,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -478,7 +501,13 @@ pub enum Error {
     TooMany,
     TooLong,
     TooLarge,
-    Formula { at: usize },
+    Formula {
+        at: usize,
+    },
+    Denied {
+        capability: crate::Capability,
+        table: String,
+    },
     Changed,
     Random,
     Document(String),
