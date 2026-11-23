@@ -120,6 +120,7 @@ void main() {
     await tap(tester, find.text('Save point'));
     expect(kit.fake.previewed.last, (kit.page, 'v1'));
     expect(find.textContaining('read-only'), findsOneWidget);
+    expect(find.byTooltip('Page history'), findsOneWidget);
     await tap(tester, find.text('Restore version'));
     expect(kit.fake.restored.single, (kit.page, 'v1'));
 

@@ -272,6 +272,7 @@ class _PageHistoryDialogState extends State<PageHistoryDialog> {
                     key: ValueKey(chosen?.after),
                     state: preview,
                     open: OpenPage(page.area, widget.page),
+                    version: true,
                   ),
                 ),
         ),

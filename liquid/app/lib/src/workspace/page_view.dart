@@ -25,7 +25,14 @@ import 'whiteboard_block.dart';
 import 'workspace_state.dart';
 
 class WorkspacePage extends StatefulWidget {
-  const WorkspacePage({super.key, required this.state, required this.open});
+  const WorkspacePage({
+    super.key,
+    required this.state,
+    required this.open,
+    this.version = false,
+  });
+
+  final bool version;
 
   final WorkspaceState state;
   final OpenPage open;
@@ -325,16 +332,17 @@ class _WorkspacePageState extends State<WorkspacePage> implements EditorSource {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        ValueListenableBuilder(
-          valueListenable: _views.arranging,
-          builder: (context, arranging, _) => arranging
-              ? ArrangeBar(views: _views, title: _title.controller.text)
-              : _Breadcrumb(
-                  state: widget.state,
-                  open: widget.open,
-                  onArrange: () => _views.arranging.value = true,
-                ),
-        ),
+        if (!widget.version)
+          ValueListenableBuilder(
+            valueListenable: _views.arranging,
+            builder: (context, arranging, _) => arranging
+                ? ArrangeBar(views: _views, title: _title.controller.text)
+                : _Breadcrumb(
+                    state: widget.state,
+                    open: widget.open,
+                    onArrange: () => _views.arranging.value = true,
+                  ),
+          ),
         ValueListenableBuilder(
           valueListenable: widget.state.problem,
           builder: (context, problem, _) => problem == null
