@@ -468,6 +468,10 @@ fn compared(task: &Value) -> Vec<&Value> {
     COMPARED_KEYS.iter().map(|key| &task[*key]).collect()
 }
 
+pub(crate) fn same_routine(left: &Value, right: &Value) -> bool {
+    compared(left) == compared(right)
+}
+
 pub(crate) fn differences(
     seen: &Snapshot,
     now: &Snapshot,

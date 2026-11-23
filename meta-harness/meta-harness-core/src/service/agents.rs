@@ -15,9 +15,12 @@ use crate::{AgentEvent, StartThread, Thread, Workspace, handoff};
 const RETRY: Duration = Duration::from_secs(10);
 const MAX_LABEL_CHARS: usize = 200;
 
+type Found = (AgentChangeKind, Option<String>, Option<String>);
+
 #[derive(Default)]
 pub(super) struct Watchers {
     tasks: std::sync::Mutex<HashMap<String, JoinHandle<()>>>,
+    unreverted: std::sync::Mutex<HashMap<String, Vec<Found>>>,
     followed: std::sync::Mutex<HashMap<String, Thread>>,
     serial: tokio::sync::Mutex<()>,
 }
@@ -330,8 +333,44 @@ async fn apply(shared: &Shared, agent: &Agent, id: i64) -> Result<(), String> {
     if !change.held || change.undone {
         return Err("This change does not wait for approval.".to_owned());
     }
+    if !still(shared, agent, &change).await? {
+        return Err(
+            "The agent's configuration changed since this change was held; it was not applied. \
+             Discard it, or ask the agent for it again."
+                .to_owned(),
+        );
+    }
     restore(shared, agent, change.kind, &change.before, &change.after).await?;
     agents::mark_applied(&shared.store.db(), id)
+}
+
+async fn still(
+    shared: &Shared,
+    agent: &Agent,
+    change: &crate::AgentChange,
+) -> Result<bool, String> {
+    let task = |text: &Option<String>| {
+        text.as_deref()
+            .and_then(|text| serde_json::from_str::<Value>(text).ok())
+    };
+    Ok(match change.kind {
+        AgentChangeKind::Name => true,
+        AgentChangeKind::Instructions => {
+            agents::instructions(agent)? == change.before.clone().unwrap_or_default()
+        }
+        AgentChangeKind::RoutineAdded
+        | AgentChangeKind::RoutineRemoved
+        | AgentChangeKind::RoutineChanged => {
+            let tasks = current(shared, agent).await?.routine_tasks().await?;
+            match (task(&change.before), task(&change.after)) {
+                (Some(before), _) => tasks
+                    .iter()
+                    .any(|task| task["id"] == before["id"] && agents::same_routine(task, &before)),
+                (None, Some(after)) => !tasks.iter().any(|task| task["id"] == after["id"]),
+                (None, None) => false,
+            }
+        }
+    })
 }
 
 async fn restore(
@@ -466,7 +505,12 @@ async fn notice(
         .filter(|(kind, _, after)| {
             *kind != AgentChangeKind::Name || after.as_deref() != Some(agent.name.as_str())
         })
-        .partition(|change| routine || pending.contains(change));
+        .partition(|change| {
+            routine
+                || crate::util::lock(&shared.agents.unreverted)
+                    .get(&agent.id)
+                    .is_some_and(|stuck| stuck.contains(change))
+        });
     for change in &held {
         if !pending.contains(change) {
             agents::record(
@@ -479,11 +523,13 @@ async fn notice(
             )?;
         }
     }
+    crate::util::lock(&shared.agents.unreverted).insert(agent.id.clone(), held.clone());
     for (kind, before, after) in held.iter().rev() {
         if *kind != AgentChangeKind::Name {
             restore(shared, agent, *kind, after, before).await?;
         }
     }
+    crate::util::lock(&shared.agents.unreverted).remove(&agent.id);
     for change in kept {
         if let (AgentChangeKind::Name, Some(name)) = (change.0, &change.2) {
             if agents::rename(&shared.store.db(), &shared.home, &agent.id, name).is_err() {

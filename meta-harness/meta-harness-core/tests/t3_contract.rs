@@ -518,6 +518,19 @@ async fn an_agent_made_by_chat_names_itself_logs_its_changes_and_answers_a_menti
         host.agent_instructions("news-bot").await.unwrap(),
         "# news-bot\n\nRead the feeds twice.\n"
     );
+    host.agent_set_instructions("news-bot", "# news-bot\n\nRead.\n")
+        .await
+        .unwrap();
+    assert!(
+        host.agent_apply("news-bot", aborted.id).await.is_err(),
+        "a held change does not overwrite what changed since"
+    );
+    host.agent_undo("news-bot", aborted.id).await.unwrap();
+    assert_eq!(
+        host.agent_instructions("news-bot").await.unwrap(),
+        "# news-bot\n\nRead.\n",
+        "discarding a held change keeps the current instructions"
+    );
     host.agent_routine_remove("news-bot", &stopped.id)
         .await
         .unwrap();
