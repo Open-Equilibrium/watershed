@@ -252,21 +252,19 @@ impl Store {
             )?;
             tx.commit().map_err(failed)
         });
-        match recorded {
-            Ok(()) => self.set_reconciled(true),
-            Err(error) => {
-                return Err(match write(&base.blocks) {
-                    Ok(()) => {
-                        self.set_reconciled(true);
-                        error
-                    }
-                    Err(restore) => {
-                        self.set_reconciled(false);
-                        format!("{error}. The harness homes could not be restored: {restore}")
-                    }
-                });
-            }
+        if let Err(error) = recorded {
+            return Err(match write(&base.blocks) {
+                Ok(()) => {
+                    self.set_reconciled(true);
+                    error
+                }
+                Err(restore) => {
+                    self.set_reconciled(false);
+                    format!("{error}. The harness homes could not be restored: {restore}")
+                }
+            });
         }
+        self.set_reconciled(true);
         Ok(Current { revision, blocks })
     }
 
