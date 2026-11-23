@@ -55,9 +55,6 @@ impl Watchers {
 }
 
 pub(super) fn start_all(shared: &Arc<Shared>) {
-    if let Err(error) = agents::migrate(&shared.store.db(), &shared.home) {
-        eprintln!("meta: the persistent agents are not moved to their new store: {error}");
-    }
     match agents::list(&shared.store.db(), &shared.home) {
         Ok(listed) => {
             for agent in listed {
