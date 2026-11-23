@@ -137,6 +137,7 @@ fn an_agent_made_by_chat_names_itself_from_its_instructions() {
     let now = agents::Snapshot {
         instructions: "# news-bot\n\nRead the feeds.\n".to_owned(),
         routines: Vec::new(),
+        fresh: false,
     };
     let found = agents::differences(&seen, &now);
     assert_eq!(
@@ -172,6 +173,7 @@ fn routine_changes_are_found_by_what_the_person_sees() {
             task("renamed", "Old", "m1"),
             task("gone", "Gone", "m1"),
         ],
+        fresh: false,
     };
     let now = agents::Snapshot {
         instructions: "# a\n".to_owned(),
@@ -180,6 +182,7 @@ fn routine_changes_are_found_by_what_the_person_sees() {
             task("renamed", "New", "m1"),
             task("new", "New", "m1"),
         ],
+        fresh: false,
     };
 
     let found: Vec<_> = agents::differences(&seen, &now)
@@ -377,4 +380,49 @@ fn a_profile_moves_on_once_its_context_is_four_fifths_full() {
     assert!(!agents::full(context(None, 1000)));
     assert!(!agents::full(context(Some(5), 0)));
     assert!(!agents::full(None));
+}
+
+#[test]
+fn an_agent_of_the_earlier_store_keeps_its_folder_threads_and_routines() {
+    let home = Dir::new();
+    let store = Store::open(&home.join("meta-harness.sqlite")).unwrap();
+    store
+        .db()
+        .execute_batch(
+            "CREATE TABLE agent (name TEXT PRIMARY KEY, root TEXT NOT NULL, model TEXT NOT NULL,
+             permissions TEXT NOT NULL, instructions TEXT NOT NULL, thread TEXT NOT NULL,
+             previous TEXT, generation INTEGER NOT NULL, created_ms INTEGER NOT NULL);
+             INSERT INTO agent VALUES ('news-bot', '/repo',
+             '{\"instance\":\"codex\",\"model\":\"gpt-6.1\",\"options\":[]}',
+             '\"Supervised\"', 'Keep the news page current.', 'thread-2', 'thread-1', 1, 5);",
+        )
+        .unwrap();
+
+    agents::migrate(&store.db(), &home).unwrap();
+    agents::migrate(&store.db(), &home).unwrap();
+
+    let agent = agents::get(&store.db(), &home, "news-bot")
+        .unwrap()
+        .unwrap();
+    assert_eq!(agent.id, "news-bot");
+    assert_eq!(agent.memory, home.join("agents/news-bot/memory"));
+    assert_eq!(
+        agents::instructions(&agent).unwrap(),
+        "# news-bot\n\nKeep the news page current.\n"
+    );
+    assert_eq!(
+        agents::threads(&store.db(), &agent.id).unwrap(),
+        ["thread-2", "thread-1"]
+    );
+    let seen = agents::seen(&store.db(), &agent.id).unwrap();
+    assert!(seen.fresh, "its routines are not yet known");
+    let now = agents::Snapshot {
+        instructions: seen.instructions.clone(),
+        routines: vec![serde_json::json!({"id": "task-1"})],
+        fresh: false,
+    };
+    assert!(
+        agents::differences(&seen, &now).is_empty(),
+        "routines it had before are not the agent's new changes"
+    );
 }

@@ -8,7 +8,6 @@ use crate::config::{failed, now_ms, sql};
 use crate::{ModelChoice, Permissions};
 
 pub(crate) const SCHEMA: &str = "
-DROP TABLE IF EXISTS agent;
 CREATE TABLE IF NOT EXISTS agent_profile (
     id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE, named INTEGER NOT NULL, root TEXT NOT NULL,
     model TEXT NOT NULL, permissions TEXT NOT NULL, request TEXT, thread TEXT NOT NULL,
@@ -125,6 +124,7 @@ pub struct Mention {
 pub(crate) struct Snapshot {
     pub instructions: String,
     pub routines: Vec<Value>,
+    pub fresh: bool,
 }
 
 pub(crate) fn memory(home: &Path, id: &str) -> PathBuf {
@@ -336,10 +336,99 @@ pub(crate) fn seen(db: &Connection, id: &str) -> Result<Snapshot, String> {
             |row| Ok((row.get(0)?, row.get(1)?)),
         )
         .map_err(failed)?;
+    let routines: Option<Vec<Value>> =
+        serde_json::from_str(&routines).map_err(|e| e.to_string())?;
     Ok(Snapshot {
         instructions,
-        routines: serde_json::from_str(&routines).map_err(|e| e.to_string())?,
+        fresh: routines.is_none(),
+        routines: routines.unwrap_or_default(),
     })
+}
+
+pub(crate) fn migrate(db: &Connection, home: &Path) -> Result<(), String> {
+    let old: i64 = db
+        .query_row(
+            "SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'agent'",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(failed)?;
+    if old == 0 {
+        return Ok(());
+    }
+    type Old = (
+        String,
+        String,
+        String,
+        String,
+        String,
+        String,
+        Option<String>,
+        i64,
+        i64,
+    );
+    let rows: Vec<Old> = db
+        .prepare(
+            "SELECT name, root, model, permissions, instructions, thread, previous, generation,
+             created_ms FROM agent",
+        )
+        .map_err(failed)?
+        .query_map([], |row| {
+            Ok((
+                row.get(0)?,
+                row.get(1)?,
+                row.get(2)?,
+                row.get(3)?,
+                row.get(4)?,
+                row.get(5)?,
+                row.get(6)?,
+                row.get(7)?,
+                row.get(8)?,
+            ))
+        })
+        .map_err(failed)?
+        .collect::<Result<_, _>>()
+        .map_err(failed)?;
+    for (name, root, model, permissions, instructions, thread, previous, generation, created) in
+        rows
+    {
+        let folder = memory(home, &name);
+        crate::service::create_private_dir(&folder)?;
+        let text = with_heading(&format!("\n{}\n", instructions.trim()), &name);
+        let file = folder.join(INSTRUCTIONS);
+        if !file.exists() {
+            crate::service::write_private(&file, &text)?;
+        }
+        db.execute(
+            "INSERT OR IGNORE INTO agent_profile (id, name, named, root, model, permissions,
+             request, thread, previous, generation, seen_instructions, seen_routines, created_ms)
+             VALUES (?1, ?1, 1, ?2, ?3, ?4, NULL, ?5, ?6, ?7, ?8, 'null', ?9)",
+            params![
+                name,
+                root,
+                model,
+                permissions,
+                thread,
+                previous,
+                generation,
+                text,
+                created
+            ],
+        )
+        .map_err(failed)?;
+        let earlier = previous.map(|previous| (previous, generation - 1));
+        for (thread, generation) in std::iter::once((thread, generation)).chain(earlier) {
+            db.execute(
+                "INSERT OR IGNORE INTO agent_thread (agent, thread, generation)
+                 VALUES (?1, ?2, ?3)",
+                params![name, thread, generation],
+            )
+            .map_err(failed)?;
+        }
+    }
+    db.execute("DROP TABLE agent", [])
+        .map_err(failed)
+        .map(|_| ())
 }
 
 pub(crate) fn set_seen(db: &Connection, id: &str, seen: &Snapshot) -> Result<(), String> {
@@ -369,6 +458,9 @@ pub(crate) fn differences(
     now: &Snapshot,
 ) -> Vec<(AgentChangeKind, Option<String>, Option<String>)> {
     let mut found = Vec::new();
+    if seen.fresh {
+        return found;
+    }
     let named = |text: &str| heading(text).map(str::to_owned);
     if named(&seen.instructions) != named(&now.instructions)
         && let Some(after) = named(&now.instructions)

@@ -18,6 +18,7 @@ const MAX_LABEL_CHARS: usize = 200;
 #[derive(Default)]
 pub(super) struct Watchers {
     tasks: std::sync::Mutex<HashMap<String, JoinHandle<()>>>,
+    followed: std::sync::Mutex<HashMap<String, Thread>>,
     serial: tokio::sync::Mutex<()>,
 }
 
@@ -33,6 +34,14 @@ impl Watchers {
         if let Some(task) = crate::util::lock(&self.tasks).remove(id) {
             task.abort();
         }
+        crate::util::lock(&self.followed).remove(id);
+    }
+
+    fn followed(&self, agent: &str, thread: &str) -> Option<Thread> {
+        crate::util::lock(&self.followed)
+            .get(agent)
+            .filter(|followed| followed.id() == thread)
+            .cloned()
     }
 
     pub(super) fn stop_all(&self) {
@@ -43,6 +52,9 @@ impl Watchers {
 }
 
 pub(super) fn start_all(shared: &Arc<Shared>) {
+    if let Err(error) = agents::migrate(&shared.store.db(), &shared.home) {
+        eprintln!("meta: the persistent agents are not moved to their new store: {error}");
+    }
     match agents::list(&shared.store.db(), &shared.home) {
         Ok(listed) => {
             for agent in listed {
@@ -54,6 +66,9 @@ pub(super) fn start_all(shared: &Arc<Shared>) {
 }
 
 pub(super) async fn call(shared: &Arc<Shared>, call: AgentsCall) -> Result<Value, String> {
+    if let AgentsCall::Mentions(thread) = call {
+        return mentions(shared, &thread).await;
+    }
     let _serial = shared.agents.serial.lock().await;
     match call {
         AgentsCall::List => {
@@ -208,24 +223,29 @@ pub(super) async fn call(shared: &Arc<Shared>, call: AgentsCall) -> Result<Value
             agents::add_mention(&shared.store.db(), &agent, &thread, &message, &text)?;
             to(message)
         }
-        AgentsCall::Mentions(thread) => {
-            let mut mentions = agents::mentions(&shared.store.db(), &thread)?;
-            let mut threads: HashMap<String, Option<Thread>> = HashMap::new();
-            for mention in &mut mentions {
-                if !threads.contains_key(&mention.thread) {
-                    let opened = existing(shared, &mention.root, &mention.thread).await?;
-                    threads.insert(mention.thread.clone(), opened);
-                }
-                if let Some(Some(agent)) = threads.get(&mention.thread)
-                    && let Some((ended, text)) = agent.reply_to(&mention.message)
-                {
-                    mention.answered = ended;
-                    mention.answer = text;
-                }
-            }
-            to(mentions)
+        AgentsCall::Mentions(thread) => mentions(shared, &thread).await,
+    }
+}
+
+async fn mentions(shared: &Shared, source: &str) -> Result<Value, String> {
+    let mut mentions = agents::mentions(&shared.store.db(), source)?;
+    let mut threads: HashMap<String, Option<Thread>> = HashMap::new();
+    for mention in &mut mentions {
+        if !threads.contains_key(&mention.thread) {
+            let opened = match shared.agents.followed(&mention.agent, &mention.thread) {
+                Some(thread) => Some(thread),
+                None => existing(shared, &mention.root, &mention.thread).await?,
+            };
+            threads.insert(mention.thread.clone(), opened);
+        }
+        if let Some(Some(agent)) = threads.get(&mention.thread)
+            && let Some((ended, text)) = agent.reply_to(&mention.message)
+        {
+            mention.answered = ended;
+            mention.answer = text;
         }
     }
+    to(mentions)
 }
 
 fn label(title: &str) -> String {
@@ -253,6 +273,9 @@ fn absorb(
     change: impl FnOnce(&mut Snapshot),
 ) -> Result<(), String> {
     let mut seen = agents::seen(&shared.store.db(), &agent.id)?;
+    if seen.fresh {
+        return Ok(());
+    }
     change(&mut seen);
     agents::set_seen(&shared.store.db(), &agent.id, &seen)
 }
@@ -392,6 +415,7 @@ async fn notice(shared: &Shared, agent: &Agent, thread: &Thread, turn: u64) -> R
     let now = Snapshot {
         instructions: agents::instructions(agent)?,
         routines: thread.routine_tasks().await?,
+        fresh: false,
     };
     let seen = agents::seen(&shared.store.db(), &agent.id)?;
     for change in agents::differences(&seen, &now) {
@@ -439,6 +463,7 @@ async fn follow(shared: &Shared, id: &str) -> Result<(), String> {
             };
             current(shared, &agent).await?
         };
+        crate::util::lock(&shared.agents.followed).insert(id.to_owned(), thread.clone());
         let (_, mut events) = thread.subscribe();
         let mut full = filled(&thread);
         let mut ended = None;
