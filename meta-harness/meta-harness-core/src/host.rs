@@ -162,6 +162,17 @@ impl Host {
             .to_owned())
     }
 
+    pub(crate) async fn scheduled_tasks(&self) -> Result<Value, String> {
+        let mut stream = self
+            .client
+            .stream("scheduledTasks.subscribe", json!({}))
+            .await?;
+        stream
+            .recv()
+            .await
+            .ok_or_else(|| "T3 sent no routines".to_owned())
+    }
+
     pub async fn environment_id(&self) -> Result<String, String> {
         let config = self.client.call("server.getConfig", json!({})).await?;
         match config["environment"]["environmentId"].as_str() {
@@ -299,6 +310,8 @@ pub struct ThreadSummary {
     pub harness_known: bool,
     #[serde(default)]
     pub moving: Option<crate::host_move::Moving>,
+    #[serde(default)]
+    pub visited_ms: Option<u64>,
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq, Eq)]
@@ -432,6 +445,7 @@ impl Project {
                     .and_then(Harness::of_instance),
                 harness_known: true,
                 moving: None,
+                visited_ms: crate::t3::millis(&t["lastVisitedAt"]),
             })
             .collect();
         threads.sort_by_key(|t| std::cmp::Reverse(t.updated_ms));

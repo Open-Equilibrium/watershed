@@ -21,6 +21,8 @@ pub enum ItemDetail {
     None,
     Tool { name: String, target: String },
     Tasks { steps: Vec<TaskStep> },
+    Routine { task: String },
+    Opening { handoff: bool },
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq, Eq)]

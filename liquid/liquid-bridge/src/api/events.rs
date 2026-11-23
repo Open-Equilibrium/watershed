@@ -49,6 +49,15 @@ pub struct BridgeItem {
     pub failed: bool,
     pub duration_ms: Option<i64>,
     pub steps: Vec<BridgeTaskStep>,
+    pub routine: Option<String>,
+    pub opening: BridgeOpening,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BridgeOpening {
+    None,
+    Start,
+    Handoff,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

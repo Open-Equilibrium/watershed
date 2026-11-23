@@ -89,11 +89,12 @@ fn new_agent(name: &str, mut args: &[&str]) -> Result<NewAgent, String> {
         ));
     }
     Ok(NewAgent {
-        name: name.to_owned(),
+        name: Some(name.to_owned()),
         root: root.ok_or("meta agent create needs --project PATH")?,
         model: model.ok_or("meta agent create needs --model INSTANCE/MODEL")?,
         permissions,
         instructions,
+        request: None,
     })
 }
 

@@ -3,6 +3,7 @@
 
 // ignore_for_file: unused_import, unused_element, unnecessary_import, duplicate_ignore, invalid_use_of_internal_member, annotate_overrides, non_constant_identifier_names, curly_braces_in_flow_control_structures, prefer_const_literals_to_create_immutables, unused_field
 
+import 'api/agents.dart';
 import 'api/automation.dart';
 import 'api/calculation.dart';
 import 'api/chart.dart';
@@ -245,6 +246,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   BridgeAttention dco_decode_box_autoadd_bridge_attention(dynamic raw);
 
   @protected
+  BridgeAutomation dco_decode_box_autoadd_bridge_automation(dynamic raw);
+
+  @protected
   BridgeAutomationSetup dco_decode_box_autoadd_bridge_automation_setup(
     dynamic raw,
   );
@@ -312,6 +316,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   BridgePace dco_decode_box_autoadd_bridge_pace(dynamic raw);
 
   @protected
+  BridgePermissions dco_decode_box_autoadd_bridge_permissions(dynamic raw);
+
+  @protected
   BridgeQuery dco_decode_box_autoadd_bridge_query(dynamic raw);
 
   @protected
@@ -319,6 +326,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   BridgeResource dco_decode_box_autoadd_bridge_resource(dynamic raw);
+
+  @protected
+  BridgeSchedule dco_decode_box_autoadd_bridge_schedule(dynamic raw);
 
   @protected
   BridgeSort dco_decode_box_autoadd_bridge_sort(dynamic raw);
@@ -343,6 +353,18 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   PlatformInt64 dco_decode_box_autoadd_i_64(dynamic raw);
+
+  @protected
+  BridgeAddedRoutine dco_decode_bridge_added_routine(dynamic raw);
+
+  @protected
+  BridgeAgent dco_decode_bridge_agent(dynamic raw);
+
+  @protected
+  BridgeAgentChange dco_decode_bridge_agent_change(dynamic raw);
+
+  @protected
+  BridgeAgentChangeKind dco_decode_bridge_agent_change_kind(dynamic raw);
 
   @protected
   BridgeAnswer dco_decode_bridge_answer(dynamic raw);
@@ -549,6 +571,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   BridgeMedia dco_decode_bridge_media(dynamic raw);
 
   @protected
+  BridgeMention dco_decode_bridge_mention(dynamic raw);
+
+  @protected
   BridgeModel dco_decode_bridge_model(dynamic raw);
 
   @protected
@@ -580,6 +605,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   BridgeMutationKind dco_decode_bridge_mutation_kind(dynamic raw);
+
+  @protected
+  BridgeOpening dco_decode_bridge_opening(dynamic raw);
 
   @protected
   BridgeOption dco_decode_bridge_option(dynamic raw);
@@ -761,6 +789,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   List<String> dco_decode_list_String(dynamic raw);
 
   @protected
+  List<BridgeAgent> dco_decode_list_bridge_agent(dynamic raw);
+
+  @protected
+  List<BridgeAgentChange> dco_decode_list_bridge_agent_change(dynamic raw);
+
+  @protected
   List<BridgeApprovalOption> dco_decode_list_bridge_approval_option(
     dynamic raw,
   );
@@ -824,6 +858,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   List<BridgeMedia> dco_decode_list_bridge_media(dynamic raw);
+
+  @protected
+  List<BridgeMention> dco_decode_list_bridge_mention(dynamic raw);
 
   @protected
   List<BridgeModel> dco_decode_list_bridge_model(dynamic raw);
@@ -944,6 +981,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   BridgeAttention? dco_decode_opt_box_autoadd_bridge_attention(dynamic raw);
 
   @protected
+  BridgeAutomation? dco_decode_opt_box_autoadd_bridge_automation(dynamic raw);
+
+  @protected
   BridgeAutomationSetup? dco_decode_opt_box_autoadd_bridge_automation_setup(
     dynamic raw,
   );
@@ -1011,6 +1051,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   BridgePace? dco_decode_opt_box_autoadd_bridge_pace(dynamic raw);
+
+  @protected
+  BridgePermissions? dco_decode_opt_box_autoadd_bridge_permissions(dynamic raw);
 
   @protected
   BridgeRequest? dco_decode_opt_box_autoadd_bridge_request(dynamic raw);
@@ -1243,6 +1286,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  BridgeAutomation sse_decode_box_autoadd_bridge_automation(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   BridgeAutomationSetup sse_decode_box_autoadd_bridge_automation_setup(
     SseDeserializer deserializer,
   );
@@ -1338,6 +1386,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   BridgePace sse_decode_box_autoadd_bridge_pace(SseDeserializer deserializer);
 
   @protected
+  BridgePermissions sse_decode_box_autoadd_bridge_permissions(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   BridgeQuery sse_decode_box_autoadd_bridge_query(SseDeserializer deserializer);
 
   @protected
@@ -1347,6 +1400,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   BridgeResource sse_decode_box_autoadd_bridge_resource(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgeSchedule sse_decode_box_autoadd_bridge_schedule(
     SseDeserializer deserializer,
   );
 
@@ -1379,6 +1437,24 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   PlatformInt64 sse_decode_box_autoadd_i_64(SseDeserializer deserializer);
+
+  @protected
+  BridgeAddedRoutine sse_decode_bridge_added_routine(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgeAgent sse_decode_bridge_agent(SseDeserializer deserializer);
+
+  @protected
+  BridgeAgentChange sse_decode_bridge_agent_change(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgeAgentChangeKind sse_decode_bridge_agent_change_kind(
+    SseDeserializer deserializer,
+  );
 
   @protected
   BridgeAnswer sse_decode_bridge_answer(SseDeserializer deserializer);
@@ -1621,6 +1697,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   BridgeMedia sse_decode_bridge_media(SseDeserializer deserializer);
 
   @protected
+  BridgeMention sse_decode_bridge_mention(SseDeserializer deserializer);
+
+  @protected
   BridgeModel sse_decode_bridge_model(SseDeserializer deserializer);
 
   @protected
@@ -1658,6 +1737,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   BridgeMutationKind sse_decode_bridge_mutation_kind(
     SseDeserializer deserializer,
   );
+
+  @protected
+  BridgeOpening sse_decode_bridge_opening(SseDeserializer deserializer);
 
   @protected
   BridgeOption sse_decode_bridge_option(SseDeserializer deserializer);
@@ -1865,6 +1947,14 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   List<String> sse_decode_list_String(SseDeserializer deserializer);
 
   @protected
+  List<BridgeAgent> sse_decode_list_bridge_agent(SseDeserializer deserializer);
+
+  @protected
+  List<BridgeAgentChange> sse_decode_list_bridge_agent_change(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   List<BridgeApprovalOption> sse_decode_list_bridge_approval_option(
     SseDeserializer deserializer,
   );
@@ -1954,6 +2044,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   List<BridgeMedia> sse_decode_list_bridge_media(SseDeserializer deserializer);
+
+  @protected
+  List<BridgeMention> sse_decode_list_bridge_mention(
+    SseDeserializer deserializer,
+  );
 
   @protected
   List<BridgeModel> sse_decode_list_bridge_model(SseDeserializer deserializer);
@@ -2100,6 +2195,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  BridgeAutomation? sse_decode_opt_box_autoadd_bridge_automation(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   BridgeAutomationSetup? sse_decode_opt_box_autoadd_bridge_automation_setup(
     SseDeserializer deserializer,
   );
@@ -2197,6 +2297,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   BridgePace? sse_decode_opt_box_autoadd_bridge_pace(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgePermissions? sse_decode_opt_box_autoadd_bridge_permissions(
     SseDeserializer deserializer,
   );
 
@@ -2478,6 +2583,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_box_autoadd_bridge_automation(
+    BridgeAutomation self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_box_autoadd_bridge_automation_setup(
     BridgeAutomationSetup self,
     SseSerializer serializer,
@@ -2604,6 +2715,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_box_autoadd_bridge_permissions(
+    BridgePermissions self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_box_autoadd_bridge_query(
     BridgeQuery self,
     SseSerializer serializer,
@@ -2618,6 +2735,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_box_autoadd_bridge_resource(
     BridgeResource self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_box_autoadd_bridge_schedule(
+    BridgeSchedule self,
     SseSerializer serializer,
   );
 
@@ -2666,6 +2789,27 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_box_autoadd_i_64(
     PlatformInt64 self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_bridge_added_routine(
+    BridgeAddedRoutine self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_bridge_agent(BridgeAgent self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_bridge_agent_change(
+    BridgeAgentChange self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_bridge_agent_change_kind(
+    BridgeAgentChangeKind self,
     SseSerializer serializer,
   );
 
@@ -3006,6 +3150,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_bridge_media(BridgeMedia self, SseSerializer serializer);
 
   @protected
+  void sse_encode_bridge_mention(BridgeMention self, SseSerializer serializer);
+
+  @protected
   void sse_encode_bridge_model(BridgeModel self, SseSerializer serializer);
 
   @protected
@@ -3061,6 +3208,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
     BridgeMutationKind self,
     SseSerializer serializer,
   );
+
+  @protected
+  void sse_encode_bridge_opening(BridgeOpening self, SseSerializer serializer);
 
   @protected
   void sse_encode_bridge_option(BridgeOption self, SseSerializer serializer);
@@ -3330,6 +3480,18 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_list_String(List<String> self, SseSerializer serializer);
 
   @protected
+  void sse_encode_list_bridge_agent(
+    List<BridgeAgent> self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_list_bridge_agent_change(
+    List<BridgeAgentChange> self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_list_bridge_approval_option(
     List<BridgeApprovalOption> self,
     SseSerializer serializer,
@@ -3452,6 +3614,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_list_bridge_media(
     List<BridgeMedia> self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_list_bridge_mention(
+    List<BridgeMention> self,
     SseSerializer serializer,
   );
 
@@ -3660,6 +3828,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_opt_box_autoadd_bridge_automation(
+    BridgeAutomation? self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_opt_box_autoadd_bridge_automation_setup(
     BridgeAutomationSetup? self,
     SseSerializer serializer,
@@ -3776,6 +3950,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_opt_box_autoadd_bridge_pace(
     BridgePace? self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_opt_box_autoadd_bridge_permissions(
+    BridgePermissions? self,
     SseSerializer serializer,
   );
 

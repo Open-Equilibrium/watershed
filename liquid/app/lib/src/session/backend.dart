@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import '../rust/api/agents.dart';
 import '../rust/api/details.dart';
 import '../rust/api/events.dart';
 import '../rust/api/git.dart';
@@ -83,6 +84,32 @@ abstract interface class ProjectBackend {
   Future<SessionBackend> moveIn(CarriedMove move, {required String root});
   Future<String> environmentMachine();
 
+  Future<List<BridgeAgent>> agents();
+  Future<BridgeAgent> agentStart(
+    BridgeModelChoice model,
+    BridgePermissions permissions,
+    String request,
+  );
+  Future<String> agentRemove(String name);
+  Future<BridgeAgent> agentUpdate(
+    String name, {
+    String? rename,
+    BridgeModelChoice? model,
+    BridgePermissions? permissions,
+  });
+  Future<String> agentInstructions(String name);
+  Future<void> agentSetInstructions(String name, String text);
+  Future<List<BridgeAgentChange>> agentChanges(String name);
+  Future<void> agentUndo(String name, int change);
+  Future<BridgeAddedRoutine> agentRoutineAdd(
+    String name,
+    String title,
+    String prompt,
+    BridgeSchedule schedule,
+  );
+  Future<String> agentMention(String name, String thread, String text);
+  Future<List<BridgeMention>> agentMentions(String thread);
+
   void close();
 }
 
@@ -140,6 +167,7 @@ abstract interface class SessionBackend {
   Stream<List<BridgeAutomation>> automationChanges();
   Future<void> setAutomationEnabled(String id, {required bool enabled});
   Future<void> runAutomationNow(String id);
+  Future<void> visit();
 
   Future<BridgeLineage> lineage();
   Stream<BridgeLineage> lineageChanges();
@@ -289,6 +317,64 @@ class RustProjectBackend implements ProjectBackend {
 
   @override
   Future<String> environmentMachine() => _host.environmentMachine();
+
+  @override
+  Future<List<BridgeAgent>> agents() => _host.agents();
+  @override
+  Future<BridgeAgent> agentStart(
+    BridgeModelChoice model,
+    BridgePermissions permissions,
+    String request,
+  ) => _host.agentStart(
+    root: root,
+    model: model,
+    permissions: permissions,
+    request: request,
+  );
+  @override
+  Future<String> agentRemove(String name) => _host.agentRemove(name: name);
+  @override
+  Future<BridgeAgent> agentUpdate(
+    String name, {
+    String? rename,
+    BridgeModelChoice? model,
+    BridgePermissions? permissions,
+  }) => _host.agentUpdate(
+    name: name,
+    rename: rename,
+    model: model,
+    permissions: permissions,
+  );
+  @override
+  Future<String> agentInstructions(String name) =>
+      _host.agentInstructions(name: name);
+  @override
+  Future<void> agentSetInstructions(String name, String text) =>
+      _host.agentSetInstructions(name: name, text: text);
+  @override
+  Future<List<BridgeAgentChange>> agentChanges(String name) =>
+      _host.agentChanges(name: name);
+  @override
+  Future<void> agentUndo(String name, int change) =>
+      _host.agentUndo(name: name, change: change);
+  @override
+  Future<BridgeAddedRoutine> agentRoutineAdd(
+    String name,
+    String title,
+    String prompt,
+    BridgeSchedule schedule,
+  ) => _host.agentRoutineAdd(
+    name: name,
+    title: title,
+    prompt: prompt,
+    schedule: schedule,
+  );
+  @override
+  Future<String> agentMention(String name, String thread, String text) =>
+      _host.agentMention(name: name, root: root, thread: thread, text: text);
+  @override
+  Future<List<BridgeMention>> agentMentions(String thread) =>
+      _host.agentMentions(thread: thread);
 
   @override
   Future<List<BridgeThreadSummary>> threads() => _project.threads();
@@ -463,6 +549,8 @@ class RustSessionBackend implements SessionBackend {
       _session.setAutomationEnabled(id: id, enabled: enabled);
   @override
   Future<void> runAutomationNow(String id) => _session.runAutomationNow(id: id);
+  @override
+  Future<void> visit() => _session.visit();
   @override
   Future<BridgeLineage> lineage() => _session.lineageSubscribe();
   @override

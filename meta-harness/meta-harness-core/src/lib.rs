@@ -17,7 +17,9 @@ mod tunnel;
 mod util;
 mod visible;
 
-pub use agents::{AddedRoutine, Agent, NewAgent, NewRoutine};
+pub use agents::{
+    AddedRoutine, Agent, AgentChange, AgentChangeKind, Mention, NewAgent, NewRoutine,
+};
 pub use api::RemoteStatus;
 pub use config::{
     Action, Blocks, Change, Current, Difference, Direction, LogEntry, McpServer, Proposal,

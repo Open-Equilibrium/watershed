@@ -68,7 +68,10 @@ struct Message {
 fn message(item: &ChatItem) -> Option<Message> {
     let target = match &item.detail {
         ItemDetail::Tool { target, .. } => target.as_str(),
-        ItemDetail::None | ItemDetail::Tasks { .. } => "",
+        ItemDetail::None
+        | ItemDetail::Tasks { .. }
+        | ItemDetail::Routine { .. }
+        | ItemDetail::Opening { .. } => "",
     };
     let (role, kind, body) = match item.kind {
         ItemKind::UserMessage => (Role::User, "user_message", item.text.clone()),

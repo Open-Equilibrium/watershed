@@ -13,8 +13,8 @@ use crate::api::details::{
 };
 use crate::api::events::{
     BridgeApproval, BridgeApprovalOption, BridgeChangeStatus, BridgeEvent, BridgeEventKind,
-    BridgeFileChange, BridgeItem, BridgeItemKind, BridgeQuestion, BridgeRequest, BridgeStepStatus,
-    BridgeTaskStep, BridgeUsage,
+    BridgeFileChange, BridgeItem, BridgeItemKind, BridgeOpening, BridgeQuestion, BridgeRequest,
+    BridgeStepStatus, BridgeTaskStep, BridgeUsage,
 };
 use crate::api::git::{
     BridgeBranchPullRequest, BridgeGitStatus, BridgePullRequestCheck, BridgePullRequestDetail,
@@ -65,8 +65,20 @@ fn item(
     duration_ms: Option<u64>,
 ) -> BridgeItem {
     let (tool, target) = match detail {
-        ItemDetail::None | ItemDetail::Tasks { .. } => (None, None),
         ItemDetail::Tool { name, target } => (Some(visible_name(name)), Some(visible_name(target))),
+        ItemDetail::None
+        | ItemDetail::Tasks { .. }
+        | ItemDetail::Routine { .. }
+        | ItemDetail::Opening { .. } => (None, None),
+    };
+    let routine = match detail {
+        ItemDetail::Routine { task } => Some(task.clone()),
+        _ => None,
+    };
+    let opening = match detail {
+        ItemDetail::Opening { handoff: false } => BridgeOpening::Start,
+        ItemDetail::Opening { handoff: true } => BridgeOpening::Handoff,
+        _ => BridgeOpening::None,
     };
     let steps = match detail {
         ItemDetail::Tasks { steps } => steps
@@ -91,6 +103,8 @@ fn item(
         failed: status == Some(ItemStatus::Failed),
         duration_ms: duration_ms.map(int),
         steps,
+        routine,
+        opening,
     }
 }
 
@@ -402,6 +416,7 @@ pub(crate) fn thread_summary(thread: ThreadSummary) -> BridgeThreadSummary {
         movable: thread.harness.is_some(),
         harness_known: thread.harness_known,
         moving: thread.moving.map(crate::api::moves::moving_of),
+        visited_ms: thread.visited_ms.map(int),
     }
 }
 

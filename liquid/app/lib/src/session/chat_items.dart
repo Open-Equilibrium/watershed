@@ -13,6 +13,8 @@ class ItemView {
     this.target,
     this.turnEnd,
     this.marker,
+    this.routine,
+    this.opening = BridgeOpening.none,
   });
 
   final int id;
@@ -26,6 +28,9 @@ class ItemView {
   final BridgeTurn? turnEnd;
 
   final String? marker;
+
+  final String? routine;
+  final BridgeOpening opening;
   final ValueNotifier<String> text = ValueNotifier('');
 
   final ValueNotifier<ItemOutcome?> outcome = ValueNotifier(null);

@@ -252,7 +252,7 @@ fn take_lock(home: &Path) -> Result<std::fs::File, String> {
     Ok(file)
 }
 
-fn write_private(path: &Path, text: &str) -> Result<(), String> {
+pub(crate) fn write_private(path: &Path, text: &str) -> Result<(), String> {
     use std::io::Write;
     let temporary = path.with_extension("tmp");
     let _ = std::fs::remove_file(&temporary);
@@ -889,6 +889,7 @@ async fn thread_call(thread: &Thread, call: ThreadCall) -> Result<Value, String>
             to(thread.set_automation_enabled(&id, enabled).await?)
         }
         ThreadCall::RunAutomationNow(id) => to(thread.run_automation_now(&id).await?),
+        ThreadCall::Visit => to(thread.visit().await?),
         ThreadCall::UsageLimits => to(thread.usage_limits().await?),
         ThreadCall::Lineage => to(thread.lineage().await?),
         ThreadCall::MergeBack => to(thread.merge_back().await?),

@@ -47,12 +47,13 @@ class StartChips extends StatelessWidget {
       state.model,
       state.providers,
       state.permissions,
+      state.agents.composing,
     ]),
     builder: (context, _) => Wrap(
       spacing: WsMetrics.space2,
       runSpacing: WsMetrics.space2,
       children: [
-        WorkspaceMenu(state: state),
+        if (!state.agents.composing.value) WorkspaceMenu(state: state),
         ModelMenu(
           providers: state.providers.value,
           choice: state.model.value,
