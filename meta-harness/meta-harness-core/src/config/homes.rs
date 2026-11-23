@@ -59,7 +59,10 @@ pub(crate) fn provider_instances(
     homes: &Homes,
     claude_dir: Option<&str>,
 ) -> Result<Value, String> {
-    let mcp = homes.claude_mcp().to_string_lossy().into_owned();
+    let mut mcp = homes.claude_mcp().to_string_lossy().into_owned();
+    if cfg!(windows) {
+        mcp = mcp.replace('\\', "/");
+    }
     if mcp.contains(['"', '\\']) {
         return Err(format!(
             "Meta-Harness's data folder {} holds a quote or backslash, which T3 cannot pass to \

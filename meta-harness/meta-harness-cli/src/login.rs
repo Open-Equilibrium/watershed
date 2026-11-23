@@ -648,6 +648,7 @@ mod tests {
         (std::fs::read_to_string(&manager.file).unwrap(), ran)
     }
 
+    #[cfg(unix)]
     #[test]
     fn a_launch_agent_keeps_meta_serve_running_with_the_user_s_path() {
         let dir = Dir::new();
@@ -684,6 +685,7 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
     #[test]
     fn a_systemd_user_unit_quotes_what_systemd_would_expand() {
         let dir = Dir::new();
@@ -711,6 +713,7 @@ mod tests {
         assert_eq!(manager.recorded_home(), Ok(Some(plan.home)));
     }
 
+    #[cfg(unix)]
     #[test]
     fn a_systemd_unit_expands_dollar_signs_only_in_exec_start() {
         let dir = Dir::new();
@@ -828,11 +831,11 @@ mod tests {
             assert!(task.contains(part), "{part}");
         }
         assert!(task.contains(&format!(
-            "--headless \"{}/A &amp; B/bin/meta\" serve --home \"{}/data 100%\"",
-            dir.0.display(),
-            dir.0.display()
+            "--headless \"{}\" serve --home \"{}\" --log \"{}\"",
+            xml(&plan.program.to_string_lossy()),
+            xml(&plan.home.to_string_lossy()),
+            xml(&plan.log().to_string_lossy()),
         )));
-        assert!(task.contains("data 100%/service.log"));
         let xml = manager.file.to_string_lossy();
         assert_eq!(
             ran,
