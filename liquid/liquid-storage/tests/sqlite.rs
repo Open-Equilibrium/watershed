@@ -348,3 +348,45 @@ fn the_search_index_is_kept_in_the_encrypted_replica() {
         "the index is encrypted with the rest"
     );
 }
+
+fn keyed(path: &Path) -> rusqlite::Connection {
+    let connection = rusqlite::Connection::open(path).unwrap();
+    let hex: String = KEY.iter().map(|byte| format!("{byte:02x}")).collect();
+    connection
+        .execute_batch(&format!("PRAGMA key = \"x'{hex}'\";"))
+        .unwrap();
+    connection
+}
+
+#[cfg(target_vendor = "apple")]
+#[test]
+fn on_apple_the_replica_is_encrypted_by_the_systems_crypto() {
+    let scratch = Scratch::new("provider");
+    drop(lisbon(&scratch.db()));
+    let provider: String = keyed(&scratch.db())
+        .query_row("PRAGMA cipher_provider", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(provider, "commoncrypto");
+}
+
+#[test]
+fn a_replica_written_by_the_openssl_build_still_opens() {
+    let scratch = Scratch::new("openssl");
+    std::fs::copy(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/openssl-written.db"),
+        scratch.db(),
+    )
+    .unwrap();
+    let connection = keyed(&scratch.db());
+    let text: String = connection
+        .query_row("SELECT v FROM t", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(text, "written by the OpenSSL build");
+    let mut check = connection.prepare("PRAGMA cipher_integrity_check").unwrap();
+    let problems: Vec<String> = check
+        .query_map([], |row| row.get(0))
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap();
+    assert!(problems.is_empty(), "{problems:?}");
+}
