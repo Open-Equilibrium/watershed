@@ -140,8 +140,8 @@ fn missing(args: &[&str]) -> Option<&'static str> {
 
 fn status_text(status: &api::Status) -> String {
     let mut text = format!(
-        "Meta-Harness runs T3 Code {} as process {}, configuration revision {}.",
-        status.t3_version, status.pid, status.revision
+        "Meta-Harness runs as process {} with T3 Code {}, configuration revision {}.",
+        status.pid, status.t3_version, status.revision
     );
     if !status.reconciled {
         text.push_str(&format!(
@@ -658,6 +658,20 @@ mod tests {
             Some(recorded)
         );
         assert_eq!(data_in_installation(prefix, None, shell), None);
+    }
+
+    #[test]
+    fn status_names_the_serve_process_and_the_t3_release() {
+        let status = api::Status {
+            t3_version: "0.1.11".to_owned(),
+            pid: 7,
+            revision: 3,
+            reconciled: true,
+        };
+        assert_eq!(
+            status_text(&status),
+            "Meta-Harness runs as process 7 with T3 Code 0.1.11, configuration revision 3."
+        );
     }
 
     #[test]
