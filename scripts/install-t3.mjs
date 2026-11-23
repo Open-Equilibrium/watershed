@@ -27,5 +27,7 @@ if (actual !== expected) throw new Error(`${name}.${extension} has SHA-256 ${act
 mkdirSync(folder, { recursive: true });
 const file = join(folder, `${name}.${extension}`);
 writeFileSync(file, archive);
-execFileSync("tar", ["-xf", file, "-C", folder]);
+const tar =
+  process.platform === "win32" ? join(process.env.SystemRoot ?? "C:\\Windows", "System32", "tar.exe") : "tar";
+execFileSync(tar, ["-xf", file, "-C", folder]);
 process.stdout.write(join(folder, name, process.platform === "win32" ? "t3.exe" : "t3"));

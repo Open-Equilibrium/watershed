@@ -1,5 +1,6 @@
 mod agents;
 mod hosts;
+mod install;
 mod login;
 
 use std::path::{Path, PathBuf};
@@ -53,6 +54,8 @@ usage: meta <command>
                             time with an offset, such as 2026-12-01T07:30:00+01:00
   agent routine remove NAME ID
                             remove one of the agent's routines
+  install [--prefix PATH] [--no-service]
+                            on Windows: install this download and start the login service
   service install           start the login service, also after each login and crash
   service uninstall         stop and remove the login service
   uninstall                 remove the login service and this installation; data stays
@@ -81,6 +84,9 @@ async fn run(args: &[&str]) -> Result<(), String> {
     if matches!(args, [] | ["help" | "--help" | "-h"]) {
         println!("{USAGE}");
         return Ok(());
+    }
+    if let ["install", rest @ ..] = args {
+        return install_download(rest);
     }
     let home = default_home()?;
     match args {
@@ -316,6 +322,68 @@ fn pinned_t3() -> Result<PathBuf, String> {
         .join("lib/meta-harness")
         .join(format!("t3-{}-{platform}", t3_version()))
         .join(format!("t3{}", std::env::consts::EXE_SUFFIX)))
+}
+
+fn install_download(args: &[&str]) -> Result<(), String> {
+    if !cfg!(windows) {
+        return Err("On macOS and Linux, run install.sh from the download.".to_owned());
+    }
+    let (mut prefix, mut service) = (None, true);
+    let mut rest = args;
+    while let Some((flag, more)) = rest.split_first() {
+        rest = match (*flag, more) {
+            ("--prefix", [path, after @ ..]) => {
+                prefix = Some(PathBuf::from(path));
+                after
+            }
+            ("--no-service", after) => {
+                service = false;
+                after
+            }
+            _ => return Err(format!("meta install does not take {flag}\n{USAGE}")),
+        };
+    }
+    let prefix = match prefix {
+        Some(prefix) => prefix,
+        None => std::env::var_os("LOCALAPPDATA")
+            .map(PathBuf::from)
+            .ok_or("LOCALAPPDATA is not set; pass --prefix.")?
+            .join("Programs")
+            .join("Meta-Harness"),
+    };
+    let bundle = std::env::current_exe()
+        .map_err(|e| format!("Could not find this program: {e}"))?
+        .parent()
+        .and_then(Path::parent)
+        .map(Path::to_path_buf)
+        .ok_or("meta install runs from the bin folder of an unpacked download.")?;
+    let _ = std::process::Command::new("schtasks")
+        .args(["/End", "/TN", "Meta-Harness"])
+        .output();
+    let program = install::install_files(&bundle, &prefix, "win32-x64")?;
+    if service {
+        let status = std::process::Command::new(&program)
+            .args(["service", "install"])
+            .status()
+            .map_err(|e| format!("Could not run {}: {e}", program.display()))?;
+        if !status.success() {
+            return Err(format!(
+                "the files are installed in {}, but the login service did not start; \
+                 --no-service installs without it",
+                prefix.display()
+            ));
+        }
+    }
+    println!(
+        "Installed Meta-Harness {} in {}",
+        install::bundle_info(&bundle)?.0,
+        prefix.display()
+    );
+    println!(
+        "Add {} to your PATH to run meta from any folder.",
+        prefix.join("bin").display()
+    );
+    Ok(())
 }
 
 fn install(home: PathBuf) -> Result<(), String> {
