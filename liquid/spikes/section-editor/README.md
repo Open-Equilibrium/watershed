@@ -46,8 +46,8 @@ A lays every Paragraph out in one `Column`, so its frames grow with the Section;
 
 ## Findings for `liquid-core`, whichever editor
 
-- **Mark ops are expensive in Automerge 0.12:** about 0.6 ms for `mark` and 0.2 ms for `unmark`, against 3 µs for a splice, at any Section size (`cargo test --release cost -- --ignored --nocapture`). Each also stays in history, so an editor must not mark every keystroke; the `insert` op corrects only what Automerge's expand rules got wrong.
-- **`get_marks` can disagree with `marks` and `spans`:** after mark and unmark history it reported no mark where both show bold. `get-marks-replay.json` reproduces it (`SECTION_REPLAY=../get-marks-replay.json cargo test replay -- --ignored --nocapture`); the core reads `marks` instead. Worth an upstream report.
+- **A mark costs about 25 µs**, against 5 µs for a splice, and stays in history (`cargo test --release cost -- --ignored --nocapture`), so the `insert` op marks only where Automerge's expand rules differ from what the editor wants. An earlier 0.6 ms came from marking one range 200 times.
+- **Read marks through `spans` only:** `marks` slows down superlinearly once hundreds of marks sit on one character ([automerge#1737](https://github.com/automerge/automerge/issues/1737)), and `get_marks` counts elements rather than UTF-16 units ([automerge#1592](https://github.com/automerge/automerge/issues/1592)). This spike's `insert` op still reads `marks`.
 - **Predicting expand rules in Dart fails:** a first version of C mirrored Peritext's rules to skip ops and broke the randomized test; the core must decide.
 
 ## Findings on A

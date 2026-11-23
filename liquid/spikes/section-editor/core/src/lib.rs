@@ -400,67 +400,6 @@ mod tests {
 }
 
 #[cfg(test)]
-mod replay {
-    use super::*;
-
-    /// Replays a dumped op log up to its last step, then splices that step's
-    /// text on a fork and prints what `get_marks` and `marks` say about it.
-    #[test]
-    #[ignore = "replays the op log in SECTION_REPLAY"]
-    fn replay_a_dumped_log() {
-        let path = std::env::var("SECTION_REPLAY").unwrap();
-        let log: Json = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
-        let mut section = Section::new();
-        let mut at = 1;
-        for (i, text) in ["alpha beta", "gamma delta", "epsilon"].iter().enumerate() {
-            if i > 0 {
-                section
-                    .apply(&json!({"op": "split", "at": at, "type": "paragraph"}))
-                    .unwrap();
-                at += 1;
-            }
-            section
-                .apply(&json!({"op": "splice", "at": at, "ins": text}))
-                .unwrap();
-            at += width(text);
-        }
-        let steps = log.as_array().unwrap();
-        let (last, earlier) = steps.split_last().unwrap();
-        for step in earlier {
-            for op in step.as_array().unwrap() {
-                section.apply(op).unwrap();
-            }
-        }
-        for op in last.as_array().unwrap() {
-            let (Some(at), Some(text)) = (op["at"].as_u64(), op["text"].as_str()) else {
-                continue;
-            };
-            let at = at as usize;
-            let mut probe = section.fork();
-            probe
-                .apply(&json!({"op": "splice", "at": at, "ins": text}))
-                .unwrap();
-            let by_index: Vec<String> = probe
-                .doc
-                .get_marks(&probe.text, at, None)
-                .unwrap()
-                .iter()
-                .map(|(n, v)| format!("{n}={v}"))
-                .collect();
-            let by_list: Vec<String> = probe
-                .doc
-                .marks(&probe.text)
-                .unwrap()
-                .iter()
-                .filter(|m| m.start <= at && at < m.end)
-                .map(|m| format!("{}={}", m.name(), m.value()))
-                .collect();
-            println!("after splicing {text:?} at {at}: get_marks {by_index:?}, marks {by_list:?}");
-        }
-    }
-}
-
-#[cfg(test)]
 mod cost {
     use super::*;
     use std::time::Instant;
@@ -481,25 +420,25 @@ mod cost {
                     .unwrap();
                 at += width(text);
             }
-            let ops = [
-                ("splice", json!({"op": "splice", "at": 5, "ins": "x"})),
+            let ops: [(&str, fn(usize) -> Json); 4] = [
+                ("splice", |at| json!({"op": "splice", "at": at, "ins": "x"})),
                 (
                     "unmark",
-                    json!({"op": "unmark", "start": 5, "end": 6, "name": "bold"}),
+                    |at| json!({"op": "unmark", "start": at, "end": at + 1, "name": "bold"}),
                 ),
                 (
                     "mark",
-                    json!({"op": "mark", "start": 5, "end": 6, "name": "bold"}),
+                    |at| json!({"op": "mark", "start": at, "end": at + 1, "name": "bold"}),
                 ),
                 (
                     "insert",
-                    json!({"op": "insert", "at": 5, "text": "x", "marks": {}}),
+                    |at| json!({"op": "insert", "at": at, "text": "x", "marks": {}}),
                 ),
             ];
             for (name, op) in ops {
                 let start = Instant::now();
-                for _ in 0..200 {
-                    a.apply(&op).unwrap();
+                for i in 0..200 {
+                    a.apply(&op(5 + i * 3)).unwrap();
                 }
                 println!(
                     "{paragraphs:>5} paragraphs: {name:<6} {:>8.1} µs",
