@@ -4,8 +4,18 @@ async fn connects(url: &str, token: &str, name: &str) -> bool {
     remote::Host::connect_to(url, token, name).await.is_ok()
 }
 
+async fn may_tunnel(url: &str, token: &str) -> bool {
+    use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+    let mut request = url.into_client_request().unwrap();
+    let headers = request.headers_mut();
+    headers.insert("authorization", format!("Bearer {token}").parse().unwrap());
+    headers.insert("meta-harness-api", "1".parse().unwrap());
+    headers.insert("meta-harness-tunnel", "t3".parse().unwrap());
+    tokio_tungstenite::connect_async(request).await.is_ok()
+}
+
 #[tokio::test(flavor = "multi_thread")]
-async fn pairing_names_and_host_addresses_are_checked_before_use() {
+async fn pairing_names_host_addresses_and_the_handshake_limit_are_checked_before_use() {
     let (dir, _repo, _home) = fixture();
     let (_service, local) = start_service(&dir.path().join("meta")).await;
     let port = remote_on_free(&local).await;
@@ -29,24 +39,31 @@ async fn pairing_names_and_host_addresses_are_checked_before_use() {
         error,
         "Enter the address as ws://HOST:PORT, as meta invite prints it."
     );
+
+    let address = format!("127.0.0.1:{port}");
+    let idle =
+        futures_util::future::join_all((0..32).map(|_| tokio::net::TcpStream::connect(&address)))
+            .await;
+    let mut extra = tokio::net::TcpStream::connect(&address).await.unwrap();
+    let mut byte = [0u8; 1];
+    let closed = tokio::time::timeout(Duration::from_secs(5), extra.read(&mut byte))
+        .await
+        .expect("closed without waiting for a handshake")
+        .unwrap();
+    assert_eq!(closed, 0, "the extra connection is closed");
+    drop(idle);
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn remote_access_refuses_port_zero() {
+async fn remote_access_refuses_port_zero_and_binds_a_busy_port_once_it_is_free() {
     let (dir, _repo, _home) = fixture();
-    let (_service, local) = start_service(&dir.path().join("meta")).await;
+    let meta = dir.path().join("meta");
+    let (service, local) = start_service(&meta).await;
     assert!(
         local.remote_on(0).await.is_err(),
         "port 0 is no port to listen on"
     );
     assert!(local.remote_status().await.unwrap().is_none());
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn remote_access_that_cannot_bind_at_start_says_so_and_binds_once_the_port_is_free() {
-    let (dir, _repo, _home) = fixture();
-    let meta = dir.path().join("meta");
-    let (service, local) = start_service(&meta).await;
     let port = remote_on_free(&local).await;
     drop(local);
     service.stop().await;
@@ -71,49 +88,7 @@ async fn remote_access_that_cannot_bind_at_start_says_so_and_binds_once_the_port
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn the_remote_listener_closes_a_handshake_beyond_its_limit_at_once() {
-    let (dir, _repo, _home) = fixture();
-    let (_service, local) = start_service(&dir.path().join("meta")).await;
-    let port = remote_on_free(&local).await;
-    let address = format!("127.0.0.1:{port}");
-    let idle =
-        futures_util::future::join_all((0..32).map(|_| tokio::net::TcpStream::connect(&address)))
-            .await;
-    let mut extra = tokio::net::TcpStream::connect(&address).await.unwrap();
-    let mut byte = [0u8; 1];
-    let closed = tokio::time::timeout(Duration::from_secs(5), extra.read(&mut byte))
-        .await
-        .expect("closed without waiting for a handshake")
-        .unwrap();
-    assert_eq!(closed, 0, "the extra connection is closed");
-    drop(idle);
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn turning_remote_access_off_ends_the_connections_it_admitted() {
-    let (dir, _repo, _home) = fixture();
-    let (_service, local) = start_service(&dir.path().join("meta")).await;
-    let port = remote_on_free(&local).await;
-    let url = format!("ws://127.0.0.1:{port}");
-    let device = connect_paired(&local, &url, ClientKind::Device, "phone").await;
-    device.status().await.unwrap();
-
-    local.remote_off().await.unwrap();
-    let ended = tokio::time::timeout(Duration::from_secs(10), async {
-        while device.status().await.is_ok() {
-            tokio::time::sleep(Duration::from_millis(10)).await;
-        }
-    })
-    .await;
-    assert!(
-        ended.is_ok(),
-        "the device's connection ended with remote access"
-    );
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn a_device_pairs_once_and_keeps_its_access_across_a_restart_while_a_host_only_asks_for_a_pairing_code()
- {
+async fn a_device_pairs_once_keeps_its_access_across_a_restart_and_ends_with_remote_access() {
     let (_dir, _repo, home) = fixture();
     let (service, local) = start_service(&home).await;
     let port = free_port();
@@ -139,9 +114,10 @@ async fn a_device_pairs_once_and_keeps_its_access_across_a_restart_while_a_host_
         refused,
         "A client named phone is paired already; pair under another name."
     );
-    remote::pair(&url, &second, "tablet")
+    let tablet_token = remote::pair(&url, &second, "tablet")
         .await
-        .expect("the code was not spent");
+        .expect("the code was not spent")
+        .token;
 
     let device = remote::Host::connect_to(&url, &token, "phone")
         .await
@@ -182,16 +158,20 @@ async fn a_device_pairs_once_and_keeps_its_access_across_a_restart_while_a_host_
     assert!(!host.t3_pairing().await.unwrap().is_empty());
     assert!(!connects(&url, &"0".repeat(64), "other").await);
 
+    let tablet = remote::Host::connect_to(&url, &tablet_token, "tablet")
+        .await
+        .unwrap();
+    tablet.status().await.unwrap();
     local.remote_off().await.unwrap();
     assert!(local.remote_status().await.unwrap().is_none());
-}
-
-async fn may_tunnel(url: &str, token: &str) -> bool {
-    use tokio_tungstenite::tungstenite::client::IntoClientRequest;
-    let mut request = url.into_client_request().unwrap();
-    let headers = request.headers_mut();
-    headers.insert("authorization", format!("Bearer {token}").parse().unwrap());
-    headers.insert("meta-harness-api", "1".parse().unwrap());
-    headers.insert("meta-harness-tunnel", "t3".parse().unwrap());
-    tokio_tungstenite::connect_async(request).await.is_ok()
+    let ended = tokio::time::timeout(Duration::from_secs(10), async {
+        while tablet.status().await.is_ok() {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await;
+    assert!(
+        ended.is_ok(),
+        "the device's connection ended with remote access"
+    );
 }

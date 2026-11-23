@@ -1,5 +1,19 @@
 use super::*;
 
+async fn change_at(host: &remote::Host, index: usize) -> AgentChange {
+    tokio::time::timeout(Duration::from_secs(30), async {
+        loop {
+            let changes = host.agent_changes("news-bot").await.unwrap();
+            if let Some(change) = changes.get(index) {
+                return change.clone();
+            }
+            tokio::time::sleep(Duration::from_millis(200)).await;
+        }
+    })
+    .await
+    .expect("the agent's change is noticed")
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn a_persistent_agent_moves_to_a_fresh_thread_with_its_routines_when_its_context_fills() {
     let (_dir, repo, home) = fixture();
@@ -129,20 +143,7 @@ async fn an_agent_made_by_chat_names_itself_logs_its_changes_and_answers_a_menti
     assert_eq!(changes[1].turn, Some(1));
 
     let routine = host
-        .agent_routine_add(
-            "news-bot",
-            NewRoutine {
-                title: "Morning".to_owned(),
-                prompt: "reinstruct".to_owned(),
-                schedule: Schedule {
-                    kind: ScheduleKind::Interval,
-                    every_ms: Some(3_600_000),
-                    time_of_day: None,
-                    weekdays: Vec::new(),
-                    run_at: None,
-                },
-            },
-        )
+        .agent_routine_add("news-bot", every_hour("Morning", "reinstruct"))
         .await
         .unwrap();
     host.agent_undo("news-bot", changes[1].id).await.unwrap();
@@ -158,17 +159,7 @@ async fn an_agent_made_by_chat_names_itself_logs_its_changes_and_answers_a_menti
 
     thread.run_automation_now(&routine.id).await.unwrap();
     wait(&thread, completed(2)).await;
-    let held = tokio::time::timeout(Duration::from_secs(30), async {
-        loop {
-            let changes = host.agent_changes("news-bot").await.unwrap();
-            if changes.len() == 3 {
-                return changes[2].clone();
-            }
-            tokio::time::sleep(Duration::from_millis(200)).await;
-        }
-    })
-    .await
-    .expect("the routine's change is noticed");
+    let held = change_at(&host, 2).await;
     assert_eq!(held.kind, AgentChangeKind::Instructions);
     assert!(held.held, "a change from a routine waits for approval");
     assert_eq!(
@@ -185,27 +176,11 @@ async fn an_agent_made_by_chat_names_itself_logs_its_changes_and_answers_a_menti
     assert!(host.agent_apply("news-bot", held.id).await.is_err());
 
     let stopped = host
-        .agent_routine_add(
-            "news-bot",
-            NewRoutine {
-                title: "Stopped".to_owned(),
-                prompt: "rewrite-wait".to_owned(),
-                schedule: Schedule {
-                    kind: ScheduleKind::Interval,
-                    every_ms: Some(3_600_000),
-                    time_of_day: None,
-                    weekdays: Vec::new(),
-                    run_at: None,
-                },
-            },
-        )
+        .agent_routine_add("news-bot", every_hour("Stopped", "rewrite-wait"))
         .await
         .unwrap();
     thread.run_automation_now(&stopped.id).await.unwrap();
-    wait(&thread, |s| {
-        s.turns.iter().any(|t| t.status == TurnStatus::Running)
-    })
-    .await;
+    until_running(&thread).await;
     tokio::time::timeout(Duration::from_secs(30), async {
         while host.agent_instructions("news-bot").await.unwrap()
             != "# news-bot\n\nRead the feeds three times.\n"
@@ -216,17 +191,7 @@ async fn an_agent_made_by_chat_names_itself_logs_its_changes_and_answers_a_menti
     .await
     .expect("the stopped routine run rewrites the instructions first");
     thread.stop().await.unwrap();
-    let aborted = tokio::time::timeout(Duration::from_secs(30), async {
-        loop {
-            let changes = host.agent_changes("news-bot").await.unwrap();
-            if changes.len() == 4 {
-                return changes[3].clone();
-            }
-            tokio::time::sleep(Duration::from_millis(200)).await;
-        }
-    })
-    .await
-    .expect("a stopped routine run's change is noticed");
+    let aborted = change_at(&host, 3).await;
     assert!(aborted.held, "a routine run that was stopped is held too");
     assert_eq!(
         host.agent_instructions("news-bot").await.unwrap(),
@@ -292,16 +257,12 @@ async fn an_agent_made_by_chat_names_itself_logs_its_changes_and_answers_a_menti
 
 #[tokio::test(flavor = "multi_thread")]
 async fn an_agent_moves_to_another_host_with_its_memory_and_routines() {
-    let dir = tempdir::Dir::new();
-    let (origin, url) = shared_remote(dir.path());
-    let repo_a = clone_project(dir.path(), &origin, &url, "a");
-    let repo_b = clone_project(dir.path(), &origin, &url, "b");
-    let (service_a, host_a) = start_codex(&dir.path().join("host-a")).await;
-    let (service_b, host_b) = start_codex(&dir.path().join("host-b")).await;
-    let created = host_a
+    let pair = Pair::codex().await;
+    let created = pair
+        .host_a
         .agent_create(NewAgent {
             name: Some("news-bot".to_owned()),
-            root: repo_a.to_string_lossy().into_owned(),
+            root: pair.repo_a.to_string_lossy().into_owned(),
             model: codex_start("").model,
             permissions: Permissions::FullAccess,
             instructions: "Keep the news page current.".to_owned(),
@@ -309,29 +270,16 @@ async fn an_agent_moves_to_another_host_with_its_memory_and_routines() {
         })
         .await
         .unwrap();
-    let project_a = host_a.project(&repo_a).await.unwrap();
-    let project_b = host_b.project(&repo_b).await.unwrap();
+    let project_a = pair.host_a.project(&pair.repo_a).await.unwrap();
+    let project_b = pair.host_b.project(&pair.repo_b).await.unwrap();
     let thread = project_a.open(&created.thread).await.unwrap();
     wait(&thread, completed(1)).await;
     std::fs::create_dir_all(created.memory.join("days")).unwrap();
     std::fs::write(created.memory.join("days/monday.md"), "Saw 4 items.\n").unwrap();
     let large = vec![7u8; 20 * 1024 * 1024];
     std::fs::write(created.memory.join("feeds.bin"), &large).unwrap();
-    host_a
-        .agent_routine_add(
-            "news-bot",
-            NewRoutine {
-                title: "Morning".to_owned(),
-                prompt: "Check the feeds.".to_owned(),
-                schedule: Schedule {
-                    kind: ScheduleKind::Interval,
-                    every_ms: Some(3_600_000),
-                    time_of_day: None,
-                    weekdays: Vec::new(),
-                    run_at: None,
-                },
-            },
-        )
+    pair.host_a
+        .agent_routine_add("news-bot", every_hour("Morning", "Check the feeds."))
         .await
         .unwrap();
 
@@ -343,21 +291,11 @@ async fn an_agent_moves_to_another_host_with_its_memory_and_routines() {
     );
     assert!(facts.memory_bytes > 0);
     assert_eq!(check.blocked, None);
-    let package = thread
-        .move_out(
-            &transfer(),
-            "host-b",
-            "studio",
-            "environment-target",
-            true,
-            None,
-        )
-        .await
-        .unwrap();
+    let package = move_out(&thread, &transfer(), None).await.unwrap();
     assert!(package.agent.is_some(), "the package carries the agent");
     let moved = project_b.move_in(package.clone()).await.unwrap();
 
-    let arrived = host_b.agents().await.unwrap();
+    let arrived = pair.host_b.agents().await.unwrap();
     assert_eq!(arrived.len(), 1);
     assert_eq!(
         (arrived[0].name.as_str(), arrived[0].thread.as_str()),
@@ -373,7 +311,7 @@ async fn an_agent_moves_to_another_host_with_its_memory_and_routines() {
         "a memory past one socket frame arrives whole"
     );
     assert!(
-        host_b
+        pair.host_b
             .agent_instructions("news-bot")
             .await
             .unwrap()
@@ -390,7 +328,7 @@ async fn an_agent_moves_to_another_host_with_its_memory_and_routines() {
             .any(|t| t.prompt.contains("You are news-bot")),
         "the moved agent learns its new memory folder"
     );
-    let routines = host_b.agent_routines("news-bot").await.unwrap();
+    let routines = pair.host_b.agent_routines("news-bot").await.unwrap();
     assert_eq!(
         routines
             .iter()
@@ -398,7 +336,13 @@ async fn an_agent_moves_to_another_host_with_its_memory_and_routines() {
             .collect::<Vec<_>>(),
         ["Morning"]
     );
-    assert!(host_b.agent_changes("news-bot").await.unwrap().is_empty());
+    assert!(
+        pair.host_b
+            .agent_changes("news-bot")
+            .await
+            .unwrap()
+            .is_empty()
+    );
 
     let record = moved.move_record().await.unwrap().unwrap();
     thread
@@ -410,12 +354,14 @@ async fn an_agent_moves_to_another_host_with_its_memory_and_routines() {
         )
         .await
         .unwrap();
-    assert!(host_a.agents().await.unwrap().is_empty(), "the agent left");
+    assert!(
+        pair.host_a.agents().await.unwrap().is_empty(),
+        "the agent left"
+    );
     assert!(thread.automations().await.unwrap().current().is_empty());
     assert!(
         created.memory.is_dir(),
         "the old host keeps its copy of the memory"
     );
-    service_a.stop().await;
-    service_b.stop().await;
+    pair.stop().await;
 }

@@ -36,12 +36,12 @@ async fn a_thread_runs_turns_and_reverts_files_in_its_worktree() {
     thread.send("append second", false).await.unwrap();
     wait(&thread, completed(2)).await;
 
-    let worktree = thread
+    let folder = thread
         .worktree()
         .await
         .unwrap()
-        .expect("the thread has its own worktree");
-    let file = worktree.join("contract.txt");
+        .expect("the thread has its own folder");
+    let file = folder.join("contract.txt");
     assert_eq!(std::fs::read_to_string(&file).unwrap(), "first\nsecond\n");
     let turns = thread.turns().await.unwrap();
     assert_eq!(turns.len(), 2);
@@ -85,21 +85,12 @@ async fn a_thread_runs_turns_and_reverts_files_in_its_worktree() {
         thread.worktree().await.unwrap().as_deref(),
         Some(repo.as_path())
     );
-    service.stop().await;
-}
 
-#[tokio::test(flavor = "multi_thread")]
-async fn an_agent_s_plan_reaches_the_transcript_as_a_task_list() {
-    let (_dir, repo, home) = fixture();
-    let (service, host) = start_service(&home).await;
-    let project = host.project(&repo).await.unwrap();
-    let thread = project
+    let plan = project
         .start(start("plan", worktree(), Permissions::FullAccess))
         .await
         .unwrap();
-
-    let snapshot = wait(&thread, completed(1)).await;
-
+    let snapshot = wait(&plan, completed(1)).await;
     let tasks = snapshot
         .transcript
         .iter()
@@ -114,6 +105,26 @@ async fn an_agent_s_plan_reaches_the_transcript_as_a_task_list() {
         ItemDetail::Tasks {
             steps: vec![step("Explore"), step("Explore › scraper-1")]
         }
+    );
+
+    let owned = project
+        .start(start("append one", worktree(), Permissions::FullAccess))
+        .await
+        .unwrap();
+    wait(&owned, completed(1)).await;
+    let listed = project.threads().await.unwrap();
+    let summary = listed.iter().find(|t| t.id == owned.id()).unwrap();
+    let folder = summary.worktree.clone().unwrap();
+    assert!(project.only_thread_in_worktree(summary).await.unwrap());
+    project.delete(summary, true).await.unwrap();
+    assert!(!folder.exists());
+    assert!(
+        project
+            .threads()
+            .await
+            .unwrap()
+            .iter()
+            .all(|t| t.id != owned.id())
     );
     service.stop().await;
 }
@@ -200,10 +211,7 @@ async fn a_prompt_sent_while_a_turn_runs_queues_and_can_be_removed() {
         .start(start("wait", Workspace::Checkout, Permissions::FullAccess))
         .await
         .unwrap();
-    wait(&thread, |s| {
-        s.turns.iter().any(|t| t.status == TurnStatus::Running)
-    })
-    .await;
+    until_running(&thread).await;
     thread.send("append later", false).await.unwrap();
     thread.send("append more", false).await.unwrap();
     let queued = wait(&thread, |s| {
@@ -246,33 +254,6 @@ async fn a_prompt_sent_while_a_turn_runs_queues_and_can_be_removed() {
         s.turns.iter().all(|t| t.status == TurnStatus::Aborted)
     })
     .await;
-    service.stop().await;
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn deleting_a_worktree_s_only_thread_can_delete_the_worktree() {
-    let (_dir, repo, home) = fixture();
-    let (service, host) = start_service(&home).await;
-    let project = host.project(&repo).await.unwrap();
-    let thread = project
-        .start(start("append one", worktree(), Permissions::FullAccess))
-        .await
-        .unwrap();
-    wait(&thread, completed(1)).await;
-    let listed = project.threads().await.unwrap();
-    let summary = listed.iter().find(|t| t.id == thread.id()).unwrap();
-    let folder = summary.worktree.clone().unwrap();
-    assert!(project.only_thread_in_worktree(summary).await.unwrap());
-    project.delete(summary, true).await.unwrap();
-    assert!(!folder.exists());
-    assert!(
-        project
-            .threads()
-            .await
-            .unwrap()
-            .iter()
-            .all(|t| t.id != thread.id())
-    );
     service.stop().await;
 }
 

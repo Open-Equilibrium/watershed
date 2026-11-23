@@ -1,5 +1,16 @@
 use super::*;
 
+fn origin_of(dir: &tempdir::Dir, repo: &Path) -> PathBuf {
+    let origin = dir.path().join("origin.git");
+    git(dir.path(), &["init", "-q", "--bare", "origin.git"]);
+    git(
+        repo,
+        &["remote", "add", "origin", &origin.to_string_lossy()],
+    );
+    git(repo, &["push", "-q", "-u", "origin", "main"]);
+    origin
+}
+
 async fn run(git: &remote::Git, action: GitAction, message: Option<&str>) -> GitProgress {
     let mut progress = git
         .run(GitActionRequest {
@@ -20,13 +31,7 @@ async fn run(git: &remote::Git, action: GitAction, message: Option<&str>) -> Git
 #[tokio::test(flavor = "multi_thread")]
 async fn git_commits_branches_and_pushes_as_t3_does() {
     let (dir, repo, home) = fixture();
-    let origin = dir.path().join("origin.git");
-    git(dir.path(), &["init", "-q", "--bare", "origin.git"]);
-    git(
-        &repo,
-        &["remote", "add", "origin", &origin.to_string_lossy()],
-    );
-    git(&repo, &["push", "-q", "-u", "origin", "main"]);
+    let origin = origin_of(&dir, &repo);
     let (service, host) = start_service(&home).await;
     let project = host.project(&repo).await.unwrap();
     let git = project.git();
@@ -61,19 +66,32 @@ async fn git_commits_branches_and_pushes_as_t3_does() {
     assert!(!plain_git.status().await.unwrap().repository);
     plain_git.init().await.unwrap();
     assert!(plain_git.status().await.unwrap().repository);
+
+    let destination = dir.path().join("cloned");
+    let cloned = host
+        .clone_project(&origin.to_string_lossy(), &destination.to_string_lossy())
+        .await
+        .unwrap();
+    assert_eq!(cloned.root, destination.to_string_lossy());
+    assert!(destination.join("README.md").exists());
+    let added = dir.path().join("added");
+    std::fs::create_dir(&added).unwrap();
+    let listed = host.add_project(&added.to_string_lossy()).await.unwrap();
+    assert_eq!(listed.root, added.to_string_lossy().into_owned());
+    assert!(
+        host.projects()
+            .await
+            .unwrap()
+            .iter()
+            .any(|p| p.root == cloned.root)
+    );
     service.stop().await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn branch_changes_and_the_branch_diff_compare_the_branch_with_its_base_as_t3_does() {
     let (dir, repo, home) = fixture();
-    let origin = dir.path().join("origin.git");
-    git(dir.path(), &["init", "-q", "--bare", "origin.git"]);
-    git(
-        &repo,
-        &["remote", "add", "origin", &origin.to_string_lossy()],
-    );
-    git(&repo, &["push", "-q", "-u", "origin", "main"]);
+    origin_of(&dir, &repo);
     let (service, host) = start_service(&home).await;
     let checkout = host.project(&repo).await.unwrap().git();
 
@@ -103,31 +121,5 @@ async fn branch_changes_and_the_branch_diff_compare_the_branch_with_its_base_as_
     );
     let diff = checkout.branch_diff(false).await.unwrap();
     assert!(diff.contains("+branch") && diff.contains("+more"), "{diff}");
-    service.stop().await;
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn a_host_clones_a_remote_into_a_project_and_names_it() {
-    let dir = tempdir::Dir::new();
-    let (origin, _url) = shared_remote(dir.path());
-    let (service, host) = start_codex(&dir.path().join("host")).await;
-    let destination = dir.path().join("cloned");
-    let cloned = host
-        .clone_project(&origin.to_string_lossy(), &destination.to_string_lossy())
-        .await
-        .unwrap();
-    assert_eq!(cloned.root, destination.to_string_lossy());
-    assert!(destination.join("README.md").exists());
-    let folder = dir.path().join("plain");
-    std::fs::create_dir(&folder).unwrap();
-    let added = host.add_project(&folder.to_string_lossy()).await.unwrap();
-    assert_eq!(added.root, folder.to_string_lossy().into_owned());
-    assert!(
-        host.projects()
-            .await
-            .unwrap()
-            .iter()
-            .any(|p| p.root == cloned.root)
-    );
     service.stop().await;
 }

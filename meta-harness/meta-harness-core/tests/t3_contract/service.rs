@@ -9,10 +9,7 @@ async fn shutdown_stops_t3_and_the_agent_processes_it_started() {
         .start(start("wait", Workspace::Checkout, Permissions::FullAccess))
         .await
         .unwrap();
-    wait(&thread, |s| {
-        s.turns.iter().any(|t| t.status == TurnStatus::Running)
-    })
-    .await;
+    until_running(&thread).await;
     let mut agents = Vec::new();
     for _ in 0..100 {
         agents = processes_naming(&home);
@@ -152,7 +149,6 @@ async fn the_host_names_its_machine_kind_and_keeps_one_writer_model() {
     service.stop().await;
 }
 
-#[cfg(unix)]
 #[tokio::test(flavor = "multi_thread")]
 async fn the_service_admits_only_clients_with_its_token_and_owns_its_folder() {
     use std::os::unix::fs::PermissionsExt;
@@ -236,10 +232,33 @@ async fn an_approved_configuration_reaches_the_harness_homes_t3_runs_them_in() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn a_dropped_service_ends_its_connections_and_streams_and_frees_its_folder() {
+async fn a_stopped_or_dropped_service_ends_its_streams_and_a_client_goes_on_after_a_restart() {
     let (dir, repo, _) = fixture();
     let home = dir.path().join("meta");
     let (service, client) = start_service(&home).await;
+    let mut statuses = client
+        .project(&repo)
+        .await
+        .unwrap()
+        .git()
+        .watch()
+        .await
+        .unwrap();
+    let before = client.status().await.unwrap();
+
+    service.stop().await;
+    assert!(client.status().await.is_err(), "nothing answers meanwhile");
+    let ended = tokio::time::timeout(Duration::from_secs(10), async {
+        while statuses.recv().await.is_some() {}
+    })
+    .await;
+    assert!(ended.is_ok(), "a stream of the lost connection ends");
+
+    let service = Service::start(service_config(&home)).await.unwrap();
+    let after = client.status().await.unwrap();
+    assert_eq!(after.revision, before.revision);
+    assert!(client.project(&repo).await.is_ok());
+
     let _statuses = client
         .project(&repo)
         .await
@@ -278,36 +297,6 @@ async fn a_dropped_service_ends_its_connections_and_streams_and_frees_its_folder
         "the folder is still held by the dropped service's stream"
     );
     started.unwrap().stop().await;
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn a_client_goes_on_after_the_service_restarts() {
-    let (dir, repo, _) = fixture();
-    let home = dir.path().join("meta");
-    let (service, client) = start_service(&home).await;
-    let mut statuses = client
-        .project(&repo)
-        .await
-        .unwrap()
-        .git()
-        .watch()
-        .await
-        .unwrap();
-    let before = client.status().await.unwrap();
-
-    service.stop().await;
-    assert!(client.status().await.is_err(), "nothing answers meanwhile");
-    let ended = tokio::time::timeout(Duration::from_secs(10), async {
-        while statuses.recv().await.is_some() {}
-    })
-    .await;
-    assert!(ended.is_ok(), "a stream of the lost connection ends");
-
-    let service = Service::start(service_config(&home)).await.unwrap();
-    let after = client.status().await.unwrap();
-    assert_eq!(after.revision, before.revision);
-    assert!(client.project(&repo).await.is_ok());
-    service.stop().await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -379,7 +368,9 @@ async fn disconnected_after_flood(
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn a_client_that_stops_reading_is_disconnected_for_calls_and_malformed_requests() {
+async fn a_client_that_stops_reading_is_disconnected_and_one_that_reads_gets_every_reply() {
+    use futures_util::{SinkExt, StreamExt};
+    use tokio_tungstenite::tungstenite::Message;
     let (dir, _repo, _home) = fixture();
     let (service, _local) = start_service(&dir.path().join("meta")).await;
     for text in [
@@ -393,15 +384,6 @@ async fn a_client_that_stops_reading_is_disconnected_for_calls_and_malformed_req
             "a client that never reads its replies is disconnected: {text}"
         );
     }
-    service.stop().await;
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn a_client_that_reads_its_replies_gets_each_burst_answered_and_no_call_limit() {
-    use futures_util::{SinkExt, StreamExt};
-    use tokio_tungstenite::tungstenite::Message;
-    let (dir, _repo, _home) = fixture();
-    let (service, _local) = start_service(&dir.path().join("meta")).await;
     let mut socket = open_client(&service).await;
     for id in [1u64, 2] {
         let bogus = serde_json::json!({"id": id, "bogus": true});

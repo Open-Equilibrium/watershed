@@ -1,8 +1,9 @@
 use super::*;
 
 const FORM: &[(&str, &str)] = &[("Content-Type", "application/x-www-form-urlencoded")];
-
 const JSON: &[(&str, &str)] = &[("Content-Type", "application/json")];
+const REDIRECT: &str = "http://127.0.0.1/t3code-peer-link";
+const PKCE_CHALLENGE: &str = "_-BU_nrgy23GXDr5th1SCfQ5hR20PQulmXM33xVGaOs";
 
 fn http(addr: &str, method: &str, path: &str, headers: &[(&str, &str)], body: &str) -> String {
     http_at(addr, addr, method, path, headers, body)
@@ -90,6 +91,102 @@ fn query(url: &str, key: &str) -> String {
         .find_map(|pair| pair.strip_prefix(&format!("{key}=")))
         .unwrap()
         .to_owned()
+}
+
+fn register_client(addr: &str) -> String {
+    let registered = post(
+        addr,
+        "/oauth/mcp/register",
+        JSON,
+        &serde_json::json!({"client_name": "tester", "redirect_uris": [REDIRECT]}).to_string(),
+    );
+    registered["client_id"].as_str().unwrap().to_owned()
+}
+
+fn decide(addr: &str, client_id: &str, pairing: &str) -> String {
+    http(
+        addr,
+        "POST",
+        "/oauth/mcp/decision",
+        JSON,
+        &serde_json::json!({
+            "authorization": {
+                "response_type": "code",
+                "client_id": client_id,
+                "redirect_uri": REDIRECT,
+                "code_challenge": PKCE_CHALLENGE,
+                "code_challenge_method": "S256",
+                "state": "state",
+                "resource": format!("http://{addr}/mcp"),
+            },
+            "decision": {"_tag": "pairing-code", "access": "auto", "code": pairing},
+        })
+        .to_string(),
+    )
+}
+
+fn approve(addr: &str, client_id: &str, pairing: &str) -> String {
+    let answer = decide(addr, client_id, pairing);
+    assert_eq!(status_of(&answer), 200, "{answer}");
+    query(body_json(&answer)["redirectTo"].as_str().unwrap(), "code")
+}
+
+fn code_form(code: &str, client_id: &str, addr: &str) -> String {
+    format!(
+        "grant_type=authorization_code&code={}&redirect_uri={}&client_id={}&code_verifier={}&resource={}",
+        form_value(code),
+        form_value(REDIRECT),
+        form_value(client_id),
+        "a".repeat(64),
+        form_value(&format!("http://{addr}/mcp")),
+    )
+}
+
+fn sign_in(addr: &str, pairing: &str) -> String {
+    let client_id = register_client(addr);
+    let code = approve(addr, &client_id, pairing);
+    let token = post(
+        addr,
+        "/oauth/mcp/token",
+        FORM,
+        &code_form(&code, &client_id, addr),
+    );
+    format!("Bearer {}", token["access_token"].as_str().unwrap())
+}
+
+fn mcp_answer(connect: &str, host: &str, bearer: &str) -> String {
+    let initialize = serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": {
+            "protocolVersion": "2025-06-18",
+            "capabilities": {},
+            "clientInfo": {"name": "tester", "version": "0"},
+        },
+    });
+    http_at(
+        connect,
+        host,
+        "POST",
+        "/mcp",
+        &[
+            ("Authorization", bearer),
+            ("Accept", "application/json, text/event-stream"),
+            ("Content-Type", "application/json"),
+        ],
+        &initialize.to_string(),
+    )
+}
+
+fn t3_sessions(home: &Path) -> Vec<serde_json::Value> {
+    let output = Command::new(t3())
+        .args(["auth", "session", "list", "--json"])
+        .env("T3CODE_HOME", home.join("t3"))
+        .env("T3CODE_TELEMETRY_ENABLED", "false")
+        .output()
+        .unwrap();
+    serde_json::from_slice(&output.stdout).unwrap()
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -193,120 +290,8 @@ async fn revoking_a_client_closes_the_connections_it_has_open() {
     assert!(ended.is_ok(), "the tunnel's connection ended");
 }
 
-const REDIRECT: &str = "http://127.0.0.1/t3code-peer-link";
-
-const PKCE_CHALLENGE: &str = "_-BU_nrgy23GXDr5th1SCfQ5hR20PQulmXM33xVGaOs";
-
-fn register_client(addr: &str) -> String {
-    let registered = post(
-        addr,
-        "/oauth/mcp/register",
-        JSON,
-        &serde_json::json!({"client_name": "tester", "redirect_uris": [REDIRECT]}).to_string(),
-    );
-    registered["client_id"].as_str().unwrap().to_owned()
-}
-
-fn decide(addr: &str, client_id: &str, pairing: &str) -> String {
-    http(
-        addr,
-        "POST",
-        "/oauth/mcp/decision",
-        JSON,
-        &serde_json::json!({
-            "authorization": {
-                "response_type": "code",
-                "client_id": client_id,
-                "redirect_uri": REDIRECT,
-                "code_challenge": PKCE_CHALLENGE,
-                "code_challenge_method": "S256",
-                "state": "state",
-                "resource": format!("http://{addr}/mcp"),
-            },
-            "decision": {"_tag": "pairing-code", "access": "auto", "code": pairing},
-        })
-        .to_string(),
-    )
-}
-
-fn approve(addr: &str, client_id: &str, pairing: &str) -> String {
-    let answer = decide(addr, client_id, pairing);
-    assert_eq!(status_of(&answer), 200, "{answer}");
-    query(body_json(&answer)["redirectTo"].as_str().unwrap(), "code")
-}
-
-fn code_form(code: &str, client_id: &str, addr: &str) -> String {
-    format!(
-        "grant_type=authorization_code&code={}&redirect_uri={}&client_id={}&code_verifier={}&resource={}",
-        form_value(code),
-        form_value(REDIRECT),
-        form_value(client_id),
-        "a".repeat(64),
-        form_value(&format!("http://{addr}/mcp")),
-    )
-}
-
-fn sign_in(addr: &str, pairing: &str) -> String {
-    let client_id = register_client(addr);
-    let code = approve(addr, &client_id, pairing);
-    let token = post(
-        addr,
-        "/oauth/mcp/token",
-        FORM,
-        &code_form(&code, &client_id, addr),
-    );
-    format!("Bearer {}", token["access_token"].as_str().unwrap())
-}
-
-fn mcp_answer(connect: &str, host: &str, bearer: &str) -> String {
-    let initialize = serde_json::json!({
-        "jsonrpc": "2.0",
-        "id": 1,
-        "method": "initialize",
-        "params": {
-            "protocolVersion": "2025-06-18",
-            "capabilities": {},
-            "clientInfo": {"name": "tester", "version": "0"},
-        },
-    });
-    http_at(
-        connect,
-        host,
-        "POST",
-        "/mcp",
-        &[
-            ("Authorization", bearer),
-            ("Accept", "application/json, text/event-stream"),
-            ("Content-Type", "application/json"),
-        ],
-        &initialize.to_string(),
-    )
-}
-
-fn t3_sessions(home: &Path) -> Vec<serde_json::Value> {
-    let output = Command::new(t3())
-        .args(["auth", "session", "list", "--json"])
-        .env("T3CODE_HOME", home.join("t3"))
-        .env("T3CODE_TELEMETRY_ENABLED", "false")
-        .output()
-        .unwrap();
-    serde_json::from_slice(&output.stdout).unwrap()
-}
-
 #[tokio::test(flavor = "multi_thread")]
-async fn a_linked_agents_mcp_request_reaches_t3_through_the_tunnel() {
-    let (dir, _repo, _home) = fixture();
-    let (link, name) = linked(dir.path()).await;
-    let host = connect_paired(&link.b.1, &link.url_b, ClientKind::Host, "tester").await;
-    let addr = tunnel_addr(&dir.path().join("a"), &name);
-    let bearer = sign_in(&addr, &host.t3_pairing().await.unwrap());
-    let answer = mcp_answer(&addr, &addr, &bearer);
-    assert_eq!(status_of(&answer), 200, "{answer}");
-    assert!(answer.contains("protocolVersion"), "{answer}");
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn a_decision_or_token_exchange_with_another_pairings_client_id_is_refused_by_the_tunnel() {
+async fn a_linked_agent_reaches_t3_and_another_pairings_client_id_is_refused_by_the_tunnel() {
     let (dir, _repo, _home) = fixture();
     let (link, name_a) = linked(dir.path()).await;
     let home_c = dir.path().join("c");
@@ -321,8 +306,13 @@ async fn a_decision_or_token_exchange_with_another_pairings_client_id_is_refused
     let (name_c, _) = c.host_add(&link.url_b, &code, None).await.unwrap();
     let addr_a = tunnel_addr(&dir.path().join("a"), &name_a);
     let addr_c = tunnel_addr(&home_c, &name_c);
-    let client_id = register_client(&addr_a);
     let tester = connect_paired(&link.b.1, &link.url_b, ClientKind::Host, "tester").await;
+    let bearer = sign_in(&addr_a, &tester.t3_pairing().await.unwrap());
+    let answer = mcp_answer(&addr_a, &addr_a, &bearer);
+    assert_eq!(status_of(&answer), 200, "{answer}");
+    assert!(answer.contains("protocolVersion"), "{answer}");
+
+    let client_id = register_client(&addr_a);
     let refused = decide(&addr_c, &client_id, &tester.t3_pairing().await.unwrap());
     assert_eq!(status_of(&refused), 403, "a decision: {refused}");
     let code = approve(&addr_a, &client_id, &tester.t3_pairing().await.unwrap());

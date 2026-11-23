@@ -158,6 +158,68 @@ pub(crate) fn completed(n: usize) -> impl Fn(&Snapshot) -> bool {
     }
 }
 
+pub(crate) fn every_hour(title: &str, prompt: &str) -> NewRoutine {
+    NewRoutine {
+        title: title.to_owned(),
+        prompt: prompt.to_owned(),
+        schedule: Schedule {
+            kind: ScheduleKind::Interval,
+            every_ms: Some(3_600_000),
+            time_of_day: None,
+            weekdays: Vec::new(),
+            run_at: None,
+        },
+    }
+}
+
+pub(crate) async fn until_running(thread: &remote::Thread) {
+    wait(thread, |s| {
+        s.turns.iter().any(|t| t.status == TurnStatus::Running)
+    })
+    .await;
+}
+
+pub(crate) async fn hold_turn(thread: &remote::Thread) {
+    thread.send("wait", false).await.unwrap();
+    until_running(thread).await;
+}
+
+pub(crate) async fn send_queued(thread: &remote::Thread, text: &str) {
+    thread.send(text, false).await.unwrap();
+    wait(thread, |s| {
+        s.turns
+            .iter()
+            .any(|t| t.status == TurnStatus::Queued && t.prompt == text)
+    })
+    .await;
+}
+
+pub(crate) async fn ran(thread: &remote::Thread, text: &str) {
+    wait(thread, |s| {
+        s.turns.iter().any(|t| {
+            t.prompt == text && matches!(t.status, TurnStatus::Running | TurnStatus::Completed)
+        })
+    })
+    .await;
+}
+
+pub(crate) async fn move_out(
+    thread: &remote::Thread,
+    transfer: &str,
+    note: Option<&str>,
+) -> Result<MovePackage, String> {
+    thread
+        .move_out(
+            transfer,
+            "host-b",
+            "studio",
+            "environment-target",
+            true,
+            note.map(str::to_owned),
+        )
+        .await
+}
+
 pub(crate) mod tempdir {
     pub struct Dir(std::path::PathBuf);
 
@@ -183,25 +245,101 @@ pub(crate) mod tempdir {
     }
 }
 
-pub(crate) fn t3_environments(home: &Path) -> Vec<serde_json::Value> {
-    let output = Command::new(t3())
-        .args(["environment", "list", "--json"])
-        .env("T3CODE_HOME", home.join("t3"))
-        .env("T3CODE_TELEMETRY_ENABLED", "false")
-        .output()
-        .unwrap();
-    serde_json::from_slice(&output.stdout).unwrap()
+pub(crate) fn shared_remote(dir: &Path) -> (PathBuf, String) {
+    let origin = dir.join("origin.git");
+    git(dir, &["init", "-q", "--bare", "-b", "main", "origin.git"]);
+    let seed = dir.join("seed");
+    seed_repo(&seed);
+    git(&seed, &["push", "-q", &origin.to_string_lossy(), "main"]);
+    let transport = dir.join("fake-ssh");
+    std::fs::write(
+        &transport,
+        "#!/bin/sh\nfor last; do :; done\nexec sh -c \"$last\"\n",
+    )
+    .unwrap();
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(&transport, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let url = format!("git@example.invalid:{}", origin.display());
+    (origin, url)
 }
 
-pub(crate) fn peer_row(home: &Path, name: &str) -> (u16, Option<i64>) {
-    rusqlite::Connection::open(home.join("meta-harness.sqlite"))
-        .unwrap()
-        .query_row(
-            "SELECT tunnel_port, linked_ms FROM peer WHERE name = ?1",
-            [name],
-            |row| Ok((row.get(0)?, row.get(1)?)),
-        )
-        .unwrap()
+pub(crate) fn clone_project(dir: &Path, origin: &Path, url: &str, name: &str) -> PathBuf {
+    let repo = dir.join(name);
+    git(dir, &["clone", "-q", &origin.to_string_lossy(), name]);
+    git(&repo, &["remote", "set-url", "origin", url]);
+    git(
+        &repo,
+        &[
+            "config",
+            "core.sshCommand",
+            &dir.join("fake-ssh").to_string_lossy(),
+        ],
+    );
+    git(&repo, &["config", "user.name", "Contract"]);
+    git(&repo, &["config", "user.email", "contract@example.invalid"]);
+    repo
+}
+
+pub(crate) fn pushed_subject(origin: &Path, branch: &str) -> String {
+    let log = Command::new("git")
+        .args(["log", "-1", "--format=%s", branch])
+        .current_dir(origin)
+        .output()
+        .unwrap();
+    String::from_utf8_lossy(&log.stdout).trim().to_owned()
+}
+
+pub(crate) async fn start_codex(home: &Path) -> (Service, remote::Host) {
+    let mut config = service_config(home);
+    for agent in &mut config.acp_agents {
+        agent.id = "codex".to_owned();
+    }
+    start_with(config, home).await
+}
+
+pub(crate) fn codex_start(text: &str) -> StartThread {
+    let mut thread = start(text, Workspace::Checkout, Permissions::FullAccess);
+    thread.model.instance = "codex".to_owned();
+    thread
+}
+
+pub(crate) struct Pair {
+    pub(crate) dir: tempdir::Dir,
+    pub(crate) origin: PathBuf,
+    pub(crate) url: String,
+    pub(crate) repo_a: PathBuf,
+    pub(crate) repo_b: PathBuf,
+    pub(crate) service_a: Service,
+    pub(crate) host_a: remote::Host,
+    pub(crate) service_b: Service,
+    pub(crate) host_b: remote::Host,
+}
+
+impl Pair {
+    pub(crate) async fn codex() -> Self {
+        let dir = tempdir::Dir::new();
+        let (origin, url) = shared_remote(dir.path());
+        let repo_a = clone_project(dir.path(), &origin, &url, "a");
+        let repo_b = clone_project(dir.path(), &origin, &url, "b");
+        let (service_a, host_a) = start_codex(&dir.path().join("host-a")).await;
+        let (service_b, host_b) = start_codex(&dir.path().join("host-b")).await;
+        Self {
+            dir,
+            origin,
+            url,
+            repo_a,
+            repo_b,
+            service_a,
+            host_a,
+            service_b,
+            host_b,
+        }
+    }
+
+    pub(crate) async fn stop(self) {
+        self.service_a.stop().await;
+        self.service_b.stop().await;
+    }
 }
 
 pub(crate) struct Hosts {
@@ -224,6 +362,17 @@ pub(crate) async fn two_hosts(
         (b_service, b),
         format!("ws://127.0.0.1:{port_b}"),
     )
+}
+
+pub(crate) fn peer_row(home: &Path, name: &str) -> (u16, Option<i64>) {
+    rusqlite::Connection::open(home.join("meta-harness.sqlite"))
+        .unwrap()
+        .query_row(
+            "SELECT tunnel_port, linked_ms FROM peer WHERE name = ?1",
+            [name],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap()
 }
 
 pub(crate) fn tunnel_addr(home: &Path, name: &str) -> String {
@@ -270,62 +419,12 @@ pub(crate) async fn host_client_names(on: &remote::Host) -> Vec<String> {
         .collect()
 }
 
-pub(crate) async fn start_codex(home: &Path) -> (Service, remote::Host) {
-    let mut config = service_config(home);
-    for agent in &mut config.acp_agents {
-        agent.id = "codex".to_owned();
-    }
-    start_with(config, home).await
-}
-
-pub(crate) fn codex_start(text: &str) -> StartThread {
-    let mut thread = start(text, Workspace::Checkout, Permissions::FullAccess);
-    thread.model.instance = "codex".to_owned();
-    thread
-}
-
-pub(crate) fn shared_remote(dir: &Path) -> (PathBuf, String) {
-    let origin = dir.join("origin.git");
-    git(dir, &["init", "-q", "--bare", "-b", "main", "origin.git"]);
-    let seed = dir.join("seed");
-    seed_repo(&seed);
-    git(&seed, &["push", "-q", &origin.to_string_lossy(), "main"]);
-    let transport = dir.join("fake-ssh");
-    std::fs::write(
-        &transport,
-        "#!/bin/sh\nfor last; do :; done\nexec sh -c \"$last\"\n",
-    )
-    .unwrap();
-    use std::os::unix::fs::PermissionsExt;
-    std::fs::set_permissions(&transport, std::fs::Permissions::from_mode(0o755)).unwrap();
-    (
-        origin.clone(),
-        format!("git@example.invalid:{}", origin.display()),
-    )
-}
-
-pub(crate) fn pushed_subject(origin: &Path, branch: &str) -> String {
-    let log = Command::new("git")
-        .args(["log", "-1", "--format=%s", branch])
-        .current_dir(origin)
+pub(crate) fn t3_environments(home: &Path) -> Vec<serde_json::Value> {
+    let output = Command::new(t3())
+        .args(["environment", "list", "--json"])
+        .env("T3CODE_HOME", home.join("t3"))
+        .env("T3CODE_TELEMETRY_ENABLED", "false")
         .output()
         .unwrap();
-    String::from_utf8_lossy(&log.stdout).trim().to_owned()
-}
-
-pub(crate) fn clone_project(dir: &Path, origin: &Path, url: &str, name: &str) -> PathBuf {
-    let repo = dir.join(name);
-    git(dir, &["clone", "-q", &origin.to_string_lossy(), name]);
-    git(&repo, &["remote", "set-url", "origin", url]);
-    git(
-        &repo,
-        &[
-            "config",
-            "core.sshCommand",
-            &dir.join("fake-ssh").to_string_lossy(),
-        ],
-    );
-    git(&repo, &["config", "user.name", "Contract"]);
-    git(&repo, &["config", "user.email", "contract@example.invalid"]);
-    repo
+    serde_json::from_slice(&output.stdout).unwrap()
 }
