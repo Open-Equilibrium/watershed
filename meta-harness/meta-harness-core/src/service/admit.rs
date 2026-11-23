@@ -30,6 +30,7 @@ impl Caller {
                     | Call::Thread { .. }
                     | Call::Git { .. }
                     | Call::Config(_)
+                    | Call::Agents(_)
             ),
             Self::Host(_) => matches!(call, Call::Hosts(HostsCall::T3Pairing)),
         }

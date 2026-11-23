@@ -219,6 +219,26 @@ fn the_context_window_is_the_latest_one_t3_reported() {
 }
 
 #[test]
+fn an_acp_agent_s_context_window_comes_from_its_provider_thread() {
+    let reported = projection(json!({
+        "providerThreads": [
+            {"id": "p1", "contextUsage": {"usedTokens": 300, "maxTokens": 1000}},
+            {"id": "p2", "contextUsage": {"usedTokens": 900, "maxTokens": 1000}},
+            {"id": "p3", "contextUsage": null},
+        ],
+        "providerTurns": [{"tokenUsage": {"usedTokens": 5}}],
+    }));
+    assert_eq!(
+        context(&reported),
+        Some(Context {
+            tokens: Some(900),
+            window: 1000,
+            compacts_at: None
+        })
+    );
+}
+
+#[test]
 fn a_queued_turn_behind_the_running_one_leaves_its_unfinished_calls_open() {
     let queued = projection(json!({
         "runs": [

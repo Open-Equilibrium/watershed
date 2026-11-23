@@ -13,8 +13,9 @@ use meta_harness_core::{
 };
 use meta_harness_core::{
     AcpAgent, AgentEvent, GitAction, GitActionRequest, GitProgress, Group, Harness, Host,
-    HostConfig, ItemDetail, ItemKind, LineCount, ModelChoice, Permissions, Relation, Request,
-    Snapshot, StartThread, StepStatus, TaskStep, Thread, ThreadEvent, TurnStatus, Workspace,
+    HostConfig, ItemDetail, ItemKind, LineCount, ModelChoice, NewAgent, NewRoutine, Permissions,
+    Relation, Request, Schedule, ScheduleKind, Snapshot, StartThread, StepStatus, TaskStep, Thread,
+    ThreadEvent, TurnStatus, Workspace,
 };
 
 const AGENT: &str = "scripted";
@@ -290,6 +291,81 @@ async fn an_agent_s_plan_reaches_the_transcript_as_a_task_list() {
             steps: vec![step("Explore"), step("Explore › scraper-1")]
         }
     );
+    service.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_persistent_agent_moves_to_a_fresh_thread_with_its_routines_when_its_context_fills() {
+    let (_dir, repo, home) = fixture();
+    let (service, host) = start_service(&home).await;
+    let created = host
+        .agent_create(NewAgent {
+            name: "news-bot".to_owned(),
+            root: repo.to_string_lossy().into_owned(),
+            model: start("", Workspace::Checkout, Permissions::FullAccess).model,
+            permissions: Permissions::FullAccess,
+            instructions: "Keep the news page current.".to_owned(),
+        })
+        .await
+        .unwrap();
+    let project = host.project(&repo).await.unwrap();
+    let first = project.open(&created.thread).await.unwrap();
+    wait(&first, completed(1)).await;
+    let routine = host
+        .agent_routine_add(
+            "news-bot",
+            NewRoutine {
+                title: "Morning".to_owned(),
+                prompt: "Check the feeds.".to_owned(),
+                schedule: Schedule {
+                    kind: ScheduleKind::FixedTime,
+                    every_ms: None,
+                    time_of_day: Some("07:30".to_owned()),
+                    weekdays: Vec::new(),
+                    run_at: None,
+                },
+            },
+        )
+        .await
+        .unwrap();
+
+    first.send("fill", false).await.unwrap();
+    let moved = tokio::time::timeout(Duration::from_secs(60), async {
+        loop {
+            let agents = host.agents().await.unwrap();
+            if agents[0].generation == 1 && agents[0].previous.is_none() {
+                return agents[0].clone();
+            }
+            tokio::time::sleep(Duration::from_millis(200)).await;
+        }
+    })
+    .await
+    .expect("the agent moves on within a minute");
+    let next = project.open(&moved.thread).await.unwrap();
+    let opened = wait(&next, completed(1)).await;
+
+    assert!(created.memory.is_dir());
+    assert_ne!(moved.thread, created.thread);
+    let opening = &opened.transcript[0].text;
+    assert!(opening.contains("Keep the news page current."), "{opening}");
+    assert!(opening.contains(&created.memory.display().to_string()));
+    assert!(opening.contains("Imported conversation history"));
+    let routines = host.agent_routines("news-bot").await.unwrap();
+    assert_eq!(
+        routines.iter().map(|r| r.id.as_str()).collect::<Vec<_>>(),
+        [routine.id.as_str()]
+    );
+    assert!(first.automations().await.unwrap().current().is_empty());
+
+    service.stop().await;
+    let (service, host) = start_service(&home).await;
+    assert_eq!(host.agents().await.unwrap()[0].thread, moved.thread);
+    host.agent_remove("news-bot").await.unwrap();
+    assert!(host.agents().await.unwrap().is_empty());
+    let project = host.project(&repo).await.unwrap();
+    let next = project.open(&moved.thread).await.unwrap();
+    assert!(next.automations().await.unwrap().current().is_empty());
+    assert!(created.memory.is_dir(), "the memory stays");
     service.stop().await;
 }
 
