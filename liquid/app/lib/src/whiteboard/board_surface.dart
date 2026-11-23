@@ -9,10 +9,15 @@ import '../rust/api/drawing.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
 import 'board.dart';
+import 'board_claim.dart';
 import 'board_controller.dart';
 import 'board_painter.dart';
 import 'ink_geometry.dart';
 import 'shape_snap.dart';
+
+part 'board_ink.dart';
+part 'board_erase.dart';
+part 'board_select.dart';
 
 class BoardSurface extends StatefulWidget {
   const BoardSurface({
@@ -234,16 +239,6 @@ class BoardSurfaceState extends State<BoardSurface> {
     });
   }
 
-  void _startInk(Offset at, PointerDownEvent event) {
-    _drag = _Drag.ink;
-    _snapped = null;
-    _ink
-      ..clear()
-      ..add(InkPoint(at.dx, at.dy, _pressure(event)));
-    _armHold();
-    _showInk();
-  }
-
   void _armHold() {
     _hold?.cancel();
     _hold = Timer(const Duration(milliseconds: 500), () {
@@ -261,18 +256,6 @@ class BoardSurfaceState extends State<BoardSurface> {
     });
   }
 
-  BoardTool get _inkTool => switch (tools.tool) {
-    BoardTool.shape || BoardTool.highlighter => tools.tool,
-    _ => BoardTool.pen,
-  };
-  BridgeInkColor get _inkColor => tools.colorOf(_inkTool);
-  int get _inkWidth => tools.widthOf(_inkTool);
-  BridgePen get _inkPen => switch (tools.tool) {
-    BoardTool.shape => BridgePen.ball,
-    BoardTool.highlighter => BridgePen.highlighter,
-    _ => tools.pen,
-  };
-
   void _showInk() => setState(
     () => _draft = Draft(
       ink: [..._ink],
@@ -282,457 +265,22 @@ class BoardSurfaceState extends State<BoardSurface> {
     ),
   );
 
-  void _endInk() {
-    final snapping = tools.tool == BoardTool.shape;
-    if (board.paged && _ink.isNotEmpty) {
-      final page = board.pageAt(_ink.first.offset);
-      final sheet = page == null ? null : board.sheets[page];
-      final inside = sheet == null
-          ? 0
-          : _ink.takeWhile((point) => sheet.contains(point.offset)).length;
-      _ink.removeRange(inside, _ink.length);
-    }
-    if (tools.tool == BoardTool.highlighter && _ink.length > 2) {
-      final (first, last) = (_ink.first, _ink.last);
-      var length = 0.0;
-      for (var at = 1; at < _ink.length; at++) {
-        length += (_ink[at].offset - _ink[at - 1].offset).distance;
-      }
-      if ((last.offset - first.offset).distance >= 0.9 * length) {
-        _ink
-          ..clear()
-          ..addAll([first, last]);
-      }
-    }
-    final shape = _snapped ?? (snapping ? _shapeOf(_ink) : null);
-    if (shape != null) {
-      unawaited(board.edit(add: [shape]));
-    } else if (_ink.isNotEmpty) {
-      unawaited(
-        board.edit(
-          add: [
-            for (final piece in splitInk(_ink))
-              newElement(
-                BridgeElementKind.stroke,
-                frame: pointsBounds(piece),
-                color: _inkColor,
-                width: _inkWidth,
-                pen: _inkPen,
-                points: packPoints(piece),
-              ),
-          ],
-        ),
-      );
-    }
-    _ink.clear();
-    _snapped = null;
-  }
-
-  BridgeElement? _shapeOf(List<InkPoint> ink) {
-    final snapped = snapShape([for (final point in ink) point.offset]);
-    if (snapped == null) return null;
-    final color = _inkColor;
-    final width = _inkWidth;
-    switch (snapped.kind) {
-      case SnapKind.line:
-        final [a, b] = snapped.points;
-        return newElement(
-          BridgeElementKind.shape,
-          frame: Rect.fromLTWH(a.dx, a.dy, b.dx - a.dx, b.dy - a.dy),
-          color: color,
-          width: width,
-          shape: BridgeShape.line,
-        );
-      case SnapKind.rectangle || SnapKind.ellipse:
-        return newElement(
-          BridgeElementKind.shape,
-          frame: Rect.fromCenter(
-            center: snapped.center,
-            width: snapped.width,
-            height: snapped.height,
-          ),
-          rotation: snapped.rotation,
-          color: color,
-          width: width,
-          shape: snapped.kind == SnapKind.rectangle
-              ? BridgeShape.rectangle
-              : BridgeShape.ellipse,
-        );
-      case SnapKind.triangle:
-        var box = Rect.fromPoints(snapped.points[0], snapped.points[1]);
-        box = box.expandToInclude(
-          Rect.fromCenter(center: snapped.points[2], width: 0, height: 0),
-        );
-        if (box.width == 0 || box.height == 0) return null;
-        return newElement(
-          BridgeElementKind.shape,
-          frame: box,
-          color: color,
-          width: width,
-          shape: BridgeShape.triangle,
-          corners: [
-            for (final corner in snapped.points) ...[
-              (corner.dx - box.left) / box.width,
-              (corner.dy - box.top) / box.height,
-            ],
-          ],
-        );
-    }
-  }
-
-  void _showDragged(Offset from, Offset to) {
-    final shift = HardwareKeyboard.instance.isShiftPressed;
-    final kind = tools.shape;
-    var end = to;
-    final line = kind == ShapeKind.line || kind == ShapeKind.arrow;
-    if (shift && line) {
-      final d = to - from;
-      final step = math.pi / 12;
-      final angle = (d.direction / step).round() * step;
-      end = from + Offset.fromDirection(angle, d.distance);
-    } else if (shift) {
-      final d = to - from;
-      final side = math.max(d.dx.abs(), d.dy.abs());
-      end = from + Offset(side * d.dx.sign, side * d.dy.sign);
-    }
-    final frame = line
-        ? Rect.fromLTWH(from.dx, from.dy, end.dx - from.dx, end.dy - from.dy)
-        : Rect.fromPoints(from, end);
-    setState(
-      () => _draft = Draft(
-        shape: newElement(
-          BridgeElementKind.shape,
-          frame: frame,
-          color: tools.colorOf(BoardTool.shape),
-          width: tools.widthOf(BoardTool.shape),
-          shape: switch (kind) {
-            ShapeKind.ellipse => BridgeShape.ellipse,
-            ShapeKind.line || ShapeKind.arrow => BridgeShape.line,
-            _ => BridgeShape.rectangle,
-          },
-          arrowhead: kind == ShapeKind.arrow,
-        ),
-      ),
-    );
-  }
-
-  double get _eraserRadius =>
-      const [6.0, 12.0, 24.0][tools.widthOf(BoardTool.eraser).clamp(0, 2)] /
-      board.zoom;
+  void _showDragged(Offset from, Offset to) =>
+      setState(() => _draft = Draft(shape: _dragShape(from, to)));
 
   void _erase(Offset at) {
     final radius = _eraserRadius;
-    final kept = <BridgeElement>[];
-    var changed = false;
-    for (final element in board.elements) {
-      if (element.id?.startsWith(pendingPrefix) ?? false) {
-        kept.add(element);
-        continue;
-      }
-      if ((tools.highlighterOnly && !isHighlight(element)) ||
-          !touches(element, board.cache, at, radius)) {
-        kept.add(element);
-        continue;
-      }
-      changed = true;
-      final partial =
-          !tools.wholeEraser && element.kind == BridgeElementKind.stroke;
-      if (!partial) {
-        _taken(element);
-        continue;
-      }
-      final source = board.cache.bounds(element);
-      final sx = source.width == 0 ? 1.0 : element.w / source.width;
-      final sy = source.height == 0 ? 1.0 : element.h / source.height;
-      final local = unturned(element, at);
-      final drawn = Offset(
-        source.left + (local.dx - element.x) / sx,
-        source.top + (local.dy - element.y) / sy,
-      );
-      final scale = math.max(sx.abs(), sy.abs());
-      final half = penSizes[element.width.clamp(0, 2)] / 2;
-      final pieces = eraseInside(
-        board.cache.points(element),
-        drawn,
-        radius / (scale == 0 ? 1 : scale),
-        halfWidth: half,
-      );
-      _taken(element);
-      for (final piece in pieces) {
-        final bounds = pointsBounds(piece);
-        final unturnedFrame = Rect.fromLTWH(
-          element.x + (bounds.left - source.left) * sx,
-          element.y + (bounds.top - source.top) * sy,
-          bounds.width * sx,
-          bounds.height * sy,
-        );
-        final made = newElement(
-          BridgeElementKind.stroke,
-          frame: Rect.fromCenter(
-            center: turned(element, unturnedFrame.center),
-            width: unturnedFrame.width,
-            height: unturnedFrame.height,
-          ),
-          rotation: element.rotation,
-          color: element.color,
-          width: element.width,
-          docPage: element.docPage,
-          pen: element.pen,
-          points: packPoints(piece),
-        );
-        final local = BridgeElement(
-          id: '$localPrefix${_localIds++}',
-          kind: made.kind,
-          x: made.x,
-          y: made.y,
-          w: made.w,
-          h: made.h,
-          rotation: made.rotation,
-          color: made.color,
-          width: made.width,
-          docPage: made.docPage,
-          pen: made.pen,
-          points: made.points,
-          shape: made.shape,
-          seed: made.seed,
-          arrowhead: false,
-          corners: made.corners,
-          text: '',
-        );
-        kept.add(local);
-        _pieces.putIfAbsent('', () => []).add(local);
-      }
-    }
-    if (changed) board.elements = kept;
+    final changed = _sweep(at);
     setState(() => _draft = Draft(eraser: at, eraserRadius: radius));
     if (changed) board.notifyListeners();
   }
 
   int _localIds = 0;
 
-  void _taken(BridgeElement element) {
-    final id = element.id;
-    if (id == null || id.startsWith(pendingPrefix)) return;
-    if (id.startsWith(localPrefix)) {
-      _pieces['']?.removeWhere((piece) => piece.id == id);
-    } else {
-      _erased.add(id);
-    }
-  }
-
-  void _endErase() {
-    final pieces = [
-      for (final piece in _pieces[''] ?? const <BridgeElement>[])
-        BridgeElement(
-          kind: piece.kind,
-          x: piece.x,
-          y: piece.y,
-          w: piece.w,
-          h: piece.h,
-          rotation: piece.rotation,
-          color: piece.color,
-          width: piece.width,
-          docPage: piece.docPage,
-          pen: piece.pen,
-          points: piece.points,
-          shape: piece.shape,
-          seed: piece.seed,
-          arrowhead: false,
-          corners: piece.corners,
-          text: '',
-        ),
-    ];
-    final removed = [..._erased];
-    _erased.clear();
-    _pieces.clear();
-    board.elements = [
-      for (final element in board.elements)
-        if (!(element.id?.startsWith(localPrefix) ?? false)) element,
-    ];
-    unawaited(board.edit(add: pieces, remove: removed));
-  }
-
   void _startLasso(Offset view, Offset at) {
-    final box = selectionBox(board);
-    if (box != null) {
-      final corners = [for (final corner in box.$1) board.toView(corner)];
-      final (_, knob) = rotateHandle(corners);
-      _before = {for (final element in board.selection) element.id!: element};
-      _boxBefore = box;
-      if ((view - knob).distance <= 9) {
-        _drag = _Drag.rotate;
-        return;
-      }
-      for (final (index, corner) in corners.indexed) {
-        if ((view - corner).distance <= 8) {
-          _drag = _Drag.resize;
-          _corner = index;
-          return;
-        }
-      }
-      if (lassoEncloses(box.$1, at)) {
-        _drag = _Drag.move;
-        return;
-      }
-    }
+    if (_grab(view, at)) return;
     _drag = _Drag.loop;
     setState(() => _draft = Draft(loop: [at]));
-  }
-
-  void _endLasso() {
-    final loop = _draft.loop;
-    if (loop.length < 3 || _loopLength(loop) < 6 / board.zoom) {
-      final at = loop.isEmpty ? null : loop.first;
-      final hit = at == null
-          ? null
-          : board.elements.reversed
-                .where(
-                  (element) =>
-                      isStored(element) &&
-                      touches(element, board.cache, at, 4 / board.zoom),
-                )
-                .firstOrNull;
-      board.select({?hit?.id});
-      return;
-    }
-    board.select({
-      for (final element in board.elements)
-        if (isStored(element) &&
-            lassoSelects(loop, samplesOf(element, board.cache)))
-          element.id!,
-    });
-  }
-
-  static double _loopLength(List<Offset> loop) {
-    var length = 0.0;
-    for (var at = 1; at < loop.length; at++) {
-      length += (loop[at] - loop[at - 1]).distance;
-    }
-    return length;
-  }
-
-  void _show(Map<String, BridgeElement> moved) {
-    board.elements = [
-      for (final element in board.elements) moved[element.id] ?? element,
-    ];
-    board.notifyListeners();
-  }
-
-  void _moveSelection(Offset from, Offset to) {
-    final by = to - from;
-    _show({
-      for (final MapEntry(key: id, value: element) in _before.entries)
-        id: _with(element, frameOf(element).shift(by), element.rotation),
-    });
-  }
-
-  void _resize(Offset to) {
-    final (corners, rotation) = _boxBefore!;
-    final fixed = corners[(_corner + 2) % 4];
-    if (_before.length == 1) {
-      final element = _before.values.single;
-      final center = Offset.lerp(corners[0], corners[2], 0.5)!;
-      final next = Rect.fromPoints(
-        _rotateAround(fixed, center, -rotation),
-        _rotateAround(to, center, -rotation),
-      );
-      final middle = _rotateAround(next.center, center, rotation);
-      final w = next.width * (element.w < 0 ? -1 : 1);
-      final h = next.height * (element.h < 0 ? -1 : 1);
-      _show({
-        element.id!: _with(
-          element,
-          Rect.fromLTWH(middle.dx - w / 2, middle.dy - h / 2, w, h),
-          element.rotation,
-        ),
-      });
-      return;
-    }
-    final dragged = corners[_corner];
-    double scale(double to, double from, double anchor) =>
-        from == anchor ? 1 : math.max(0.05, (to - anchor) / (from - anchor));
-    final sx = scale(to.dx, dragged.dx, fixed.dx);
-    final sy = scale(to.dy, dragged.dy, fixed.dy);
-    _show({
-      for (final MapEntry(key: id, value: element) in _before.entries)
-        id: _with(
-          element,
-          Rect.fromLTWH(
-            fixed.dx + (element.x - fixed.dx) * sx,
-            fixed.dy + (element.y - fixed.dy) * sy,
-            element.w * sx,
-            element.h * sy,
-          ),
-          element.rotation,
-        ),
-    });
-  }
-
-  void _rotate(Offset from, Offset to) {
-    final (corners, _) = _boxBefore!;
-    final center = Offset.lerp(corners[0], corners[2], 0.5)!;
-    var angle = (to - center).direction - (from - center).direction;
-    if (HardwareKeyboard.instance.isShiftPressed) {
-      angle = (angle / (math.pi / 12)).round() * (math.pi / 12);
-    }
-    _show({
-      for (final MapEntry(key: id, value: element) in _before.entries)
-        id: () {
-          final frame = frameOf(element);
-          final moved = _rotateAround(frame.center, center, angle);
-          return _with(
-            element,
-            frame.shift(moved - frame.center),
-            element.rotation + angle,
-          );
-        }(),
-    });
-  }
-
-  static Offset _rotateAround(Offset p, Offset center, double angle) {
-    final (sin, cos) = (math.sin(angle), math.cos(angle));
-    final d = p - center;
-    return center + Offset(d.dx * cos - d.dy * sin, d.dx * sin + d.dy * cos);
-  }
-
-  static BridgeElement _with(
-    BridgeElement element,
-    Rect frame,
-    double rotation,
-  ) => BridgeElement(
-    id: element.id,
-    kind: element.kind,
-    x: frame.left,
-    y: frame.top,
-    w: frame.width,
-    h: frame.height,
-    rotation: rotation,
-    color: element.color,
-    width: element.width,
-    docPage: element.docPage,
-    pen: element.pen,
-    points: element.points,
-    shape: element.shape,
-    seed: element.seed,
-    arrowhead: element.arrowhead,
-    corners: element.corners,
-    text: element.text,
-  );
-
-  void _endTransform() {
-    final changes = [
-      for (final element in board.selection)
-        if (_before[element.id] case final before?
-            when before.x != element.x ||
-                before.y != element.y ||
-                before.w != element.w ||
-                before.h != element.h ||
-                before.rotation != element.rotation)
-          changeOf(element),
-    ];
-    _before = const {};
-    _boxBefore = null;
-    unawaited(board.edit(change: changes));
   }
 
   void _startText(Offset at) {
@@ -899,8 +447,8 @@ class BoardSurfaceState extends State<BoardSurface> {
             Positioned.fill(
               child: RawGestureDetector(
                 gestures: {
-                  _Claim: GestureRecognizerFactoryWithHandlers<_Claim>(
-                    () => _Claim(),
+                  BoardClaim: GestureRecognizerFactoryWithHandlers<BoardClaim>(
+                    () => BoardClaim(),
                     (claim) => claim
                       ..claims = ((event) =>
                           widget.focused ||
@@ -991,56 +539,4 @@ class BoardSurfaceState extends State<BoardSurface> {
       ),
     );
   }
-}
-
-class _Claim extends OneSequenceGestureRecognizer {
-  bool Function(PointerDownEvent event) claims = (_) => false;
-  bool panZooms = true;
-  void Function(Offset pan, double scale, Offset focal)? onPanZoom;
-
-  Offset _pan = Offset.zero;
-  double _scale = 1;
-
-  @override
-  bool isPointerAllowed(PointerDownEvent event) => claims(event);
-
-  @override
-  void addAllowedPointer(PointerDownEvent event) {
-    startTrackingPointer(event.pointer, event.transform);
-    resolve(GestureDisposition.accepted);
-  }
-
-  @override
-  bool isPointerPanZoomAllowed(PointerPanZoomStartEvent event) => panZooms;
-
-  @override
-  void addAllowedPointerPanZoom(PointerPanZoomStartEvent event) {
-    startTrackingPointer(event.pointer, event.transform);
-    resolve(GestureDisposition.accepted);
-    _pan = Offset.zero;
-    _scale = 1;
-  }
-
-  @override
-  void handleEvent(PointerEvent event) {
-    if (event is PointerPanZoomUpdateEvent) {
-      onPanZoom?.call(
-        event.pan - _pan,
-        event.scale / _scale,
-        event.localPosition,
-      );
-      _pan = event.pan;
-      _scale = event.scale;
-    } else if (event is PointerUpEvent ||
-        event is PointerCancelEvent ||
-        event is PointerPanZoomEndEvent) {
-      stopTrackingPointer(event.pointer);
-    }
-  }
-
-  @override
-  void didStopTrackingLastPointer(int pointer) {}
-
-  @override
-  String get debugDescription => 'whiteboard pointers';
 }
