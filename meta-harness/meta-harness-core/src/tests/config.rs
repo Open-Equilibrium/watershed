@@ -454,3 +454,25 @@ fn a_diff_names_each_change_with_its_direction_and_identical_blocks_need_none() 
         ]
     );
 }
+
+#[test]
+fn a_change_with_an_unknown_field_is_refused_instead_of_read_as_a_removal() {
+    for text in [
+        r#"{"instruction":{"name":"style","txt":"Be verbose."}}"#,
+        r#"{"instruction":{"name":"style","text":"Be verbose.","extra":1}}"#,
+        r#"{"skill":{"name":"review","files":null,"extra":1}}"#,
+        r#"{"mcp_server":{"name":"docs","server":{"url":"https://x","extra":1}}}"#,
+        r#"{"extra":1}"#,
+    ] {
+        assert!(serde_json::from_str::<Change>(text).is_err(), "{text}");
+    }
+    let removal: Change =
+        serde_json::from_str(r#"{"instruction":{"name":"style","text":null}}"#).unwrap();
+    assert_eq!(
+        removal,
+        Change::Instruction {
+            name: "style".to_owned(),
+            text: None
+        }
+    );
+}
