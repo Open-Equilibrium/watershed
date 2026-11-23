@@ -269,7 +269,7 @@ class _PageHistoryDialogState extends State<PageHistoryDialog> {
               ? const SizedBox.shrink()
               : ExcludeFocus(
                   child: WorkspacePage(
-                    key: ValueKey(chosen?.after),
+                    key: ObjectKey(preview),
                     state: preview,
                     open: OpenPage(page.area, widget.page),
                     version: true,

@@ -300,6 +300,7 @@ class FakeWorkspace implements LiquidWorkspace {
   }
 
   FakeWorkspace? version;
+  final versionAt = <String, FakeWorkspace>{};
 
   final previewed = <(String, String)>[];
 
@@ -309,7 +310,8 @@ class FakeWorkspace implements LiquidWorkspace {
     required String to,
   }) async {
     previewed.add((page, to));
-    return version ?? this;
+    await Future<void>.delayed(const Duration(milliseconds: 250));
+    return versionAt[to] ?? version ?? this;
   }
 
   void _rolesChanged() =>

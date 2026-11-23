@@ -130,13 +130,28 @@ void main() {
       BridgeVersion(after: 'v2', at: now, actor: you, savePoint: false),
       BridgeVersion(after: 'v1', at: now - 600000, actor: you, savePoint: true),
     ];
-    kit.fake.version = FakeWorkspace();
+    kit.fake.versionAt['v1'] = FakeWorkspace()
+      ..areas.addAll(kit.fake.areas)
+      ..pages.addAll(kit.fake.pages)
+      ..views.addAll(kit.fake.views)
+      ..texts.addAll({for (final block in kit.fake.texts.keys) block: 'May'});
+    Finder shown(String text) => find.descendant(
+      of: find.byKey(const Key('page history')),
+      matching: find.text(text),
+    );
     await tap(tester, find.byTooltip('Page history'));
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.pumpAndSettle();
     expect(find.byKey(const Key('page history')), findsOneWidget);
     expect(find.text('Save point'), findsOneWidget);
+    expect(shown('October'), findsOneWidget);
 
     await tap(tester, find.text('Save point'));
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.pumpAndSettle();
     expect(kit.fake.previewed.last, (kit.page, 'v1'));
+    expect(shown('October'), findsNothing);
+    expect(shown('May'), findsOneWidget);
     expect(find.textContaining('read-only'), findsOneWidget);
     expect(find.byTooltip('Page history'), findsOneWidget);
     await tap(tester, find.text('Restore version'));
