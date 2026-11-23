@@ -9,7 +9,7 @@
   </div>
   <section>
     <h1>Liquid Workspace: Pages</h1>
-    <p class="sub">Mockups for the M3a slice in <a href="../../../PLAN.md#m3a--local-workspace-foundation">PLAN.md</a>, approved by the maintainer on 2026-11-01: the Explorer, a blank Page and its first actions, the built-in Blocks, Arrange mode, the PowerBar and a Source. They follow the <a href="../../concept/V-Spec_Liquid.html#experience">V-Spec</a>, ADR-0235 and <a href="../guidelines.md">guidelines.md</a>. Page icons, Settings at the Explorer's foot and the PowerBar's prefixes were added on his request and approved the same day. Views and the deletion cascade are in the <a href="liquid-workspace-blocks.html">Blocks mockups</a>, Workspace settings in the <a href="liquid-workspace-history.html">Workspace settings mockups</a>.</p>
+    <p class="sub">Mockups for the M3a slice in <a href="../../../PLAN.md#m3a--local-workspace-foundation">PLAN.md</a>, approved by the maintainer on 2026-11-01: the Explorer, a blank Page and its first actions, the built-in Blocks, Arrange mode and the PowerBar; Sources are built (V-Spec). They follow the <a href="../../concept/V-Spec_Liquid.html#experience">V-Spec</a>, ADR-0235 and <a href="../guidelines.md">guidelines.md</a>. Page icons, Settings at the Explorer's foot and the PowerBar's prefixes were added on his request and approved the same day. Views and the deletion cascade are in the <a href="liquid-workspace-blocks.html">Blocks mockups</a>, Workspace settings in the <a href="liquid-workspace-history.html">Workspace settings mockups</a>.</p>
     <p class="sub"><b>Revised by ADR-0239 and ADR-0241:</b> the rail with Inbox and Settings, the Workspace switcher in the sidebar's top row, tabs side by side, Chats in place of agent sessions and Notion's scale are in <a href="liquid-app-concept.html">the app's structure</a>; this file keeps its slice's content, and the shell is redrawn as each slice is built.</p>
   </section>
   <section>
@@ -71,27 +71,10 @@
     <div class="stage" style="margin-top:16px"><div class="scaler"><div class="win bare" id="w-pb45" data-w="1320"></div></div></div>
   </section>
   <section>
-    <h3 class="sec">10 · A Source</h3>
-    <p class="sub">A Source opens like a Page. In M3a it is a local file or folder that Liquid reads but never writes (ADR-0235); Liquid rereads it when the file changes. "Use in a Block…" creates a Connection, and "Used by" lists them. The area's <b>+</b> menu adds it.</p>
-    <div class="stage"><div class="scaler"><div class="win" id="w-src" data-w="1240"></div></div></div>
-    <p class="sub"><b>10b · A folder.</b> A folder Source lists what it holds, folders first, as Finder's list view does. In the Explorer it unfolds like a Page with subpages: its folders and files show with their icons, and a click opens one directly. A file opens in the same view, and the breadcrumb leads back; Liquid adds no Source for it.</p>
-    <div class="stage"><div class="scaler"><div class="win" id="w-src-dir" data-w="1240"></div></div></div>
-    <p class="sub"><b>10c · A file in it.</b> CSV and TSV show as a table, text and Markdown as plain text, images and PDFs as a Media Block shows them. Liquid reads at most 50 MiB of a file.</p>
-    <div class="stage"><div class="scaler"><div class="win" id="w-src-md" data-w="1240"></div></div></div>
-    <p class="sub"><b>10d · Any other file</b> shows as a card with "Open in default app".</p>
-    <div class="stage"><div class="scaler"><div class="win" id="w-src-other" data-w="1240"></div></div></div>
-    <p class="sub"><b>10e · A missing file.</b> The path lives only on this device, until Liquid stores files itself. When the file was moved or deleted, "Choose file…" points the Source at another one, and every Block using it reads the new file.</p>
-    <div class="stage"><div class="scaler"><div class="win" id="w-src-gone" data-w="1240"></div></div></div>
-    <p class="sub"><b>10f · A Source as a Chart's data.</b> "Use in a Block…" adds a Chart that reads the CSV. The Chart's From list offers CSV Sources beside Tables and Calculation Blocks. Group by takes any column, and Value takes the count or the sum or average of a column whose cells are all numbers. The Chart redraws when the file changes.</p>
-    <div class="stage"><div class="scaler"><div class="win" id="w-src-chart" data-w="1240"></div></div></div>
-  </section>
-  <section>
     <h3 class="sec">Decisions</h3>
     <h4 class="qh">Decided (ADR-0235)</h4>
     <ol class="qs">
       <li>Each area has its own heading in the Explorer, with nested Pages; Sources are peers in the same tree.</li>
-      <li>M3a Sources are local files and folders, read-only.</li>
-      <li>Sources, approved with 10b–10f on 2026-11-23 (ADR-0324): the path stays on this device until Liquid stores files itself; search finds Sources by name only; CSV, TSV, text, Markdown, images and PDFs show, other files as a card; a folder unfolds in the Explorer like a Page with subpages, its files directly selectable; a CSV Source can be a Chart's data.</li>
       <li>A pasted URL is a link that fetches nothing; an embed loads only after a click.</li>
     </ol>
     <h4 class="qh">Approved with these mockups (2026-11-01)</h4>
@@ -153,7 +136,7 @@ ${nav(0,I.file,'bank-export.csv',{on:e('csv')})}
 <h6>Acme API</h6>
 ${nav(0,em(E.road),'Roadmap',{on:e('road')})}
 ${nav(0,em(E.api),'API design',{on:e('api')})}
-${o.docs?nav(0,I.dir,'docs',{tw:'⌄',on:e('docs')})+[['dir','drafts','›'],['file','packing-list.md'],['file','api-overview.pdf'],['img','architecture.png'],['file','schema.sql']].map(([ic,n,tw])=>nav(1,I[ic],n,{tw:tw||'',on:e(n)})).join(''):nav(0,I.dir,'docs',{tw:'›',on:e('docs')})}
+${nav(0,I.dir,'docs',{tw:'›',on:e('docs')})}
 <div class="foot">${nav(0,I.zap,'Automations',Object.assign({on:e('auto')},o.att?{r:'⚠ 1',warn:true}:{}))}${nav(0,I.clock,'History',{on:e('hist')})}${nav(0,I.cog,'Settings',{on:e('set')})}</div>
 ${o.menu||''}</div>`}
 function head(crumb,o={}){return `<div class="head"><span class="crumb">${crumb}</span><span class="end">${o.right!==undefined?o.right:`<span class="ib ${o.arr?'on':''}">${I.grid}Arrange</span><span class="ib" title="Page history">${I.clock}</span><span class="ib">${I.more}</span>`}</span></div>`}
@@ -263,54 +246,6 @@ const pbAct=pbBox(typed('&gt;'),`<div class="lbl">This Page</div>${pbItem(I.grid
 <div class="lbl">Workspace</div>${pbItem(I.page,'New Page','','⇧⌘N')}${pbItem(I.zap,'Automations')}${pbItem(I.clock,'History')}${pbItem(I.cog,'Settings','','⌘,')}`,`<div class="pbfoot"><span>Only actions your Role allows</span></div>`);
 document.getElementById('w-pb23').innerHTML=`<div style="display:flex;gap:40px;align-items:flex-start">${pbQuery}${pbSlash}</div>`;
 document.getElementById('w-pb45').innerHTML=`<div style="display:flex;gap:40px;align-items:flex-start">${pbAct}</div>`;
-
-// 10 · Source
-const csv=[['2026-11-01','REWE SAGT DANKE','-84.20'],['2026-10-30','STADTWERKE','-96.00'],['2026-10-28','CP COMBOIOS','-42.50'],['2026-10-27','MIETE OKT','-950.00'],['2026-10-25','KINO','-111.80'],['2026-10-24','GEHALT','+3,200.00']];
-const addMenu=`<div class="pop" style="left:40px;top:200px;width:236px"><div class="it">${I.page}<span>New Page</span><span class="r">⇧⌘N</span></div><div class="it">${I.tpl}<span>New Page from template</span><span class="r">›</span></div><hr><div class="lbl">Add Source</div><div class="it on">${I.file}<span>File…</span></div><div class="it">${I.dir}<span>Folder…</span></div></div>`;
-frame('w-src',{h:620,side:{sel:'csv',plus:true,menu:addMenu},head:head('Private <span>›</span> <b>bank-export.csv</b>',{right:`<span class="ib">${I.reload}Reload</span><span class="ib">Show in Finder</span><span class="ib">${I.more}</span>`}),main:`<div class="pg"><div class="col">
-<div style="display:flex;align-items:center;gap:10px"><span style="color:var(--ws-text-faint)">${sv('<path d="M4 2h5l3 3v9H4z"/><path d="M6 9h4M6 11.5h4"/>',28)}</span><div class="ttl" style="margin:0">bank-export.csv</div></div>
-<div class="cap" style="font-size:13px">Source · local file <code>~/Documents/bank-export.csv</code> · read-only · read at 10:42 · 6 rows</div>
-<div class="tbl" style="--cols:130px 1fr 130px"><div class="tr hd"><span>Date</span><span>Text</span><span class="num">Amount</span></div>${csv.map(r=>`<div class="tr"><span class="mono" style="font-size:13px">${r[0]}</span><span>${r[1]}</span><span class="num">${r[2]}</span></div>`).join('')}</div>
-<div style="display:flex;gap:8px;align-items:center"><span class="btn">${I.link}Use in a Block…</span><span class="cap">Liquid reads this file and never writes it.</span></div>
-<div><div class="cap" style="margin-bottom:4px">Used by</div><div class="nav" style="padding:0 6px"><span class="ico">${I.chart}</span><span>Amount by day</span><span class="r">Chart · Household budget</span></div></div>
-</div></div>`});
-
-const srcHead=(crumb)=>head(crumb,{right:`<span class="ib">${I.reload}Reload</span><span class="ib">Show in Finder</span><span class="ib">${I.more}</span>`});
-const srcTitle=(ic,name,cap)=>`<div style="display:flex;align-items:center;gap:10px"><span style="color:var(--ws-text-faint)">${sv(ic,28)}</span><div class="ttl" style="margin:0">${name}</div></div><div class="cap" style="font-size:13px">${cap}</div>`;
-const icDir='<path d="M1.8 4.2c0-.6.4-1 1-1h3.4l1.4 1.6h5.6c.6 0 1 .4 1 1v6.9c0 .6-.4 1-1 1H2.8c-.6 0-1-.4-1-1z"/>';
-const icFile='<path d="M4 2h5l3 3v9H4z"/><path d="M6 9h4M6 11.5h4"/>';
-const icPdf='<path d="M4 2h5l3 3v9H4z"/><path d="M9 2v3h3"/>';
-const icImg='<rect x="2" y="2.5" width="12" height="11" rx="1.5"/><circle cx="6" cy="6.5" r="1.2"/><path d="M2.5 12l3.5-3.5 2.5 2.5 2-2 3 3"/>';
-const files=[[icDir,'drafts','Folder','—','29 Oct'],[icFile,'packing-list.md','Markdown','2 KB','31 Oct',1],[icPdf,'api-overview.pdf','PDF','1.2 MB','30 Oct'],[icImg,'architecture.png','Image','340 KB','28 Oct'],[icFile,'schema.sql','File','12 KB','27 Oct']];
-frame('w-src-dir',{h:560,side:{sel:'docs',docs:1},head:srcHead('Acme API <span>›</span> <b>docs</b>'),main:`<div class="pg"><div class="col">
-${srcTitle(icDir,'docs','Source · local folder <code>~/Projects/acme/docs</code> · read-only · read at 10:42 · 1 folder, 4 files')}
-<div class="tbl" style="--cols:1fr 120px 100px 100px"><div class="tr hd"><span>Name</span><span>Kind</span><span class="num">Size</span><span>Modified</span></div>
-${files.map(f=>`<div class="tr" ${f[5]?'style="background:var(--ws-hover)"':''}><span style="display:flex;gap:8px;align-items:center"><span style="color:var(--ws-text-faint);display:flex">${sv(f[0])}</span>${f[1]}</span><span>${f[2]}</span><span class="num">${f[3]}</span><span>${f[4]}</span></div>`).join('')}</div>
-<div class="cap">Liquid reads this folder and never writes it.</div>
-</div></div>`});
-frame('w-src-md',{h:560,side:{sel:'packing-list.md',docs:1},head:srcHead('Acme API <span>›</span> docs <span>›</span> <b>packing-list.md</b>'),main:`<div class="pg"><div class="col">
-${srcTitle(icFile,'packing-list.md','In the Source <b>docs</b> · Markdown · 2 KB · read at 10:42')}
-<div class="card" style="white-space:pre-line;font-size:14px;line-height:22px"># Packing list
-
-- Passport and ID
-- Charger, adapter (type F)
-- Rain jacket
-- Train tickets Lisbon → Porto</div>
-</div></div>`});
-frame('w-src-other',{h:560,side:{sel:'schema.sql',docs:1},head:srcHead('Acme API <span>›</span> docs <span>›</span> <b>schema.sql</b>'),main:`<div class="pg"><div class="col">
-${srcTitle(icFile,'schema.sql','In the Source <b>docs</b> · 12 KB · modified 27 Oct')}
-<div class="card" style="display:flex;align-items:center;gap:12px"><span style="color:var(--ws-text-faint);display:flex">${sv(icFile,22)}</span><div style="flex:1"><div>schema.sql</div><div class="cap">Liquid shows no preview for this kind of file.</div></div><span class="btn">Open in default app</span></div>
-</div></div>`});
-frame('w-src-gone',{h:460,side:{sel:'csv'},head:head('Private <span>›</span> <b>bank-export.csv</b>',{right:`<span class="ib">${I.more}</span>`}),main:`<div class="pg"><div class="col">
-${srcTitle(icFile,'bank-export.csv','Source · local file <code>~/Documents/bank-export.csv</code> · last read 1 Nov at 10:42')}
-<div class="card" style="display:flex;flex-direction:column;gap:10px"><div><b>Liquid can't find this file on this device.</b></div><div class="cap" style="font-size:13px">It may have been moved, renamed or deleted. The Chart "Amount by day" shows nothing until the file is back.</div><div style="display:flex;gap:8px"><span class="btn pri">Choose file…</span><span class="btn">Remove Source</span></div></div>
-</div></div>`});
-const line=(h=150)=>{const v=[3200,-111.8,-950,-42.5,-96,-84.2];const lo=-1200,hi=3400;const y=t=>8+(hi-t)/(hi-lo)*(h-16);const pts=v.map((t,i)=>`${30+i*104},${y(t)}`).join(' ');return `<svg width="580" height="${h}" style="display:block"><line x1="20" x2="570" y1="${y(0)}" y2="${y(0)}" stroke="var(--ws-border)"/><polyline points="${pts}" fill="none" stroke="var(--ws-data-1)" stroke-width="2"/>${v.map((t,i)=>`<circle cx="${30+i*104}" cy="${y(t)}" r="3" fill="var(--ws-data-1)"/>`).join('')}</svg><div class="blab" style="width:580px">${['24 Oct','25 Oct','27 Oct','28 Oct','30 Oct','1 Nov'].map(d=>`<span>${d}</span>`).join('')}</div>`};
-const fromList=`<div class="pop" style="right:24px;top:236px;width:300px"><div class="it">None</div><div class="it">${I.db}<span>Expenses</span><span class="r">Table</span></div><div class="it">${I.fx}<span>Left this month</span><span class="r">Calculation</span></div><div class="it on">${sv(icFile)}<span>bank-export.csv</span><span class="r">Source</span></div></div>`;
-frame('w-src-chart',{h:560,side:{sel:'budget'},head:head('Private <span>›</span> <b>Household budget</b>'),main:`<div class="pg"><div class="col" style="margin-left:48px">
-<div class="ttl">${em(E.budget)} Household budget</div>
-<div class="bh"><span class="ico">${I.chart}</span><b>Amount by day</b><span class="chip">Line ⌄</span><span class="end"><span class="cap">from bank-export.csv</span></span></div>${line()}
-</div></div>`,over:`<div class="card" style="position:absolute;right:24px;top:96px;width:300px;display:flex;flex-direction:column;gap:10px;box-shadow:var(--ws-shadow);font-size:13px"><div style="display:flex;gap:8px;align-items:center"><span style="color:var(--ws-text-faint);display:flex">${I.chart}</span><b style="flex:1">Amount by day</b>✕</div><div class="cap">Data</div><div style="display:grid;grid-template-columns:80px 1fr;gap:6px 10px"><span class="cap">From</span><span>bank-export.csv · Source ⌄</span><span class="cap">Group by</span><span>Date ⌄</span><span class="cap">Value</span><span>Sum of Amount ⌄</span></div></div>${fromList}`});
 
 let mode='system',fit=true;const mq=matchMedia('(prefers-color-scheme: dark)');
 function hostDark(){const v=getComputedStyle(document.documentElement).getPropertyValue('--background').trim();if(!v)return mq.matches;const c=document.createElement('canvas');c.width=c.height=1;const x=c.getContext('2d');x.fillStyle='#808080';x.fillStyle=v;x.fillRect(0,0,1,1);const d=x.getImageData(0,0,1,1).data;return .2126*d[0]+.7152*d[1]+.0722*d[2]<128}
