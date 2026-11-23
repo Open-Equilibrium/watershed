@@ -92,46 +92,50 @@ pub(crate) fn local_servers(list: &Value, thread: &str) -> Vec<LocalServer> {
 }
 
 pub(crate) fn automations(list: &Value, thread: &str) -> Vec<Automation> {
+    bound(list, thread).filter_map(routine).collect()
+}
+
+fn bound<'a>(list: &'a Value, thread: &'a str) -> impl Iterator<Item = &'a Value> {
     list["tasks"]
         .as_array()
         .into_iter()
         .flatten()
-        .filter(|t| t["threadId"] == thread)
-        .filter_map(|t| {
-            let schedule = &t["schedule"];
-            Some(Automation {
-                id: t["id"].as_str()?.to_owned(),
-                title: t["title"].as_str()?.to_owned(),
-                schedule: Schedule {
-                    kind: match schedule["type"].as_str()? {
-                        "interval" => ScheduleKind::Interval,
-                        "fixed_time" => ScheduleKind::FixedTime,
-                        "once" => ScheduleKind::Once,
-                        "webhook" => ScheduleKind::Webhook,
-                        _ => return None,
-                    },
-                    every_ms: schedule["everyMs"].as_u64(),
-                    time_of_day: schedule["timeOfDay"].as_str().map(str::to_owned),
-                    weekdays: schedule["weekdays"]
-                        .as_array()
-                        .into_iter()
-                        .flatten()
-                        .filter_map(|day| u8::try_from(day.as_u64()?).ok())
-                        .collect(),
-                    run_at: schedule["runAt"].as_str().map(str::to_owned),
-                },
-                enabled: t["enabled"].as_bool().unwrap_or_default(),
-                next_run_ms: millis(&t["nextRunAt"]),
-                last_run: match t["lastRunStatus"].as_str() {
-                    Some("running") => RunStatus::Running,
-                    Some("succeeded") => RunStatus::Succeeded,
-                    Some("failed") => RunStatus::Failed,
-                    _ => RunStatus::Never,
-                },
-                blocked_by_policy: t["blockedByPolicy"].as_str().map(str::to_owned),
-            })
-        })
-        .collect()
+        .filter(move |t| t["threadId"] == thread)
+}
+
+pub(crate) fn routine(t: &Value) -> Option<Automation> {
+    let schedule = &t["schedule"];
+    Some(Automation {
+        id: t["id"].as_str()?.to_owned(),
+        title: t["title"].as_str()?.to_owned(),
+        schedule: Schedule {
+            kind: match schedule["type"].as_str()? {
+                "interval" => ScheduleKind::Interval,
+                "fixed_time" => ScheduleKind::FixedTime,
+                "once" => ScheduleKind::Once,
+                "webhook" => ScheduleKind::Webhook,
+                _ => return None,
+            },
+            every_ms: schedule["everyMs"].as_u64(),
+            time_of_day: schedule["timeOfDay"].as_str().map(str::to_owned),
+            weekdays: schedule["weekdays"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|day| u8::try_from(day.as_u64()?).ok())
+                .collect(),
+            run_at: schedule["runAt"].as_str().map(str::to_owned),
+        },
+        enabled: t["enabled"].as_bool().unwrap_or_default(),
+        next_run_ms: millis(&t["nextRunAt"]),
+        last_run: match t["lastRunStatus"].as_str() {
+            Some("running") => RunStatus::Running,
+            Some("succeeded") => RunStatus::Succeeded,
+            Some("failed") => RunStatus::Failed,
+            _ => RunStatus::Never,
+        },
+        blocked_by_policy: t["blockedByPolicy"].as_str().map(str::to_owned),
+    })
 }
 
 pub(crate) fn usage_limits(config: &Value, instance: &str, now_ms: u64) -> Option<UsageLimits> {
@@ -310,33 +314,46 @@ impl Thread {
             .map(|_| ())
     }
 
-    pub(crate) async fn rebind_routines(&self, to: &str) -> Result<(), String> {
+    pub(crate) async fn routine_tasks(&self) -> Result<Vec<Value>, String> {
         let mut stream = self
             .client
             .stream("scheduledTasks.subscribe", json!({}))
             .await?;
         let list = stream.recv().await.ok_or("T3 sent no routines")?;
-        for task in list["tasks"].as_array().into_iter().flatten() {
-            if task["threadId"] != self.id.as_str() {
-                continue;
-            }
-            let mut moved =
-                json!({"requireExisting": true, "threadId": to, "threadMode": "continue"});
-            for key in [
-                "id",
-                "title",
-                "prompt",
-                "enabled",
-                "schedule",
-                "projectId",
-                "workspaceStrategy",
-                "modelSelection",
-                "runtimeMode",
-                "interactionMode",
-            ] {
-                moved[key] = task[key].clone();
-            }
-            self.client.call("scheduledTasks.upsert", moved).await?;
+        Ok(bound(&list, &self.id)
+            .map(crate::agents::routine_copy)
+            .collect())
+    }
+
+    pub(crate) async fn save_routine(&self, copy: &Value, existing: bool) -> Result<Value, String> {
+        let mut task = copy.clone();
+        task["threadId"] = json!(self.id);
+        task["threadMode"] = json!("continue");
+        if existing {
+            task["requireExisting"] = json!(true);
+        } else if let Some(fields) = task.as_object_mut() {
+            fields.remove("id");
+        }
+        let answer = self.client.call("scheduledTasks.upsert", task).await?;
+        Ok(crate::agents::routine_copy(&answer["task"]))
+    }
+
+    pub(crate) async fn rebind_routines(&self, to: &Thread) -> Result<(), String> {
+        for task in self.routine_tasks().await? {
+            to.save_routine(&task, true).await?;
+        }
+        Ok(())
+    }
+
+    pub(crate) async fn retune_routines(
+        &self,
+        model: &crate::ModelChoice,
+        permissions: crate::Permissions,
+    ) -> Result<(), String> {
+        for mut task in self.routine_tasks().await? {
+            task["modelSelection"] = model.to_t3();
+            task["runtimeMode"] = json!(permissions.mode());
+            self.save_routine(&task, true).await?;
         }
         Ok(())
     }

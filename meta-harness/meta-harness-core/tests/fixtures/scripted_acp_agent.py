@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import json
 import os
+import re
 import sys
 import threading
 
@@ -22,8 +23,14 @@ def say(sid, text):
     update(sid, {"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": text}})
 
 
-def prompt(mid, sid, script):
-    if script.startswith("append "):
+def prompt(mid, sid, script, text):
+    if script == "instruct":
+        path = re.search(r"(/\S+/instructions\.md)", text).group(1)
+        with open(path, "w", encoding="utf-8") as f:
+            f.write("# news-bot\n\nRead the feeds.\n")
+        say(sid, "Saved.")
+        reason = "end_turn"
+    elif script.startswith("append "):
         path = os.path.join(sessions[sid], "contract.txt")
         update(sid, {"sessionUpdate": "tool_call", "toolCallId": f"t{mid}", "title": "Append contract.txt",
                      "kind": "edit", "status": "in_progress", "locations": [{"path": path}]})
@@ -91,8 +98,8 @@ for raw in sys.stdin:
         text = "".join(p.get("text", "") for p in params.get("prompt", []) if p.get("type") == "text")
         lines = [line.split("<")[0].strip() for line in text.splitlines()]
         handoff = "Imported conversation history from the previous host" in text
-        script = "" if handoff else next((line for line in lines if line.startswith(("append ", "stream ")) or line in ("ask", "wait", "plan", "fill")), "")
-        threading.Thread(target=prompt, args=(mid, sid, script)).start()
+        script = "" if handoff else next((line for line in lines if line.startswith(("append ", "stream ")) or line in ("ask", "wait", "plan", "fill", "instruct")), "")
+        threading.Thread(target=prompt, args=(mid, sid, script, text)).start()
     elif method == "session/cancel":
         cancelled[params["sessionId"]].set()
     elif mid is not None:

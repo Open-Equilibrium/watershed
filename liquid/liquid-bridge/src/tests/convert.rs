@@ -268,6 +268,8 @@ fn turn_and_item_events_cross_with_their_turn_item_and_text() {
                 failed: false,
                 duration_ms: None,
                 steps: Vec::new(),
+                routine: None,
+                opening: crate::api::events::BridgeOpening::None,
             }),
             ..crate::convert::event(BridgeEventKind::ItemStarted, 1)
         }
@@ -312,6 +314,8 @@ fn turn_and_item_events_cross_with_their_turn_item_and_text() {
             failed: true,
             duration_ms: Some(5),
             steps: Vec::new(),
+            routine: None,
+            opening: crate::api::events::BridgeOpening::None,
         })
     );
 
@@ -748,6 +752,7 @@ fn a_thread_summary_crosses_with_its_title_and_worktree() {
         harness: Some(Harness::ClaudeCode),
         harness_known: true,
         moving: None,
+        visited_ms: None,
     });
     assert_eq!(
         summary,
@@ -762,6 +767,7 @@ fn a_thread_summary_crosses_with_its_title_and_worktree() {
             movable: true,
             harness_known: true,
             moving: None,
+            visited_ms: None,
         }
     );
     let other = convert::thread_summary(ThreadSummary {
@@ -775,6 +781,7 @@ fn a_thread_summary_crosses_with_its_title_and_worktree() {
         harness: None,
         harness_known: true,
         moving: None,
+        visited_ms: None,
     });
     assert!(!other.movable, "a thread of another harness cannot move");
     assert!(other.harness_known, "its service reported the harness");
@@ -790,6 +797,7 @@ fn a_thread_summary_crosses_with_its_title_and_worktree() {
         harness: None,
         harness_known: false,
         moving: None,
+        visited_ms: None,
     });
     assert!(!older.movable);
     assert!(!older.harness_known, "an older service reported no harness");

@@ -474,6 +474,74 @@ impl Host {
         }))
         .await
     }
+
+    pub async fn agent_update(
+        &self,
+        name: &str,
+        rename: Option<String>,
+        model: Option<crate::ModelChoice>,
+        permissions: Option<crate::Permissions>,
+    ) -> Result<crate::Agent, String> {
+        self.call(Call::Agents(AgentsCall::Update {
+            name: name.to_owned(),
+            rename,
+            model,
+            permissions,
+        }))
+        .await
+    }
+
+    pub async fn agent_instructions(&self, name: &str) -> Result<String, String> {
+        self.call(Call::Agents(AgentsCall::Instructions(name.to_owned())))
+            .await
+    }
+
+    pub async fn agent_set_instructions(&self, name: &str, text: &str) -> Result<(), String> {
+        self.call(Call::Agents(AgentsCall::SetInstructions {
+            name: name.to_owned(),
+            text: text.to_owned(),
+        }))
+        .await
+    }
+
+    pub async fn agent_changes(&self, name: &str) -> Result<Vec<crate::AgentChange>, String> {
+        self.call(Call::Agents(AgentsCall::Changes(name.to_owned())))
+            .await
+    }
+
+    pub async fn agent_undo(&self, name: &str, change: i64) -> Result<(), String> {
+        self.call(Call::Agents(AgentsCall::Undo {
+            name: name.to_owned(),
+            change,
+        }))
+        .await
+    }
+
+    pub async fn agent_threads(&self, name: &str) -> Result<Vec<String>, String> {
+        self.call(Call::Agents(AgentsCall::Threads(name.to_owned())))
+            .await
+    }
+
+    pub async fn agent_mention(
+        &self,
+        name: &str,
+        root: &str,
+        thread: &str,
+        text: &str,
+    ) -> Result<String, String> {
+        self.call(Call::Agents(AgentsCall::Mention {
+            name: name.to_owned(),
+            root: root.to_owned(),
+            thread: thread.to_owned(),
+            text: text.to_owned(),
+        }))
+        .await
+    }
+
+    pub async fn agent_mentions(&self, thread: &str) -> Result<Vec<crate::Mention>, String> {
+        self.call(Call::Agents(AgentsCall::Mentions(thread.to_owned())))
+            .await
+    }
 }
 
 #[cfg(test)]
@@ -958,6 +1026,10 @@ impl Thread {
 
     pub async fn run_automation_now(&self, id: &str) -> Result<(), String> {
         self.call(ThreadCall::RunAutomationNow(id.to_owned())).await
+    }
+
+    pub async fn visit(&self) -> Result<(), String> {
+        self.call(ThreadCall::Visit).await
     }
 
     pub async fn stop_subagent(&self, subagent: &str) -> Result<(), String> {

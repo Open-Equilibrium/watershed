@@ -6,11 +6,12 @@ use std::time::Duration;
 
 use meta_harness_core::remote::{Host, Project, Stream, Thread};
 use meta_harness_core::{
-    Automation, LineageChanges, LocalServer, Permissions, StartThread, ThreadEvent, ThreadSummary,
-    TurnStatus, Watch, Workspace, default_home, visible_name,
+    Automation, LineageChanges, LocalServer, StartThread, ThreadEvent, ThreadSummary, TurnStatus,
+    Watch, Workspace, default_home, visible_name,
 };
 use tokio::runtime::{Runtime, RuntimeFlavor};
 
+use crate::api::agents::permissions_of;
 use crate::api::details::{BridgeAutomation, BridgeLineage, BridgeLocalServer, BridgeUsageLimits};
 use crate::api::events::{BridgeEvent, BridgeFileChange};
 use crate::api::git::GitCheckout;
@@ -83,6 +84,7 @@ pub struct BridgeThreadSummary {
     pub movable: bool,
     pub harness_known: bool,
     pub moving: Option<crate::api::moves::BridgeMoving>,
+    pub visited_ms: Option<i64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -239,15 +241,6 @@ impl AgentProject {
 
     pub fn git(&self) -> GitCheckout {
         GitCheckout::new(self.project.git())
-    }
-}
-
-fn permissions_of(permissions: BridgePermissions) -> Permissions {
-    match permissions {
-        BridgePermissions::Supervised => Permissions::Supervised,
-        BridgePermissions::AutoAcceptEdits => Permissions::AutoAcceptEdits,
-        BridgePermissions::Auto => Permissions::Auto,
-        BridgePermissions::FullAccess => Permissions::FullAccess,
     }
 }
 
@@ -687,6 +680,10 @@ impl AgentSession {
 
     pub fn run_automation_now(&self, id: String) -> Result<(), String> {
         run(self.thread.run_automation_now(&id))
+    }
+
+    pub fn visit(&self) -> Result<(), String> {
+        run(self.thread.visit())
     }
 
     pub fn lineage_subscribe(&self) -> Result<BridgeLineage, String> {

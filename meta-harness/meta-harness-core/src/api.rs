@@ -65,6 +65,30 @@ pub(crate) enum AgentsCall {
         name: String,
         id: String,
     },
+    Update {
+        name: String,
+        rename: Option<String>,
+        model: Option<crate::ModelChoice>,
+        permissions: Option<crate::Permissions>,
+    },
+    Instructions(String),
+    SetInstructions {
+        name: String,
+        text: String,
+    },
+    Changes(String),
+    Undo {
+        name: String,
+        change: i64,
+    },
+    Threads(String),
+    Mention {
+        name: String,
+        root: String,
+        thread: String,
+        text: String,
+    },
+    Mentions(String),
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -183,6 +207,7 @@ pub(crate) enum ThreadCall {
         enabled: bool,
     },
     RunAutomationNow(String),
+    Visit,
     UsageLimits,
     Lineage,
     MergeBack,
