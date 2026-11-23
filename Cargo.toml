@@ -48,6 +48,8 @@ reqwest = { version = "=0.13.5", default-features = false, features = ["form", "
 rusqlite = "=0.43.0"
 rustls = { version = "=0.23.46", default-features = false, features = ["ring", "std", "tls12"] }
 rustix = { version = "=1.1.6", default-features = false, features = ["fs", "process"] }
+# Owner-only ACLs and process trees for Meta-Harness on Windows (ADR-0291), at the version the lock already holds.
+windows-sys = { version = "=0.61.2", features = ["Win32_Foundation", "Win32_Security", "Win32_Security_Authorization", "Win32_Storage_FileSystem", "Win32_System_JobObjects", "Win32_System_Threading"] }
 signal-hook = { version = "=0.4.6", default-features = false, features = ["iterator"] }
 tokio = { version = "=1.54.1", features = ["rt-multi-thread", "sync", "time"] }
 # Meta-Harness's client for T3 Code's WebSocket protocol (ADR-0292).

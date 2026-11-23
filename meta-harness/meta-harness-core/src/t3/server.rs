@@ -18,6 +18,7 @@ pub(crate) const QUIET_ENV: [(&str, &str); 2] = [
 
 pub(crate) struct Server {
     child: tokio::process::Child,
+    tree: Option<crate::platform::Tree>,
     pub origin: String,
     home: PathBuf,
     binary: PathBuf,
@@ -42,10 +43,21 @@ impl Server {
                 .kill_on_drop(true);
             let mut child =
                 crate::spawn(&mut command).map_err(|e| format!("Could not start T3: {e}"))?;
+            let tree = match child.id() {
+                Some(pid) => match crate::platform::hold_tree(pid) {
+                    Some(tree) => Some(tree),
+                    None => {
+                        let _ = child.kill().await;
+                        return Err("Could not hold T3 and its agents in one job".to_owned());
+                    }
+                },
+                None => None,
+            };
             match wait_for_origin(&runtime, &mut child).await? {
                 Some(origin) => {
                     return Ok(Self {
                         child,
+                        tree,
                         origin,
                         home: home.to_owned(),
                         binary: binary.to_owned(),
@@ -69,12 +81,8 @@ impl Server {
     }
 
     pub async fn stop(&mut self) {
-        if let Some(pid) = self
-            .child
-            .id()
-            .and_then(|pid| rustix::process::Pid::from_raw(i32::try_from(pid).ok()?))
-        {
-            let _ = rustix::process::kill_process(pid, rustix::process::Signal::TERM);
+        if let Some(pid) = self.child.id() {
+            crate::platform::terminate(pid);
         }
         if tokio::time::timeout(Duration::from_secs(5), self.child.wait())
             .await
@@ -82,6 +90,7 @@ impl Server {
         {
             let _ = self.child.kill().await;
         }
+        self.tree = None;
     }
 }
 
@@ -122,45 +131,41 @@ async fn issue(binary: PathBuf, home: PathBuf, wait: Duration) -> Result<String,
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_owned())
 }
 
-fn runs_t3_serve(binary: &Path, home: &Path, command: &str) -> bool {
-    command
-        .strip_prefix(&*binary.to_string_lossy())
-        .is_some_and(|arguments| {
-            arguments.starts_with(" serve ")
-                && arguments
-                    .trim_end()
-                    .ends_with(&format!(" --base-dir {}", home.to_string_lossy()))
-        })
-}
-
 async fn stop_left_behind(binary: &Path, home: &Path) {
     let runtime = home.join("userdata").join("server-runtime.json");
-    let Some(pid) = std::fs::read_to_string(runtime)
+    let written = std::fs::metadata(&runtime)
+        .and_then(|meta| meta.modified())
+        .ok();
+    let Some(pid) = std::fs::read_to_string(&runtime)
         .ok()
         .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
-        .and_then(|value| value["pid"].as_i64())
-        .and_then(|pid| rustix::process::Pid::from_raw(i32::try_from(pid).ok()?))
+        .and_then(|value| value["pid"].as_u64())
+        .and_then(|pid| u32::try_from(pid).ok())
     else {
         return;
     };
-    let runs_t3 = |pid: rustix::process::Pid| {
-        std::process::Command::new("ps")
-            .args(["-o", "command=", "-p", &pid.as_raw_nonzero().to_string()])
-            .output()
-            .is_ok_and(|out| runs_t3_serve(binary, home, &String::from_utf8_lossy(&out.stdout)))
-    };
-    if !runs_t3(pid) {
+    let base = home.to_string_lossy();
+    let arguments = [
+        "serve",
+        "--host",
+        "127.0.0.1",
+        "--no-browser",
+        "--base-dir",
+        &base,
+    ];
+    let runs_t3 = || crate::platform::runs(pid, binary, &arguments, written);
+    if !runs_t3() {
         return;
     }
-    let _ = rustix::process::kill_process(pid, rustix::process::Signal::TERM);
+    crate::platform::terminate(pid);
     for _ in 0..50 {
-        if !runs_t3(pid) {
+        if !runs_t3() {
             return;
         }
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
-    if runs_t3(pid) {
-        let _ = rustix::process::kill_process(pid, rustix::process::Signal::KILL);
+    if runs_t3() {
+        crate::platform::kill(pid);
     }
 }
 
@@ -294,7 +299,20 @@ mod tests {
             ("/x/t3-helper serve --other\n", false),
             ("/x/t3 auth session issue\n", false),
         ] {
-            assert_eq!(runs_t3_serve(binary, home, command), runs, "{command}");
+            let base = home.to_string_lossy();
+            let arguments = [
+                "serve",
+                "--host",
+                "127.0.0.1",
+                "--no-browser",
+                "--base-dir",
+                &base,
+            ];
+            assert_eq!(
+                crate::platform::matches_command(command, binary, &arguments),
+                runs,
+                "{command}"
+            );
         }
     }
 

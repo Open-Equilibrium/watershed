@@ -2,6 +2,7 @@ use std::path::{Path, PathBuf};
 
 pub const LABEL: &str = "io.github.open-equilibrium.meta-harness";
 const UNIT: &str = "meta-harness.service";
+const TASK: &str = "Meta-Harness";
 
 pub struct Plan {
     program: PathBuf,
@@ -83,6 +84,7 @@ fn step(program: &'static str, args: &[&str], required: bool) -> Step {
 pub struct Manager {
     pub file: PathBuf,
     render: fn(&Plan) -> String,
+    wide: bool,
     home_of: fn(&str) -> Option<String>,
     start: Vec<Step>,
     stop: Vec<Step>,
@@ -100,6 +102,7 @@ impl Manager {
         let plist = file.to_string_lossy().into_owned();
         Self {
             render: plist_of,
+            wide: false,
             home_of: plist_home,
             start: vec![
                 step("launchctl", &["bootout", &target], false),
@@ -117,6 +120,7 @@ impl Manager {
         Self {
             file: config.join("systemd/user").join(UNIT),
             render: unit_of,
+            wide: false,
             home_of: unit_home,
             start: vec![
                 step("systemctl", &["--user", "daemon-reload"], true),
@@ -133,10 +137,76 @@ impl Manager {
         }
     }
 
+    pub fn task_scheduler(local: &Path) -> Self {
+        let file = local.join("Meta-Harness").join("meta-harness-task.xml");
+        let xml = file.to_string_lossy().into_owned();
+        let create = step(
+            "schtasks",
+            &["/Create", "/TN", TASK, "/XML", &xml, "/F"],
+            true,
+        );
+        let run = step("schtasks", &["/Run", "/TN", TASK], true);
+        Self {
+            render: task_of,
+            wide: true,
+            home_of: task_home,
+            start: vec![step("schtasks", &["/End", "/TN", TASK], false), create, run],
+            stop: vec![
+                step("schtasks", &["/End", "/TN", TASK], false),
+                step("schtasks", &["/Delete", "/TN", TASK, "/F"], false),
+            ],
+            restore: vec![step("schtasks", &["/Delete", "/TN", TASK, "/F"], false)],
+            restart: vec![
+                step(
+                    "schtasks",
+                    &["/Create", "/TN", TASK, "/XML", &xml, "/F"],
+                    true,
+                ),
+                step("schtasks", &["/Run", "/TN", TASK], true),
+            ],
+            file,
+        }
+    }
+
+    fn encode(&self, text: &str) -> Vec<u8> {
+        if self.wide {
+            [0xFF, 0xFE]
+                .into_iter()
+                .chain(text.encode_utf16().flat_map(u16::to_le_bytes))
+                .collect()
+        } else {
+            text.as_bytes().to_vec()
+        }
+    }
+
+    fn decode(&self, bytes: &[u8]) -> Option<String> {
+        if self.wide {
+            let units: Vec<u16> = bytes
+                .strip_prefix(&[0xFF, 0xFE])?
+                .as_chunks::<2>()
+                .0
+                .iter()
+                .map(|pair| u16::from_le_bytes(*pair))
+                .collect();
+            String::from_utf16(&units).ok()
+        } else {
+            String::from_utf8(bytes.to_vec()).ok()
+        }
+    }
+
     pub fn current() -> Result<Self, String> {
         let home = std::env::home_dir().ok_or("The home folder is unknown.")?;
         if cfg!(target_os = "macos") {
-            Ok(Self::launchd(&home, rustix::process::getuid().as_raw()))
+            #[cfg(unix)]
+            return Ok(Self::launchd(&home, rustix::process::getuid().as_raw()));
+            #[cfg(not(unix))]
+            return Err("Meta-Harness has no login service on this platform yet.".to_owned());
+        } else if cfg!(windows) {
+            let local = std::env::var_os("LOCALAPPDATA")
+                .map(PathBuf::from)
+                .filter(|p| p.is_absolute())
+                .ok_or("LOCALAPPDATA is not set, so the login task has no place.")?;
+            Ok(Self::task_scheduler(&local))
         } else if cfg!(target_os = "linux") {
             let config = std::env::var_os("XDG_CONFIG_HOME")
                 .map(PathBuf::from)
@@ -164,7 +234,7 @@ impl Manager {
             Err(e) => return Err(format!("Could not read {}: {e}", self.file.display())),
         };
         let had_previous = previous.is_some();
-        replace_file(&self.file, (self.render)(plan).as_bytes())
+        replace_file(&self.file, &self.encode(&(self.render)(plan)))
             .map_err(|e| format!("Could not write {}: {e}", self.file.display()))?;
         let started = run_all(&self.start, &mut run).map(|_| ());
         if let Err(error) = started {
@@ -178,7 +248,11 @@ impl Manager {
             return Err(match restored {
                 Ok(()) => {
                     let mut message = error;
-                    for failure in run_all(&self.restore, &mut run).unwrap_or_else(|e| vec![e]) {
+                    for failure in run_all(&self.restore, &mut run)
+                        .unwrap_or_else(|e| vec![e])
+                        .into_iter()
+                        .filter(|failure| !not_loaded(failure))
+                    {
                         message = format!("{message}. {failure}");
                     }
                     if had_previous && let Err(failure) = run_all(&self.restart, &mut run) {
@@ -198,8 +272,8 @@ impl Manager {
     }
 
     pub fn recorded_home(&self) -> Result<Option<PathBuf>, String> {
-        match std::fs::read_to_string(&self.file) {
-            Ok(text) => match (self.home_of)(&text) {
+        match std::fs::read(&self.file) {
+            Ok(bytes) => match self.decode(&bytes).and_then(|text| (self.home_of)(&text)) {
                 Some(home) => Ok(Some(PathBuf::from(home))),
                 None => Err(format!(
                     "The login service file {} does not name its data folder, so nothing was removed.",
@@ -236,6 +310,8 @@ fn not_loaded(failure: &str) -> bool {
         "No such process",
         "Could not find service",
         "Could not find specified service",
+        "cannot find the file specified",
+        "is not running",
     ]
     .iter()
     .any(|phrase| failure.contains(phrase))
@@ -347,6 +423,77 @@ fn plist_of(plan: &Plan) -> String {
 </dict>
 </plist>
 "#
+    )
+}
+
+fn task_user() -> String {
+    let user = std::env::var("USERNAME").unwrap_or_default();
+    match std::env::var("USERDOMAIN") {
+        Ok(domain) if !domain.is_empty() => format!("{domain}\\{user}"),
+        _ => user,
+    }
+}
+
+fn task_of(plan: &Plan) -> String {
+    let program = xml(&argument(&plan.program.to_string_lossy()));
+    let home = xml(&argument(&plan.home.to_string_lossy()));
+    let log = xml(&argument(&plan.log().to_string_lossy()));
+    let user = xml(&task_user());
+    format!(
+        r#"<?xml version="1.0" encoding="UTF-16"?>
+<Task version="1.4" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+  <RegistrationInfo>
+    <Description>Meta-Harness, started at logon</Description>
+  </RegistrationInfo>
+  <Triggers>
+    <LogonTrigger>
+      <Enabled>true</Enabled>
+      <UserId>{user}</UserId>
+    </LogonTrigger>
+  </Triggers>
+  <Principals>
+    <Principal id="Author">
+      <UserId>{user}</UserId>
+      <LogonType>InteractiveToken</LogonType>
+      <RunLevel>LeastPrivilege</RunLevel>
+    </Principal>
+  </Principals>
+  <Settings>
+    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
+    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
+    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
+    <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>
+    <RestartOnFailure>
+      <Interval>PT1M</Interval>
+      <Count>999</Count>
+    </RestartOnFailure>
+    <Hidden>true</Hidden>
+    <Enabled>true</Enabled>
+  </Settings>
+  <Actions Context="Author">
+    <Exec>
+      <Command>conhost.exe</Command>
+      <Arguments>--headless {program} serve --home {home} --log {log}</Arguments>
+    </Exec>
+  </Actions>
+</Task>
+"#
+    )
+}
+
+fn argument(value: &str) -> String {
+    let trailing = value.len() - value.trim_end_matches('\\').len();
+    format!("\"{value}{}\"", "\\".repeat(trailing))
+}
+
+fn task_home(text: &str) -> Option<String> {
+    let value = text.split_once("--home \"")?.1.split_once('"')?.0;
+    let trailing = value.len() - value.trim_end_matches('\\').len();
+    Some(
+        value[..value.len() - trailing / 2]
+            .replace("&lt;", "<")
+            .replace("&gt;", ">")
+            .replace("&amp;", "&"),
     )
 }
 
@@ -511,6 +658,7 @@ mod tests {
         (std::fs::read_to_string(&manager.file).unwrap(), ran)
     }
 
+    #[cfg(unix)]
     #[test]
     fn a_launch_agent_keeps_meta_serve_running_with_the_user_s_path() {
         let dir = Dir::new();
@@ -547,6 +695,7 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
     #[test]
     fn a_systemd_user_unit_quotes_what_systemd_would_expand() {
         let dir = Dir::new();
@@ -574,6 +723,7 @@ mod tests {
         assert_eq!(manager.recorded_home(), Ok(Some(plan.home)));
     }
 
+    #[cfg(unix)]
     #[test]
     fn a_systemd_unit_expands_dollar_signs_only_in_exec_start() {
         let dir = Dir::new();
@@ -664,6 +814,88 @@ mod tests {
         std::fs::create_dir_all(manager.file.parent().unwrap()).unwrap();
         std::fs::write(&manager.file, "[Service]\nExecStart=/bin/meta serve\n").unwrap();
         assert!(manager.recorded_home().is_err());
+    }
+
+    #[test]
+    fn a_windows_logon_task_runs_meta_serve_hidden_and_logs_to_the_data_folder() {
+        let dir = Dir::new();
+        let manager = Manager::task_scheduler(&dir.0);
+        let plan = plan(&dir.0);
+        let mut ran = Vec::new();
+        manager
+            .install(&plan, |step| {
+                ran.push(format!("{} {}", step.program, step.args.join(" ")));
+                Ok(())
+            })
+            .unwrap();
+        let bytes = std::fs::read(&manager.file).unwrap();
+        assert_eq!(&bytes[..2], &[0xFF, 0xFE], "Task Scheduler reads UTF-16");
+        let task = manager.decode(&bytes).unwrap();
+        for part in [
+            "<LogonTrigger>",
+            "<LogonType>InteractiveToken</LogonType>",
+            "<RunLevel>LeastPrivilege</RunLevel>",
+            "<RestartOnFailure>",
+            "<Command>conhost.exe</Command>",
+        ] {
+            assert!(task.contains(part), "{part}");
+        }
+        assert!(task.contains(&format!(
+            "--headless \"{}\" serve --home \"{}\" --log \"{}\"",
+            xml(&plan.program.to_string_lossy()),
+            xml(&plan.home.to_string_lossy()),
+            xml(&plan.log().to_string_lossy()),
+        )));
+        let xml = manager.file.to_string_lossy();
+        assert_eq!(
+            ran,
+            vec![
+                "schtasks /End /TN Meta-Harness".to_owned(),
+                format!("schtasks /Create /TN Meta-Harness /XML {xml} /F"),
+                "schtasks /Run /TN Meta-Harness".to_owned(),
+            ]
+        );
+        assert_eq!(manager.recorded_home(), Ok(Some(plan.home.clone())));
+        assert!(not_loaded(
+            "ERROR: The system cannot find the file specified."
+        ));
+    }
+
+    #[test]
+    fn a_windows_home_ending_in_a_backslash_keeps_its_closing_quote() {
+        let dir = Dir::new();
+        let manager = Manager::task_scheduler(&dir.0);
+        let home = format!("{}\\", dir.0.join("data").to_string_lossy());
+        let plan = Plan::new(dir.0.join("bin/meta"), PathBuf::from(&home), |_| None).unwrap();
+        manager.install(&plan, |_| Ok(())).unwrap();
+        let task = manager
+            .decode(&std::fs::read(&manager.file).unwrap())
+            .unwrap();
+        assert!(
+            task.contains(&format!("--home \"{home}\\\" --log")),
+            "{task}"
+        );
+        assert_eq!(manager.recorded_home(), Ok(Some(PathBuf::from(home))));
+    }
+
+    #[test]
+    fn a_failed_first_windows_task_install_deletes_the_task_it_created() {
+        let dir = Dir::new();
+        let manager = Manager::task_scheduler(&dir.0);
+        let mut ran = Vec::new();
+        let result = manager.install(&plan(&dir.0), |step| {
+            ran.push(step.args.join(" "));
+            if step.args[0] == "/Run" {
+                Err("Access is denied.".to_owned())
+            } else if step.args[0] == "/End" {
+                Err("ERROR: The system cannot find the file specified.".to_owned())
+            } else {
+                Ok(())
+            }
+        });
+        assert_eq!(result, Err("Access is denied.".to_owned()));
+        assert_eq!(ran.last().unwrap(), "/Delete /TN Meta-Harness /F");
+        assert!(!manager.file.exists());
     }
 
     #[test]

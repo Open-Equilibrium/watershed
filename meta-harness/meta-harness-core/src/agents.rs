@@ -269,9 +269,7 @@ pub(crate) fn unpack(folder: &Path, files: &[CarriedFile]) -> Result<(), String>
         }
         std::fs::write(&target, &bytes)
             .map_err(|e| format!("Could not write {}: {e}", target.display()))?;
-        #[cfg(unix)]
-        std::fs::set_permissions(&target, std::os::unix::fs::PermissionsExt::from_mode(0o600))
-            .map_err(|e| format!("Could not protect {}: {e}", target.display()))?;
+        crate::platform::owner_only(&target, false)?;
     }
     Ok(())
 }
@@ -785,9 +783,11 @@ pub(crate) fn mentions(db: &Connection, source: &str) -> Result<Vec<Mention>, St
 
 pub(crate) fn opening(agent: &Agent, instructions: &str, handoff: Option<&str>) -> String {
     let memory = agent.memory.display();
+    let file = instructions_file(agent);
+    let file = file.display();
     let mut text = if agent.named {
         format!(
-            "You are {name}, a persistent agent. Your instructions are in {memory}/{INSTRUCTIONS}; \
+            "You are {name}, a persistent agent. Your instructions are in {file}; \
              its first line, `# {name}`, is your name. They read now:\n{instructions}",
             name = agent.name,
         )
@@ -795,7 +795,7 @@ pub(crate) fn opening(agent: &Agent, instructions: &str, handoff: Option<&str>) 
         format!(
             "You are a new persistent agent without a name yet. Choose a short name for the job \
              below, in lowercase letters, digits and dashes, and write your instructions to \
-             {memory}/{INSTRUCTIONS}, starting with the line `# <name>`."
+             {file}, starting with the line `# <name>`."
         )
     };
     text.push_str(&format!(

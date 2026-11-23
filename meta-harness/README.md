@@ -5,7 +5,7 @@ M2 in progress; product and runtime shape: [Meta-Harness V-Spec](../docs/concept
 ## Layout
 
 - `meta-harness-core/`, `meta-harness-cli/` — the crates and their responsibilities: [architecture](../docs/architecture.md#rust-workspace-crates).
-- `install.sh` — the bundle's installer.
+- `install.sh` — the bundle's installer on macOS and Linux; on Windows `meta install` does its work.
 - `t3.lock` — the pinned T3 release and each archive's SHA-256; `scripts/install-t3.mjs` installs it.
 
 ## Install
@@ -20,7 +20,9 @@ tar -xzf "meta-harness-$version-$platform.tar.gz"
 sh "meta-harness-$version-$platform/install.sh"
 ```
 
-The installer puts `meta` and the pinned T3 Code into `~/.local/meta-harness` (`--prefix` chooses another folder) without administrator rights and starts the login service (`--no-service` skips it; `meta service install` starts it later). A newer archive installs the same way over the old one, with the same `--prefix`, and restarts the service; `meta uninstall` removes the service and the installation and keeps the data. The service logs to `service.log` in the data folder. On Linux the service keeps running after logout only with lingering ([PLATFORMS.md](../PLATFORMS.md)); on Linux, `sha256sum -c` replaces `shasum -a 256 -c`. `scripts/package-meta-harness.mjs` packs a bundle from a built `meta` and the folder `scripts/install-t3.mjs` unpacks. Build that `meta` on its own, `cargo build --release --locked -p meta-harness-cli`: a build together with Liquid's crates merges their SQLCipher, and outside macOS its OpenSSL, into it (ADR-0319).
+On Windows 11 x86_64, the download is `meta-harness-<version>-win32-x64.zip`. After `Get-FileHash` matches its line in `SHA256SUMS`, unpack it and run `bin\meta.exe install` from the unpacked folder: it copies `meta.exe` and T3 Code into `%LOCALAPPDATA%\Programs\Meta-Harness` (`--prefix` chooses another folder) and starts a logon task in the Task Scheduler that runs `meta serve` without a window or administrator rights (`--no-service` skips it).
+
+On macOS and Linux, the installer puts `meta` and the pinned T3 Code into `~/.local/meta-harness` (`--prefix` chooses another folder) without administrator rights and starts the login service (`--no-service` skips it; `meta service install` starts it later). A newer archive installs the same way over the old one, with the same `--prefix`, and restarts the service; `meta uninstall` removes the service and the installation and keeps the data. The service logs to `service.log` in the data folder. On Linux the service keeps running after logout only with lingering ([PLATFORMS.md](../PLATFORMS.md)); on Linux, `sha256sum -c` replaces `shasum -a 256 -c`. `scripts/package-meta-harness.mjs` packs a bundle from a built `meta` and the folder `scripts/install-t3.mjs` unpacks. Build that `meta` on its own, `cargo build --release --locked -p meta-harness-cli`: a build together with Liquid's crates merges their SQLCipher, and outside macOS its OpenSSL, into it (ADR-0319).
 
 ## Run from the repository
 

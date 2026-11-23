@@ -13,10 +13,15 @@ workspace = true
 
 [dependencies]
 meta-harness-core.workspace = true
-rustix = { workspace = true, features = ["process"] }
 serde.workspace = true
 serde_json.workspace = true
 tokio = { workspace = true, features = ["macros", "signal"] }
+
+[target.'cfg(unix)'.dependencies]
+rustix = { workspace = true, features = ["process"] }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { workspace = true, features = ["Win32_System_Console"] }
 
 [dev-dependencies]
 getrandom.workspace = true

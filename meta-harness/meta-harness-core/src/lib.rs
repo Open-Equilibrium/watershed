@@ -8,6 +8,7 @@ mod handoff;
 mod host;
 mod host_move;
 mod hosts;
+mod platform;
 pub mod remote;
 mod service;
 mod statistics;

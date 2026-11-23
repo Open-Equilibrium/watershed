@@ -53,7 +53,7 @@ Canonical terms. Use these exactly; do not introduce synonyms. Tool names are fi
 - **Host link** — A link that lets one host's T3 Code reach another's; Meta-Harness pairs each direction separately, carries it through a host tunnel and renews it (ADR-0285, ADR-0288, ADR-0299). Canonical: [V-Spec](docs/concept/V-Spec_MetaHarness.html#host-links).
 - **Host tunnel** — The request-passing path of a host link: a loopback port on the linking host to the other host's remote access, passing only the requests a link makes. Refusals: [SECURITY.md](SECURITY.md#meta-harness-service-and-configuration) (ADR-0300, ADR-0301).
 - **Peer link** — T3 Code's own link from one T3 server to another's `/mcp`, which a host link carries (ADR-0288).
-- **Login service** — The per-user launchd agent or systemd user unit that keeps `meta serve` running (ADR-0286).
+- **Login service** — The per-user launchd agent, systemd user unit or Windows logon task (Task Scheduler) that keeps `meta serve` running (ADR-0286, ADR-0291).
 - **BYOA** — "Bring Your Own Agent"; plugging an external agent in as the Meta-Agent.
 - **AgentPulse** — Meta-Harness subsystem measuring rework ratio, first-attempt success rate and cost-per-productive-outcome. Meta-Harness computes and stores the metrics; Liquid only renders them. Canonical: [V-Spec](docs/concept/V-Spec_MetaHarness.html#agentpulse).
 - **Adapter** — The part of an agent host that translates an external agent's harness into normalized events and commands; on T3 Code, its providers and local ACP commands (ADR-0282). Native agent shapes do not leak past it.

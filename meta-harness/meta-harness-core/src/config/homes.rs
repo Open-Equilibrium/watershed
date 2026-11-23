@@ -59,7 +59,10 @@ pub(crate) fn provider_instances(
     homes: &Homes,
     claude_dir: Option<&str>,
 ) -> Result<Value, String> {
-    let mcp = homes.claude_mcp().to_string_lossy().into_owned();
+    let mut mcp = homes.claude_mcp().to_string_lossy().into_owned();
+    if cfg!(windows) {
+        mcp = mcp.replace('\\', "/");
+    }
     if mcp.contains(['"', '\\']) {
         return Err(format!(
             "Meta-Harness's data folder {} holds a quote or backslash, which T3 cannot pass to \
@@ -255,8 +258,20 @@ fn link(path: &Path, target: &Path) -> Result<(), String> {
     #[cfg(unix)]
     let linked = std::os::unix::fs::symlink(target, path);
     #[cfg(windows)]
-    let linked = std::os::windows::fs::symlink_file(target, path);
+    let linked = std::os::windows::fs::symlink_file(target, path)
+        .or_else(|error| hard_link_or_skip(path, target, error));
     linked.map_err(|e| failed(path, &e))
+}
+
+#[cfg(any(windows, test))]
+fn hard_link_or_skip(path: &Path, target: &Path, error: std::io::Error) -> std::io::Result<()> {
+    if target.is_file() {
+        std::fs::hard_link(target, path)
+    } else if target.exists() {
+        Err(error)
+    } else {
+        Ok(())
+    }
 }
 
 fn failed(path: &Path, error: &std::io::Error) -> String {
@@ -264,4 +279,28 @@ fn failed(path: &Path, error: &std::io::Error) -> String {
         "Could not write the harness home at {}: {error}",
         path.display()
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::hard_link_or_skip;
+    use crate::tests::Dir;
+
+    #[test]
+    fn without_symlinks_a_present_login_is_hard_linked_and_an_absent_one_waits() {
+        let dir = Dir::new();
+        let refused = || std::io::Error::other("no symlink privilege");
+        let login = dir.join("person-auth.json");
+        let linked = dir.join("harness-auth.json");
+        hard_link_or_skip(&linked, &login, refused()).unwrap();
+        assert!(!linked.exists());
+
+        std::fs::write(&login, "token").unwrap();
+        hard_link_or_skip(&linked, &login, refused()).unwrap();
+        assert_eq!(std::fs::read_to_string(&linked).unwrap(), "token");
+
+        let folder = dir.join("folder");
+        std::fs::create_dir(&folder).unwrap();
+        assert!(hard_link_or_skip(&dir.join("other"), &folder, refused()).is_err());
+    }
 }

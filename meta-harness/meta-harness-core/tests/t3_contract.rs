@@ -1,3 +1,4 @@
+#![cfg(unix)]
 #![allow(clippy::unwrap_used)]
 
 use std::path::{Path, PathBuf};

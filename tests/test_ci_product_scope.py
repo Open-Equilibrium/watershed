@@ -281,6 +281,7 @@ class CiJobScopeTest(unittest.TestCase):
         "flow-coverage": "flow_agent",
         "m11-evidence": "flow_agent",
         "liquid": "liquid",
+        "windows": "meta_harness",
     }
 
     def test_every_job_runs_only_after_classification_of_its_scope(self) -> None:
