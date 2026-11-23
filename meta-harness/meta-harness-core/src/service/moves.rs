@@ -200,6 +200,7 @@ async fn depart_once(
         reconcile(thread, &shared.store, transfer).await?;
     }
     let facts = thread.move_facts().await?;
+    host_move::owned_by(&shared.store.db(), transfer, thread.id())?;
     let fresh = host_move::phase(&shared.store.db(), transfer)?.is_none();
     if fresh
         && let Some(agent) = super::agents::move_facts(shared, thread).await?
@@ -278,6 +279,7 @@ async fn finish_move(
         MoveFinish::Seal { to_host } => Some(to_host.clone()),
         MoveFinish::Release => None,
     };
+    host_move::owned_by(&shared.store.db(), transfer, thread.id())?;
     shared
         .transfers
         .run(transfer, async {
@@ -405,6 +407,7 @@ async fn arrive(
 ) -> Result<Thread, String> {
     let transfer = package.transfer.clone();
     shared.transfers.run(&transfer, async {
+        host_move::within_budget(&package)?;
         let existing = host_move::arrival(&shared.store.db(), &transfer)?;
         let thread_id = match existing {
             Some(row) if row.state == "refused" => {

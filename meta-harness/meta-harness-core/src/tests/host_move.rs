@@ -311,3 +311,18 @@ fn an_arrival_row_is_kept_per_transfer() {
         Some("thread-1".to_owned())
     );
 }
+
+#[test]
+fn a_transfer_serves_only_the_session_that_began_it() {
+    let db = Connection::open_in_memory().unwrap();
+    db.execute_batch(SCHEMA).unwrap();
+    host_move::begin(&db, "t1", "/repo", "tr-1", ("addr", "studio", "env"), 10).unwrap();
+
+    assert_eq!(host_move::owned_by(&db, "tr-1", "t1"), Ok(()));
+    assert!(
+        host_move::owned_by(&db, "tr-1", "t2")
+            .unwrap_err()
+            .contains("another session")
+    );
+    assert_eq!(host_move::owned_by(&db, "tr-unknown", "t2"), Ok(()));
+}

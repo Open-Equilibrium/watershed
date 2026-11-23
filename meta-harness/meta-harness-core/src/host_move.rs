@@ -416,6 +416,23 @@ pub(crate) enum Phase {
     Released,
 }
 
+pub(crate) fn owned_by(db: &Connection, transfer: &str, thread: &str) -> Result<(), String> {
+    let owner: Option<String> = db
+        .query_row(
+            "SELECT thread FROM moved_thread WHERE transfer = ?1",
+            [transfer],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(failed)?;
+    match owner {
+        Some(owner) if owner != thread => {
+            Err("This transfer belongs to another session, so nothing changed.".to_owned())
+        }
+        _ => Ok(()),
+    }
+}
+
 pub(crate) fn begin(
     db: &Connection,
     thread: &str,
