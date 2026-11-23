@@ -91,6 +91,9 @@ pub enum Match {
     Is(Cell),
     Contains(String),
     Between(String, String),
+    IsNot(Cell),
+    Above(Cell),
+    Below(Cell),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -141,6 +144,14 @@ impl Index {
 
     pub(crate) fn entries(&self) -> impl Iterator<Item = (&RowId, &HashMap<String, Cell>)> {
         self.rows.iter().map(|row| (&row.id, &row.cells))
+    }
+
+    pub(crate) fn cells(&self, row: &RowId) -> Option<&HashMap<String, Cell>> {
+        self.position(row).map(|at| &self.rows[at].cells)
+    }
+
+    pub(crate) fn last(&self) -> Option<&RowId> {
+        self.rows.last().map(|row| &row.id)
     }
 
     fn position(&self, row: &RowId) -> Option<usize> {
@@ -209,6 +220,7 @@ fn kind_name(kind: FieldKind) -> &'static str {
         FieldKind::Checkbox => "checkbox",
         FieldKind::File => "file",
         FieldKind::Formula => "formula",
+        FieldKind::Button => "button",
     }
 }
 
@@ -221,6 +233,7 @@ fn kind(name: Option<&str>) -> Option<FieldKind> {
         "checkbox" => FieldKind::Checkbox,
         "file" => FieldKind::File,
         "formula" => FieldKind::Formula,
+        "button" => FieldKind::Button,
         _ => return None,
     })
 }
@@ -408,16 +421,13 @@ pub(crate) fn remove_row(
     Ok(())
 }
 
-pub(crate) fn set_cell(
-    doc: &mut AutoCommit,
-    index: &mut Index,
+pub(crate) fn check_cell(
+    doc: &AutoCommit,
     block: &BlockId,
-    row_id: &RowId,
     field_id: &FieldId,
     value: &Cell,
-) -> Result<(), Error> {
+) -> Result<FieldKind, Error> {
     let (field_entry, kind) = field(doc, block, field_id)?;
-    let cells = map(doc, &row(doc, block, row_id)?, CELLS)?;
     match (kind, value) {
         (FieldKind::File, Cell::Files(files)) if files.len() > MAX_FILES => {
             return Err(Error::TooMany);
@@ -434,6 +444,19 @@ pub(crate) fn set_cell(
         }
         _ => return Err(Error::WrongKind),
     }
+    Ok(kind)
+}
+
+pub(crate) fn set_cell(
+    doc: &mut AutoCommit,
+    index: &mut Index,
+    block: &BlockId,
+    row_id: &RowId,
+    field_id: &FieldId,
+    value: &Cell,
+) -> Result<(), Error> {
+    check_cell(doc, block, field_id, value)?;
+    let cells = map(doc, &row(doc, block, row_id)?, CELLS)?;
     let stored = match value {
         Cell::Number(number) => Cell::Number(*number + 0.0),
         Cell::Files(files) if files.is_empty() => Cell::Empty,
@@ -766,7 +789,7 @@ fn matching<'a>(
 
 pub(crate) fn check_sort(doc: &AutoCommit, block: &BlockId, sort: &Sort) -> Result<(), Error> {
     match field(doc, block, &sort.field)? {
-        (_, FieldKind::File | FieldKind::Formula) => Err(Error::WrongKind),
+        (_, FieldKind::File | FieldKind::Formula | FieldKind::Button) => Err(Error::WrongKind),
         _ => Ok(()),
     }
 }
@@ -779,8 +802,25 @@ pub(crate) fn check_filter(
     let (entry, kind) = field(doc, block, &filter.field)?;
     let long = |text: &str| text.chars().count() > MAX_FILTER_TEXT;
     match (kind, &filter.matches) {
-        (FieldKind::Formula, _) => Err(Error::WrongKind),
+        (FieldKind::Formula | FieldKind::Button, _) => Err(Error::WrongKind),
         (_, Match::Empty | Match::NotEmpty) => Ok(()),
+        (_, Match::IsNot(value)) => check_filter(
+            doc,
+            block,
+            &Filter {
+                field: filter.field.clone(),
+                matches: Match::Is(value.clone()),
+            },
+        ),
+        (
+            FieldKind::Number,
+            Match::Above(Cell::Number(number)) | Match::Below(Cell::Number(number)),
+        ) if number.is_finite() => Ok(()),
+        (FieldKind::Date, Match::Above(Cell::Date(date)) | Match::Below(Cell::Date(date)))
+            if valid_date(date) =>
+        {
+            Ok(())
+        }
         (FieldKind::Text, Match::Contains(text) | Match::Is(Cell::Text(text))) if long(text) => {
             Err(Error::TooLong)
         }
@@ -867,8 +907,14 @@ pub(crate) fn in_group(cell: Option<&Cell>, group: &Cell) -> bool {
     }
 }
 
-fn matches(cell: Option<&Cell>, matches: &Match) -> bool {
+pub(crate) fn matches(cell: Option<&Cell>, matches: &Match) -> bool {
     match (matches, cell) {
+        (Match::IsNot(value), cell) => !self::matches(cell, &Match::Is(value.clone())),
+        (Match::Above(Cell::Number(value)), Some(Cell::Number(stored))) => stored > value,
+        (Match::Below(Cell::Number(value)), Some(Cell::Number(stored))) => stored < value,
+        (Match::Above(Cell::Date(value)), Some(Cell::Date(stored))) => stored > value,
+        (Match::Below(Cell::Date(value)), Some(Cell::Date(stored))) => stored < value,
+        (Match::Above(_) | Match::Below(_), _) => false,
         (Match::Empty | Match::Is(Cell::Empty), cell) => cell.is_none(),
         (Match::Is(Cell::Files(files)), cell) if files.is_empty() => cell.is_none(),
         (Match::NotEmpty, cell) => cell.is_some(),
