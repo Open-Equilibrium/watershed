@@ -2,8 +2,8 @@ use std::path::{Path, PathBuf};
 
 use serde_json::Value;
 
-use super::Dir;
 use super::fake_t3::Fake;
+use super::{Dir, put, read};
 use crate::AcpAgent;
 use crate::host::write_settings;
 
@@ -36,9 +36,9 @@ fn an_unreadable_settings_file_is_kept_and_reported() {
         r#"{"providerInstances":"x"}"#,
     ] {
         let home = home();
-        std::fs::write(settings(&home), text).unwrap();
+        put(settings(&home), text);
         assert!(write_settings(&home, &[agent()]).is_err(), "{text}");
-        assert_eq!(std::fs::read_to_string(settings(&home)).unwrap(), text);
+        assert_eq!(read(&settings(&home)), text);
     }
 }
 
@@ -65,14 +65,14 @@ fn a_settings_write_that_cannot_finish_keeps_the_previous_settings() {
 
     let home = home();
     let previous = r#"{"theme":"dark"}"#;
-    std::fs::write(settings(&home), previous).unwrap();
+    put(settings(&home), previous);
     std::fs::set_permissions(
         home.join("userdata"),
         std::fs::Permissions::from_mode(0o555),
     )
     .unwrap();
     assert!(write_settings(&home, &[agent()]).is_err());
-    assert_eq!(std::fs::read_to_string(settings(&home)).unwrap(), previous);
+    assert_eq!(read(&settings(&home)), previous);
     std::fs::set_permissions(
         home.join("userdata"),
         std::fs::Permissions::from_mode(0o755),
@@ -83,10 +83,9 @@ fn a_settings_write_that_cannot_finish_keeps_the_previous_settings() {
 #[test]
 fn the_agents_are_merged_into_the_settings_and_no_temporary_file_is_left() {
     let home = home();
-    std::fs::write(settings(&home), r#"{"theme":"dark"}"#).unwrap();
+    put(settings(&home), r#"{"theme":"dark"}"#);
     write_settings(&home, &[agent()]).unwrap();
-    let written: Value =
-        serde_json::from_str(&std::fs::read_to_string(settings(&home)).unwrap()).unwrap();
+    let written: Value = serde_json::from_str(&read(&settings(&home))).unwrap();
     assert_eq!(written["theme"], "dark");
     assert_eq!(
         written["providerInstances"]["scripted"]["config"]["commandPath"],

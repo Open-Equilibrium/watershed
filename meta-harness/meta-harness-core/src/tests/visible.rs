@@ -21,33 +21,12 @@ fn never_shows_two_texts_alike() {
 
 #[test]
 fn writes_out_every_kind_of_character_that_hides_or_reorders_text() {
-    for character in [
-        '\u{AD}',
-        '\u{34F}',
-        '\u{600}',
-        '\u{61C}',
-        '\u{6DD}',
-        '\u{70F}',
-        '\u{890}',
-        '\u{8E2}',
-        '\u{115F}',
-        '\u{17B4}',
-        '\u{180B}',
-        '\u{200B}',
-        '\u{2028}',
-        '\u{2060}',
-        '\u{3164}',
-        '\u{FE00}',
-        '\u{FEFF}',
-        '\u{FFA0}',
-        '\u{FFF0}',
-        '\u{110BD}',
-        '\u{110CD}',
-        '\u{13430}',
-        '\u{1BCA0}',
-        '\u{1D173}',
-        '\u{E0000}',
-    ] {
+    let characters = concat!(
+        "\u{AD}\u{34F}\u{600}\u{61C}\u{6DD}\u{70F}\u{890}\u{8E2}\u{115F}\u{17B4}\u{180B}",
+        "\u{200B}\u{2028}\u{2060}\u{3164}\u{FE00}\u{FEFF}\u{FFA0}\u{FFF0}\u{110BD}\u{110CD}",
+        "\u{13430}\u{1BCA0}\u{1D173}\u{E0000}",
+    );
+    for character in characters.chars() {
         assert_eq!(
             visible(&character.to_string()),
             format!("<U+{:04X}>", u32::from(character))

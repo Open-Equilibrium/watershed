@@ -9,6 +9,10 @@ fn db() -> Connection {
     db
 }
 
+fn begin(db: &Connection, transfer: &str, at: u64) {
+    host_move::begin(db, "t1", "/repo", transfer, ("addr", "studio", "env"), at).unwrap();
+}
+
 fn model(instance: &str) -> ModelChoice {
     ModelChoice {
         instance: instance.to_owned(),
@@ -33,7 +37,7 @@ fn facts() -> Facts {
 #[test]
 fn a_seal_and_its_pending_pause_are_recorded_together_or_not_at_all_and_the_pause_waits() {
     let db = db();
-    host_move::begin(&db, "t1", "/repo", "tr-1", ("addr", "studio", "env"), 10).unwrap();
+    begin(&db, "tr-1", 10);
     host_move::hand(&db, "tr-1", "{}", 11).unwrap();
     db.execute_batch(
         "CREATE TRIGGER refuse_pause BEFORE INSERT ON pause_pending \
@@ -109,13 +113,13 @@ fn a_session_moves_only_when_it_is_claude_code_or_codex_and_nothing_blocks_it() 
 fn a_move_begins_hands_over_and_seals_or_releases_in_the_store() {
     let db = db();
     assert_eq!(host_move::state(&db, "t1").unwrap(), None);
-    host_move::begin(&db, "t1", "/repo", "tr-1", ("addr", "studio", "env"), 10).unwrap();
+    begin(&db, "tr-1", 10);
     assert_eq!(host_move::state(&db, "t1").unwrap(), Some(State::Moving));
     assert!(host_move::sealed_threads(&db).unwrap().is_empty());
     host_move::release(&db, "tr-1").unwrap();
     assert_eq!(host_move::state(&db, "t1").unwrap(), None);
 
-    host_move::begin(&db, "t1", "/repo", "tr-2", ("addr", "studio", "env"), 20).unwrap();
+    begin(&db, "tr-2", 20);
     assert!(
         host_move::seal(&db, "tr-2", "studio", 30).is_err(),
         "a move seals only once handed over"
@@ -137,25 +141,9 @@ fn a_move_begins_hands_over_and_seals_or_releases_in_the_store() {
 #[test]
 fn a_finish_acts_only_on_the_move_it_began() {
     let db = db();
-    host_move::begin(
-        &db,
-        "t1",
-        "/repo",
-        "tr-first",
-        ("addr", "studio", "env"),
-        10,
-    )
-    .unwrap();
+    begin(&db, "tr-first", 10);
     host_move::release(&db, "tr-first").unwrap();
-    host_move::begin(
-        &db,
-        "t1",
-        "/repo",
-        "tr-second",
-        ("addr", "studio", "env"),
-        20,
-    )
-    .unwrap();
+    begin(&db, "tr-second", 20);
 
     assert!(
         host_move::hand(&db, "tr-first", "{}", 30).is_err(),
@@ -171,7 +159,7 @@ fn a_finish_acts_only_on_the_move_it_began() {
 #[test]
 fn a_cancelled_message_waits_with_its_move_until_the_move_ends() {
     let db = db();
-    host_move::begin(&db, "t1", "/repo", "tr-1", ("addr", "studio", "env"), 10).unwrap();
+    begin(&db, "tr-1", 10);
     host_move::enqueue(&db, "tr-1", 1, "one").unwrap();
     host_move::enqueue(&db, "tr-1", 2, "two").unwrap();
     assert_eq!(host_move::queued(&db, "tr-1").unwrap(), ["one", "two"]);
@@ -245,7 +233,7 @@ fn a_remote_that_carries_a_credential_blocks_the_move_and_an_ssh_user_does_not()
 #[test]
 fn a_transfer_serves_only_the_session_that_began_it() {
     let db = db();
-    host_move::begin(&db, "t1", "/repo", "tr-1", ("addr", "studio", "env"), 10).unwrap();
+    begin(&db, "tr-1", 10);
 
     assert_eq!(host_move::owned_by(&db, "tr-1", "t1"), Ok(()));
     assert!(

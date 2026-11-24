@@ -1,14 +1,13 @@
 use std::collections::HashMap;
-use std::time::Duration;
 
 use serde_json::{Value, json};
 
 use super::fake_t3::{chunk, ok};
 use super::thread::{event, follow_answering, projection};
+use super::within;
 use crate::t3::{Projection, millis};
 use crate::thread::lineage::{Group, Lineage, Relation, derive};
 
-const WAIT: Duration = Duration::from_secs(10);
 const ROOT_CREATED: &str = "2026-11-15T10:00:00.000Z";
 
 fn thread(
@@ -261,14 +260,10 @@ async fn lineage_watches_wake_for_a_change_of_the_thread_or_its_shell_and_stop_w
         "orchestration.subscribeShell",
         vec![json!({"kind": "synchronized"})],
     );
-    tokio::time::timeout(WAIT, changes.changed())
-        .await
-        .expect("a shell change wakes the watch");
+    within("a shell change wakes the watch", changes.changed()).await;
     let shell = fake.request_id("orchestration.subscribeShell");
     drop(changes);
-    tokio::time::timeout(WAIT, fake.interrupted(&shell))
-        .await
-        .expect("dropping the watch stops the shell stream on T3");
+    fake.interrupted(&shell).await;
 
     let (fake, thread) = follow_answering(projection(json!({})), 1, |tag, _, id| match tag {
         "orchestration.subscribeShell" => vec![chunk(id, vec![])],
@@ -287,12 +282,11 @@ async fn lineage_watches_wake_for_a_change_of_the_thread_or_its_shell_and_stop_w
             json!({"id": "sub-1", "threadId": "thread-1", "status": "running"}),
         )],
     );
-    tokio::time::timeout(WAIT, async {
+    within("both watches wake", async {
         first.changed().await;
         second.changed().await;
     })
-    .await
-    .expect("both watches wake");
+    .await;
 }
 
 #[test]

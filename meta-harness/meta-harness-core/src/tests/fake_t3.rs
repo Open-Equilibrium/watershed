@@ -9,20 +9,8 @@ use tokio::sync::{Notify, mpsc};
 use tokio_tungstenite::accept_async;
 use tokio_tungstenite::tungstenite::Message;
 
+use super::until;
 use crate::t3::Client;
-
-const WAIT: std::time::Duration = std::time::Duration::from_secs(10);
-
-async fn until(expected: String, done: impl Fn() -> bool) {
-    let polls = async {
-        while !done() {
-            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
-        }
-    };
-    if tokio::time::timeout(WAIT, polls).await.is_err() {
-        panic!("timed out after {WAIT:?} waiting for {expected}");
-    }
-}
 
 pub fn frame(value: Value) -> Message {
     Message::Text(value.to_string().into())

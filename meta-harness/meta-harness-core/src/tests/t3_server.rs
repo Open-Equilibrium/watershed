@@ -1,30 +1,31 @@
 use std::path::Path;
 use std::time::Duration;
 
+#[cfg(unix)]
+use super::{Dir, executable, read};
 use crate::t3::server::{Server, issue, listening_origin};
 use crate::t3::t3_version;
 
 #[cfg(unix)]
 #[tokio::test]
 async fn a_server_that_ends_during_its_start_is_started_again() {
-    use std::os::unix::fs::PermissionsExt;
-    let dir = std::env::temp_dir().join(format!("t3-start-{}", std::process::id()));
+    let dir = Dir::new();
     let home = dir.join("home");
-    let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(home.join("userdata")).unwrap();
     let binary = dir.join("t3");
-    let script = format!(
-        "#!/bin/sh\n\
-         [ \"$1\" = serve ] || exit 1\n\
-         echo start >> \"$T3CODE_HOME/../starts\"\n\
-         if [ ! -e \"$T3CODE_HOME/../started\" ]; then : > \"$T3CODE_HOME/../started\"; exit 1; fi\n\
-         printf '{{\"pid\":%s,\"serverVersion\":\"{version}\",\"origin\":\"http://127.0.0.1:1\"}}' $$ \
-         > \"$T3CODE_HOME/userdata/server-runtime.json\"\n\
-         exec sleep 30\n",
-        version = t3_version(),
+    executable(
+        &binary,
+        &format!(
+            "#!/bin/sh\n\
+             [ \"$1\" = serve ] || exit 1\n\
+             echo start >> \"$T3CODE_HOME/../starts\"\n\
+             if [ ! -e \"$T3CODE_HOME/../started\" ]; then : > \"$T3CODE_HOME/../started\"; exit 1; fi\n\
+             printf '{{\"pid\":%s,\"serverVersion\":\"{version}\",\"origin\":\"http://127.0.0.1:1\"}}' $$ \
+             > \"$T3CODE_HOME/userdata/server-runtime.json\"\n\
+             exec sleep 30\n",
+            version = t3_version(),
+        ),
     );
-    std::fs::write(&binary, script).unwrap();
-    std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o755)).unwrap();
 
     let started = std::time::Instant::now();
     let mut server = Server::start(&binary, &home)
@@ -36,56 +37,52 @@ async fn a_server_that_ends_during_its_start_is_started_again() {
         "{:?}",
         started.elapsed()
     );
-    let starts = std::fs::read_to_string(dir.join("starts")).unwrap();
-    assert_eq!(starts.lines().count(), 2, "started again once");
+    assert_eq!(
+        read(&dir.join("starts")).lines().count(),
+        2,
+        "started again once"
+    );
     server.stop().await;
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[cfg(unix)]
 #[tokio::test]
 async fn a_token_issue_that_never_ends_is_killed_at_its_wait() {
-    use std::os::unix::fs::PermissionsExt;
-    let dir = std::env::temp_dir().join(format!("t3-issue-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).unwrap();
+    let dir = Dir::new();
     let binary = dir.join("t3");
-    std::fs::write(&binary, "#!/bin/sh\nexec sleep 60\n").unwrap();
-    std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o755)).unwrap();
+    executable(&binary, "#!/bin/sh\nexec sleep 60\n");
 
     let started = std::time::Instant::now();
-    let result = issue(binary, dir.clone(), Duration::from_millis(200)).await;
+    let result = issue(binary, dir.to_path_buf(), Duration::from_millis(200)).await;
     assert!(result.is_err(), "{result:?}");
     assert!(
         started.elapsed() < Duration::from_secs(10),
         "{:?}",
         started.elapsed()
     );
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[cfg(unix)]
 #[tokio::test]
 async fn stopping_t3_ends_the_processes_it_started_too() {
-    use std::os::unix::fs::PermissionsExt;
-    let dir = std::env::temp_dir().join(format!("t3-tree-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
+    let dir = Dir::new();
     let home = dir.join("home");
     std::fs::create_dir_all(home.join("userdata")).unwrap();
     let binary = dir.join("t3");
-    let script = format!(
-        "#!/bin/sh\n\
-         sleep 60 &\n\
-         echo $! > \"$T3CODE_HOME/../started\"\n\
-         printf '{{\"pid\":%s,\"serverVersion\":\"{version}\",\"origin\":\"http://127.0.0.1:1\"}}' $$ \
-         > \"$T3CODE_HOME/userdata/server-runtime.json\"\n\
-         wait\n",
-        version = t3_version(),
+    executable(
+        &binary,
+        &format!(
+            "#!/bin/sh\n\
+             sleep 60 &\n\
+             echo $! > \"$T3CODE_HOME/../started\"\n\
+             printf '{{\"pid\":%s,\"serverVersion\":\"{version}\",\"origin\":\"http://127.0.0.1:1\"}}' $$ \
+             > \"$T3CODE_HOME/userdata/server-runtime.json\"\n\
+             wait\n",
+            version = t3_version(),
+        ),
     );
-    std::fs::write(&binary, script).unwrap();
-    std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o755)).unwrap();
     let mut server = Server::start(&binary, &home).await.expect("T3 starts");
-    let started = std::fs::read_to_string(dir.join("started")).unwrap();
+    let started = read(&dir.join("started"));
     let agent = rustix::process::Pid::from_raw(started.trim().parse().unwrap()).unwrap();
     server.stop().await;
     assert!(
@@ -95,7 +92,6 @@ async fn stopping_t3_ends_the_processes_it_started_too() {
         .await,
         "a process T3 started outlives its stop"
     );
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
