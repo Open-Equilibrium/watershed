@@ -47,11 +47,13 @@ extension _FakeBlocks on FakeWorkspace {
         return _done();
       case BridgeMutationKind.addLine:
         final lines = calculations[mutation.block] ?? (throw 'not found');
-        final at = mutation.after == null
-            ? 0
-            : lines.indexWhere((line) => line.id == mutation.after) + 1;
         final id = _id();
-        lines.insert(at, line(id, mutation.lineSetup!));
+        _insertAfter(
+          lines,
+          line(id, mutation.lineSetup!),
+          mutation.after,
+          idOf: (line) => line.id,
+        );
         _changed(_blockResource(mutation));
         return _done(line: id);
       case BridgeMutationKind.setLine:
