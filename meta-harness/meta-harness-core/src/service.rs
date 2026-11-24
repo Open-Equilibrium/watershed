@@ -342,8 +342,17 @@ async fn serve(
         return;
     };
     drop(slot);
-    let (caller, owner) = match admission {
-        Some(Admission::Session(caller, owner)) => (caller, owner),
+    match admission {
+        Some(Admission::Session(caller, owner)) => {
+            let session = Arc::new(Session {
+                shared,
+                client: owner.clone().unwrap_or(client),
+                caller,
+                projects: Mutex::default(),
+                threads: Mutex::default(),
+            });
+            converse(socket, session, owner, ends, revocations).await;
+        }
         Some(Admission::Tunnel(owner, access)) => {
             let mut ends = ends.clone();
             tokio::select! {
@@ -357,7 +366,6 @@ async fn serve(
                 () = revoked(&mut revocations, Some(&owner)) => {}
                 _ = ends.wait_for(|stopped| *stopped) => {}
             }
-            return;
         }
         Some(Admission::Paired(token, access)) => {
             let answer = serde_json::to_string(&api::Pairing {
@@ -368,10 +376,18 @@ async fn serve(
             .expect("pairings serialize");
             let _ = socket.send(Message::Text(answer.into())).await;
             let _ = socket.close(None).await;
-            return;
         }
-        None => return,
-    };
+        None => {}
+    }
+}
+
+async fn converse(
+    socket: tokio_tungstenite::WebSocketStream<TcpStream>,
+    session: Arc<Session>,
+    owner: Option<String>,
+    mut stopping: tokio::sync::watch::Receiver<bool>,
+    mut revocations: tokio::sync::broadcast::Receiver<String>,
+) {
     let (mut sink, mut frames) = socket.split();
     let (out, mut outgoing) = mpsc::channel::<Message>(OUTGOING);
     let mut tasks = tokio::task::JoinSet::new();
@@ -381,14 +397,6 @@ async fn serve(
                 break;
             }
         }
-    });
-    let mut stopping = ends;
-    let session = Arc::new(Session {
-        shared,
-        client: owner.clone().unwrap_or(client),
-        caller,
-        projects: Mutex::default(),
-        threads: Mutex::default(),
     });
     let mut streams: HashMap<u64, AbortHandle> = HashMap::new();
     let requests = Arc::new(tokio::sync::Semaphore::new(REQUESTS));
