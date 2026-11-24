@@ -4,35 +4,17 @@ mod common;
 
 use common::*;
 use liquid_core::{
-    Applied, BlockId, Content, Created, DrawingStyle, Element, Error, Frame, InkColor,
-    MAX_BOARD_POINTS, MAX_DOC_PAGES, MAX_DRAWING_ELEMENTS, MAX_DRAWING_POINTS, MAX_ELEMENTS,
-    MAX_POINTS, Mutation, PageId, Pen, Shape,
+    Applied, BlockId, Content, DrawingStyle, Element, Error, Frame, InkColor, MAX_BOARD_POINTS,
+    MAX_DOC_PAGES, MAX_DRAWING_ELEMENTS, MAX_DRAWING_POINTS, MAX_ELEMENTS, MAX_POINTS, Mutation,
+    PageId, Pen, Shape,
 };
 
 fn agreement() -> (Workspace, PageId, BlockId, BlockId) {
-    let mut workspace = workspace();
-    let Created::Area(area) = created(
-        &mut workspace,
-        Mutation::CreateArea {
-            name: "Personal".into(),
-        },
-    ) else {
-        panic!("an area")
-    };
-    let Created::Page(page) = created(
-        &mut workspace,
-        Mutation::CreatePage {
-            area,
-            parent: None,
-            title: "Trip to Lisbon".into(),
-        },
-    ) else {
-        panic!("a Page")
-    };
+    let (mut workspace, _, page) = private_page("Trip to Lisbon");
     let mut upload = workspace.begin_upload(&owner(), 7).unwrap();
     workspace.upload(&mut upload, b"%PDF-1.").unwrap();
     let attachment = workspace.finish_upload(upload).unwrap();
-    let Created::Block { block: pdf, .. } = created(
+    let (pdf, _) = block(
         &mut workspace,
         Mutation::AddMediaBlock {
             page: page.clone(),
@@ -41,18 +23,14 @@ fn agreement() -> (Workspace, PageId, BlockId, BlockId) {
             media_type: "application/pdf".into(),
             attachment: attachment.id,
         },
-    ) else {
-        panic!("a Media Block")
-    };
-    let Created::Block { block: board, .. } = created(
+    );
+    let (board, _) = block(
         &mut workspace,
         Mutation::AddWhiteboardBlock {
             page: page.clone(),
             after: None,
         },
-    ) else {
-        panic!("a Whiteboard")
-    };
+    );
     (workspace, page, pdf, board)
 }
 

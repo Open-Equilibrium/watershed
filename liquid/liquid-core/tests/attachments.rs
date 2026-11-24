@@ -10,35 +10,8 @@ use liquid_core::{
 };
 
 fn page() -> (Workspace, PageId, ViewId) {
-    let mut workspace = workspace();
-    let Created::Area(area) = created(
-        &mut workspace,
-        Mutation::CreateArea {
-            name: "Personal".into(),
-        },
-    ) else {
-        panic!("an area")
-    };
-    let Created::Page(page) = created(
-        &mut workspace,
-        Mutation::CreatePage {
-            area,
-            parent: None,
-            title: "Trip to Lisbon".into(),
-        },
-    ) else {
-        panic!("a Page")
-    };
-    let Created::Block { view, .. } = created(
-        &mut workspace,
-        Mutation::AddTextBlock {
-            page: page.clone(),
-            after: None,
-            text: "What we planned to spend:".into(),
-        },
-    ) else {
-        panic!("a Text Block")
-    };
+    let (mut workspace, _, page) = private_page("Trip to Lisbon");
+    let (_, view) = text_block(&mut workspace, &page, "What we planned to spend:");
     (workspace, page, view)
 }
 

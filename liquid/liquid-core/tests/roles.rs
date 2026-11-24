@@ -46,14 +46,7 @@ fn table(workspace: &mut Workspace, area: &AreaId, name: &str) -> BlockId {
 impl Budget {
     fn new() -> Self {
         let mut workspace = workspace();
-        let Created::Area(area) = created(
-            &mut workspace,
-            Mutation::CreateArea {
-                name: "Private".into(),
-            },
-        ) else {
-            panic!("an area")
-        };
+        let area = area(&mut workspace, "Private");
         let expenses = table(&mut workspace, &area, "Expenses");
         let bills = table(&mut workspace, &area, "Bills");
         let Created::Field(amount) = created(
