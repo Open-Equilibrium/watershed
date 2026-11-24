@@ -197,6 +197,11 @@ const emojiGroups = <(String, List<(String, String)>)>[
   ),
 ];
 
+final _emojiWords = {
+  for (final (_, emoji) in emojiGroups)
+    for (final (icon, word) in emoji) icon: word,
+};
+
 class PageIcon extends StatelessWidget {
   const PageIcon(this.icon, {super.key, this.size = 14, this.color});
 
@@ -246,10 +251,13 @@ class PageIconButton extends StatefulWidget {
 
 class _PageIconButtonState extends State<PageIconButton> {
   final _menu = MenuController();
+  var _focused = false;
 
   Future<void> _set(String icon) async {
     _menu.close();
-    await widget.state.setPageIcon(widget.page, icon);
+    await widget.state
+        .setPageIcon(widget.page, icon)
+        .then<void>((_) {}, onError: (Object _) {});
   }
 
   @override
@@ -271,11 +279,12 @@ class _PageIconButtonState extends State<PageIconButton> {
       ],
       builder: (context, controller, _) => widget.icon.isEmpty
           ? AnimatedOpacity(
-              opacity: widget.shown || controller.isOpen ? 1 : 0,
+              opacity: widget.shown || _focused || controller.isOpen ? 1 : 0,
               duration: const Duration(milliseconds: 120),
               child: TextButton.icon(
                 key: const Key('add page icon'),
                 onPressed: controller.open,
+                onFocusChange: (focused) => setState(() => _focused = focused),
                 style: TextButton.styleFrom(
                   padding: EdgeInsets.zero,
                   minimumSize: const Size(0, 28),
@@ -291,18 +300,21 @@ class _PageIconButtonState extends State<PageIconButton> {
                 ),
               ),
             )
-          : InkWell(
-              key: const Key('page icon'),
-              borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
-              onTap: controller.open,
-              child: Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: WsMetrics.space1,
-                ),
-                child: PageIcon(
-                  widget.icon,
-                  size: WsMetrics.fsDisplay,
-                  color: ws.text,
+          : Tooltip(
+              message: 'Change icon',
+              child: InkWell(
+                key: const Key('page icon'),
+                borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
+                onTap: controller.open,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: WsMetrics.space1,
+                  ),
+                  child: PageIcon(
+                    widget.icon,
+                    size: WsMetrics.fsDisplay,
+                    color: ws.text,
+                  ),
                 ),
               ),
             ),
@@ -363,36 +375,53 @@ class _IconPickerState extends State<IconPicker> {
     final ws = context.ws;
     final query = _query.trim().toLowerCase();
     final label = TextStyle(fontSize: WsMetrics.fsSmall, color: ws.textFaint);
-    Widget tab(String text, bool on, VoidCallback onTap) => InkWell(
-      onTap: onTap,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(
-          horizontal: WsMetrics.space2,
-          vertical: WsMetrics.space1,
-        ),
-        child: Text(
-          text,
-          style: TextStyle(
-            fontSize: WsMetrics.fsCompact,
-            color: on ? ws.text : ws.textMuted,
-            fontWeight: on ? WsMetrics.fwSemibold : WsMetrics.fwRegular,
+    Widget tab(String text, bool on, VoidCallback onTap) => MergeSemantics(
+      child: Semantics(
+        button: true,
+        selected: on,
+        child: InkWell(
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(
+              horizontal: WsMetrics.space2,
+              vertical: WsMetrics.space1,
+            ),
+            child: Text(
+              text,
+              style: TextStyle(
+                fontSize: WsMetrics.fsCompact,
+                color: on ? ws.text : ws.textMuted,
+                fontWeight: on ? WsMetrics.fwSemibold : WsMetrics.fwRegular,
+              ),
+            ),
           ),
         ),
       ),
     );
-    Widget cell(String icon, {Key? key}) => InkWell(
-      key: key,
-      borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
-      onTap: () => _pick(icon),
-      child: Container(
-        width: 32,
-        height: 32,
-        alignment: Alignment.center,
-        decoration: BoxDecoration(
-          color: icon == widget.icon ? ws.hover : null,
+    Widget cell(String icon, {Key? key}) => MergeSemantics(
+      child: Semantics(
+        label: icon.startsWith(lucidePrefix)
+            ? icon.substring(lucidePrefix.length)
+            : _emojiWords[icon] ?? icon,
+        button: true,
+        selected: icon == widget.icon,
+        child: InkWell(
+          key: key,
           borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
+          onTap: () => _pick(icon),
+          child: Container(
+            width: 32,
+            height: 32,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: icon == widget.icon ? ws.hover : null,
+              borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
+            ),
+            child: ExcludeSemantics(
+              child: PageIcon(icon, size: 18, color: ws.textMuted),
+            ),
+          ),
         ),
-        child: PageIcon(icon, size: 18, color: ws.textMuted),
       ),
     );
     final sections = <(String, List<String>)>[

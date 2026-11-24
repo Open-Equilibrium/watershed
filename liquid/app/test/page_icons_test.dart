@@ -4,7 +4,10 @@ import 'package:liquid/src/agent/sidebar.dart';
 import 'package:liquid/src/rust/api/workspace.dart';
 import 'package:liquid/src/workspace/page_icon.dart';
 
+import 'focus_kit.dart';
 import 'page_kit.dart';
+
+void expectOne(Finder finder) => expect(finder, findsOneWidget);
 
 Finder inSidebar(Finder finder) =>
     find.descendant(of: find.byType(Sidebar), matching: finder);
@@ -77,4 +80,81 @@ void main() {
       findsOneWidget,
     );
   });
+
+  testWidgets('Add icon shows while keyboard focus is on it', (tester) async {
+    final kit = PageKit();
+    await kit.show(tester, const [TextPart('October')]);
+    await kit.workspace.rename(kit.page, 'October');
+    await tester.pumpAndSettle();
+    final add = find.byKey(const Key('add page icon'));
+    double opacity() => tester
+        .widget<AnimatedOpacity>(
+          find.ancestor(of: add, matching: find.byType(AnimatedOpacity)),
+        )
+        .opacity;
+    expect(opacity(), 0);
+    await tabTo(tester, add);
+    expect(opacity(), 1);
+  });
+
+  testWidgets('the icon picker names its icons, marks the chosen one and its '
+      'tabs', (tester) async {
+    final semantics = tester.ensureSemantics();
+    final kit = PageKit();
+    await kit.show(tester, const [TextPart('October')]);
+    await kit.workspace.setPageIcon(kit.page, '💰');
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('page icon')));
+    await tester.pumpAndSettle();
+
+    expect(find.byTooltip('Change icon'), findsOneWidget);
+    expect(
+      tester.getSemantics(find.bySemanticsLabel('money')),
+      containsSemantics(
+        label: 'money',
+        isButton: true,
+        isSelected: true,
+        hasTapAction: true,
+      ),
+    );
+    expect(
+      tester.getSemantics(find.bySemanticsLabel('chart')),
+      containsSemantics(
+        label: 'chart',
+        isButton: true,
+        isSelected: false,
+        hasTapAction: true,
+      ),
+    );
+    expect(
+      tester.getSemantics(find.bySemanticsLabel('Emoji')),
+      containsSemantics(
+        label: 'Emoji',
+        isButton: true,
+        isSelected: true,
+        hasTapAction: true,
+      ),
+    );
+    await tester.tap(find.text('Icons'));
+    await tester.pumpAndSettle();
+    expect(
+      tester.getSemantics(find.bySemanticsLabel('rocket')),
+      containsSemantics(label: 'rocket', isButton: true, hasTapAction: true),
+    );
+    semantics.dispose();
+  });
+
+  testWidgets(
+    'an icon that cannot be saved shows the notice and nothing else',
+    (tester) async {
+      final kit = PageKit();
+      await kit.show(tester, const [TextPart('October')]);
+      kit.fake.refuseKinds = {BridgeMutationKind.setPageIcon};
+      await tester.tap(find.byKey(const Key('add page icon')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('💰').last);
+      await tester.pumpAndSettle();
+      expectOne(find.textContaining('Liquid did not save this change'));
+    },
+  );
 }
