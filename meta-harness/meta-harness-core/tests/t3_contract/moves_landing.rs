@@ -62,11 +62,7 @@ async fn a_move_is_refused_onto_a_branch_or_checkout_that_tracks_another_branch(
 async fn an_attached_branch_with_unpushed_commits_is_refused() {
     let pair = Pair::codex().await;
     pushed_branch(&pair.repo_a, "feature/unpushed");
-    git(&pair.repo_b, &["fetch", "-q", "origin"]);
-    git(
-        &pair.repo_b,
-        &["branch", "feature/unpushed", "origin/feature/unpushed"],
-    );
+    local_from_origin(&pair.repo_b, "feature/unpushed");
     git(&pair.repo_b, &["checkout", "-q", "feature/unpushed"]);
     std::fs::write(pair.repo_b.join("local.txt"), "local only\n").unwrap();
     git(&pair.repo_b, &["add", "local.txt"]);
@@ -75,10 +71,9 @@ async fn an_attached_branch_with_unpushed_commits_is_refused() {
     let (project_a, project_b) = pair.projects().await;
     let package = handoff(&appended(&project_a).await).await;
 
-    let refused = project_b.move_in(package).await.err().unwrap();
-    assert!(
-        refused.contains("has commits that are not pushed"),
-        "{refused}"
+    assert_refused(
+        project_b.move_in(package).await,
+        "has commits that are not pushed",
     );
     pair.stop().await;
 }
@@ -136,8 +131,10 @@ async fn a_move_lands_in_the_clean_checkout_the_target_has_on_its_branch() {
     assert_eq!(package.branch, "main");
 
     std::fs::write(pair.repo_b.join("README.md"), "changed here\n").unwrap();
-    let refused = project_b.move_in(package.clone()).await.err().unwrap();
-    assert!(refused.contains("uncommitted changes"), "{refused}");
+    assert_refused(
+        project_b.move_in(package.clone()).await,
+        "uncommitted changes",
+    );
     assert!(project_b.threads().await.unwrap().is_empty());
     git(&pair.repo_b, &["checkout", "-q", "--", "README.md"]);
 
@@ -154,11 +151,7 @@ async fn a_move_lands_in_the_clean_checkout_the_target_has_on_its_branch() {
 async fn a_move_onto_a_local_branch_that_is_not_checked_out_attaches_a_worktree() {
     let pair = Pair::codex().await;
     pushed_branch(&pair.repo_a, "feature/attach");
-    git(&pair.repo_b, &["fetch", "-q", "origin"]);
-    git(
-        &pair.repo_b,
-        &["branch", "feature/attach", "origin/feature/attach"],
-    );
+    local_from_origin(&pair.repo_b, "feature/attach");
     let (project_a, project_b) = pair.projects().await;
     let package = handoff(&appended(&project_a).await).await;
 
@@ -180,8 +173,7 @@ async fn a_move_is_refused_while_a_live_session_uses_the_checkout_it_would_conti
     let live = project_b.start(codex_start("work in b")).await.unwrap();
     wait(&live, completed(1)).await;
 
-    let refused = project_b.move_in(package).await.err().unwrap();
-    assert!(refused.contains("checked out"), "{refused}");
+    assert_refused(project_b.move_in(package).await, "checked out");
     assert_eq!(project_b.threads().await.unwrap().len(), 1);
     pair.stop().await;
 }
@@ -210,8 +202,7 @@ async fn a_branch_in_a_project_with_two_remotes_is_blocked_and_an_absent_branch_
             .unwrap(),
         Landing::NewWorktree
     );
-    let refused = project_b.move_in(package).await.err().unwrap();
-    assert!(refused.contains("more than one Git remote"), "{refused}");
+    assert_refused(project_b.move_in(package).await, "more than one Git remote");
     assert!(project_b.threads().await.unwrap().is_empty());
     pair.stop().await;
 }

@@ -74,6 +74,31 @@ async fn a_thread_runs_turns_and_reverts_files_in_its_worktree() {
     wait(&thread, |s| s.turns.is_empty()).await;
     assert!(!file.exists());
 
+    thread.send("plan", false).await.unwrap();
+    let snapshot = wait(&thread, completed(1)).await;
+    let tasks = snapshot
+        .transcript
+        .iter()
+        .find(|item| item.kind == ItemKind::TaskList)
+        .expect("the plan is a task list item");
+    let step = |text: &str| TaskStep {
+        text: text.to_owned(),
+        status: StepStatus::Completed,
+    };
+    assert_eq!(
+        tasks.detail,
+        ItemDetail::Tasks {
+            steps: vec![step("Explore"), step("Explore › scraper-1")]
+        }
+    );
+
+    use std::os::unix::ffi::OsStrExt;
+    let not_utf8 = Path::new(std::ffi::OsStr::from_bytes(b"/tmp/\xff"));
+    assert_refused(host.project(not_utf8).await, "not valid UTF-8");
+    assert_refused(
+        thread.set_branch("main", Some(not_utf8)).await,
+        "not valid UTF-8",
+    );
     thread.set_branch("main", Some(&repo)).await.unwrap();
     assert_eq!(
         thread.worktree().await.unwrap().as_deref(),
@@ -126,7 +151,7 @@ async fn a_supervised_thread_waits_for_the_person_to_approve() {
         request: asked.id.clone()
     }));
     assert!(done.requests.is_empty());
-    assert!(done.transcript.iter().any(|item| item.text == "Approved."));
+    assert!(says(&done.transcript, "Approved."));
     service.stop().await;
 }
 
@@ -149,11 +174,8 @@ async fn a_thread_details_card_reads_t3_and_a_fork_merges_back() {
 
     let fork_id = thread.fork(1).await.unwrap();
     let fork = project.open(&fork_id).await.unwrap();
-    let forked = wait(&fork, |s| {
-        s.transcript.iter().any(|i| i.text == "append first")
-    })
-    .await;
-    assert!(forked.transcript.iter().all(|i| i.text != "append second"));
+    let forked = wait(&fork, |s| says(&s.transcript, "append first")).await;
+    assert!(!says(&forked.transcript, "append second"));
     fork.send("append in fork", false).await.unwrap();
     wait(&fork, |s| {
         s.turns.iter().any(|t| {
@@ -210,36 +232,6 @@ async fn a_snapshot_names_the_events_it_already_contains() {
         1,
         "the completion is in the snapshot or the stream, exactly once"
     );
-    assert!(after.transcript.iter().any(|item| item.text == "Appended."));
+    assert!(says(&after.transcript, "Appended."));
     host.shutdown().await;
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn an_agent_s_plan_reaches_the_transcript_as_a_task_list() {
-    let (_dir, repo, home) = fixture();
-    let (service, host) = start_service(&home).await;
-    let project = host.project(&repo).await.unwrap();
-    let thread = project
-        .start(start("plan", worktree(), Permissions::FullAccess))
-        .await
-        .unwrap();
-
-    let snapshot = wait(&thread, completed(1)).await;
-
-    let tasks = snapshot
-        .transcript
-        .iter()
-        .find(|item| item.kind == ItemKind::TaskList)
-        .expect("the plan is a task list item");
-    let step = |text: &str| TaskStep {
-        text: text.to_owned(),
-        status: StepStatus::Completed,
-    };
-    assert_eq!(
-        tasks.detail,
-        ItemDetail::Tasks {
-            steps: vec![step("Explore"), step("Explore › scraper-1")]
-        }
-    );
-    service.stop().await;
 }

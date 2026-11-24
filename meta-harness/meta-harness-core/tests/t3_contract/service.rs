@@ -71,7 +71,7 @@ async fn a_stale_server_record_never_stops_another_process() {
     let (dir, _repo, home) = fixture();
     let other_home = dir.path().join("other");
     let other = host(&other_home).await;
-    let record = runtime_record(&other_home);
+    let record = json_file(&other_home.join("userdata").join("server-runtime.json"));
     let address = record["origin"]
         .as_str()
         .unwrap()
@@ -98,11 +98,6 @@ async fn a_stale_server_record_never_stops_another_process() {
     other.shutdown().await;
     sleeper.kill().unwrap();
     sleeper.wait().unwrap();
-}
-
-fn runtime_record(home: &Path) -> serde_json::Value {
-    let text = std::fs::read_to_string(home.join("userdata").join("server-runtime.json")).unwrap();
-    serde_json::from_str(&text).unwrap()
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -152,6 +147,7 @@ async fn the_service_admits_only_clients_with_its_token_and_owns_its_folder() {
     assert_eq!(client.status().await.unwrap().t3_version, t3_version());
     let second = Service::start(service_config(&home)).await;
     assert!(second.is_err_and(|e| e.contains("Another Meta-Harness service")));
+    assert_handshake_cap(service.url.trim_start_matches("ws://")).await;
 
     service.stop().await;
     assert!(!home.join(CONNECTION_FILE).exists());
@@ -167,16 +163,7 @@ async fn an_approved_configuration_reaches_the_harness_homes_t3_runs_them_in() {
     let home = dir.path().join("meta");
     let service = Service::start(service_config(&home)).await.unwrap();
     let client = remote::Host::connect(&home, "liquid").await.unwrap();
-    let number = client
-        .propose(
-            "Test first",
-            vec![Change::Instruction {
-                name: "rules".to_owned(),
-                text: Some("Run the tests.".to_owned()),
-            }],
-        )
-        .await
-        .unwrap();
+    let number = propose_rules(&client).await;
     let claude = home.join("harness/claude");
     let codex = home.join("harness/codex");
     assert!(
@@ -279,24 +266,16 @@ async fn a_stopped_or_dropped_service_ends_its_streams_and_a_client_goes_on_afte
 
 #[tokio::test(flavor = "multi_thread")]
 async fn the_service_refuses_a_client_that_names_no_api_version_or_another() {
-    use tokio_tungstenite::tungstenite::{Error, client::IntoClientRequest, http::StatusCode};
+    use tokio_tungstenite::tungstenite::{Error, http::StatusCode};
     let (dir, _repo, _) = fixture();
     let home = dir.path().join("meta");
     let service = Service::start(service_config(&home)).await.unwrap();
-    for version in [None, Some("2")] {
-        let mut request = service.url.as_str().into_client_request().unwrap();
-        request.headers_mut().insert(
-            "authorization",
-            format!("Bearer {}", service.token).parse().unwrap(),
-        );
-        if let Some(version) = version {
-            request
-                .headers_mut()
-                .insert("meta-harness-api", version.parse().unwrap());
-        }
+    let cases: [&[(&str, &str)]; 2] = [&[], &[("meta-harness-api", "2")]];
+    for headers in cases {
+        let request = upgrade(&service.url, &service.token, headers);
         let refused = match tokio_tungstenite::connect_async(request).await {
             Err(Error::Http(response)) => response,
-            Ok(_) => panic!("the service admits a client of version {version:?}"),
+            Ok(_) => panic!("the service admits a client with {headers:?}"),
             Err(other) => panic!("{other}"),
         };
         assert_eq!(refused.status(), StatusCode::UPGRADE_REQUIRED);
@@ -305,73 +284,10 @@ async fn the_service_refuses_a_client_that_names_no_api_version_or_another() {
     service.stop().await;
 }
 
-#[tokio::test(flavor = "multi_thread")]
-async fn a_start_that_fails_leaves_no_remote_listener_and_the_folder_free() {
-    let (dir, _repo, _) = fixture();
-    let home = dir.path().join("meta");
-    let (service, host) = start_service(&home).await;
-    let port = remote_on_free(&host).await;
-    drop(host);
-    service.stop().await;
-    db(&home)
-        .execute(
-            "INSERT INTO peer (name, address, token, access, tunnel_port, linked_ms, client) \
-             VALUES ('bad', 'ws://127.0.0.1:1', 'token', 'unknown', 1, NULL, 'client')",
-            [],
-        )
-        .unwrap();
-    let failed = Service::start_with_remote(
-        service_config(&home),
-        Some(vec![std::net::Ipv4Addr::LOCALHOST.into()]),
-    )
-    .await;
-    assert!(
-        failed.is_err(),
-        "a linked host with an unknown access level"
-    );
-    assert!(
-        std::net::TcpStream::connect(("127.0.0.1", port)).is_err(),
-        "nothing listens after the failed start"
-    );
-    db(&home)
-        .execute("DELETE FROM peer WHERE name = 'bad'", [])
-        .unwrap();
-    let (service, _host) = start_service(&home).await;
-    assert!(std::net::TcpStream::connect(("127.0.0.1", port)).is_ok());
-    service.stop().await;
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn the_local_listener_holds_at_most_32_handshakes_and_closes_the_rest() {
-    let (dir, _repo, _) = fixture();
-    let (service, _host) = start_service(&dir.path().join("meta")).await;
-    let address = service.url.trim_start_matches("ws://").to_owned();
-    let idle =
-        futures_util::future::join_all((0..32).map(|_| tokio::net::TcpStream::connect(&address)))
-            .await;
-    let mut extra = tokio::net::TcpStream::connect(&address).await.unwrap();
-    let mut byte = [0u8; 1];
-    let closed = tokio::time::timeout(Duration::from_secs(5), extra.read(&mut byte))
-        .await
-        .expect("closed without waiting for a handshake")
-        .unwrap();
-    assert_eq!(closed, 0, "the extra connection is closed");
-    drop(idle);
-    service.stop().await;
-}
-
 async fn open_client(
     service: &Service,
 ) -> tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>> {
-    use tokio_tungstenite::tungstenite::client::IntoClientRequest;
-    let mut request = service.url.as_str().into_client_request().unwrap();
-    request.headers_mut().insert(
-        "authorization",
-        format!("Bearer {}", service.token).parse().unwrap(),
-    );
-    request
-        .headers_mut()
-        .insert("meta-harness-api", "1".parse().unwrap());
+    let request = upgrade(&service.url, &service.token, &[("meta-harness-api", "1")]);
     tokio_tungstenite::connect_async(request).await.unwrap().0
 }
 
@@ -454,27 +370,5 @@ async fn a_client_that_stops_reading_is_disconnected_and_one_that_reads_gets_eve
         assert_eq!(reply["id"], id);
         assert!(reply.get("ok").is_some(), "{reply}");
     }
-    service.stop().await;
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn a_path_that_is_not_utf8_is_refused_before_it_is_sent() {
-    use std::os::unix::ffi::OsStrExt;
-    let (_dir, repo, home) = fixture();
-    let (service, host) = start_service(&home).await;
-    let not_utf8 = Path::new(std::ffi::OsStr::from_bytes(b"/tmp/\xff"));
-    let refused = host.project(not_utf8).await.err().unwrap();
-    assert!(refused.contains("not valid UTF-8"), "{refused}");
-    let project = host.project(&repo).await.unwrap();
-    let thread = project
-        .start(start("wait", Workspace::Checkout, Permissions::FullAccess))
-        .await
-        .unwrap();
-    let refused = thread
-        .set_branch("main", Some(not_utf8))
-        .await
-        .err()
-        .unwrap();
-    assert!(refused.contains("not valid UTF-8"), "{refused}");
     service.stop().await;
 }

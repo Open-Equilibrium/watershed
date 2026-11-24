@@ -11,6 +11,10 @@ async fn change_at(host: &remote::Host, index: usize) -> AgentChange {
     .await
 }
 
+async fn instructions(host: &remote::Host) -> String {
+    host.agent_instructions("news-bot").await.unwrap()
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn a_persistent_agent_moves_to_a_fresh_thread_with_its_routines_when_its_context_fills() {
     let (_dir, repo, home) = fixture();
@@ -109,17 +113,21 @@ async fn an_agent_made_by_chat_names_itself_logs_its_changes_and_answers_a_menti
         &host,
         "the agent names itself after its first turn",
         |host| async move {
-            let agents = host.agents().await.unwrap();
-            agents[0].named.then(|| agents[0].clone())
+            host.agents()
+                .await
+                .unwrap()
+                .into_iter()
+                .next()
+                .filter(|a| a.named)
         },
     )
     .await;
     assert_eq!(named.name, "news-bot");
     assert_eq!(named.memory, created.memory);
-    let kinds = |changes: Vec<AgentChange>| changes.into_iter().map(|c| c.kind).collect::<Vec<_>>();
     let changes = host.agent_changes("news-bot").await.unwrap();
+    let kinds: Vec<AgentChangeKind> = changes.clone().into_iter().map(|c| c.kind).collect();
     assert_eq!(
-        kinds(changes.clone()),
+        kinds,
         [AgentChangeKind::Name, AgentChangeKind::Instructions]
     );
     assert_eq!(changes[1].turn, Some(1));
@@ -129,7 +137,7 @@ async fn an_agent_made_by_chat_names_itself_logs_its_changes_and_answers_a_menti
         .await
         .unwrap();
     host.agent_undo("news-bot", changes[1].id).await.unwrap();
-    assert_eq!(host.agent_instructions("news-bot").await.unwrap(), "");
+    assert_eq!(instructions(&host).await, "");
     assert!(host.agent_undo("news-bot", changes[1].id).await.is_err());
     let after = host.agent_changes("news-bot").await.unwrap();
     assert_eq!(after.len(), 2, "the person's changes are not the agent's");
@@ -140,14 +148,10 @@ async fn an_agent_made_by_chat_names_itself_logs_its_changes_and_answers_a_menti
     let held = change_at(&host, 2).await;
     assert_eq!(held.kind, AgentChangeKind::Instructions);
     assert!(held.held, "a change from a routine waits for approval");
-    assert_eq!(
-        host.agent_instructions("news-bot").await.unwrap(),
-        "",
-        "and is undone until then"
-    );
+    assert_eq!(instructions(&host).await, "", "and is undone until then");
     host.agent_apply("news-bot", held.id).await.unwrap();
     assert_eq!(
-        host.agent_instructions("news-bot").await.unwrap(),
+        instructions(&host).await,
         "# news-bot\n\nRead the feeds twice.\n"
     );
     assert!(!host.agent_changes("news-bot").await.unwrap()[2].held);
@@ -163,8 +167,7 @@ async fn an_agent_made_by_chat_names_itself_logs_its_changes_and_answers_a_menti
         &host,
         "the stopped routine run rewrites the instructions first",
         |host| async move {
-            (host.agent_instructions("news-bot").await.unwrap()
-                == "# news-bot\n\nRead the feeds three times.\n")
+            (instructions(host).await == "# news-bot\n\nRead the feeds three times.\n")
                 .then_some(())
         },
     )
@@ -173,7 +176,7 @@ async fn an_agent_made_by_chat_names_itself_logs_its_changes_and_answers_a_menti
     let aborted = change_at(&host, 3).await;
     assert!(aborted.held, "a routine run that was stopped is held too");
     assert_eq!(
-        host.agent_instructions("news-bot").await.unwrap(),
+        instructions(&host).await,
         "# news-bot\n\nRead the feeds twice.\n"
     );
     host.agent_set_instructions("news-bot", "# news-bot\n\nRead.\n")
@@ -185,7 +188,7 @@ async fn an_agent_made_by_chat_names_itself_logs_its_changes_and_answers_a_menti
     );
     host.agent_undo("news-bot", aborted.id).await.unwrap();
     assert_eq!(
-        host.agent_instructions("news-bot").await.unwrap(),
+        instructions(&host).await,
         "# news-bot\n\nRead.\n",
         "discarding a held change keeps the current instructions"
     );
@@ -289,8 +292,11 @@ async fn an_agent_moves_to_another_host_with_its_memory_and_routines() {
         large,
         "a memory past one socket frame arrives whole"
     );
-    let instructions = pair.host_b.agent_instructions("news-bot").await.unwrap();
-    assert!(instructions.contains("Keep the news page current."));
+    assert!(
+        instructions(&pair.host_b)
+            .await
+            .contains("Keep the news page current.")
+    );
     let memory = arrived[0].memory.display().to_string();
     let told = wait(&moved, |s| {
         s.turns.iter().any(|t| t.prompt.contains(&memory))

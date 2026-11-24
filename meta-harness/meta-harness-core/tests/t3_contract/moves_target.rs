@@ -55,15 +55,9 @@ async fn a_move_in_whose_record_cannot_be_kept_stays_retryable_until_it_is_withd
     let (project_a, project_b) = pair.projects().await;
     let package = handoff(&appended(&project_a).await).await;
     let token = package.transfer.as_str();
-    db(&home_b)
-        .execute_batch(
-            "CREATE TRIGGER refuse BEFORE INSERT ON move_record \
-             BEGIN SELECT RAISE(ABORT, 'refused'); END;",
-        )
-        .unwrap();
+    refuse(&home_b, "refuse", "BEFORE INSERT ON move_record");
 
-    let refused = project_b.move_in(package.clone()).await.err().unwrap();
-    assert!(refused.contains("refused"), "{refused}");
+    assert_refused(project_b.move_in(package.clone()).await, "refused");
     assert_eq!(arrival(&pair.host_b, token).await, Arrival::Starting);
     assert_eq!(withdraw(&pair.host_b, token).await, Arrival::Refused);
     assert!(project_b.threads().await.unwrap().is_empty());
@@ -83,12 +77,7 @@ async fn carried_messages_reach_the_target_only_after_it_lands_and_once_each_in_
     let project_b = pair.host_b.project(&pair.repo_b).await.unwrap();
     let package = moving_with_queued(&pair.host_a, &pair.repo_a, &["carry one", "carry two"]).await;
     let token = package.transfer.as_str();
-    let raw = db(&home_b);
-    raw.execute_batch(
-        "CREATE TRIGGER refuse_record BEFORE INSERT ON move_record \
-         BEGIN SELECT RAISE(ABORT, 'refused'); END;",
-    )
-    .unwrap();
+    refuse(&home_b, "refuse_record", "BEFORE INSERT ON move_record");
     assert!(project_b.move_in(package.clone()).await.is_err());
     let listed = project_b.threads().await.unwrap();
     let held = project_b.open(&listed[0].id).await.unwrap();
@@ -97,12 +86,12 @@ async fn carried_messages_reach_the_target_only_after_it_lands_and_once_each_in_
         carried_prompts(&snapshot).is_empty(),
         "a carried message reached a session that never landed"
     );
-    raw.execute_batch("DROP TRIGGER refuse_record").unwrap();
-    raw.execute_batch(
-        "CREATE TRIGGER refuse_progress BEFORE UPDATE OF delivered ON arrival \
-         WHEN NEW.delivered = 1 BEGIN SELECT RAISE(ABORT, 'refused'); END;",
-    )
-    .unwrap();
+    exec_sql(&home_b, "DROP TRIGGER refuse_record");
+    refuse(
+        &home_b,
+        "refuse_progress",
+        "BEFORE UPDATE OF delivered ON arrival WHEN NEW.delivered = 1",
+    );
     assert!(project_b.move_in(package.clone()).await.is_err());
     assert_eq!(arrival(&pair.host_b, token).await, Arrival::Starting);
     assert_eq!(
@@ -110,12 +99,11 @@ async fn carried_messages_reach_the_target_only_after_it_lands_and_once_each_in_
         Arrival::Starting,
         "an abort on a landed transfer never refuses it"
     );
-    let refused = project_b.move_in(package.clone()).await.err().unwrap();
-    assert!(
-        refused.contains("not all delivered yet"),
-        "a repeat does not finish the move early: {refused}"
+    assert_refused(
+        project_b.move_in(package.clone()).await,
+        "not all delivered yet",
     );
-    raw.execute_batch("DROP TRIGGER refuse_progress").unwrap();
+    exec_sql(&home_b, "DROP TRIGGER refuse_progress");
     assert!(matches!(
         arrival(&pair.host_b, token).await,
         Arrival::Landed { .. }
@@ -181,9 +169,7 @@ async fn a_starting_arrival_launches_its_chosen_thread_id_and_adopts_it_once_it_
         Arrival::Landed { thread }
     );
 
-    db(&home_b)
-        .execute("UPDATE arrival SET state = 'starting'", [])
-        .unwrap();
+    exec_sql(&home_b, "UPDATE arrival SET state = 'starting'");
     let adopted = project_b.move_in(package.clone()).await.unwrap();
     assert_eq!(adopted.id(), landed.id());
     assert_eq!(project_b.threads().await.unwrap().len(), 1);
@@ -200,9 +186,7 @@ async fn a_move_abort_removes_the_thread_keeps_the_worktree_and_refuses_the_tran
     let token = package.transfer.as_str();
     let landed = project_b.move_in(package.clone()).await.unwrap();
     let worktree = landed.worktree().await.unwrap().expect("its own worktree");
-    db(&home_b)
-        .execute("UPDATE arrival SET state = 'starting'", [])
-        .unwrap();
+    exec_sql(&home_b, "UPDATE arrival SET state = 'starting'");
     assert_eq!(arrival(&pair.host_b, token).await, Arrival::Starting);
 
     assert_eq!(withdraw(&pair.host_b, token).await, Arrival::Refused);
@@ -244,13 +228,9 @@ async fn a_failed_record_store_is_retried_on_the_same_thread_and_lands_listed() 
     let (project_a, project_b) = pair.projects().await;
     let package = handoff(&appended(&project_a).await).await;
     let token = package.transfer.as_str();
-    let raw = db(&home_b);
-    raw.execute_batch(
-        "CREATE TRIGGER refuse BEFORE INSERT ON move_record BEGIN SELECT RAISE(ABORT, 'refused'); END;",
-    )
-    .unwrap();
+    refuse(&home_b, "refuse", "BEFORE INSERT ON move_record");
     assert!(project_b.move_in(package.clone()).await.is_err());
-    raw.execute_batch("DROP TRIGGER refuse").unwrap();
+    exec_sql(&home_b, "DROP TRIGGER refuse");
 
     let landed = project_b.move_in(package.clone()).await.unwrap();
     let listed = project_b.threads().await.unwrap();
@@ -281,16 +261,13 @@ async fn a_withdrawal_interrupted_after_its_delete_refuses_a_late_move_in_and_ne
         .find(|t| t.id == landed.id())
         .unwrap();
     project_b.delete(&summary, false).await.unwrap();
-    let raw = db(&home_b);
-    raw.execute("UPDATE arrival SET state = 'landed'", [])
-        .unwrap();
+    exec_sql(&home_b, "UPDATE arrival SET state = 'landed'");
     assert_eq!(
         arrival(&pair.host_b, token).await,
         Arrival::Unknown,
         "a deleted thread is never reported as landed"
     );
-    raw.execute("UPDATE arrival SET state = 'starting'", [])
-        .unwrap();
+    exec_sql(&home_b, "UPDATE arrival SET state = 'starting'");
     let late = project_b.move_in(package.clone()).await;
     assert!(
         late.as_ref().map_or(true, |t| t.id() != landed.id()),
@@ -313,17 +290,11 @@ async fn a_session_moved_again_carries_its_transcript_and_moves_back_to_the_host
         .await
         .unwrap();
     assert!(
-        again
-            .transcript
-            .iter()
-            .any(|item| item.text == "append first"),
+        says(&again.transcript, "append first"),
         "the earlier host's transcript is carried"
     );
     assert!(
-        again
-            .transcript
-            .iter()
-            .all(|item| item.text != first.handoff),
+        !says(&again.transcript, &first.handoff),
         "the handoff is not carried twice"
     );
 
@@ -357,30 +328,18 @@ async fn a_session_moved_again_carries_its_transcript_and_moves_back_to_the_host
 async fn a_move_whose_arrival_cannot_be_recorded_keeps_its_worktree_and_refuses() {
     let pair = Pair::codex().await;
     pushed_branch(&pair.repo_a, "feature/late-record");
-    git(&pair.repo_b, &["fetch", "-q", "origin"]);
-    git(
-        &pair.repo_b,
-        &[
-            "branch",
-            "feature/late-record",
-            "origin/feature/late-record",
-        ],
-    );
+    local_from_origin(&pair.repo_b, "feature/late-record");
     let home_b = pair.dir.path().join("host-b");
     let (project_a, project_b) = pair.projects().await;
     let package = handoff(&appended(&project_a).await).await;
-    db(&home_b)
-        .execute_batch(
-            "CREATE TRIGGER refuse_row BEFORE INSERT ON arrival \
-             WHEN NEW.state = 'starting' BEGIN SELECT RAISE(ABORT, 'refused'); END;",
-        )
-        .unwrap();
+    refuse(
+        &home_b,
+        "refuse_row",
+        "BEFORE INSERT ON arrival WHEN NEW.state = 'starting'",
+    );
 
-    let refused = project_b.move_in(package.clone()).await.err().unwrap();
-    assert!(refused.contains("refused"), "{refused}");
-    db(&home_b)
-        .execute_batch("DROP TRIGGER refuse_row")
-        .unwrap();
+    assert_refused(project_b.move_in(package.clone()).await, "refused");
+    exec_sql(&home_b, "DROP TRIGGER refuse_row");
     assert_eq!(
         withdraw(&pair.host_b, &package.transfer).await,
         Arrival::Refused

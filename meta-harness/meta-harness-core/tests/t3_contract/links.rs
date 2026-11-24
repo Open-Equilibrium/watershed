@@ -1,8 +1,7 @@
 use super::*;
 
 fn linked_environments_setting(home: &Path) -> bool {
-    let text = std::fs::read_to_string(home.join("t3/userdata/settings.json")).unwrap();
-    serde_json::from_str::<serde_json::Value>(&text).unwrap()["linkedEnvironmentsEnabled"]
+    json_file(&home.join("t3/userdata/settings.json"))["linkedEnvironmentsEnabled"]
         .as_bool()
         .unwrap_or(false)
 }
@@ -10,6 +9,10 @@ fn linked_environments_setting(home: &Path) -> bool {
 #[allow(clippy::result_large_err)]
 async fn silent_peer() -> String {
     use futures_util::SinkExt;
+    use tokio_tungstenite::tungstenite::{
+        Message,
+        handshake::server::{Request, Response},
+    };
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let url = format!("ws://{}", listener.local_addr().unwrap());
     tokio::spawn(async move {
@@ -18,8 +21,7 @@ async fn silent_peer() -> String {
             let mut pairing = false;
             let Ok(mut socket) = tokio_tungstenite::accept_hdr_async(
                 socket,
-                |request: &tokio_tungstenite::tungstenite::handshake::server::Request,
-                 response: tokio_tungstenite::tungstenite::handshake::server::Response| {
+                |request: &Request, response: Response| {
                     pairing = request
                         .headers()
                         .contains_key(meta_harness_core::api::PAIRING_HEADER);
@@ -32,9 +34,7 @@ async fn silent_peer() -> String {
             };
             if pairing {
                 let answer = r#"{"name":"silent","token":"silent-token","access":"auto"}"#;
-                let _ = socket
-                    .send(tokio_tungstenite::tungstenite::Message::Text(answer.into()))
-                    .await;
+                let _ = socket.send(Message::Text(answer.into())).await;
                 let _ = socket.close(None).await;
             } else {
                 held.push(socket);
@@ -55,17 +55,16 @@ async fn a_host_links_another_hosts_t3_through_a_tunnel_behind_the_switch_and_re
     a.remote_on(port_a).await.unwrap();
     b.remote_on(port_b).await.unwrap();
     let address = format!("ws://127.0.0.1:{port_b}");
-    let waiting = b.invite(ClientKind::Host, Access::Auto).await.unwrap();
-    let refused = a
-        .host_add(&address, &waiting, Some(Access::Auto))
-        .await
-        .unwrap_err();
-    assert!(refused.contains("meta host agents on"), "{refused}");
+    let waiting = invite(&b, ClientKind::Host, Access::Auto).await;
+    assert_refused(
+        a.host_add(&address, &waiting, Some(Access::Auto)).await,
+        "meta host agents on",
+    );
     a.host_agents(true).await.unwrap();
     b.host_agents(true).await.unwrap();
     assert!(linked_environments_setting(&home_a));
 
-    let code = b.invite(ClientKind::Host, Access::Auto).await.unwrap();
+    let code = invite(&b, ClientKind::Host, Access::Auto).await;
     let (name, _) = a
         .host_add(&address, &code, Some(Access::Auto))
         .await
@@ -82,12 +81,8 @@ async fn a_host_links_another_hosts_t3_through_a_tunnel_behind_the_switch_and_re
     assert_eq!(linked[0]["status"], "reachable");
 
     let clients = b.hosts().await.unwrap().clients.len();
-    let code = b.invite(ClientKind::Host, Access::Auto).await.unwrap();
-    let error = a
-        .host_add(&address, &code, Some(Access::Auto))
-        .await
-        .unwrap_err();
-    assert!(error.contains(&name), "{error}");
+    let code = invite(&b, ClientKind::Host, Access::Auto).await;
+    assert_refused(a.host_add(&address, &code, Some(Access::Auto)).await, &name);
     assert_eq!(
         b.hosts().await.unwrap().clients.len(),
         clients,
@@ -100,9 +95,7 @@ async fn a_host_links_another_hosts_t3_through_a_tunnel_behind_the_switch_and_re
         .await
         .unwrap();
     tokio::time::sleep(Duration::from_millis(500)).await;
-    let trigger = "CREATE TRIGGER refuse_peer_delete BEFORE DELETE ON peer \
-                   BEGIN SELECT RAISE(ABORT, 'refused'); END;";
-    db(&home_a).execute_batch(trigger).unwrap();
+    refuse(&home_a, "refuse_peer_delete", "BEFORE DELETE ON peer");
     assert!(a.host_remove(&name).await.is_err());
     assert_eq!(a.hosts().await.unwrap().hosts.len(), 1);
     assert!(std::net::TcpStream::connect(("127.0.0.1", tunnel)).is_ok());
@@ -111,9 +104,7 @@ async fn a_host_links_another_hosts_t3_through_a_tunnel_behind_the_switch_and_re
         None,
         "a failed removal links again"
     );
-    db(&home_a)
-        .execute_batch("DROP TRIGGER refuse_peer_delete")
-        .unwrap();
+    exec_sql(&home_a, "DROP TRIGGER refuse_peer_delete");
 
     let client = a.host_remove(&name).await.unwrap();
     assert!(host_client_names(&b).await.contains(&client), "{client}");
@@ -179,14 +170,10 @@ async fn a_link_takes_or_refuses_an_access_level_by_its_invite_and_names_the_pai
         "{error}"
     );
 
-    let code = b.invite(ClientKind::Host, Access::ReadOnly).await.unwrap();
-    let error = a
-        .host_add(&url_b, &code, Some(Access::Auto))
-        .await
-        .unwrap_err();
-    assert!(
-        error.contains("invited this host at read-only; ask for that or less."),
-        "{error}"
+    let code = invite(&b, ClientKind::Host, Access::ReadOnly).await;
+    assert_refused(
+        a.host_add(&url_b, &code, Some(Access::Auto)).await,
+        "invited this host at read-only; ask for that or less.",
     );
     assert!(
         a.hosts().await.unwrap().hosts.is_empty(),
@@ -220,7 +207,7 @@ async fn a_host_link_is_made_again_on_restart_when_its_port_is_taken_or_it_is_ol
     let (dir, _repo, _home) = fixture();
     let home_a = dir.path().join("a");
     let ((a_service, a), (_b, b), url_b) = two_hosts(dir.path()).await;
-    let code = b.invite(ClientKind::Host, Access::Auto).await.unwrap();
+    let code = invite(&b, ClientKind::Host, Access::Auto).await;
     let (name, _) = a
         .host_add(&url_b, &code, Some(Access::ReadOnly))
         .await
@@ -259,13 +246,8 @@ async fn a_link_made_is_reported_made_even_when_its_time_cannot_be_stored() {
     let (dir, _repo, _home) = fixture();
     let home_a = dir.path().join("a");
     let ((_a, a), (_b, b), url_b) = two_hosts(dir.path()).await;
-    db(&home_a)
-        .execute_batch(
-            "CREATE TRIGGER refuse_link_time BEFORE UPDATE ON peer \
-             BEGIN SELECT RAISE(ABORT, 'refused'); END;",
-        )
-        .unwrap();
-    let code = b.invite(ClientKind::Host, Access::Auto).await.unwrap();
+    refuse(&home_a, "refuse_link_time", "BEFORE UPDATE ON peer");
+    let code = invite(&b, ClientKind::Host, Access::Auto).await;
     let (name, _) = a
         .host_add(&url_b, &code, None)
         .await
@@ -278,12 +260,12 @@ async fn a_peer_that_never_answers_a_link_is_given_up_on_and_holds_no_other_chan
     let (dir, _repo, _home) = fixture();
     let ((_a, a), (_b, b), url_b) = two_hosts(dir.path()).await;
     let silent = silent_peer().await;
-    let code = b.invite(ClientKind::Host, Access::Auto).await.unwrap();
+    let code = invite(&b, ClientKind::Host, Access::Auto).await;
     let given_up = tokio::time::timeout(Duration::from_secs(60), a.host_add(&silent, &code, None))
         .await
         .expect("the link gives up on a peer that never answers");
     assert!(given_up.is_err());
-    let code = b.invite(ClientKind::Host, Access::Auto).await.unwrap();
+    let code = invite(&b, ClientKind::Host, Access::Auto).await;
     let linked = tokio::time::timeout(Duration::from_secs(60), a.host_add(&url_b, &code, None))
         .await
         .expect("a link is not held behind the silent one");
