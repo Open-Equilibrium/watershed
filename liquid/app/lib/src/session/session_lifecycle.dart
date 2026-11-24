@@ -78,6 +78,7 @@ extension SessionLifecycle on SessionState {
           if (chosen != null) model.value = chosen;
         } on Object catch (error) {
           if (generation == _generation) {
+            await _detach();
             notify(NoticeLevel.error, 'Could not open the session: $error');
           }
           return;

@@ -12,6 +12,7 @@ import 'package:liquid/src/rust/api/git.dart';
 import 'package:liquid/src/rust/api/moves.dart';
 import 'package:liquid/src/rust/api/session.dart';
 import 'package:liquid/src/rust/api/thread.dart';
+import 'package:liquid/src/session/agents_state.dart';
 import 'package:liquid/src/session/session_state.dart';
 
 import 'fake_backend.dart';
@@ -553,6 +554,45 @@ void main() {
       },
     );
 
+    testWidgets('mention polling resumes after one read fails', (tester) async {
+      final session = FakeSession();
+      final project = FlakyMentions(session)
+        ..mentionList = [
+          BridgeMention(
+            agent: 'agent-news-bot',
+            name: 'news-bot',
+            thread: 'thread-1',
+            message: 'msg-1',
+            text: 'is it up?',
+            createdMs: 1000,
+            answered: false,
+            answer: '',
+          ),
+        ];
+      final moving = SessionState(project);
+      addTearDown(moving.dispose);
+      await moving.open('thread-1');
+      await tester.pump();
+
+      project.failNext = true;
+      await tester.pump(mentionPoll);
+      project.mentionList = [
+        BridgeMention(
+          agent: 'agent-news-bot',
+          name: 'news-bot',
+          thread: 'thread-1',
+          message: 'msg-1',
+          text: 'is it up?',
+          createdMs: 1000,
+          answered: true,
+          answer: 'Yes.',
+        ),
+      ];
+      await tester.pump(mentionPoll);
+
+      expect(moving.agents.mentions.value.single.answered, isTrue);
+    });
+
     test('every event, skipped ones too, is confirmed (ADR-0272)', () async {
       await open(snapshotOf(sequence: 5));
 
@@ -970,6 +1010,16 @@ void main() {
       expectNotice('Could not open the session: the stream is gone');
     });
 
+    test('a session whose stream fails to attach is not left active', () async {
+      final flaky = FailingSession()..subscribeError = 'the stream is gone';
+      project.session = flaky;
+      await state.open('thread-1');
+      await pumpEventQueue();
+
+      expect(state.session, isNull);
+      expectNotice('Could not open the session: the stream is gone');
+    });
+
     test('an unreadable session list is a host problem', () async {
       state = SessionState(UnreachableProject());
 
@@ -1244,6 +1294,21 @@ void main() {
 List<String> threadIds(SessionState state) => [
   for (final listed in state.recent.value) listed.thread.id,
 ];
+
+class FlakyMentions extends FakeProject {
+  FlakyMentions(FakeSession session) : super(session: session);
+
+  bool failNext = false;
+
+  @override
+  Future<List<BridgeMention>> agentMentions(String thread) async {
+    if (failNext) {
+      failNext = false;
+      throw StateError('the host blinked');
+    }
+    return super.agentMentions(thread);
+  }
+}
 
 class GatedAgents extends FakeProject {
   GatedAgents({this.startGate, this.listGate});
