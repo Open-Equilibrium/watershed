@@ -174,6 +174,25 @@ void main() {
       expect(sessionIds(launch), ['studio']);
     });
 
+    test(
+      'a host for new sessions waits for a connection already in progress',
+      () async {
+        final attempt = Completer<ProjectBackend>();
+        final (:launch, :links) = windowFor(
+          environment,
+          open: (address, root) => attempt.future,
+        );
+
+        unawaited(links.connect(studio));
+        final starting = links.startOn(studio);
+        await pumpEventQueue();
+        attempt.complete(FakeProject()..threadList = [threadOf('studio')]);
+
+        expect(await starting, isNull);
+        expect(launch.state!.startAddress, studio);
+      },
+    );
+
     test('without a project, no agent host starts sessions and the launch problem says why', () async {
       final (:launch, :links) = windowFor({}, answers: {null: FakeProject()});
 
