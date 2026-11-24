@@ -126,7 +126,10 @@ fn a_threads_rows_follow_t3s_relations_order_groups_titles_and_merge_back() {
     let (projection, shells) = root_scenario();
     let first = derive(&projection, &shells, &HashMap::new());
     assert_eq!(first.unlisted, vec!["t-next".to_owned()]);
-    let titles = HashMap::from([("t-next".to_owned(), "Next thread".to_owned())]);
+    let titles = HashMap::from([
+        ("t-next".to_owned(), "Next thread".to_owned()),
+        ("t-root".to_owned(), "Root".to_owned()),
+    ]);
     let lineage = derive(&projection, &shells, &titles).lineage;
 
     let mut subagent = row(
@@ -202,6 +205,8 @@ fn a_threads_rows_follow_t3s_relations_order_groups_titles_and_merge_back() {
     assert_eq!(lineage.merge_target_title.as_deref(), Some("Root"));
     assert!(lineage.merge_ready && lineage.can_merge);
     assert!(!lineage.can_disconnect);
+    let unlisted = derive(&fork, &[shells[1].clone()], &titles).lineage;
+    assert_eq!(unlisted.merge_target_title.as_deref(), Some("Root"));
 }
 
 #[tokio::test(flavor = "multi_thread")]

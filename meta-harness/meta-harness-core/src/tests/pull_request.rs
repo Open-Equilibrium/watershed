@@ -206,7 +206,7 @@ async fn the_card_offers_the_action_t3_offers_for_the_state_checks_and_permissio
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn a_merge_uses_the_merge_method_the_card_selects_and_names_the_pull_request() {
+async fn the_card_merges_with_its_selected_method_and_checks_out_a_fix_worktree() {
     let pull = detail(
         "open",
         false,
@@ -226,12 +226,6 @@ async fn a_merge_uses_the_merge_method_the_card_selects_and_names_the_pull_reque
             "action": "merge", "mergeMethod": "squash"})
         ]
     );
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn a_fix_or_resolve_checks_the_pull_request_out_in_a_worktree_for_a_new_thread() {
-    let pull = detail("open", false, "conflicting", &[], &[], &json!([]));
-    let (fake, git) = card(pull, github()).await;
     assert_eq!(
         git.pull_request_worktree(URL).await.unwrap(),
         ("feature".to_owned(), Some(PathBuf::from("/wt/feature")))

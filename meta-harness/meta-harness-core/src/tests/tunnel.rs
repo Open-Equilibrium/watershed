@@ -76,16 +76,6 @@ async fn a_decision_passes_only_within_the_level_its_host_was_invited_at() {
     }
 }
 
-#[tokio::test(start_paused = true)]
-async fn a_relay_ends_when_its_peer_goes_silent() {
-    let (socket_end, _held) = tokio::io::duplex(1024);
-    let socket = WebSocketStream::from_raw_socket(socket_end, Role::Client, None).await;
-    let (tcp, _tcp_far) = tokio::io::duplex(1024);
-    tokio::time::timeout(Duration::from_secs(600), relay(tcp, socket))
-        .await
-        .expect("the relay ends once its peer has been silent");
-}
-
 #[test]
 fn a_client_id_names_the_pairing_it_was_registered_for() {
     assert_eq!(client_name_of(CLIENT_ID).as_deref(), Some("host-1a2b"));
@@ -146,7 +136,14 @@ fn a_token_form_names_one_client_id_however_it_is_encoded() {
 }
 
 #[tokio::test(start_paused = true)]
-async fn a_relay_ends_when_its_local_end_stops_reading() {
+async fn a_relay_ends_when_its_peer_goes_silent_or_its_local_end_stops_reading() {
+    let (socket_end, _held) = tokio::io::duplex(1024);
+    let socket = WebSocketStream::from_raw_socket(socket_end, Role::Client, None).await;
+    let (tcp, _tcp_far) = tokio::io::duplex(1024);
+    tokio::time::timeout(Duration::from_secs(600), relay(tcp, socket))
+        .await
+        .expect("the relay ends once its peer has been silent");
+
     let (socket_end, far_end) = tokio::io::duplex(1024);
     let socket = WebSocketStream::from_raw_socket(socket_end, Role::Client, None).await;
     let mut peer = WebSocketStream::from_raw_socket(far_end, Role::Server, None).await;
