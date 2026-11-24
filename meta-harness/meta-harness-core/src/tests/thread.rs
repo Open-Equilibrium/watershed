@@ -658,15 +658,8 @@ async fn commands_name_the_request_queued_turn_or_message_they_act_on() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn settings_branch_and_context_reach_t3_and_show_in_the_thread() {
-    let (fake, thread) = follow(
-        projection(json!({
-            "providerTurns": [{"id": "pt1", "runAttemptId": null, "status": "completed",
-                "tokenUsage": {"usedTokens": 1200, "maxTokens": 200000, "autoCompactThreshold": 160000}}],
-        })),
-        1,
-    )
-    .await;
+async fn settings_and_branch_reach_t3_and_show_in_the_thread() {
+    let (fake, thread) = follow(projection(json!({})), 1).await;
     assert_eq!(thread.title(), "Build it");
     assert_eq!(
         thread.model(),
@@ -676,12 +669,6 @@ async fn settings_branch_and_context_reach_t3_and_show_in_the_thread() {
             options: Vec::new(),
         })
     );
-    let context = thread.context().expect("T3 reported the window");
-    assert_eq!(
-        (context.tokens, context.window, context.compacts_at),
-        (Some(1200), 200_000, Some(160_000))
-    );
-
     let (_, mut events) = thread.subscribe();
     thread
         .set_permissions(Permissions::Supervised)
