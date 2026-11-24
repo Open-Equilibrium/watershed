@@ -37,7 +37,8 @@ def write(path, content, mode=0o644):
 def snapshot(root):
     if not root.exists():
         return {}
-    return {str(path.relative_to(root)): path.read_bytes() if path.is_file() else None
+    return {str(path.relative_to(root)):
+            (path.read_bytes(), path.stat().st_mode & 0o777) if path.is_file() else None
             for path in sorted(root.rglob("*"))}
 
 
