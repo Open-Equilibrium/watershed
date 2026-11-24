@@ -43,25 +43,7 @@ struct Private {
 
 impl Private {
     fn new() -> Self {
-        let mut workspace = workspace();
-        let Created::Area(area) = created(
-            &mut workspace,
-            Mutation::CreateArea {
-                name: "Private".into(),
-            },
-        ) else {
-            panic!("an area")
-        };
-        let Created::Page(page) = created(
-            &mut workspace,
-            Mutation::CreatePage {
-                area: area.clone(),
-                parent: None,
-                title: "Household budget".into(),
-            },
-        ) else {
-            panic!("a Page")
-        };
+        let (workspace, area, page) = private_page("Household budget");
         Self {
             workspace,
             area,
@@ -96,14 +78,14 @@ impl Private {
     }
 
     fn new_chart(&mut self) -> BlockId {
-        let added = self.edit(Mutation::AddChartBlock {
-            page: self.page.clone(),
-            after: None,
-        });
-        let Some(Created::Block { block, .. }) = added.unwrap().created else {
-            panic!("a Chart")
-        };
-        block
+        block(
+            &mut self.workspace,
+            Mutation::AddChartBlock {
+                page: self.page.clone(),
+                after: None,
+            },
+        )
+        .0
     }
 
     fn set_chart(&mut self, block: &BlockId, setup: ChartSetup) -> Result<Applied, Error> {
