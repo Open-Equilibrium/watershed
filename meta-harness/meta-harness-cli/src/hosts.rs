@@ -40,6 +40,7 @@ fn invite_request(args: &[&str]) -> Result<(ClientKind, Access), String> {
             access("meta invite", rest)?.unwrap_or_default(),
         )),
         ["--device", "--access", ..] => Err("--access goes only with --host.".to_owned()),
+        ["--device", extra, ..] => Err(format!("meta invite does not take {extra} after --device")),
         _ => Err("meta invite needs --device or --host".to_owned()),
     }
 }
@@ -128,6 +129,16 @@ pub(crate) fn access(command: &str, args: &[&str]) -> Result<Option<Access>, Str
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_invite_names_the_argument_it_does_not_take() {
+        let extra = invite_request(&["--device", "extra"]).err().unwrap();
+        assert_eq!(extra, "meta invite does not take extra after --device");
+        assert_eq!(
+            invite_request(&[]).err().unwrap(),
+            "meta invite needs --device or --host"
+        );
+    }
 
     #[test]
     fn the_flags_take_their_defaults_and_refuse_what_they_do_not_name() {

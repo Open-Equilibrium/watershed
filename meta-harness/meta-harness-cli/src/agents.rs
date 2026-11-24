@@ -83,11 +83,13 @@ fn new_agent(name: &str, mut args: &[&str]) -> Result<NewAgent, String> {
         }
         args = rest;
     }
-    if !args.is_empty() {
-        return Err(format!(
-            "meta agent create misses a value after {}",
-            args[0]
-        ));
+    if let [flag] = args {
+        return Err(match *flag {
+            "--project" | "--model" | "--permissions" | "--instructions" => {
+                format!("meta agent create misses a value after {flag}")
+            }
+            _ => format!("meta agent create does not take {flag}\n{USAGE}"),
+        });
     }
     Ok(NewAgent {
         name: Some(name.to_owned()),
@@ -267,6 +269,20 @@ mod tests {
     use meta_harness_core::{Permissions, ScheduleKind};
 
     use super::{new_agent, rfc3339_millis, routine};
+
+    #[test]
+    fn a_flag_without_a_value_is_named_as_missing_only_when_it_is_known() {
+        let unknown = new_agent("bot", &["--bogus"]).unwrap_err();
+        assert!(
+            unknown.starts_with("meta agent create does not take --bogus"),
+            "{unknown}"
+        );
+        let missing = new_agent("bot", &["--project"]).unwrap_err();
+        assert!(
+            missing.starts_with("meta agent create misses a value after --project"),
+            "{missing}"
+        );
+    }
 
     #[test]
     fn an_agent_needs_a_project_and_a_model_and_asks_for_approval_by_default() {

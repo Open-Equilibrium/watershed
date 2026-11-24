@@ -287,6 +287,7 @@ pub(crate) fn install_service(home: PathBuf) -> Result<(), String> {
         .join(format!("meta{}", std::env::consts::EXE_SUFFIX));
     let plan = login::Plan::new(program, home, |name| std::env::var(name).ok())?;
     login::Manager::current()?.install(&plan, run_step)?;
+    println!("Installed the Meta-Harness login service.");
     if cfg!(target_os = "linux") && !lingering() {
         eprintln!(
             "meta: Meta-Harness stops when you log out. To keep it running, an administrator \
@@ -308,6 +309,7 @@ pub(crate) fn remove_login_service() -> Result<(), String> {
     for failure in login::Manager::current()?.uninstall(run_step)? {
         eprintln!("meta: warning: {failure}");
     }
+    println!("Removed the Meta-Harness login service.");
     Ok(())
 }
 
