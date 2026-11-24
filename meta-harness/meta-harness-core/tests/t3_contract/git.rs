@@ -21,7 +21,10 @@ async fn run(git: &remote::Git, action: GitAction, message: Option<&str>) -> Git
 async fn git_commits_branches_pushes_and_compares_branches_with_their_base_as_t3_does() {
     let (dir, repo, home) = fixture();
     let origin = dir.path().join("origin.git");
-    git(dir.path(), &["init", "-q", "--bare", "origin.git"]);
+    git(
+        dir.path(),
+        &["init", "-q", "--bare", "-b", "main", "origin.git"],
+    );
     git(
         &repo,
         &["remote", "add", "origin", &origin.to_string_lossy()],
