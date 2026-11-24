@@ -295,27 +295,42 @@ class FakeProject implements ProjectBackend {
   }
 
   @override
-  Future<String> agentRemove(String name) async {
-    calls.add('agent remove $name');
+  Future<String> agentRemove(String id) async {
+    calls.add('agent remove $id');
+    final agent = agentList.firstWhere((agent) => agent.id == id);
     agentList = [
-      for (final agent in agentList)
-        if (agent.name != name) agent,
+      for (final other in agentList)
+        if (other.id != id) other,
     ];
-    return '/home/agents/$name/memory';
+    return '/home/agents/${agent.name}/memory';
   }
 
   @override
   Future<BridgeAgent> agentUpdate(
-    String name, {
+    String id, {
     String? rename,
     BridgeModelChoice? model,
     BridgePermissions? permissions,
   }) async {
     calls.add(
-      'agent update $name rename=$rename model=${model?.model} '
+      'agent update $id rename=$rename model=${model?.model} '
       'permissions=${permissions?.name}',
     );
-    return agentList.firstWhere((agent) => agent.name == name);
+    final agent = agentList.firstWhere((agent) => agent.id == id);
+    final next = BridgeAgent(
+      id: agent.id,
+      name: rename ?? agent.name,
+      named: agent.named,
+      root: agent.root,
+      model: model ?? agent.model,
+      permissions: permissions ?? agent.permissions,
+      memory: agent.memory,
+      thread: agent.thread,
+      threads: agent.threads,
+      nextRunMs: agent.nextRunMs,
+    );
+    agentList = [for (final other in agentList) other.id == id ? next : other];
+    return next;
   }
 
   @override

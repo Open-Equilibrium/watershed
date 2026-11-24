@@ -292,6 +292,7 @@ void main() {
         'permissions=null',
       ),
     );
+    expect(project.agentList.single.name, 'morning-news');
 
     await tap(tester, find.byKey(const Key('add-routine')));
     await tap(tester, find.text('Webhook'));
