@@ -179,6 +179,30 @@ async fn an_open_stream_survives_a_reconnect_and_is_acknowledged_and_interrupted
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn closing_a_client_hangs_up_on_a_healthy_t3_and_ends_its_requests() {
+    let fake = Fake::start(|_, _, _| Vec::new()).await;
+    let client = fake.client().await;
+    let mut items = client.stream("subscribe", json!({})).await.unwrap();
+    let pending = spawn_call(&client, "slow");
+    fake.received("slow", 1).await;
+    client.close();
+    drop(client);
+    fake.hung_up(1).await;
+    assert!(
+        tokio::time::timeout(WAIT, items.recv())
+            .await
+            .expect("the stream ends")
+            .is_none()
+    );
+    tokio::time::timeout(WAIT, pending)
+        .await
+        .expect("the call ends")
+        .unwrap()
+        .unwrap_err();
+    assert_eq!(fake.connections(), 1, "a closed client does not reconnect");
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn a_closed_client_or_one_whose_t3_stays_gone_ends_its_streams_for_good() {
     let fake = Fake::start(|_, _, _| Vec::new()).await;
     let client = fake.client().await;
