@@ -55,6 +55,37 @@ async fn pairing_names_host_addresses_and_the_handshake_limit_are_checked_before
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn the_audit_log_names_a_remote_client_by_its_pairing_not_the_name_it_sends() {
+    let (dir, _repo, _home) = fixture();
+    let (_service, local) = start_service(&dir.path().join("meta")).await;
+    let port = remote_on_free(&local).await;
+    let url = format!("ws://127.0.0.1:{port}");
+    let code = local
+        .invite(ClientKind::Device, Access::Auto)
+        .await
+        .unwrap();
+    let paired = remote::pair(&url, &code, "phone").await.unwrap();
+    let remote = remote::Host::connect_to(&url, &paired.token, "impostor")
+        .await
+        .unwrap();
+    remote
+        .propose(
+            "Test first",
+            vec![Change::Instruction {
+                name: "rules".to_owned(),
+                text: Some("Run the tests.".to_owned()),
+            }],
+        )
+        .await
+        .unwrap();
+    let log = local.log().await.unwrap();
+    assert!(
+        !log.is_empty() && log.iter().all(|entry| entry.client == "phone"),
+        "{log:?}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn remote_access_refuses_port_zero_and_binds_a_busy_port_once_it_is_free() {
     let (dir, _repo, _home) = fixture();
     let meta = dir.path().join("meta");

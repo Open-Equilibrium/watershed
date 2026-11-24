@@ -387,7 +387,7 @@ async fn serve(
     let mut stopping = ends;
     let session = Arc::new(Session {
         shared,
-        client,
+        client: owner.clone().unwrap_or(client),
         caller,
         projects: Mutex::default(),
         threads: Mutex::default(),
