@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:liquid/src/agent/sidebar.dart';
 import 'package:liquid/src/rust/api/workspace.dart';
+import 'package:liquid/src/workspace/page_icon.dart';
 
 import 'page_kit.dart';
 
@@ -60,6 +61,20 @@ void main() {
     expect(
       tester.getTopLeft(find.byKey(const Key('page-title'))).dx,
       tester.getTopLeft(block(0)).dx,
+    );
+  });
+
+  testWidgets('without an icon the breadcrumb shows the plain Page symbol', (
+    tester,
+  ) async {
+    final kit = PageKit();
+    await kit.show(tester, const [TextPart('October')]);
+    expect(
+      find.descendant(
+        of: find.byKey(const Key('page-header')),
+        matching: find.byType(PageIcon),
+      ),
+      findsOneWidget,
     );
   });
 }

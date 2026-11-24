@@ -632,11 +632,8 @@ class _Breadcrumb extends StatelessWidget {
                 ),
                 child: Text('›', style: TextStyle(color: ws.textMuted)),
               ),
-              if (state.iconOf(open.page) case final icon
-                  when icon.isNotEmpty) ...[
-                PageIcon(icon, size: 14),
-                const SizedBox(width: WsMetrics.space2),
-              ],
+              PageIcon(state.iconOf(open.page), size: 14),
+              const SizedBox(width: WsMetrics.space2),
               Flexible(
                 child: Text(
                   title == null || title.isEmpty ? untitled : title,
