@@ -8,7 +8,7 @@ use tokio::net::TcpListener;
 use tokio::task::JoinHandle;
 
 use super::{Access, ClientInfo, fitted, printable, random};
-use crate::config::{Store, count, failed, now_ms, sql};
+use crate::store::{Store, count, failed, now_ms, sql};
 use crate::util::{TIMEOUT, hex, lock};
 use crate::{remote, t3, tunnel};
 
@@ -50,9 +50,9 @@ fn linked_host_from(row: LinkedHostRow) -> Result<LinkedHost, String> {
         address,
         token,
         access: Access::parse(&access)
-            .ok_or("The configuration store holds an unknown access level.")?,
+            .ok_or("The Meta-Harness store holds an unknown access level.")?,
         tunnel_port: u16::try_from(tunnel_port)
-            .map_err(|_| "The configuration store holds a bad tunnel port.")?,
+            .map_err(|_| "The Meta-Harness store holds a bad tunnel port.")?,
         linked_ms: linked_ms.map(count),
         client,
     })

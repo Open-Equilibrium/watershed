@@ -6,12 +6,12 @@ use std::time::Duration;
 use serde_json::Value;
 
 use super::{Session, Shared, to};
-use crate::config::{Store, now_ms};
 use crate::handoff::{self, TRANSCRIPT_BYTES};
 use crate::host::projects::settled;
 use crate::host_move::{
     self, Arrival, ArrivalRow, Departure, MoveFinish, MovePackage, MoveRecord, Saved,
 };
+use crate::store::{Store, now_ms};
 use crate::thread::TurnStatus;
 use crate::thread::move_out::Saving;
 use crate::util::until;
@@ -114,17 +114,9 @@ pub(super) async fn move_status(shared: &Shared, transfer: &str) -> Result<Arriv
         .run(transfer, async {
             let row = host_move::arrival(&shared.store.db(), transfer)?;
             Ok(match row {
-                Some(row) if row.state == "landed" => {
-                    let project = shared.host.project(Path::new(&row.root)).await?;
-                    if !project.is_listed(&row.thread).await? {
-                        return Ok(Arrival::Unknown);
-                    }
-                    if delivered(shared, &project, transfer).await? {
-                        Arrival::Landed { thread: row.thread }
-                    } else {
-                        Arrival::Starting
-                    }
-                }
+                Some(row) if row.state == "landed" => landed(shared, &row, transfer)
+                    .await?
+                    .unwrap_or(Arrival::Unknown),
                 Some(row) if row.state == "starting" => Arrival::Starting,
                 _ => Arrival::Unknown,
             })
@@ -137,17 +129,10 @@ pub(super) async fn move_abort(shared: &Shared, transfer: &str) -> Result<Arriva
         .transfers
         .run(transfer, async {
             let row = host_move::arrival(&shared.store.db(), transfer)?;
-            if let Some(landed) = row.as_ref().filter(|row| row.state == "landed") {
-                let project = shared.host.project(Path::new(&landed.root)).await?;
-                if project.is_listed(&landed.thread).await? {
-                    return Ok(if delivered(shared, &project, transfer).await? {
-                        Arrival::Landed {
-                            thread: landed.thread.clone(),
-                        }
-                    } else {
-                        Arrival::Starting
-                    });
-                }
+            if let Some(row) = row.as_ref().filter(|row| row.state == "landed")
+                && let Some(arrival) = landed(shared, row, transfer).await?
+            {
+                return Ok(arrival);
             }
             let refused = match row {
                 Some(row) => ArrivalRow {
@@ -167,6 +152,24 @@ pub(super) async fn move_abort(shared: &Shared, transfer: &str) -> Result<Arriva
             Ok(Arrival::Refused)
         })
         .await
+}
+
+async fn landed(
+    shared: &Shared,
+    row: &ArrivalRow,
+    transfer: &str,
+) -> Result<Option<Arrival>, String> {
+    let project = shared.host.project(Path::new(&row.root)).await?;
+    if !project.is_listed(&row.thread).await? {
+        return Ok(None);
+    }
+    Ok(Some(if delivered(shared, &project, transfer).await? {
+        Arrival::Landed {
+            thread: row.thread.clone(),
+        }
+    } else {
+        Arrival::Starting
+    }))
 }
 
 async fn withdraw(shared: &Shared, row: &ArrivalRow) -> Result<(), String> {

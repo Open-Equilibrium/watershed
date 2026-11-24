@@ -23,9 +23,10 @@ use crate::api::{
     self, Call, Checkout, ConfigCall, GitCall, HostCall, HostsCall, ProjectCall, Reply, Stream,
     ThreadCall,
 };
-use crate::config::{Homes, Proposed, Store, now_ms, provider_instances};
+use crate::config::{Homes, Proposed, provider_instances};
 use crate::host_move;
 use crate::hosts::{self, Links};
+use crate::store::{Store, now_ms};
 
 use crate::util::IDLE;
 use crate::{AcpAgent, Host, HostConfig, Project, Thread, Watch, tunnel};
@@ -258,34 +259,8 @@ fn take_lock(home: &Path) -> Result<std::fs::File, String> {
 }
 
 pub(crate) fn write_private(path: &Path, text: &str) -> Result<(), String> {
-    use std::io::Write;
-    let mut random = [0u8; 8];
-    getrandom::fill(&mut random).expect("the operating system provides random bytes");
-    let name = path.file_name().unwrap_or_default().to_string_lossy();
-    let temporary = path.with_file_name(format!(
-        ".{name}.{}.meta-harness-tmp",
-        crate::util::hex(&random)
-    ));
-    let mut options = std::fs::OpenOptions::new();
-    options.write(true).create_new(true);
-    #[cfg(unix)]
-    std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
-    let mut file = options
-        .open(&temporary)
-        .map_err(|e| format!("Could not write {}: {e}", temporary.display()))?;
-    let result = (|| {
-        #[cfg(windows)]
-        crate::platform::owner_only(&temporary, false)?;
-        file.write_all(text.as_bytes())
-            .and_then(|()| file.sync_all())
-            .map_err(|e| format!("Could not write {}: {e}", temporary.display()))?;
-        std::fs::rename(&temporary, path)
-            .map_err(|e| format!("Could not write {}: {e}", path.display()))
-    })();
-    if result.is_err() {
-        let _ = std::fs::remove_file(&temporary);
-    }
-    result
+    crate::platform::write_atomic(path, text.as_bytes(), true)
+        .map_err(|e| format!("Could not write {}: {e}", path.display()))
 }
 
 async fn relink(shared: Arc<Shared>) {

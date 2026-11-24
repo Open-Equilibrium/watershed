@@ -3,8 +3,8 @@ use tokio_tungstenite::tungstenite::http::StatusCode;
 
 use super::Shared;
 use crate::api::{self, Call, HostsCall};
-use crate::config::now_ms;
 use crate::hosts::{self, Access, ClientKind};
+use crate::store::now_ms;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum Listener {

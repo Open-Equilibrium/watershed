@@ -297,7 +297,12 @@ pub(super) async fn carry(
     let _serial = shared.agents.serial.lock().await;
     let agent = agents::of_thread(&shared.store.db(), &shared.home, thread.id())?;
     match agent {
-        Some(agent) => Ok(Some(agents::pack(&agent, thread.routine_tasks().await?)?)),
+        Some(agent) => {
+            let routines = thread.routine_tasks().await?;
+            Ok(Some(
+                blocking(move || agents::pack(&agent, routines)).await?,
+            ))
+        }
         None => Ok(None),
     }
 }
@@ -306,7 +311,7 @@ pub(super) async fn adopt(
     shared: &Arc<Shared>,
     root: &str,
     thread: &Thread,
-    carry: crate::agents::AgentCarry,
+    mut carry: crate::agents::AgentCarry,
 ) -> Result<(), String> {
     let _serial = shared.agents.serial.lock().await;
     let known = agents::of_thread(&shared.store.db(), &shared.home, thread.id())?;
@@ -332,7 +337,8 @@ pub(super) async fn adopt(
             thread.id(),
         )?,
     };
-    agents::unpack(&agent.memory, &carry.files)?;
+    let (memory, files) = (agent.memory.clone(), std::mem::take(&mut carry.files));
+    blocking(move || agents::unpack(&memory, &files)).await?;
     let mut routines = Vec::new();
     for routine in &carry.routines {
         routines.push(thread.save_routine(routine, false).await?);
@@ -808,4 +814,12 @@ fn idle(thread: &Thread) -> bool {
 
 fn filled(thread: &Thread) -> bool {
     idle(thread) && agents::full(thread.context())
+}
+
+async fn blocking<T: Send + 'static>(
+    work: impl FnOnce() -> Result<T, String> + Send + 'static,
+) -> Result<T, String> {
+    tokio::task::spawn_blocking(work)
+        .await
+        .map_err(|error| format!("The agent's memory could not be moved: {error}"))?
 }

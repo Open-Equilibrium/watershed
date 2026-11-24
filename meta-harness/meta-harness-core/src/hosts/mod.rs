@@ -5,7 +5,7 @@ use rusqlite::{Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use crate::config::failed;
+use crate::store::failed;
 use crate::util::hex;
 
 pub(crate) use links::Links;

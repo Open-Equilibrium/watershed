@@ -2,7 +2,7 @@ use rusqlite::{Connection, params};
 use serde::{Deserialize, Serialize};
 
 use super::{Access, ClientKind, digest, new_token, random, same};
-use crate::config::{count, failed, sql};
+use crate::store::{count, failed, sql};
 
 const CODE_TTL_MS: u64 = 5 * 60_000;
 
@@ -209,9 +209,9 @@ pub(crate) fn clients(db: &Connection) -> Result<Vec<ClientInfo>, String> {
         Ok(ClientInfo {
             name,
             kind: ClientKind::parse(&kind)
-                .ok_or("The configuration store holds an unknown client kind.")?,
+                .ok_or("The Meta-Harness store holds an unknown client kind.")?,
             access: Access::parse(&access)
-                .ok_or("The configuration store holds an unknown access level.")?,
+                .ok_or("The Meta-Harness store holds an unknown access level.")?,
             since_ms: count(since),
         })
     })
