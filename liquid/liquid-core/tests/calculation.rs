@@ -557,6 +557,19 @@ fn a_formula_field_computes_each_row_from_the_row_s_fields() {
 }
 
 #[test]
+fn a_formula_field_that_reads_its_own_column_stops_at_once() {
+    let mut home = Home::new();
+    let table = home.table.clone();
+    for _ in 0..4_000 {
+        home.row();
+    }
+    let share = home.field("Share", FieldKind::Formula);
+    home.set_formula(&share, format!("1 / SUM({{{table}.{share}}})"))
+        .unwrap();
+    assert_eq!(home.computed()[0][0].1, "#REF!");
+}
+
+#[test]
 fn a_tab_s_total_row_counts_the_rows_it_shows() {
     let mut home = Home::new();
     let (table, amount, page) = (home.table.clone(), home.amount.clone(), home.page.clone());
