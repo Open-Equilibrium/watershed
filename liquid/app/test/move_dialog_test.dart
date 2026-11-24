@@ -825,8 +825,8 @@ void main() {
       expect(model.picked, isNull);
       expect(
         moveButton(tester).onPressed,
-        isNotNull,
-        reason: 'Move stays available',
+        isNull,
+        reason: 'Move waits for a project to be chosen',
       );
     },
   );
@@ -916,16 +916,114 @@ void main() {
     },
   );
 
-  testWidgets('Use a project with no project picked moves as Clone to', (
-    tester,
-  ) async {
-    final model = await modelOf(projects: const []);
-    await tester.pumpWidget(dialogOf(model));
+  testWidgets(
+    'Use a project with no project picked keeps Move off and never clones',
+    (tester) async {
+      final model = await modelOf(projects: const []);
+      await tester.pumpWidget(dialogOf(model));
 
-    await tester.tap(find.text('Use a project'));
-    await tester.pump();
+      await tester.tap(find.text('Use a project'));
+      await tester.pump();
 
-    expect(model.plan?.cloneRemote, 'git@github.com:acme/api.git');
-    expect(moveButton(tester).onPressed, isNotNull);
-  });
+      expect(model.plan?.cloneRemote, isNull);
+      expect(moveButton(tester).onPressed, isNull);
+    },
+  );
+
+  test(
+    'a folder added to a project whose landing is blocked keeps Move off',
+    () async {
+      final target = FakeProject()
+        ..addedProject = const BridgeHostProject(
+          root: '/home/me/acme-api-copy',
+          title: 'acme-api-copy',
+          remoteUrl: 'git@github.com:acme/api.git',
+        );
+      final model = await modelOf(
+        projects: const [],
+        studioProject: target,
+        landings: const {
+          '/home/me/acme-api-copy': BridgeLanding(
+            kind: BridgeLandingKind.blocked,
+            reason: 'The branch has uncommitted changes there.',
+          ),
+        },
+      );
+
+      await model.addFolder('/home/me/acme-api-copy');
+
+      expect(model.chosenRoot, '/home/me/acme-api-copy');
+      expect(model.canMove, isFalse);
+      expect(model.blockedReason, 'The branch has uncommitted changes there.');
+    },
+  );
+
+  test(
+    'a folder added for a host that is no longer chosen is not listed',
+    () async {
+      final added = _SlowAddFolder()
+        ..addedProject = const BridgeHostProject(
+          root: '/home/me/acme-api-copy',
+          title: 'acme-api-copy',
+          remoteUrl: 'git@github.com:acme/api.git',
+        );
+      final model = MoveModel(
+        source: FakeProject()..moveCheckAnswer = moveCheckOf(),
+        sourceAddress: null,
+        threadId: 'thread-1',
+        sourceName: 'This Mac',
+        candidates: [
+          MoveCandidate(address: studio, name: 'studio', project: added),
+          MoveCandidate(
+            address: build,
+            name: 'build-box',
+            project: FakeProject(),
+          ),
+        ],
+        open: (address, root) async => FakeProject(),
+        running: <String>{},
+        started: <String>{},
+      );
+      await model.load();
+
+      final adding = model.addFolder('/home/me/acme-api-copy');
+      await model.select(
+        model.options.firstWhere(
+          (option) => option.candidate.name == 'build-box',
+        ),
+      );
+      added.gate.complete();
+      await adding;
+
+      expect(model.projects.map((project) => project.root), isEmpty);
+    },
+  );
+
+  test(
+    'a second start while a move runs is refused, and the first still moves',
+    () async {
+      final target = HeldProject();
+      final model = await modelOf(studioProject: target);
+
+      final first = model.start();
+      await expectLater(model.start(), throwsStateError);
+      target.gate.complete();
+      await first;
+
+      expect(
+        target.calls.where((call) => call.startsWith('move in')),
+        hasLength(1),
+      );
+    },
+  );
+}
+
+class _SlowAddFolder extends FakeProject {
+  final gate = Completer<void>();
+
+  @override
+  Future<BridgeHostProject> addProject(String root) async {
+    await gate.future;
+    return super.addProject(root);
+  }
 }

@@ -428,7 +428,8 @@ class MoveModel extends ChangeNotifier {
         matches.firstOrNull;
   }
 
-  String? get chosenRoot => (_picked ?? _preferredMatch)?.root;
+  String? get chosenRoot =>
+      (_picked ?? (_useProject ? null : _preferredMatch))?.root;
 
   BridgeLanding? landingOf(String root) => _landings[root];
 
@@ -446,11 +447,15 @@ class MoveModel extends ChangeNotifier {
   Future<void> addFolder(String root) async {
     final target = _selected?.candidate.project;
     if (target == null) return;
+    final turn = _selection;
     final project = await target.addProject(root);
+    final landings = await _landingsOf(target, [project]);
+    if (turn != _selection) return;
     _projects = [
       ..._projects.where((existing) => existing.root != project.root),
       project,
     ];
+    _landings.addAll(landings);
     notifyListeners();
   }
 
@@ -582,8 +587,10 @@ class MoveModel extends ChangeNotifier {
       uncommitted: check.uncommittedFiles,
       running: check.running,
       commit: _commit,
-      root: chosenRoot ?? _clonePath,
-      cloneRemote: picked == null && matches.isEmpty ? check.remoteUrl : null,
+      root: chosenRoot ?? (_useProject ? '' : _clonePath),
+      cloneRemote: !_useProject && picked == null && matches.isEmpty
+          ? check.remoteUrl
+          : null,
       bringing: _bringConfiguration && differences.isNotEmpty
           ? _configuration
           : null,
@@ -599,6 +606,9 @@ class MoveModel extends ChangeNotifier {
     if (_picked == null && matching.isEmpty && check.remoteUrl == null) {
       return noRemoteFilesReason;
     }
+    if (_useProject && _picked == null) {
+      return 'Choose a project on ${_selected!.candidate.name}.';
+    }
     final root = plan?.root;
     if (root != null && _blocked(root)) {
       return _landings[root]?.reason ?? 'This project cannot take the session.';
@@ -610,6 +620,7 @@ class MoveModel extends ChangeNotifier {
   }
 
   Future<SessionBackend> start() async {
+    if (_flow != null) throw StateError('The move has already started.');
     final plan = this.plan!;
     final target = _selected!.candidate;
     final flow = MoveFlow(
