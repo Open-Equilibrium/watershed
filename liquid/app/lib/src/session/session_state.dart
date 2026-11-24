@@ -84,6 +84,8 @@ class SessionState {
   );
 
   Timer? _recoveryTimer;
+  bool _recovering = false;
+  bool _recoverAgain = false;
 
   final moving = ValueNotifier<BridgeMoving?>(null);
 

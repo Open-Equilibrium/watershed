@@ -88,6 +88,22 @@ extension SessionMoves on SessionState {
   }
 
   Future<void> recoverMoves() async {
+    if (_recovering) {
+      _recoverAgain = true;
+      return;
+    }
+    _recovering = true;
+    try {
+      do {
+        _recoverAgain = false;
+        await _scanMoves();
+      } while (_recoverAgain);
+    } finally {
+      _recovering = false;
+    }
+  }
+
+  Future<void> _scanMoves() async {
     DateTime? wake;
     for (final listed in [...recent.value]) {
       final moving = listed.thread.moving;
