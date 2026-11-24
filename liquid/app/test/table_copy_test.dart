@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:liquid/src/rust/api/workspace.dart';
 import 'package:liquid/src/workspace/paste.dart';
+import 'package:liquid/src/workspace/workspace_state.dart';
 
 import 'page_kit.dart';
 
@@ -84,6 +85,45 @@ void main() {
       original.block,
     ]);
     expect(find.text('Pasted as a copy'), findsNothing);
+  });
+
+  Future<String> pasteOnEmptyPage(WidgetTester tester) async {
+    final area = kit.workspace.open.value!.area;
+    final trip = await kit.workspace.apply(
+      mutation(BridgeMutationKind.createPage, area: area, text: 'Trip'),
+    );
+    kit.workspace.open.value = OpenPage(area, trip.page!);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('first-line')));
+    await tester.pump();
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+    await key(tester, LogicalKeyboardKey.keyV);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+    await tester.pumpAndSettle();
+    return trip.page!;
+  }
+
+  testWidgets('⌘V in an empty Page pastes a copied Table, not its name', (
+    tester,
+  ) async {
+    await kit.show(tester, [TablePart(expenses)]);
+    await viewAction(tester, 'Copy');
+    await pasteOnEmptyPage(tester);
+    final pasted = kit.applied(BridgeMutationKind.duplicateTable).single;
+    expect(pasted.block, tables().single.block);
+    expect(pasted.after, isNull);
+    expect(find.text('Pasted as a copy'), findsOneWidget);
+    expect(kit.applied(BridgeMutationKind.addTextBlock), isEmpty);
+  });
+
+  testWidgets('⌘V in an empty Page pastes other text as text', (tester) async {
+    await kit.show(tester, [TablePart(expenses)]);
+    await viewAction(tester, 'Copy');
+    copied = 'Groceries';
+    change++;
+    final trip = await pasteOnEmptyPage(tester);
+    expect(kit.applied(BridgeMutationKind.duplicateTable), isEmpty);
+    expect(kit.fake.textsOf(trip), ['Groceries']);
   });
 
   testWidgets('the same text copied elsewhere later pastes as text', (

@@ -179,6 +179,26 @@ class PageViews extends ChangeNotifier {
     if (!_disposed) _settled.add(block);
   }
 
+  Future<bool> pasteCopy(CopiedView copied, String? after) async {
+    try {
+      final added = await write(
+        mutation(
+          BridgeMutationKind.duplicateTable,
+          page: page,
+          after: after,
+          block: copied.table,
+          text: '${copied.text} (copy)',
+          tabs: copied.tabs,
+        ),
+        const [],
+      );
+      pastedCopy.value = (view: added.view!, copied: copied);
+      return true;
+    } on Object {
+      return false;
+    }
+  }
+
   Future<BridgeApplied> write(
     BridgeMutation change,
     List<String> blocks, {

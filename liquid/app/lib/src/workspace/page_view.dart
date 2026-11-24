@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -18,6 +20,7 @@ import 'arrange_layout.dart' show arrangedWidth;
 import 'arranged_page.dart';
 import 'page_views.dart';
 import 'page_editor.dart';
+import 'paste.dart';
 import 'stored_name.dart';
 import 'table_block.dart';
 import 'text_block.dart';
@@ -67,14 +70,43 @@ class _WorkspacePageState extends State<WorkspacePage> implements EditorSource {
   final _first = TextEditingController();
   late final _firstFocus = FocusNode(
     debugLabel: 'First line',
-    onKeyEvent: (_, event) =>
-        event is KeyUpEvent ||
-            !_first.value.composing.isCollapsed ||
-            !_plain ||
-            !_views.editor.isSource(this)
-        ? KeyEventResult.ignored
-        : _views.editor.queue(this, event),
+    onKeyEvent: (_, event) {
+      final copied = widget.state.copiedView;
+      if (event is! KeyUpEvent &&
+          isPaste(event) &&
+          copied != null &&
+          _views.ready.value &&
+          !_views.editor.isSource(this)) {
+        widget.state.track(_pasteFirst(copied));
+        return KeyEventResult.handled;
+      }
+      return event is KeyUpEvent ||
+              !_first.value.composing.isCollapsed ||
+              !_plain ||
+              !_views.editor.isSource(this)
+          ? KeyEventResult.ignored
+          : _views.editor.queue(this, event);
+    },
   );
+
+  Future<void> _pasteFirst(CopiedView copied) async {
+    final Pasted pasted;
+    try {
+      pasted = await readClipboard();
+    } on Object catch (error) {
+      widget.state.report('Liquid could not read the clipboard: $error');
+      return;
+    }
+    if (!mounted) return;
+    if (copied.text == pasted.text && copied.change == pasted.change) {
+      if (await _views.pasteCopy(copied, null) || !mounted) return;
+      widget.state.copiedView = null;
+    }
+    final text = pasted.text;
+    final selection = _first.selection;
+    if (text == null || text.isEmpty || !selection.isValid) return;
+    _first.value = _first.value.replaced(selection, text);
+  }
 
   static bool get _plain {
     final keys = HardwareKeyboard.instance;
