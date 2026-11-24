@@ -266,6 +266,86 @@ void main() {
     await tester.pump(const Duration(seconds: 6));
   });
 
+  testWidgets('a large number condition is shown without clamping to the '
+      'integer range', (tester) async {
+    final kit = PageKit();
+    final table = await showBudget(tester, kit);
+    kit.fake.automations.add(
+      automationOf(
+        table,
+        BridgeAutomationSetup(
+          name: 'Flag large expenses',
+          trigger: BridgeTrigger(
+            kind: BridgeTriggerKind.fieldChanged,
+            table: table,
+            field: 'amount',
+          ),
+          conditions: [
+            BridgeFilter(
+              field: 'amount',
+              matches: BridgeMatch.above,
+              value: cell(BridgeCellKind.number, number: 1e20),
+            ),
+          ],
+          steps: const [],
+        ),
+      ),
+    );
+    await turnOn(tester, kit);
+    await openAutomations(tester);
+    await tap(tester, find.text('Flag large expenses'));
+    final shown = tester
+        .widget<EditableText>(
+          find.descendant(
+            of: find.byKey(const Key('value 0')),
+            matching: find.byType(EditableText),
+          ),
+        )
+        .controller
+        .text;
+    expect(double.tryParse(shown), 1e20);
+  });
+
+  testWidgets('a date that does not exist is refused, not moved to the next '
+      'day', (tester) async {
+    final kit = PageKit();
+    final table = await showBudget(tester, kit);
+    kit.fake.automations.add(
+      automationOf(
+        table,
+        BridgeAutomationSetup(
+          name: 'Due soon',
+          trigger: BridgeTrigger(
+            kind: BridgeTriggerKind.fieldChanged,
+            table: table,
+            field: 'date',
+          ),
+          conditions: [
+            BridgeFilter(
+              field: 'date',
+              matches: BridgeMatch.is_,
+              value: cell(BridgeCellKind.date, text: '2026-11-01'),
+            ),
+          ],
+          steps: const [],
+        ),
+      ),
+    );
+    await turnOn(tester, kit);
+    await openAutomations(tester);
+    await tap(tester, find.text('Due soon'));
+    await tester.enterText(find.byKey(const Key('value 0')), '2026-02-30');
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await tester.pumpAndSettle();
+    expect(kit.applied(BridgeMutationKind.setAutomation), isEmpty);
+    expectOne(find.text('Type a date as 2026-11-30.'));
+
+    await tester.enterText(find.byKey(const Key('value 0')), '2026-02-28');
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await tester.pumpAndSettle();
+    expect(lastSetup(kit).conditions.single.value?.text, '2026-02-28');
+  });
+
   testWidgets('moving the trigger to another Table keeps a notification, '
       'its fields named as text', (tester) async {
     final kit = PageKit();

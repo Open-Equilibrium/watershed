@@ -17,15 +17,20 @@ extension _ValueEditing on _AutomationEditorState {
       null => null,
     },
     BridgeFieldKind.date => switch (DateTime.tryParse(typed.trim())) {
-      final day? => _cell(BridgeCellKind.date, text: _day.format(day)),
-      null => null,
+      final day? when _day.format(day) == typed.trim() => _cell(
+        BridgeCellKind.date,
+        text: _day.format(day),
+      ),
+      _ => null,
     },
     _ => _cell(BridgeCellKind.text, text: typed),
   };
 
   String _cellText(BridgeCell? cell) => switch (cell?.kind) {
     BridgeCellKind.number when cell!.number == cell.number.truncateToDouble() =>
-      cell.number.toInt().toString(),
+      cell.number.isFinite
+          ? BigInt.from(cell.number).toString()
+          : cell.number.toString(),
     BridgeCellKind.number => cell!.number.toString(),
     BridgeCellKind.text || BridgeCellKind.date => cell!.text ?? '',
     _ => '',
