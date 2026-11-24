@@ -524,4 +524,23 @@ void main() {
     await tester.pumpAndSettle();
     expect(kit.fake.textsOf(kit.page), ['Intro', 'Keep this', 'After']);
   });
+
+  for (final (name, typed, kind) in [
+    ('a Code shortcut', '```', BridgeBlockKind.code),
+    ('a Math shortcut', r'$$', BridgeBlockKind.math),
+  ]) {
+    testWidgets('$name typed while the first block is added converts it', (
+      tester,
+    ) async {
+      await show(tester, []);
+      kit.fake
+        ..gate = Completer()
+        ..gatedKinds = {BridgeMutationKind.addTextBlock};
+      await tester.enterText(find.byKey(const Key('first-line')), typed);
+      await tester.pump();
+      kit.fake.gate!.complete();
+      await tester.pumpAndSettle();
+      expect(kinds(), [kind]);
+    });
+  }
 }
