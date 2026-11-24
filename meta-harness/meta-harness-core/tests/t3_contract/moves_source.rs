@@ -474,3 +474,44 @@ async fn a_departure_with_another_sessions_preparing_transfer_changes_no_session
     ran(&owner, "append one").await;
     service.stop().await;
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_branch_switched_while_the_move_pushes_makes_the_move_race() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = tempdir::Dir::new();
+    let (origin, url) = shared_remote(dir.path());
+    let repo = clone_project(dir.path(), &origin, &url, "a");
+    let (service, host) = start_codex(&dir.path().join("host-a")).await;
+    pushed_branch(&repo, "feature/raced");
+    let hook = origin.join("hooks/pre-receive");
+    std::fs::write(
+        &hook,
+        "#!/bin/sh\ncat >/dev/null\ntouch push-started\nfor i in $(seq 600); do [ -e push-go ] && break; sleep 0.1; done\n",
+    )
+    .unwrap();
+    std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let project = host.project(&repo).await.unwrap();
+    let thread = appended(&project).await;
+    let moving = tokio::spawn({
+        let thread = thread.clone();
+        async move { move_out(&thread, &transfer(), Some("Append")).await }
+    });
+    tokio::time::timeout(Duration::from_secs(60), async {
+        while !origin.join("push-started").exists() {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    })
+    .await
+    .expect("the push reaches the origin");
+    git(&repo, &["checkout", "-q", "-b", "other"]);
+    std::fs::write(origin.join("push-go"), "").unwrap();
+    let raced = moving
+        .await
+        .unwrap()
+        .expect_err("a move whose branch changed returns no package");
+    assert!(
+        raced.contains("The session changed while the move started"),
+        "{raced}"
+    );
+    service.stop().await;
+}
