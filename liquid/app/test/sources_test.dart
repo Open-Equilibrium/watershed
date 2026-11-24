@@ -1,5 +1,7 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -7,6 +9,7 @@ import 'package:liquid/src/agent/sidebar.dart';
 import 'package:liquid/src/rust/api/chart.dart';
 import 'package:liquid/src/rust/api/source.dart';
 import 'package:liquid/src/rust/api/workspace.dart';
+import 'package:liquid/src/workspace/pdf_pages.dart';
 import 'package:liquid/src/workspace/source_page.dart';
 import 'package:liquid/src/workspace/workspace_state.dart';
 
@@ -38,6 +41,11 @@ BridgeSourceFile text(String name, String content) => BridgeSourceFile(
 
 BridgeFileEntry entry(String name, {bool folder = false}) =>
     BridgeFileEntry(name: name, folder: folder, size: BigInt.from(2048));
+
+final receiptPng = base64Decode(
+  'iVBORw0KGgoAAAANSUhEUgAAACgAAAAeCAIAAADRv8uKAAAAK0lEQVR4nO3NMQ0AAAgDsMlBNnKQ'
+  'hQw4mvRvputExGKxWCwWi8VisVj8N158a1NqSEcsCQAAAABJRU5ErkJggg==',
+);
 
 Finder inSidebar(String text) =>
     find.descendant(of: find.byType(Sidebar), matching: find.text(text));
@@ -206,6 +214,63 @@ void main() {
     await settle(tester);
     expect(kit.fake.sourceList.values.single, isEmpty);
     expect(inSidebar('gone.csv'), findsNothing);
+  });
+
+  testWidgets('an image Source shows the bytes Liquid read for it', (
+    tester,
+  ) async {
+    const path = '/Users/benni/Pictures/receipt.png';
+    SourcePlatform.pickFile = () async => path;
+    await kit.show(tester, const [TextPart('October')]);
+    kit.fake.sourceFiles[(path, '')] = BridgeSourceFile(
+      read: BridgeRead.read,
+      name: 'receipt.png',
+      path: path,
+      size: BigInt.from(receiptPng.length),
+      shown: BridgeFileView.image,
+      columns: const [],
+      rows: const [],
+      bytes: receiptPng,
+    );
+    await addFrom(tester, 'add source file');
+
+    final image = tester.widget<Image>(
+      inSource(find.byKey(const Key('source image'))),
+    );
+    expect(image.image, isA<MemoryImage>());
+    expect((image.image as MemoryImage).bytes, receiptPng);
+  });
+
+  testWidgets('a PDF Source opens the bytes Liquid read for it', (
+    tester,
+  ) async {
+    const path = '/Users/benni/Documents/offer.pdf';
+    SourcePlatform.pickFile = () async => path;
+    await kit.show(tester, const [TextPart('October')]);
+    final pdf = Uint8List.fromList('%PDF-1.4 offer'.codeUnits);
+    Uint8List? opened;
+    PdfPages.opener = (bytes) async {
+      opened = bytes;
+      return PdfPages(
+        const [],
+        (index, width) async => throw UnimplementedError(),
+        () async {},
+      );
+    };
+    kit.fake.sourceFiles[(path, '')] = BridgeSourceFile(
+      read: BridgeRead.read,
+      name: 'offer.pdf',
+      path: path,
+      size: BigInt.from(pdf.length),
+      shown: BridgeFileView.pdf,
+      columns: const [],
+      rows: const [],
+      bytes: pdf,
+    );
+    await addFrom(tester, 'add source file');
+
+    expect(opened, pdf);
+    expect(inSource(find.byKey(const Key('source pdf'))), findsOneWidget);
   });
 
   testWidgets('a Chart offers CSV Sources as its data and their columns for '

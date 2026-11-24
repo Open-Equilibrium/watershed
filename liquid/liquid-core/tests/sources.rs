@@ -273,6 +273,37 @@ fn a_folder_source_shows_its_files_and_nothing_outside_it() {
 }
 
 #[test]
+fn an_image_or_pdf_source_comes_with_the_bytes_read_for_it() {
+    let folder = Folder::new("media");
+    folder.write("docs/receipt.png", "png bytes");
+    folder.write("docs/offer.pdf", "pdf bytes");
+    let mut private = Private::new();
+    let source = private.add(&folder.0.join("docs"));
+    assert_eq!(
+        private.file(&source, "receipt.png"),
+        Shown::Image(b"png bytes".to_vec())
+    );
+    assert_eq!(
+        private.file(&source, "offer.pdf"),
+        Shown::Pdf(b"pdf bytes".to_vec())
+    );
+    let huge = folder.write("docs/huge.pdf", "");
+    std::fs::File::options()
+        .write(true)
+        .open(&huge)
+        .unwrap()
+        .set_len(liquid_core::MAX_SOURCE_FILE + 1)
+        .unwrap();
+    assert_eq!(
+        private
+            .workspace
+            .source_file(&source, "huge.pdf")
+            .unwrap_err(),
+        Error::TooLarge
+    );
+}
+
+#[test]
 fn a_file_past_50_mib_is_refused_and_a_moved_file_is_located_again() {
     let folder = Folder::new("large");
     let path = folder.write("big.txt", "");

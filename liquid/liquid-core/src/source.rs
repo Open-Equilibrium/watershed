@@ -69,8 +69,8 @@ pub struct SourceTable {
 pub enum Shown {
     Table(SourceTable),
     Text(String),
-    Image,
-    Pdf,
+    Image(Vec<u8>),
+    Pdf(Vec<u8>),
     Other,
 }
 
@@ -257,9 +257,11 @@ fn shown(path: &Path, size: u64) -> Result<Shown, Error> {
     Ok(match extension.as_str() {
         "csv" | "tsv" => Shown::Table(table(&text(path)?, extension == "tsv")),
         "txt" | "md" | "markdown" => Shown::Text(text(path)?),
-        "png" | "jpg" | "jpeg" | "gif" | "webp" | "heic" if size <= MAX_SOURCE_FILE => Shown::Image,
-        "pdf" if size <= MAX_SOURCE_FILE => Shown::Pdf,
-        "png" | "jpg" | "jpeg" | "gif" | "webp" | "heic" | "pdf" => return Err(Error::TooLarge),
+        "png" | "jpg" | "jpeg" | "gif" | "webp" | "heic" | "pdf" if size > MAX_SOURCE_FILE => {
+            return Err(Error::TooLarge);
+        }
+        "png" | "jpg" | "jpeg" | "gif" | "webp" | "heic" => Shown::Image(read_capped(path)?),
+        "pdf" => Shown::Pdf(read_capped(path)?),
         _ => Shown::Other,
     })
 }

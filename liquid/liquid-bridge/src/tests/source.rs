@@ -6,6 +6,28 @@ use crate::api::workspace::{
 };
 
 #[test]
+fn an_image_source_crosses_the_bridge_with_the_bytes_read_for_it() {
+    let (folder, workspace) = open("source-image");
+    let (area, ..) = lisbon(&workspace);
+    let files = folder.0.join("files");
+    std::fs::create_dir_all(&files).unwrap();
+    std::fs::write(files.join("receipt.png"), b"png bytes").unwrap();
+    std::fs::write(files.join("notes.md"), "# Notes").unwrap();
+    let dir = workspace
+        .add_source(area, None, files.to_str().unwrap().into())
+        .unwrap();
+    let image = workspace
+        .source_file(dir.clone(), "receipt.png".into())
+        .unwrap();
+    assert_eq!(
+        (image.shown, image.bytes.as_deref()),
+        (BridgeFileView::Image, Some(&b"png bytes"[..]))
+    );
+    let notes = workspace.source_file(dir, "notes.md".into()).unwrap();
+    assert_eq!(notes.bytes, None);
+}
+
+#[test]
 fn a_source_crosses_the_bridge_and_feeds_a_chart() {
     let (folder, workspace) = open("source");
     let (area, page, _, view) = lisbon(&workspace);

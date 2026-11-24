@@ -69,6 +69,7 @@ pub struct BridgeSourceFile {
     pub columns: Vec<BridgeColumn>,
     pub rows: Vec<Vec<String>>,
     pub text: Option<String>,
+    pub bytes: Option<Vec<u8>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -223,6 +224,7 @@ impl LiquidWorkspace {
             columns: Vec::new(),
             rows: Vec::new(),
             text: None,
+            bytes: None,
         };
         let file = match root.and_then(|root| liquid_core::read_source(&root, &inside)) {
             Ok(file) => file,
@@ -253,8 +255,14 @@ impl LiquidWorkspace {
                 answer.text = Some(text);
                 BridgeFileView::Text
             }
-            Shown::Image => BridgeFileView::Image,
-            Shown::Pdf => BridgeFileView::Pdf,
+            Shown::Image(bytes) => {
+                answer.bytes = Some(bytes);
+                BridgeFileView::Image
+            }
+            Shown::Pdf(bytes) => {
+                answer.bytes = Some(bytes);
+                BridgeFileView::Pdf
+            }
             Shown::Other => BridgeFileView::Other,
         };
         Ok(answer)

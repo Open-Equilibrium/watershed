@@ -534,10 +534,10 @@ class _SourcePageState extends State<SourcePage> {
         );
       case BridgeFileView.image:
         children.add(
-          Image.file(File(shown.path), key: const Key('source image')),
+          Image.memory(shown.bytes!, key: const Key('source image')),
         );
       case BridgeFileView.pdf:
-        children.add(SourcePdf(key: ValueKey(shown.path), path: shown.path));
+        children.add(SourcePdf(key: ValueKey(shown.path), bytes: shown.bytes!));
       case BridgeFileView.other:
         children.add(
           SourceCard(

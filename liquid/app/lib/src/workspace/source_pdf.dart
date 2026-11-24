@@ -1,5 +1,5 @@
 import 'dart:async';
-import 'dart:io';
+import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
@@ -9,9 +9,9 @@ import '../theme/tokens.g.dart';
 import 'pdf_pages.dart';
 
 class SourcePdf extends StatefulWidget {
-  const SourcePdf({super.key, required this.path});
+  const SourcePdf({super.key, required this.bytes});
 
-  final String path;
+  final Uint8List bytes;
 
   @override
   State<SourcePdf> createState() => _PdfSourceState();
@@ -30,7 +30,7 @@ class _PdfSourceState extends State<SourcePdf> {
 
   Future<void> _open() async {
     try {
-      final pdf = await PdfPages.open(await File(widget.path).readAsBytes());
+      final pdf = await PdfPages.open(widget.bytes);
       if (!mounted) {
         await pdf.close();
         return;

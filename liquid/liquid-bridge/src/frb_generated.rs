@@ -10405,6 +10405,7 @@ impl SseDecode for crate::api::source::BridgeSourceFile {
         let mut var_columns = <Vec<crate::api::source::BridgeColumn>>::sse_decode(deserializer);
         let mut var_rows = <Vec<Vec<String>>>::sse_decode(deserializer);
         let mut var_text = <Option<String>>::sse_decode(deserializer);
+        let mut var_bytes = <Option<Vec<u8>>>::sse_decode(deserializer);
         return crate::api::source::BridgeSourceFile {
             read: var_read,
             name: var_name,
@@ -10415,6 +10416,7 @@ impl SseDecode for crate::api::source::BridgeSourceFile {
             columns: var_columns,
             rows: var_rows,
             text: var_text,
+            bytes: var_bytes,
         };
     }
 }
@@ -12336,6 +12338,17 @@ impl SseDecode for Option<Vec<String>> {
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
         if (<bool>::sse_decode(deserializer)) {
             return Some(<Vec<String>>::sse_decode(deserializer));
+        } else {
+            return None;
+        }
+    }
+}
+
+impl SseDecode for Option<Vec<u8>> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        if (<bool>::sse_decode(deserializer)) {
+            return Some(<Vec<u8>>::sse_decode(deserializer));
         } else {
             return None;
         }
@@ -16448,6 +16461,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::source::BridgeSourceFile {
             self.columns.into_into_dart().into_dart(),
             self.rows.into_into_dart().into_dart(),
             self.text.into_into_dart().into_dart(),
+            self.bytes.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -19358,6 +19372,7 @@ impl SseEncode for crate::api::source::BridgeSourceFile {
         <Vec<crate::api::source::BridgeColumn>>::sse_encode(self.columns, serializer);
         <Vec<Vec<String>>>::sse_encode(self.rows, serializer);
         <Option<String>>::sse_encode(self.text, serializer);
+        <Option<Vec<u8>>>::sse_encode(self.bytes, serializer);
     }
 }
 
@@ -20850,6 +20865,16 @@ impl SseEncode for Option<Vec<String>> {
         <bool>::sse_encode(self.is_some(), serializer);
         if let Some(value) = self {
             <Vec<String>>::sse_encode(value, serializer);
+        }
+    }
+}
+
+impl SseEncode for Option<Vec<u8>> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <bool>::sse_encode(self.is_some(), serializer);
+        if let Some(value) = self {
+            <Vec<u8>>::sse_encode(value, serializer);
         }
     }
 }
