@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -45,6 +46,29 @@ BridgeFileEntry entry(String name, {bool folder = false}) =>
 final receiptPng = base64Decode(
   'iVBORw0KGgoAAAANSUhEUgAAACgAAAAeCAIAAADRv8uKAAAAK0lEQVR4nO3NMQ0AAAgDsMlBNnKQ'
   'hQw4mvRvputExGKxWCwWi8VisVj8N158a1NqSEcsCQAAAABJRU5ErkJggg==',
+);
+
+Future<ui.Image> pixel(WidgetTester tester) async => (await tester.runAsync(() {
+  final drawn = Completer<ui.Image>();
+  ui.decodeImageFromPixels(
+    Uint8List.fromList(List.filled(4 * 4, 255)),
+    2,
+    2,
+    ui.PixelFormat.rgba8888,
+    drawn.complete,
+  );
+  return drawn.future;
+}))!;
+
+BridgeSourceFile pdfFile(String path, Uint8List bytes) => BridgeSourceFile(
+  read: BridgeRead.read,
+  name: path.split('/').last,
+  path: path,
+  size: BigInt.from(bytes.length),
+  shown: BridgeFileView.pdf,
+  columns: const [],
+  rows: const [],
+  bytes: bytes,
 );
 
 Finder inSidebar(String text) =>
@@ -304,5 +328,78 @@ void main() {
     await tester.tap(find.text('None').first);
     await settle(tester);
     expect(find.text('Date'), findsWidgets);
+  });
+
+  testWidgets('a folder with many entries builds only the rows on screen', (
+    tester,
+  ) async {
+    const path = '/Users/benni/archive';
+    SourcePlatform.pickFolder = () async => path;
+    await kit.show(tester, const [TextPart('October')]);
+    kit.fake.sourceFolders[(path, '')] = [
+      for (var n = 0; n < 2000; n++) entry('file-$n.txt'),
+    ];
+    await addFrom(tester, 'add source folder');
+    await settle(tester);
+
+    expect(
+      inSource(find.byKey(const ValueKey('source entry file-0.txt'))),
+      findsOneWidget,
+    );
+    expect(
+      inSource(find.byKey(const ValueKey('source entry file-1999.txt'))),
+      findsNothing,
+    );
+  });
+
+  testWidgets('a long PDF renders only the pages near the view', (
+    tester,
+  ) async {
+    const path = '/Users/benni/Documents/long.pdf';
+    SourcePlatform.pickFile = () async => path;
+    await kit.show(tester, const [TextPart('October')]);
+    final image = await pixel(tester);
+    final rendered = <int>[];
+    PdfPages.opener = (_) async =>
+        PdfPages(List.filled(100, const Size(595, 842)), (index, width) async {
+          rendered.add(index);
+          return image.clone();
+        }, () async {});
+    kit.fake.sourceFiles[(path, '')] = pdfFile(
+      path,
+      Uint8List.fromList('%PDF-1.4 long'.codeUnits),
+    );
+    await addFrom(tester, 'add source file');
+    await settle(tester);
+
+    expect(rendered, contains(0));
+    expect(rendered.length, lessThan(10));
+  });
+
+  testWidgets('a page rendered after its Source closed is released', (
+    tester,
+  ) async {
+    const path = '/Users/benni/Documents/offer.pdf';
+    SourcePlatform.pickFile = () async => path;
+    await kit.show(tester, const [TextPart('October')]);
+    final rendered = Completer<ui.Image>();
+    PdfPages.opener = (_) async => PdfPages(
+      const [Size(595, 842)],
+      (index, width) => rendered.future,
+      () async {},
+    );
+    kit.fake.sourceFiles[(path, '')] = pdfFile(
+      path,
+      Uint8List.fromList('%PDF-1.4 offer'.codeUnits),
+    );
+    await addFrom(tester, 'add source file');
+    kit.workspace.open.value = OpenPage(kit.fake.areas.single.id, kit.page);
+    await settle(tester);
+
+    final image = await pixel(tester);
+    rendered.complete(image);
+    await tester.pump();
+
+    expect(image.debugDisposed, isTrue);
   });
 }

@@ -474,17 +474,19 @@ class _SourcePageState extends State<SourcePage> {
     if (folder != null) {
       children
         ..add(
-          SourceListing(
-            entries: folder.entries,
-            inside: _inside,
-            onOpen: _open,
+          Expanded(
+            child: SourceListing(
+              entries: folder.entries,
+              inside: _inside,
+              onOpen: _open,
+            ),
           ),
         )
         ..add(const SizedBox(height: WsMetrics.space3))
         ..add(
           Text('Liquid reads this folder and never writes it.', style: caption),
         );
-      return _column(children);
+      return _column(children, fill: true);
     }
     final shown = file!;
     void launch() => unawaited(_launch(shown.path));
@@ -538,7 +540,12 @@ class _SourcePageState extends State<SourcePage> {
           Image.memory(shown.bytes!, key: const Key('source image')),
         );
       case BridgeFileView.pdf:
-        children.add(SourcePdf(key: ValueKey(shown.path), bytes: shown.bytes!));
+        children.add(
+          Expanded(
+            child: SourcePdf(key: ValueKey(shown.path), bytes: shown.bytes!),
+          ),
+        );
+        return _column(children, fill: true);
       case BridgeFileView.other:
         children.add(
           SourceCard(
@@ -560,14 +567,14 @@ class _SourcePageState extends State<SourcePage> {
     ].join(', ');
   }
 
-  Widget _column(List<Widget> children) => SingleChildScrollView(
-    padding: const EdgeInsets.fromLTRB(
+  Widget _column(List<Widget> children, {bool fill = false}) {
+    const padding = EdgeInsets.fromLTRB(
       WsMetrics.space7,
       28,
       WsMetrics.space7,
       WsMetrics.space8,
-    ),
-    child: Center(
+    );
+    final column = Center(
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: WsMetrics.widthReading),
         child: Column(
@@ -575,8 +582,11 @@ class _SourcePageState extends State<SourcePage> {
           children: children,
         ),
       ),
-    ),
-  );
+    );
+    return fill
+        ? Padding(padding: padding, child: column)
+        : SingleChildScrollView(padding: padding, child: column);
+  }
 
   Widget _missing(BuildContext context, BridgeSource entry) {
     final ws = context.ws;

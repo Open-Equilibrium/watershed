@@ -19,7 +19,6 @@ class SourcePdf extends StatefulWidget {
 
 class _PdfSourceState extends State<SourcePdf> {
   PdfPages? _pdf;
-  final _pages = <int, ui.Image>{};
   bool _failed = false;
 
   @override
@@ -36,11 +35,6 @@ class _PdfSourceState extends State<SourcePdf> {
         return;
       }
       setState(() => _pdf = pdf);
-      for (var at = 0; at < pdf.sizes.length && mounted; at++) {
-        final image = await pdf.render(at, 1400);
-        if (!mounted) return;
-        setState(() => _pages[at] = image);
-      }
     } on Object {
       if (mounted) setState(() => _failed = true);
     }
@@ -49,9 +43,6 @@ class _PdfSourceState extends State<SourcePdf> {
   @override
   void dispose() {
     unawaited(_pdf?.close());
-    for (final image in _pages.values) {
-      image.dispose();
-    }
     super.dispose();
   }
 
@@ -66,18 +57,72 @@ class _PdfSourceState extends State<SourcePdf> {
     }
     final pdf = _pdf;
     if (pdf == null) return const SizedBox(height: 200);
-    return Column(
+    return ListView.builder(
       key: const Key('source pdf'),
-      spacing: WsMetrics.space3,
-      children: [
-        for (final (at, size) in pdf.sizes.indexed)
-          AspectRatio(
-            aspectRatio: size.width / size.height,
-            child: _pages[at] == null
-                ? ColoredBox(color: ws.subtle)
-                : RawImage(image: _pages[at], fit: BoxFit.contain),
-          ),
-      ],
+      itemCount: pdf.sizes.length,
+      itemBuilder: (context, at) => Padding(
+        padding: const EdgeInsets.only(bottom: WsMetrics.space3),
+        child: _PdfPage(
+          pdf: pdf,
+          at: at,
+          size: pdf.sizes[at],
+          onFailed: () => setState(() => _failed = true),
+        ),
+      ),
     );
   }
+}
+
+class _PdfPage extends StatefulWidget {
+  const _PdfPage({
+    required this.pdf,
+    required this.at,
+    required this.size,
+    required this.onFailed,
+  });
+
+  final PdfPages pdf;
+  final int at;
+  final ui.Size size;
+  final VoidCallback onFailed;
+
+  @override
+  State<_PdfPage> createState() => _PdfPageState();
+}
+
+class _PdfPageState extends State<_PdfPage> {
+  ui.Image? _image;
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(_render());
+  }
+
+  Future<void> _render() async {
+    try {
+      final image = await widget.pdf.render(widget.at, 1400);
+      if (!mounted) {
+        image.dispose();
+        return;
+      }
+      setState(() => _image = image);
+    } on Object {
+      if (mounted) widget.onFailed();
+    }
+  }
+
+  @override
+  void dispose() {
+    _image?.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => AspectRatio(
+    aspectRatio: widget.size.width / widget.size.height,
+    child: _image == null
+        ? ColoredBox(color: context.ws.subtle)
+        : RawImage(image: _image, fit: BoxFit.contain),
+  );
 }

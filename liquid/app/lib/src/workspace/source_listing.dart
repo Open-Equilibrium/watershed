@@ -55,56 +55,66 @@ class SourceListing extends StatelessWidget {
             const SizedBox(width: WsMetrics.space4),
             SizedBox(width: 80, child: Text('Modified', style: faint)),
           ]),
-          if (entries.isEmpty)
-            Padding(
-              padding: const EdgeInsets.all(WsMetrics.space4),
-              child: Text('This folder is empty.', style: faint),
-            ),
-          for (final entry in entries)
-            row(
-              key: ValueKey('source entry ${entry.name}'),
-              onTap: () =>
-                  onOpen(inside.isEmpty ? entry.name : '$inside/${entry.name}'),
-              [
-                Icon(
-                  sourceIcon(entry.name, folder: entry.folder),
-                  size: 14,
-                  color: ws.textFaint,
-                ),
-                const SizedBox(width: WsMetrics.space2),
-                Expanded(
-                  child: Text(
-                    entry.name,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-                SizedBox(
-                  width: 110,
-                  child: Text(entry.folder ? 'Folder' : kindOf(entry.name)),
-                ),
-                SizedBox(
-                  width: 90,
-                  child: Text(
-                    entry.folder ? '—' : fileSize(entry.size.toInt()),
-                    textAlign: TextAlign.right,
-                  ),
-                ),
-                const SizedBox(width: WsMetrics.space4),
-                SizedBox(
-                  width: 80,
-                  child: Text(
-                    entry.modified == null
-                        ? ''
-                        : day.format(
-                            DateTime.fromMillisecondsSinceEpoch(
-                              entry.modified!.toInt(),
+          Expanded(
+            child: entries.isEmpty
+                ? Padding(
+                    padding: const EdgeInsets.all(WsMetrics.space4),
+                    child: Text('This folder is empty.', style: faint),
+                  )
+                : ListView.builder(
+                    itemCount: entries.length,
+                    itemBuilder: (context, at) {
+                      final entry = entries[at];
+                      return row(
+                        key: ValueKey('source entry ${entry.name}'),
+                        onTap: () => onOpen(
+                          inside.isEmpty ? entry.name : '$inside/${entry.name}',
+                        ),
+                        [
+                          Icon(
+                            sourceIcon(entry.name, folder: entry.folder),
+                            size: 14,
+                            color: ws.textFaint,
+                          ),
+                          const SizedBox(width: WsMetrics.space2),
+                          Expanded(
+                            child: Text(
+                              entry.name,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
                             ),
                           ),
+                          SizedBox(
+                            width: 110,
+                            child: Text(
+                              entry.folder ? 'Folder' : kindOf(entry.name),
+                            ),
+                          ),
+                          SizedBox(
+                            width: 90,
+                            child: Text(
+                              entry.folder ? '—' : fileSize(entry.size.toInt()),
+                              textAlign: TextAlign.right,
+                            ),
+                          ),
+                          const SizedBox(width: WsMetrics.space4),
+                          SizedBox(
+                            width: 80,
+                            child: Text(
+                              entry.modified == null
+                                  ? ''
+                                  : day.format(
+                                      DateTime.fromMillisecondsSinceEpoch(
+                                        entry.modified!.toInt(),
+                                      ),
+                                    ),
+                            ),
+                          ),
+                        ],
+                      );
+                    },
                   ),
-                ),
-              ],
-            ),
+          ),
         ],
       ),
     );
