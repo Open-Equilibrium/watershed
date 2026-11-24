@@ -413,3 +413,24 @@ fn a_semicolon_csv_reads_commas_as_decimal_marks() {
         chart.points
     );
 }
+
+#[test]
+fn a_semicolon_csv_with_commas_inside_a_quoted_header_keeps_its_columns() {
+    let folder = Folder::new("quoted-separator");
+    let path = folder.write(
+        "names.csv",
+        "\"Last, First, Middle\";Amount\n\"Smith, John, A\";10\n",
+    );
+    let mut private = Private::new();
+    let source = private.add(&path);
+    let table = private.table(&source);
+    assert_eq!(
+        table
+            .columns
+            .iter()
+            .map(|column| column.name.as_str())
+            .collect::<Vec<_>>(),
+        ["Last, First, Middle", "Amount"]
+    );
+    assert_eq!(table.rows, [["Smith, John, A", "10"]]);
+}

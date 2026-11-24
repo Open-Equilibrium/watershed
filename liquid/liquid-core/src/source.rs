@@ -178,9 +178,10 @@ fn parse_csv(text: &str, separator: char) -> Vec<Vec<String>> {
 
 pub(crate) fn table(text: &str, tab: bool) -> SourceTable {
     let first = text.lines().next().unwrap_or_default();
+    let header_width = |separator| parse_csv(first, separator).first().map_or(0, Vec::len);
     let separator = if tab {
         '\t'
-    } else if first.matches(';').count() > first.matches(',').count() {
+    } else if header_width(';') > header_width(',') {
         ';'
     } else {
         ','
