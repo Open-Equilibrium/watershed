@@ -523,10 +523,8 @@ pub(crate) fn write_settings(home: &Path, agents: &[AcpAgent]) -> Result<(), Str
         });
     }
     std::fs::create_dir_all(&dir).map_err(|e| format!("Could not create T3's data folder: {e}"))?;
-    let temporary = dir.join("settings.json.tmp");
-    std::fs::write(&temporary, settings.to_string())
-        .map_err(|e| format!("Could not write T3's settings: {e}"))?;
-    std::fs::rename(&temporary, &file).map_err(|e| format!("Could not write T3's settings: {e}"))
+    crate::platform::write_atomic(&file, settings.to_string().as_bytes(), true)
+        .map_err(|e| format!("Could not write T3's settings: {e}"))
 }
 
 fn initial_message(start: &StartThread) -> Value {

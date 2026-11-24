@@ -193,22 +193,33 @@ impl Links {
     pub(crate) async fn start_tunnels(&self, store: &Store) -> Result<(), String> {
         let linked_hosts = linked(&store.db())?;
         for host in linked_hosts {
-            match TcpListener::bind(("127.0.0.1", host.tunnel_port)).await {
-                Ok(socket) => self.tunnel(socket, &host),
-                Err(error) => {
-                    if let Err(moving) = self.move_tunnel(store, &host).await {
-                        eprintln!(
-                            "meta: the tunnel to {} is off: {error}; {moving}",
-                            host.name
-                        );
-                    }
-                }
+            if let Err(error) = self.ensure_tunnel(store, &host).await {
+                eprintln!("meta: the tunnel to {} is off: {error}", host.name);
             }
         }
         Ok(())
     }
 
-    async fn move_tunnel(&self, store: &Store, host: &LinkedHost) -> Result<(), String> {
+    async fn ensure_tunnel(&self, store: &Store, host: &LinkedHost) -> Result<LinkedHost, String> {
+        if lock(&self.tunnels)
+            .get(&host.name)
+            .is_some_and(|task| !task.is_finished())
+        {
+            return Ok(host.clone());
+        }
+        match TcpListener::bind(("127.0.0.1", host.tunnel_port)).await {
+            Ok(socket) => {
+                self.tunnel(socket, host);
+                Ok(host.clone())
+            }
+            Err(error) => self
+                .move_tunnel(store, host)
+                .await
+                .map_err(|moving| format!("{error}; {moving}")),
+        }
+    }
+
+    async fn move_tunnel(&self, store: &Store, host: &LinkedHost) -> Result<LinkedHost, String> {
         let (socket, port) = loopback().await?;
         self.unlink_url(tunnel_url(host.tunnel_port)).await?;
         store
@@ -224,7 +235,7 @@ impl Links {
             ..host.clone()
         };
         self.tunnel(socket, &moved);
-        Ok(())
+        Ok(moved)
     }
 
     pub(crate) async fn add(
@@ -358,7 +369,11 @@ impl Links {
             }
         };
         for host in due {
-            match self.link_t3(&host).await {
+            let linked = match self.ensure_tunnel(store, &host).await {
+                Ok(tunneled) => self.link_t3(&tunneled).await,
+                Err(error) => Err(error),
+            };
+            match linked {
                 Ok(()) => record_link(store, &host.name),
                 Err(error) => eprintln!("meta: could not link {} again: {error}", host.name),
             }
@@ -427,7 +442,10 @@ impl Links {
 mod tests {
     use std::sync::Arc;
 
-    use super::{Access, Links, RELINK_AFTER_MS, is_due};
+    use super::{
+        Access, LinkedHost, Links, RELINK_AFTER_MS, insert_linked_host, is_due, linked_named,
+    };
+    use crate::store::Store;
     use crate::util::until;
 
     #[test]
@@ -468,6 +486,72 @@ mod tests {
         let refused = links.pairing_code(Access::ReadOnly).await;
         assert!(refused.is_err(), "{refused:?}");
         assert_eq!(first.await.unwrap(), Ok("CODE".to_owned()));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_host_is_linked_only_once_its_tunnel_listens_again() {
+        use std::os::unix::fs::PermissionsExt;
+
+        use futures_util::{SinkExt, StreamExt};
+        use serde_json::json;
+        use tokio_tungstenite::tungstenite::Message;
+
+        let dir = std::env::temp_dir().join(format!("links-tunnel-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let script = dir.join("t3");
+        std::fs::write(
+            &script,
+            "#!/bin/sh\nif [ \"$2\" = list ]; then\n[ -e \"$T3CODE_HOME/down\" ] && exit 1\necho '[]'\nelse\necho \"$3\" > \"$T3CODE_HOME/linked\"\nfi\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let peer = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = format!("ws://{}", peer.local_addr().unwrap());
+        tokio::spawn(async move {
+            let (socket, _) = peer.accept().await.unwrap();
+            let mut socket = tokio_tungstenite::accept_async(socket).await.unwrap();
+            while let Some(Ok(Message::Text(text))) = socket.next().await {
+                let request: serde_json::Value = serde_json::from_str(&text).unwrap();
+                let reply = json!({"id": request["id"], "ok": "CODE"});
+                socket
+                    .send(Message::Text(reply.to_string().into()))
+                    .await
+                    .unwrap();
+            }
+        });
+        let occupied = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = occupied.local_addr().unwrap().port();
+        let store = Store::open(&dir.join("meta-harness.sqlite")).unwrap();
+        let host = LinkedHost {
+            name: "peer".to_owned(),
+            address,
+            token: "token".to_owned(),
+            access: Access::ReadOnly,
+            tunnel_port: port,
+            linked_ms: None,
+            client: "host-1a2b".to_owned(),
+        };
+        insert_linked_host(&store.db(), &host).unwrap();
+        let links = Links::new("host".to_owned(), script, dir.clone());
+        std::fs::write(dir.join("down"), "").unwrap();
+        links.start_tunnels(&store).await.unwrap();
+        links.relink_due(&store).await;
+        assert!(
+            !dir.join("linked").exists(),
+            "no link while the tunnel is off"
+        );
+        std::fs::remove_file(dir.join("down")).unwrap();
+        links.relink_due(&store).await;
+        let moved = linked_named(&store.db(), "peer")
+            .unwrap()
+            .unwrap()
+            .tunnel_port;
+        assert_ne!(moved, port, "the tunnel moved off the occupied port");
+        let linked = std::fs::read_to_string(dir.join("linked")).unwrap();
+        assert_eq!(linked.trim(), format!("http://127.0.0.1:{moved}"));
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
