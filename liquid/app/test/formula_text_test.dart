@@ -1,3 +1,4 @@
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:liquid/src/workspace/formula_text.dart';
 
@@ -22,5 +23,15 @@ void main() {
       'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb/cccccccccccccccccccccccccccccccc',
     ]);
     expect(storedFormula('to "pay"', const []), '"to ""pay"""');
+  });
+
+  test('deleting a leading operand keeps the reference that remains', () {
+    final text = FormulaText()
+      ..load('=￼ + ￼', const [Reference('{a1}', 'A'), Reference('{b2}', 'B')]);
+    text.value = const TextEditingValue(
+      text: '=￼',
+      selection: TextSelection.collapsed(offset: 1),
+    );
+    expect(storedFormula(text.text, text.chips), '{b2}');
   });
 }
