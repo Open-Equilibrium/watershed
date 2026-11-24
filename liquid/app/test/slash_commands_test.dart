@@ -508,4 +508,20 @@ void main() {
     expect(kit.fake.textsOf(kit.page), ['/text']);
     expect(menu, findsNothing);
   });
+
+  testWidgets('what is typed while a Whiteboard is added stays in its line', (
+    tester,
+  ) async {
+    await show(tester, ['Intro', '', 'After']);
+    await type(tester, 1, '/');
+    await type(tester, 1, 'whiteboard');
+    expect(item('Whiteboard'), findsOneWidget);
+    final gate = kit.fake.gate = Completer<void>();
+    kit.fake.gatedKinds = {BridgeMutationKind.addWhiteboardBlock};
+    await key(tester, LogicalKeyboardKey.enter);
+    await type(tester, 1, 'Keep this');
+    release(gate);
+    await tester.pumpAndSettle();
+    expect(kit.fake.textsOf(kit.page), ['Intro', 'Keep this', 'After']);
+  });
 }

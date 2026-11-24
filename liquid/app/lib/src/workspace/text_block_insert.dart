@@ -226,8 +226,9 @@ extension _TextBlockInsert on _TextBlockState {
       if (kind == BridgeMutationKind.addWhiteboardBlock) {
         views.focusBoard.value = added.view;
       }
-      if (empty) await _handOverSection(added.view!, last: last);
-      if (empty && !last) {
+      final vacant = empty && _text.text.isEmpty;
+      if (vacant) await _handOverSection(added.view!, last: last);
+      if (vacant && !last) {
         await views.write(
           mutation(BridgeMutationKind.removeView, page: _page, view: view.id),
           [view.block],
