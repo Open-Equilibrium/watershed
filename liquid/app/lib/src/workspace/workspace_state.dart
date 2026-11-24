@@ -714,7 +714,7 @@ class WorkspaceState {
     _pages[page] = work;
     track(work);
     unawaited(
-      work.whenComplete(() {
+      work.then<void>((_) {}, onError: (Object _) {}).whenComplete(() {
         if (identical(_pages[page], work)) _pages.remove(page);
       }),
     );

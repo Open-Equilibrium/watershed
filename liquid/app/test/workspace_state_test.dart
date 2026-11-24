@@ -124,6 +124,19 @@ void main() {
     expect(fake.pages.values.single.single.title, 'B');
   });
 
+  test('a failed page write leaves no page work and drains without an '
+      'uncaught error', () async {
+    final (_, state, page) = await startedPage();
+    final failing = Completer<void>();
+    state.trackPage(page, failing.future);
+    final handled = failing.future.then<void>((_) {}, onError: (Object _) {});
+    failing.completeError(StateError('the write failed'));
+    await handled;
+    await pumpEventQueue();
+    expect(state.pageWork(page), isNull);
+    await state.drain();
+  });
+
   test('disposing closes every subscription', () async {
     final fake = FakeWorkspace();
     final state = WorkspaceState(fake);
