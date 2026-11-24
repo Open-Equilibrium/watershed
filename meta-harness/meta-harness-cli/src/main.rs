@@ -19,7 +19,7 @@ usage: meta <command>
   config show               print the current configuration revision as JSON
   config propose FILE [SUMMARY]
                             propose the changes in FILE, a JSON array of changes (format:
-                            docs/concept/V-Spec_MetaHarness.html#config)
+                            https://github.com/Open-Equilibrium/watershed/blob/main/docs/concept/V-Spec_MetaHarness.html#config)
   config revert REVISION    propose going back to an earlier revision
   config pending            list the proposals that wait for a decision
   config approve NUMBER     approve a proposal; new harness sessions use the new revision
@@ -485,6 +485,13 @@ mod tests {
             status_text(&status(false))
                 .contains("The harness homes are not reconciled with revision 3")
         );
+    }
+
+    #[test]
+    fn the_usage_points_to_the_config_format_published_with_the_source() {
+        assert!(USAGE.contains(
+            "https://github.com/Open-Equilibrium/watershed/blob/main/docs/concept/V-Spec_MetaHarness.html#config"
+        ));
     }
 
     #[test]
