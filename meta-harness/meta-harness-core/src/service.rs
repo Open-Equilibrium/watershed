@@ -487,7 +487,7 @@ fn frame_of(reply: &Reply) -> Message {
     )
 }
 
-async fn answer(
+pub(crate) async fn answer(
     out: &mpsc::Sender<Message>,
     id: u64,
     first: Value,
@@ -498,7 +498,10 @@ async fn answer(
     while let Some(item) = items.next().await {
         let reply = match item {
             Ok(item) => Reply::Item { id, item },
-            Err(error) => Reply::Error { id, error },
+            Err(error) => {
+                let _ = out.send(frame_of(&Reply::Error { id, error })).await;
+                return;
+            }
         };
         if out.send(frame_of(&reply)).await.is_err() {
             return;

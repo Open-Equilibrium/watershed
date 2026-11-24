@@ -28,6 +28,25 @@ async fn dropping_the_last_handle_closes_the_connection_to_the_service() {
         .unwrap();
 }
 
+#[tokio::test]
+async fn a_stream_error_ends_its_answer_even_while_the_producer_stays_open() {
+    let (out, mut sent) = tokio::sync::mpsc::channel(8);
+    let items = futures_util::stream::iter([Err::<serde_json::Value, String>("broke".to_owned())])
+        .chain(futures_util::stream::pending());
+    tokio::time::timeout(
+        Duration::from_secs(5),
+        crate::service::answer(&out, 7, serde_json::Value::Null, items),
+    )
+    .await
+    .expect("the answer ends after its error");
+    let mut texts = Vec::new();
+    while let Ok(Message::Text(text)) = sent.try_recv() {
+        texts.push(text.to_string());
+    }
+    assert_eq!(texts.len(), 2, "the ok reply and the error only");
+    assert!(texts[1].contains("broke"));
+}
+
 async fn refusing_peer(reply: &'static [u8]) -> String {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let url = format!("ws://{}", listener.local_addr().unwrap());
