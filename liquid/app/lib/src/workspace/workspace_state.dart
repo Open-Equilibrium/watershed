@@ -721,8 +721,9 @@ class WorkspaceState {
   }
 
   void track(Future<void> work) {
-    _tracked.add(work);
-    unawaited(work.whenComplete(() => _tracked.remove(work)));
+    final settled = work.then<void>((_) {}, onError: (Object _) {});
+    _tracked.add(settled);
+    unawaited(settled.whenComplete(() => _tracked.remove(settled)));
   }
 
   Future<void> drain() async {

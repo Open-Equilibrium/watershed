@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -82,5 +83,19 @@ void main() {
     });
     final workspaces = await load();
     expect(workspaces.entries.map((entry) => entry.dir), ['Workspace']);
+  });
+
+  test('a write that fails while its Workspace closes does not stop the '
+      'switch', () async {
+    final workspaces = await load();
+    await workspaces.create();
+    final failing = Completer<void>();
+    workspaces.current!.track(failing.future);
+    final switching = workspaces.switchTo(0);
+    await pumpEventQueue();
+    failing.completeError(StateError('the write failed'));
+    await switching;
+    expect(workspaces.at, 0);
+    expect(workspaces.switching, isFalse);
   });
 }
