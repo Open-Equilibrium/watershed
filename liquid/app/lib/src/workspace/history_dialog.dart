@@ -603,12 +603,14 @@ class LiveFocusNode extends FocusNode {
 }
 
 class _HistoryAction<T extends Intent> extends Action<T> {
-  _HistoryAction(this.run);
+  _HistoryAction(this.run, this.active);
 
   final Future<void> Function() run;
+  final bool Function() active;
 
   @override
   bool isEnabled(T intent) {
+    if (!active()) return false;
     final focus = primaryFocus;
     final typing =
         focus?.context?.findAncestorWidgetOfExactType<EditableText>() != null;
@@ -623,24 +625,35 @@ class _HistoryAction<T extends Intent> extends Action<T> {
 }
 
 class UndoScope extends StatelessWidget {
-  const UndoScope({super.key, required this.state, required this.child});
+  const UndoScope({
+    super.key,
+    required this.state,
+    required this.active,
+    required this.child,
+  });
 
-  final WorkspaceState state;
+  final WorkspaceState? state;
+  final bool Function() active;
   final Widget child;
 
   @override
-  Widget build(BuildContext context) => Shortcuts(
-    shortcuts: const {
-      SingleActivator(LogicalKeyboardKey.keyZ, meta: true): UndoIntent(),
-      SingleActivator(LogicalKeyboardKey.keyZ, meta: true, shift: true):
-          RedoIntent(),
-    },
-    child: Actions(
-      actions: {
-        UndoIntent: _HistoryAction<UndoIntent>(state.undo),
-        RedoIntent: _HistoryAction<RedoIntent>(state.redo),
+  Widget build(BuildContext context) {
+    final state = this.state;
+    if (state == null) return child;
+    bool paged() => active() && state.open.value != null;
+    return Shortcuts(
+      shortcuts: const {
+        SingleActivator(LogicalKeyboardKey.keyZ, meta: true): UndoIntent(),
+        SingleActivator(LogicalKeyboardKey.keyZ, meta: true, shift: true):
+            RedoIntent(),
       },
-      child: child,
-    ),
-  );
+      child: Actions(
+        actions: {
+          UndoIntent: _HistoryAction<UndoIntent>(state.undo, paged),
+          RedoIntent: _HistoryAction<RedoIntent>(state.redo, paged),
+        },
+        child: child,
+      ),
+    );
+  }
 }

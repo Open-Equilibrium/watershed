@@ -8,12 +8,15 @@ import 'package:liquid/src/agent/sidebar.dart';
 import 'package:liquid/src/diff/diff_model.dart';
 import 'package:liquid/src/rust/api/events.dart';
 import 'package:liquid/src/rust/api/session.dart';
+import 'package:liquid/src/rust/api/workspace.dart';
 import 'package:liquid/src/session/session_state.dart';
 import 'package:liquid/src/settings_page.dart';
 import 'package:liquid/src/theme/theme.dart';
+import 'package:liquid/src/workspace/workspace_state.dart';
 
 import 'fake_backend.dart';
 import 'focus_kit.dart';
+import 'page_kit.dart';
 
 const info = SessionInfo(project: 'acme-api');
 
@@ -88,6 +91,57 @@ void main() {
 
   Finder modelItem() =>
       find.widgetWithText(PopupMenuItem<BridgeModelChoice>, 'Claude Opus 5.5');
+
+  testWidgets('a click on another Page gives the shortcuts back to the shell', (
+    tester,
+  ) async {
+    final kit = PageKit();
+    await kit.show(tester, const [TextPart('First'), TextPart('Second')]);
+    await tester.tap(block(0));
+    await tester.pumpAndSettle();
+    await kit.workspace.apply(
+      mutation(
+        BridgeMutationKind.createPage,
+        area: kit.workspace.open.value!.area,
+        text: 'Trip',
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(
+      find.descendant(of: find.byType(Sidebar), matching: find.text('Trip')),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyK);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('power bar')), findsOneWidget);
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pumpAndSettle();
+
+    await undo(tester);
+    expect(kit.fake.undos, 1);
+  }, variant: TargetPlatformVariant.only(TargetPlatform.macOS));
+
+  testWidgets('Settings over a Page keep ⌘Z away from it; esc closes them', (
+    tester,
+  ) async {
+    final kit = PageKit();
+    await kit.show(tester, const [TextPart('First')]);
+    await tester.tap(block(0));
+    await tester.pumpAndSettle();
+    await openSettings(tester);
+    expect(find.byType(SettingsPage), findsOneWidget);
+    await undo(tester);
+    expect(kit.fake.undos, 0);
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pumpAndSettle();
+    expect(find.byType(SettingsPage), findsNothing);
+    await undo(tester);
+    expect(kit.fake.undos, 1);
+  }, variant: TargetPlatformVariant.only(TargetPlatform.macOS));
 
   testWidgets(
     'a question takes the keys without a click, and esc dismisses it',
