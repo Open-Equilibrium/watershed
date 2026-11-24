@@ -430,8 +430,11 @@ fn install_download(args: &[&str]) -> Result<(), String> {
             .output()
             .is_ok_and(|output| output.status.success())
     };
+    let homes: Vec<PathBuf> = std::iter::once(default_home()?)
+        .chain(login::Manager::current()?.recorded_home()?)
+        .collect();
     let ended = task("/End");
-    let installed = install::install_files(&bundle, &prefix, "win32-x64");
+    let installed = install::install_files(&bundle, &prefix, "win32-x64", &homes);
     if ended && (installed.is_err() || !service) {
         task("/Run");
     }
@@ -499,20 +502,24 @@ fn removes_data(prefix: &Path, home: &Path) -> bool {
             .any(|folder| home.starts_with(resolved(prefix.join(folder))))
 }
 
-fn data_in_installation(prefix: &Path, recorded: Option<PathBuf>, home: &Path) -> Option<PathBuf> {
-    std::iter::once(home.to_path_buf())
-        .chain(recorded)
+fn data_in_installation(prefix: &Path, homes: &[PathBuf]) -> Option<PathBuf> {
+    homes
+        .iter()
         .find(|home| {
-            let target = home.canonicalize().unwrap_or_else(|_| home.clone());
+            let target = home.canonicalize().unwrap_or_else(|_| home.to_path_buf());
             removes_data(prefix, &target)
         })
+        .cloned()
 }
 
 fn uninstall() -> Result<(), String> {
     let prefix = prefix()?;
     let home = default_home()?;
     let manager = login::Manager::current()?;
-    if let Some(data) = data_in_installation(&prefix, manager.recorded_home()?, &home) {
+    let homes: Vec<PathBuf> = std::iter::once(home.clone())
+        .chain(manager.recorded_home()?)
+        .collect();
+    if let Some(data) = data_in_installation(&prefix, &homes) {
         return Err(format!(
             "The data folder {} lies in the installation that uninstall removes, so nothing was \
              removed. Move it outside {}, set META_HARNESS_HOME to its new place, run `meta \
@@ -701,10 +708,10 @@ mod tests {
         let recorded = PathBuf::from("/opt/mh/lib/meta-harness/data");
         let shell = Path::new("/home/p/.meta-harness");
         assert_eq!(
-            data_in_installation(prefix, Some(recorded.clone()), shell),
+            data_in_installation(prefix, &[shell.to_path_buf(), recorded.clone()]),
             Some(recorded)
         );
-        assert_eq!(data_in_installation(prefix, None, shell), None);
+        assert_eq!(data_in_installation(prefix, &[shell.to_path_buf()]), None);
     }
 
     #[test]

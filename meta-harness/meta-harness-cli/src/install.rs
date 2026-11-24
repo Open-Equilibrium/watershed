@@ -16,7 +16,12 @@ pub fn bundle_info(bundle: &Path) -> Result<(String, String), String> {
     }
 }
 
-pub fn install_files(bundle: &Path, prefix: &Path, platform: &str) -> Result<PathBuf, String> {
+pub fn install_files(
+    bundle: &Path,
+    prefix: &Path,
+    platform: &str,
+    homes: &[PathBuf],
+) -> Result<PathBuf, String> {
     let (_, target) = bundle_info(bundle)?;
     if target != platform {
         return Err(format!("download is for {target}, not {platform}"));
@@ -44,6 +49,14 @@ pub fn install_files(bundle: &Path, prefix: &Path, platform: &str) -> Result<Pat
         if !needed.is_file() {
             return Err(format!("download lacks {}", needed.display()));
         }
+    }
+    if let Some(data) = crate::data_in_installation(prefix, homes) {
+        return Err(format!(
+            "The data folder {} lies in the installation that an upgrade replaces, so nothing was \
+             changed. Move it outside {}, set META_HARNESS_HOME to its new place and install again.",
+            data.display(),
+            prefix.display()
+        ));
     }
     let lib = prefix.join("lib").join("meta-harness");
     let bin = prefix.join("bin");
@@ -188,20 +201,31 @@ mod tests {
         std::fs::write(prefix.join("bin").join(&meta), "old meta").unwrap();
 
         assert!(
-            install_files(&bundle, &prefix, "other-x64")
+            install_files(&bundle, &prefix, "other-x64", &[])
                 .unwrap_err()
                 .contains("not other-x64")
         );
+        let data = prefix.join("lib/meta-harness/t3-user-data");
+        std::fs::create_dir_all(&data).unwrap();
+        std::fs::write(data.join("meta-harness.sqlite"), "data").unwrap();
+        let refused =
+            install_files(&bundle, &prefix, "test-x64", std::slice::from_ref(&data)).unwrap_err();
+        assert!(refused.contains("t3-user-data"), "{refused}");
+        assert_eq!(
+            std::fs::read_to_string(prefix.join("bin/meta")).unwrap(),
+            "old meta"
+        );
+        assert!(data.join("meta-harness.sqlite").exists());
         let lock = std::fs::File::create(prefix.join("lib/meta-harness/.install.lock")).unwrap();
         lock.lock().unwrap();
-        let busy = install_files(&bundle, &prefix, "test-x64").unwrap_err();
+        let busy = install_files(&bundle, &prefix, "test-x64", &[]).unwrap_err();
         assert!(busy.contains("Another"), "{busy}");
         assert_eq!(
             std::fs::read_to_string(prefix.join("bin/meta")).unwrap(),
             "old meta"
         );
         drop(lock);
-        let program = install_files(&bundle, &prefix, "test-x64").unwrap();
+        let program = install_files(&bundle, &prefix, "test-x64", &[]).unwrap();
 
         assert_eq!(std::fs::read_to_string(&program).unwrap(), "new meta");
         assert_eq!(
