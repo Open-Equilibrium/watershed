@@ -430,8 +430,13 @@ async fn a_client_that_stops_reading_is_disconnected_and_one_that_reads_gets_eve
             panic!("a reply is text");
         };
         let reply: serde_json::Value = serde_json::from_str(&text).unwrap();
-        assert_eq!(reply["id"], id);
-        assert!(reply.get("error").is_some(), "{reply}");
+        assert!(
+            reply["id"] == id
+                && reply["error"].as_str().is_some_and(|error| {
+                    error.starts_with(meta_harness_core::api::UNKNOWN_REQUEST)
+                }),
+            "{reply}"
+        );
     }
     for id in 3..=302u64 {
         let call = serde_json::json!({"id": id, "call": {"host": "status"}});

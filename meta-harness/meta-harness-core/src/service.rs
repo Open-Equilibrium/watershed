@@ -424,7 +424,7 @@ async fn serve(
                     .ok()
                     .and_then(|v| v["id"].as_u64());
                 if let Some(id) = id {
-                    let error = format!("Meta-Harness does not understand this request: {error}");
+                    let error = format!("{}: {error}", api::UNKNOWN_REQUEST);
                     let reply = frame_of(&Reply::Error { id, error });
                     match out.try_send(reply) {
                         Ok(()) => {}
