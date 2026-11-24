@@ -209,6 +209,16 @@ fn a_damaged_skill_list_stops_the_write_before_any_skill_or_the_list_changes() {
     assert!(homes.codex.join("skills/review/SKILL.md").exists());
 }
 
+#[test]
+fn a_skill_left_half_written_by_a_failed_write_is_removed_by_the_next_write() {
+    let dir = Dir::new();
+    let homes = Homes::under(&dir.join("meta"));
+    let broken = skill("review", &[("a", "a file"), ("a/b", "under a file")]);
+    assert!(homes.write(&broken, &dir.join("person")).is_err());
+    write(&homes, &Blocks::default(), &dir);
+    assert!(!homes.claude.join("skills/review").exists());
+}
+
 fn listing(root: &Path) -> Vec<PathBuf> {
     let mut found = Vec::new();
     let mut folders = vec![root.to_path_buf()];
