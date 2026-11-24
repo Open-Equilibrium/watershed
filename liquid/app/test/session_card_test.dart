@@ -98,7 +98,10 @@ void main() {
   });
 
   group('agent instructions', () {
-    Future<SessionState> openAgent(WidgetTester tester, FakeProject project) async {
+    Future<SessionState> openAgent(
+      WidgetTester tester,
+      FakeProject project,
+    ) async {
       final state = SessionState(project);
       addTearDown(state.dispose);
       await state.loadStart();

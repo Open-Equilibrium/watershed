@@ -153,51 +153,69 @@ void main() {
     expect(sourceFinishes(), isEmpty);
   });
 
-  testWidgets('an overlapping recovery scan keeps the five-minute recovery of a young move', (tester) async {
-    final start = DateTime(2026, 11, 18, 12);
-    var now = start;
-    final gates = {for (var index = 0; index < 3; index++) index: Completer<void>()};
-    final slow = _GatedEnvironments(gates);
-    BridgeMoving movingOf(String transfer, DateTime since) => BridgeMoving(
-      transfer: transfer,
-      phase: BridgeMovePhase.handed,
-      targetAddress: studio,
-      targetName: 'studio',
-      targetEnvironment: fakeEnvironment,
-      sinceMs: since.millisecondsSinceEpoch,
-    );
-    final ms = start.millisecondsSinceEpoch;
-    source
-      ..moving = movingOf('transfer-2', start)
-      ..threadList = [
-        threadOf('thread-1', updatedMs: ms, moving: movingOf('transfer-1', start.subtract(aged))),
-        threadOf('thread-2', updatedMs: ms - 1, moving: movingOf('transfer-2', start)),
-        threadOf('thread-3', updatedMs: ms - 2, moving: movingOf('transfer-3', start.subtract(aged))),
-      ];
-    final state = SessionState(source)
-      ..clock = (() => now)
-      ..openProject = (address, root) async => address == studio ? slow : source;
-    await state.addHost(studio, slow);
-    int youngChecks() =>
-        slow.calls.where((call) => call == 'move status transfer-2').length;
+  testWidgets(
+    'an overlapping recovery scan keeps the five-minute recovery of a young move',
+    (tester) async {
+      final start = DateTime(2026, 11, 18, 12);
+      var now = start;
+      final gates = {
+        for (var index = 0; index < 3; index++) index: Completer<void>(),
+      };
+      final slow = _GatedEnvironments(gates);
+      BridgeMoving movingOf(String transfer, DateTime since) => BridgeMoving(
+        transfer: transfer,
+        phase: BridgeMovePhase.handed,
+        targetAddress: studio,
+        targetName: 'studio',
+        targetEnvironment: fakeEnvironment,
+        sinceMs: since.millisecondsSinceEpoch,
+      );
+      final ms = start.millisecondsSinceEpoch;
+      source
+        ..moving = movingOf('transfer-2', start)
+        ..threadList = [
+          threadOf(
+            'thread-1',
+            updatedMs: ms,
+            moving: movingOf('transfer-1', start.subtract(aged)),
+          ),
+          threadOf(
+            'thread-2',
+            updatedMs: ms - 1,
+            moving: movingOf('transfer-2', start),
+          ),
+          threadOf(
+            'thread-3',
+            updatedMs: ms - 2,
+            moving: movingOf('transfer-3', start.subtract(aged)),
+          ),
+        ];
+      final state = SessionState(source)
+        ..clock = (() => now)
+        ..openProject = (address, root) async =>
+            address == studio ? slow : source;
+      await state.addHost(studio, slow);
+      int youngChecks() =>
+          slow.calls.where((call) => call == 'move status transfer-2').length;
 
-    await state.loadStart();
-    await tester.runAsync(pumpEventQueue);
-    unawaited(state.recoverMoves());
-    await tester.runAsync(pumpEventQueue);
-    gates[0]!.complete();
-    await tester.runAsync(pumpEventQueue);
-    gates[1]!.complete();
-    await tester.runAsync(pumpEventQueue);
-    gates[2]!.complete();
-    await tester.runAsync(pumpEventQueue);
+      await state.loadStart();
+      await tester.runAsync(pumpEventQueue);
+      unawaited(state.recoverMoves());
+      await tester.runAsync(pumpEventQueue);
+      gates[0]!.complete();
+      await tester.runAsync(pumpEventQueue);
+      gates[1]!.complete();
+      await tester.runAsync(pumpEventQueue);
+      gates[2]!.complete();
+      await tester.runAsync(pumpEventQueue);
 
-    final before = youngChecks();
-    now = start.add(recoveryAge);
-    await tester.pump(recoveryAge);
-    expect(youngChecks(), greaterThan(before));
-    await state.dispose();
-  });
+      final before = youngChecks();
+      now = start.add(recoveryAge);
+      await tester.pump(recoveryAge);
+      expect(youngChecks(), greaterThan(before));
+      await state.dispose();
+    },
+  );
 }
 
 class _GatedEnvironments extends FakeProject {
