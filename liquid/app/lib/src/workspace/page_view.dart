@@ -68,6 +68,7 @@ class _WorkspacePageState extends State<WorkspacePage> implements EditorSource {
   late final _views = PageViews(widget.state, widget.open.page)..start();
 
   final _first = TextEditingController();
+  final _scroll = ScrollController();
   late final _firstFocus = FocusNode(
     debugLabel: 'First line',
     onKeyEvent: (_, event) {
@@ -132,6 +133,7 @@ class _WorkspacePageState extends State<WorkspacePage> implements EditorSource {
     _tree.addListener(_titleChanged);
     _first.addListener(_typedFirst);
     _views.ready.addListener(_readied);
+    _views.caret.addListener(_seek);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) widget.state.currentPage.value = _views;
     });
@@ -159,10 +161,26 @@ class _WorkspacePageState extends State<WorkspacePage> implements EditorSource {
     _tree.removeListener(_titleChanged);
     _title.dispose();
     _titleFocus.dispose();
+    _views.caret.removeListener(_seek);
+    _scroll.dispose();
     _views.dispose();
     _first.dispose();
     _firstFocus.dispose();
     super.dispose();
+  }
+
+  Future<void> _seek() async {
+    final view = _views.caret.value?.view;
+    final count = _views.count ?? 0;
+    for (var tries = 0; tries < 50; tries++) {
+      if (view == null || !mounted || !_scroll.hasClients || count == 0) return;
+      if (_views.keyFor(view).currentContext != null) return;
+      final index = _views.indexOf(view);
+      if (index == null) return;
+      final position = _scroll.position;
+      _scroll.jumpTo(position.maxScrollExtent * index / count);
+      await WidgetsBinding.instance.endOfFrame;
+    }
   }
 
   void _titleChanged() {
@@ -446,6 +464,7 @@ class _WorkspacePageState extends State<WorkspacePage> implements EditorSource {
                 _views.arranging,
               ]),
               builder: (context, _) => CustomScrollView(
+                controller: _scroll,
                 slivers: [
                   SliverPadding(
                     padding: const EdgeInsets.fromLTRB(

@@ -304,4 +304,20 @@ void main() {
     expect(bar(), findsOneWidget, reason: 'the composition is still open');
     expect(kit.applied(BridgeMutationKind.addWhiteboardBlock), isEmpty);
   });
+
+  testWidgets('a text hit far down a long Page is scrolled to and focused', (
+    tester,
+  ) async {
+    await kit.show(tester, [
+      for (var line = 0; line < 80; line++) TextPart('line $line'),
+      const TextPart('Book the flat in Alfama'),
+    ]);
+    await open(tester);
+    await type(tester, 'alfa');
+    await enter(tester);
+    final focused = tester
+        .widgetList<TextField>(find.byType(TextField))
+        .where((field) => field.focusNode?.hasFocus ?? false);
+    expect(focused.single.controller?.text, 'Book the flat in Alfama');
+  });
 }
