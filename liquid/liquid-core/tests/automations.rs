@@ -398,6 +398,13 @@ fn a_setup_must_name_fields_of_the_right_kind_and_stay_within_bounds() {
         matches: Match::Above(Cell::Text("x".into())),
     }];
     broken.push((setup, Error::WrongKind));
+    let due = field(&mut budget.workspace, &expenses, "Due", FieldKind::Date);
+    let mut setup = flag(&budget);
+    setup.conditions = vec![Filter {
+        field: due,
+        matches: Match::Between("2026-01-01".into(), "2026-12-31".into()),
+    }];
+    broken.push((setup, Error::WrongKind));
     let mut setup = flag(&budget);
     setup.steps = vec![notify(&format!("{{{}}}", budget.summarize))];
     broken.push((setup, Error::NotFound));
