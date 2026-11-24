@@ -257,12 +257,25 @@ impl<S: Store> Workspace<S> {
                 )
             }
             Operation::Revert { reverted, kind } => {
-                let first = reverted
-                    .first()
-                    .and_then(|id| known.get(id))
-                    .cloned()
-                    .map(|first| self.title(&first, titles, &HashMap::new()));
-                let what = first.unwrap_or_else(|| "a change".into());
+                let mut first = reverted.first().and_then(|id| known.get(id)).cloned();
+                if let (
+                    RevertKind::Redo,
+                    Some(Action {
+                        operation:
+                            Operation::Revert {
+                                kind: RevertKind::Undo,
+                                reverted: undone,
+                            },
+                        ..
+                    }),
+                ) = (kind, &first)
+                {
+                    first = undone.first().and_then(|id| known.get(id)).cloned();
+                }
+                let what = first.map_or_else(
+                    || "a change".into(),
+                    |first| self.title(&first, titles, known),
+                );
                 match kind {
                     RevertKind::Revert => format!("Reverted: {what}"),
                     RevertKind::Undo => format!("Undo: {what}"),

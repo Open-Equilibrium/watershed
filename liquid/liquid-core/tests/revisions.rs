@@ -304,6 +304,10 @@ fn undo_takes_back_the_last_pause_of_typing_and_redo_brings_it_again() {
     ));
     budget.workspace.redo(&owner()).unwrap().unwrap();
     assert_eq!(budget.text(), "Rent");
+    assert_eq!(
+        budget.entries()[0].title,
+        "Redo: Edited text on “Household budget”"
+    );
     budget.workspace.undo(&owner()).unwrap().unwrap();
     assert_eq!(budget.text(), "");
 
