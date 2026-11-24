@@ -117,8 +117,12 @@ async fn within<T>(next: impl Future<Output = T>) -> T {
         .expect("delivered within a second")
 }
 
-fn paused_runtime() -> tokio::runtime::Runtime {
+fn current_thread() -> tokio::runtime::Builder {
     tokio::runtime::Builder::new_current_thread()
+}
+
+fn paused_runtime() -> tokio::runtime::Runtime {
+    current_thread()
         .enable_time()
         .start_paused(true)
         .build()
@@ -127,9 +131,7 @@ fn paused_runtime() -> tokio::runtime::Runtime {
 
 #[test]
 fn gathers_streaming_text_until_its_window_passes() {
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .build()
-        .expect("runtime starts");
+    let runtime = current_thread().build().expect("runtime starts");
     runtime.block_on(async {
         let (sender, mut receiver) = tokio::sync::mpsc::channel(16);
         let (pass, window) = tokio::sync::oneshot::channel::<()>();

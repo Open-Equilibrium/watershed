@@ -20,35 +20,35 @@ impl Memory {
     }
 }
 
-struct Any([u8; 32]);
-
-impl Keys for Any {
-    fn read(&self, _: &str) -> Result<Option<[u8; 32]>, String> {
-        Ok(Some(self.0))
-    }
-
-    fn write(&self, _: &str, _: &[u8; 32]) -> Result<(), String> {
-        Ok(())
-    }
-
-    fn delete(&self, _: &str) -> Result<(), String> {
-        Ok(())
-    }
+#[derive(Default)]
+struct Scripted<'a> {
+    inner: Option<&'a Memory>,
+    key: Option<[u8; 32]>,
+    refuse_write: bool,
+    unreadable: Option<String>,
 }
 
-struct Refusing<'a>(&'a Memory);
-
-impl Keys for Refusing<'_> {
+impl Keys for Scripted<'_> {
     fn read(&self, name: &str) -> Result<Option<[u8; 32]>, String> {
-        self.0.read(name)
+        if self.unreadable.as_deref() == Some(name) {
+            return Err("the keychain is locked".into());
+        }
+        match (self.key, self.inner) {
+            (Some(key), _) => Ok(Some(key)),
+            (None, Some(inner)) => inner.read(name),
+            (None, None) => Ok(None),
+        }
     }
 
-    fn write(&self, _: &str, _: &[u8; 32]) -> Result<(), String> {
-        Err("the keychain refused the write".into())
+    fn write(&self, name: &str, key: &[u8; 32]) -> Result<(), String> {
+        if self.refuse_write {
+            return Err("the keychain refused the write".into());
+        }
+        self.inner.map_or(Ok(()), |inner| inner.write(name, key))
     }
 
     fn delete(&self, name: &str) -> Result<(), String> {
-        self.0.delete(name)
+        self.inner.map_or(Ok(()), |inner| inner.delete(name))
     }
 }
 
@@ -265,20 +265,29 @@ fn a_replica_without_its_key_is_refused() {
         missing.err().unwrap(),
         "the replica's key is missing from the keychain"
     );
-    assert!(LiquidWorkspace::open_with(&folder.0, &Any([9; 32])).is_err());
+    let other = Scripted {
+        key: Some([9; 32]),
+        ..Scripted::default()
+    };
+    assert!(LiquidWorkspace::open_with(&folder.0, &other).is_err());
 }
 
 #[test]
 fn a_moved_replica_opens_with_its_key() {
-    let folder = Folder::new("moved");
-    let keys = Memory::default();
-    lisbon(&LiquidWorkspace::open_with(&folder.0, &keys).unwrap());
+    let (folder, keys) = seeded("moved");
     let moved = Folder::new("moved-to");
     std::fs::rename(&folder.0, &moved.0).unwrap();
 
     let workspace = LiquidWorkspace::open_with(&moved.0, &keys).unwrap();
     assert_eq!(areas(&workspace), 1);
     assert!(moved.0.join(KEY_NAME_FILE).is_file());
+}
+
+fn seeded(name: &str) -> (Folder, Memory) {
+    let folder = Folder::new(name);
+    let keys = Memory::default();
+    lisbon(&LiquidWorkspace::open_with(&folder.0, &keys).unwrap());
+    (folder, keys)
 }
 
 fn filed_under_path(folder: &Folder) -> Memory {
@@ -297,6 +306,17 @@ fn a_key_filed_under_the_folder_path_moves_to_a_key_name_once() {
     let keys = filed_under_path(&folder);
     let path = path_name(&folder.0).unwrap();
 
+    let refusing = Scripted {
+        inner: Some(&keys),
+        refuse_write: true,
+        ..Scripted::default()
+    };
+    assert!(LiquidWorkspace::open_with(&folder.0, &refusing).is_err());
+    assert!(
+        keys.read(&path).unwrap().is_some(),
+        "a failed move keeps the old key"
+    );
+
     let workspace = LiquidWorkspace::open_with(&folder.0, &keys).unwrap();
     assert_eq!(areas(&workspace), 1);
     drop(workspace);
@@ -306,22 +326,8 @@ fn a_key_filed_under_the_folder_path_moves_to_a_key_name_once() {
 }
 
 #[test]
-fn a_failed_key_migration_keeps_the_old_key_for_a_retry() {
-    let folder = Folder::new("retry");
-    let keys = filed_under_path(&folder);
-    let path = path_name(&folder.0).unwrap();
-
-    assert!(LiquidWorkspace::open_with(&folder.0, &Refusing(&keys)).is_err());
-    assert!(keys.read(&path).unwrap().is_some());
-    assert!(LiquidWorkspace::open_with(&folder.0, &keys).is_ok());
-    assert_eq!(keys.read(&path).unwrap(), None);
-}
-
-#[test]
 fn a_path_entry_holding_another_key_is_kept() {
-    let folder = Folder::new("other-key");
-    let keys = Memory::default();
-    lisbon(&LiquidWorkspace::open_with(&folder.0, &keys).unwrap());
+    let (folder, keys) = seeded("other-key");
     let path = path_name(&folder.0).unwrap();
     let other = [7; 32];
     keys.write(&path, &other).unwrap();
@@ -330,41 +336,23 @@ fn a_path_entry_holding_another_key_is_kept() {
     assert_eq!(keys.read(&path).unwrap(), Some(other));
 }
 
-struct PathUnreadable<'a>(&'a Memory, String);
-
-impl Keys for PathUnreadable<'_> {
-    fn read(&self, name: &str) -> Result<Option<[u8; 32]>, String> {
-        if name == self.1 {
-            return Err("the keychain is locked".into());
-        }
-        self.0.read(name)
-    }
-
-    fn write(&self, name: &str, key: &[u8; 32]) -> Result<(), String> {
-        self.0.write(name, key)
-    }
-
-    fn delete(&self, name: &str) -> Result<(), String> {
-        self.0.delete(name)
-    }
-}
-
 #[test]
 fn a_failed_path_entry_lookup_does_not_block_the_key_named_by_the_folder() {
-    let folder = Folder::new("path-unreadable");
-    let keys = Memory::default();
-    lisbon(&LiquidWorkspace::open_with(&folder.0, &keys).unwrap());
+    let (folder, keys) = seeded("path-unreadable");
     let path = path_name(&folder.0).unwrap();
 
-    LiquidWorkspace::open_with(&folder.0, &PathUnreadable(&keys, path))
+    let keychain = Scripted {
+        inner: Some(&keys),
+        unreadable: Some(path),
+        ..Scripted::default()
+    };
+    LiquidWorkspace::open_with(&folder.0, &keychain)
         .expect("the key the folder names opens the replica");
 }
 
 #[test]
 fn a_malformed_key_name_file_is_refused() {
-    let folder = Folder::new("malformed");
-    let keys = Memory::default();
-    lisbon(&LiquidWorkspace::open_with(&folder.0, &keys).unwrap());
+    let (folder, keys) = seeded("malformed");
     std::fs::write(folder.0.join(KEY_NAME_FILE), "not a key name").unwrap();
 
     let error = LiquidWorkspace::open_with(&folder.0, &keys).err().unwrap();
@@ -374,9 +362,7 @@ fn a_malformed_key_name_file_is_refused() {
 #[cfg(unix)]
 #[test]
 fn a_key_name_that_is_no_regular_file_is_refused() {
-    let folder = Folder::new("key-name-pipe");
-    let keys = Memory::default();
-    lisbon(&LiquidWorkspace::open_with(&folder.0, &keys).unwrap());
+    let (folder, _) = seeded("key-name-pipe");
     let name = folder.0.join(KEY_NAME_FILE);
     let pipe = folder.0.join("pipe");
     let made = std::process::Command::new("mkfifo")
