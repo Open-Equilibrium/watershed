@@ -46,6 +46,7 @@ class _SourcePageState extends State<SourcePage> {
   StreamSubscription<String>? _located;
   Timer? _settle;
   int _reads = 0;
+  int _generation = 0;
   late final _name = StoredName(
     _entry?.name ?? '',
     rename: (name) =>
@@ -146,6 +147,7 @@ class _SourcePageState extends State<SourcePage> {
         _file = file;
         _users = users;
         _readAt = DateTime.now();
+        _generation++;
       });
     } on Object catch (error) {
       _state.readFailed(error);
@@ -542,7 +544,10 @@ class _SourcePageState extends State<SourcePage> {
       case BridgeFileView.pdf:
         children.add(
           Expanded(
-            child: SourcePdf(key: ValueKey(shown.path), bytes: shown.bytes!),
+            child: SourcePdf(
+              key: ValueKey((shown.path, _generation)),
+              bytes: shown.bytes!,
+            ),
           ),
         );
         return _column(children, fill: true);

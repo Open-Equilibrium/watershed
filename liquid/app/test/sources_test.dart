@@ -376,6 +376,33 @@ void main() {
     expect(rendered.length, lessThan(10));
   });
 
+  testWidgets('Reload shows a PDF that changed on disk', (tester) async {
+    const path = '/Users/benni/Documents/offer.pdf';
+    SourcePlatform.pickFile = () async => path;
+    await kit.show(tester, const [TextPart('October')]);
+    final opened = <Uint8List>[];
+    PdfPages.opener = (bytes) async {
+      opened.add(bytes);
+      return PdfPages(
+        const [],
+        (index, width) async => throw UnimplementedError(),
+        () async {},
+      );
+    };
+    kit.fake.sourceFiles[(path, '')] = pdfFile(
+      path,
+      Uint8List.fromList('%PDF-1.4 first'.codeUnits),
+    );
+    await addFrom(tester, 'add source file');
+    final source = kit.fake.sourceList.values.single.single.id;
+    final second = Uint8List.fromList('%PDF-1.4 second'.codeUnits);
+    kit.fake.sourceFiles[(source, '')] = pdfFile(path, second);
+    await tester.tap(find.text('Reload'));
+    await settle(tester);
+
+    expect(opened.last, same(second));
+  });
+
   testWidgets('a page rendered after its Source closed is released', (
     tester,
   ) async {
