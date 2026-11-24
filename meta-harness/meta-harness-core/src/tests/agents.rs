@@ -259,6 +259,16 @@ fn a_memory_name_that_is_not_utf8_is_refused_instead_of_carried_under_a_changed_
 }
 
 #[test]
+fn packing_reads_a_file_only_within_the_budget_its_predecessors_left() {
+    let home = Dir::new();
+    let file = home.join("grown.md");
+    std::fs::write(&file, "0123456789").unwrap();
+    assert_eq!(agents::read_within(&file, 0).unwrap(), b"0123456789");
+    assert!(agents::read_within(&file, agents::MAX_MEMORY_BYTES - 10).is_ok());
+    assert!(agents::read_within(&file, agents::MAX_MEMORY_BYTES - 9).is_err());
+}
+
+#[test]
 fn a_profile_moves_on_once_its_context_is_four_fifths_full() {
     let context = |tokens, window| {
         Some(crate::Context {
