@@ -180,10 +180,11 @@ async fn withdraw(shared: &Shared, row: &ArrivalRow) -> Result<(), String> {
     if project.is_listed(&row.thread).await? {
         if let Ok(thread) = project.open(&row.thread).await {
             let _ = thread.stop().await;
+            super::agents::moved_away(shared, &thread).await?;
         }
         project.discard_id(&row.thread).await?;
     }
-    Ok(())
+    super::agents::forget(shared, &row.thread).await
 }
 
 const NOT_FINISHED: &str = "The moved messages are not all delivered yet, so the session has not finished moving; try again.";
