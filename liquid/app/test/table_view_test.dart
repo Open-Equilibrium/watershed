@@ -525,6 +525,45 @@ void main() {
     },
   );
 
+  testWidgets('a Group menu with many Select fields scrolls to the last one', (
+    tester,
+  ) async {
+    await kit.show(tester, [
+      TablePart(
+        const [],
+        fields: [
+          for (var number = 1; number <= 20; number++)
+            BridgeField(
+              id: 'f$number',
+              name: 'Choice $number',
+              kind: BridgeFieldKind.select,
+              options: const [],
+              formula: '',
+            ),
+        ],
+      ),
+    ]);
+    await tester.tap(find.byKey(const Key('table group')));
+    await tester.pumpAndSettle();
+    final menu = find.byKey(const Key('table query menu'));
+    final last = find.descendant(of: menu, matching: find.text('Choice 20'));
+    await tester.scrollUntilVisible(
+      last,
+      40,
+      scrollable: find.descendant(of: menu, matching: find.byType(Scrollable)),
+    );
+    expect(tester.takeException(), isNull);
+    await tester.tap(last);
+    await tester.pumpAndSettle();
+    expect(
+      find.descendant(
+        of: find.byKey(const Key('table group')),
+        matching: find.text('Choice 20'),
+      ),
+      findsOneWidget,
+    );
+  });
+
   testWidgets('two quick + New add both rows last', (tester) async {
     await kit.show(tester, [TablePart(expenses)]);
     final gate = gateOn(BridgeMutationKind.addRow);

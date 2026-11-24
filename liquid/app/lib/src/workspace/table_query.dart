@@ -358,32 +358,36 @@ class ChoiceMenu extends StatelessWidget {
     final divider = Divider(height: 9, thickness: 1, color: ws.border);
     return _Panel(
       onEscape: onClose,
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          ?switch (title) {
-            final title? => faint(title),
-            null => null,
-          },
-          for (final (index, section) in sections.indexed) ...[
-            if (section.label case final label?)
-              faint(label)
-            else if (index > 0)
-              divider,
-            for (final choice in section.choices)
-              _Item(
-                icon: choice.icon,
-                label: choice.label,
-                checked: choice.checked,
-                onTap: () {
-                  onClose();
-                  choice.onTap();
-                },
-              ),
-          ],
-          if (hint case final hint?) ...[divider, faint(hint)],
-        ],
+      child: Flexible(
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              ?switch (title) {
+                final title? => faint(title),
+                null => null,
+              },
+              for (final (index, section) in sections.indexed) ...[
+                if (section.label case final label?)
+                  faint(label)
+                else if (index > 0)
+                  divider,
+                for (final choice in section.choices)
+                  _Item(
+                    icon: choice.icon,
+                    label: choice.label,
+                    checked: choice.checked,
+                    onTap: () {
+                      onClose();
+                      choice.onTap();
+                    },
+                  ),
+              ],
+              if (hint case final hint?) ...[divider, faint(hint)],
+            ],
+          ),
+        ),
       ),
     );
   }
