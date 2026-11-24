@@ -55,7 +55,8 @@ impl Watchers {
 }
 
 pub(super) fn start_all(shared: &Arc<Shared>) {
-    match agents::list(&shared.store.db(), &shared.home) {
+    let listed = agents::list(&shared.store.db(), &shared.home);
+    match listed {
         Ok(listed) => {
             for agent in listed {
                 shared.agents.start(shared, &agent.id);
@@ -366,7 +367,8 @@ pub(super) async fn adopt(
 
 pub(super) async fn forget(shared: &Shared, thread: &str) -> Result<(), String> {
     let _serial = shared.agents.serial.lock().await;
-    if let Some(agent) = agents::of_thread(&shared.store.db(), &shared.home, thread)? {
+    let agent = agents::of_thread(&shared.store.db(), &shared.home, thread)?;
+    if let Some(agent) = agent {
         agents::remove(&shared.store.db(), &agent.id)?;
         shared.agents.stop(&agent.id);
     }

@@ -265,6 +265,17 @@ async fn a_finish_repeats_refuses_the_other_outcome_and_a_released_message_runs_
         .count();
     assert_eq!(runs, 1, "the released message runs once");
 
+    let sealed = transfer();
+    move_out(&thread, &sealed, Some("Append")).await.unwrap();
+    let seal = MoveFinish::Seal {
+        to_host: "studio".to_owned(),
+    };
+    thread.move_finish(&sealed, seal.clone()).await.unwrap();
+    thread.move_finish(&sealed, seal).await.unwrap();
+    assert_refused(
+        thread.move_finish(&sealed, MoveFinish::Release).await,
+        "sealed",
+    );
     service.stop().await;
 }
 

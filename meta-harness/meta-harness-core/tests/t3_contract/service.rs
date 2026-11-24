@@ -306,3 +306,31 @@ async fn a_client_that_stops_reading_is_disconnected_and_one_that_reads_gets_eve
     }
     service.stop().await;
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn shutdown_stops_t3_and_the_agent_processes_it_started() {
+    let (_dir, repo, home) = fixture();
+    let (service, host) = start_service(&home).await;
+    let project = host.project(&repo).await.unwrap();
+    let thread = project
+        .start(start("wait", Workspace::Checkout, Permissions::FullAccess))
+        .await
+        .unwrap();
+    until_running(&thread).await;
+    let named = |home: &PathBuf| {
+        let listing = Command::new("ps")
+            .args(["-axww", "-o", "command="])
+            .output();
+        let listing = String::from_utf8_lossy(&listing.unwrap().stdout).into_owned();
+        listing.contains(&*home.to_string_lossy())
+    };
+    settle(&home, "T3 and its agent running", |home| {
+        std::future::ready(named(home).then_some(()))
+    })
+    .await;
+    service.stop().await;
+    settle(&home, "every process under the home ended", |home| {
+        std::future::ready((!named(home)).then_some(()))
+    })
+    .await;
+}

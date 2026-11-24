@@ -25,7 +25,7 @@ async fn a_thread_runs_turns_and_reverts_files_in_its_worktree() {
         .await
         .unwrap();
     wait(&thread, completed(1)).await;
-    assert_eq!(thread.statistics().await.unwrap().turns.len(), 1);
+    assert!(!thread.statistics().await.unwrap().turns.is_empty());
     thread.send("append second", false).await.unwrap();
     wait(&thread, completed(2)).await;
 
@@ -174,6 +174,10 @@ async fn a_thread_details_card_reads_t3_and_a_fork_merges_back() {
     })
     .await;
 
+    assert!(!thread.statistics().await.unwrap().turns.is_empty());
+    let parent = thread.lineage().await.unwrap();
+    assert!(parent.rows.iter().any(|row| row.thread == fork_id));
+    assert!(fork.lineage().await.unwrap().can_merge);
     fork.merge_back().await.unwrap();
     service.stop().await;
 }

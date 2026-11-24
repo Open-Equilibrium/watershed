@@ -204,6 +204,12 @@ async fn a_starting_arrival_is_not_retried_in_another_project_folder() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn an_abort_after_a_failed_adoption_leaves_no_agent_behind() {
+    for deleted in [false, true] {
+        abort_after_failed_adoption(deleted).await;
+    }
+}
+
+async fn abort_after_failed_adoption(deleted: bool) {
     let pair = Pair::codex().await;
     pushed_branch(&pair.repo_a, "feature/adopted");
     let home_b = pair.dir.path().join("host-b");
@@ -232,6 +238,11 @@ async fn an_abort_after_a_failed_adoption_leaves_no_agent_behind() {
         .unwrap();
     assert!(project_b.move_in(package.clone()).await.is_err());
     assert_eq!(arrival(&pair.host_b, token).await, Arrival::Starting);
+    if deleted {
+        for started in project_b.threads().await.unwrap() {
+            project_b.delete(&started, false).await.unwrap();
+        }
+    }
     assert_eq!(withdraw(&pair.host_b, token).await, Arrival::Refused);
     assert!(
         pair.host_b.agents().await.unwrap().is_empty(),
