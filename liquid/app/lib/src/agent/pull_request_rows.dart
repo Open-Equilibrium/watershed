@@ -25,7 +25,7 @@ class PullRequestRows extends StatelessWidget {
         final pr = status?.pullRequest;
         if (status == null || pr == null) return const SizedBox.shrink();
         return _PullRequestRow(
-          key: ObjectKey(git),
+          key: ValueKey((git, pr.number)),
           state: state,
           git: git,
           terms: terminologyFor(status),
@@ -174,7 +174,7 @@ class _PullRequestRowState extends State<_PullRequestRow> {
         ],
       ),
     );
-    if (merge == true) {
+    if (merge == true && mounted) {
       await _act('merge', mergeMethod: detail.mergeMethod);
     }
   }

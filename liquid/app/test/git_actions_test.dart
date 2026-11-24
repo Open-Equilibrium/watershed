@@ -106,11 +106,12 @@ BridgeGitStatus featureOf({
 );
 
 BridgeBranchPullRequest prOf({
+  int number = 7,
   String state = 'open',
   bool draft = false,
   String url = 'https://github.com/o/r/pull/7',
 }) => BridgeBranchPullRequest(
-  number: 7,
+  number: number,
   title: 'Add a feature',
   url: url,
   state: state,
@@ -493,6 +494,19 @@ void main() {
       'Could not merge this pull request. Exception: host refused',
     );
     expect(find.text('Merge'), findsOneWidget);
+  });
+
+  testWidgets('a merge confirmed for one pull request never merges the next', (
+    tester,
+  ) async {
+    final git = _prGit(detailOf(action: 'merge'));
+    await pumpGit(tester, git);
+    await tap(tester, find.text('Merge'));
+    git.detail = null;
+    git.change(gitStatusOf(pullRequest: prOf(number: 8)));
+    await tester.pumpAndSettle();
+    await tap(tester, find.widgetWithText(PrimaryButton, 'Merge'));
+    expect(git.calls, isEmpty);
   });
 
   testWidgets(
