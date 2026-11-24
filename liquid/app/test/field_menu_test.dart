@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:liquid/src/rust/api/workspace.dart';
 import 'package:liquid/src/workspace/workspace_state.dart';
 
+import 'focus_kit.dart';
 import 'page_kit.dart';
 
 void main() {
@@ -14,11 +15,6 @@ void main() {
   Finder inMenu(Finder finder) => find.descendant(of: menu, matching: finder);
   Finder header(String name) => kit.inTable(find.text(name));
   final dialog = find.byType(Dialog);
-
-  Future<void> tap(WidgetTester tester, Finder finder) async {
-    await tester.tap(finder);
-    await tester.pumpAndSettle();
-  }
 
   Finder chevron(String name) => find
       .descendant(

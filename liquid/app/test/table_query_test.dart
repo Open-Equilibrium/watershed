@@ -7,6 +7,7 @@ import 'package:liquid/src/rust/api/workspace.dart';
 import 'package:liquid/src/workspace/table_block.dart';
 import 'package:liquid/src/workspace/workspace_state.dart';
 
+import 'focus_kit.dart';
 import 'page_kit.dart';
 
 void main() {
@@ -23,11 +24,6 @@ void main() {
   final filterField = find.byKey(const Key('filter field'));
   final filterValue = find.byKey(const Key('filter value'));
   final filterMatch = find.byKey(const Key('filter match'));
-
-  Future<void> tap(WidgetTester tester, Finder target) async {
-    await tester.tap(target);
-    await tester.pumpAndSettle();
-  }
 
   Finder menuText(String text) => find.descendant(
     of: find.byKey(const Key('table query menu')),

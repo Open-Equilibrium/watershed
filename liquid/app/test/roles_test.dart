@@ -10,15 +10,11 @@ import 'package:liquid/src/workspace/workspace_state.dart';
 import 'automations_test.dart' show buttonFields, flagLarge;
 import 'fake_workspace.dart';
 import 'page_kit.dart';
+import 'focus_kit.dart';
 
 Future<String> showBudget(WidgetTester tester, PageKit kit) async {
   await kit.show(tester, [TablePart(expenses, fields: buttonFields)]);
   return kit.fake.databases.keys.single;
-}
-
-Future<void> tap(WidgetTester tester, Finder finder) async {
-  await tester.tap(finder);
-  await tester.pumpAndSettle();
 }
 
 BridgeRoleSetup lastRole(PageKit kit) =>

@@ -7,8 +7,6 @@ import 'package:liquid/src/workspace/page_icon.dart';
 import 'focus_kit.dart';
 import 'page_kit.dart';
 
-void expectOne(Finder finder) => expect(finder, findsOneWidget);
-
 Finder inSidebar(Finder finder) =>
     find.descendant(of: find.byType(Sidebar), matching: finder);
 

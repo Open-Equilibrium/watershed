@@ -5,6 +5,7 @@ import 'package:liquid/src/rust/api/database.dart';
 import 'package:liquid/src/rust/api/workspace.dart';
 import 'package:liquid/src/workspace/workspace_state.dart';
 
+import 'focus_kit.dart';
 import 'page_kit.dart';
 
 void main() {
@@ -15,11 +16,6 @@ void main() {
     expenseRow('r2', 'Electricity', '2026-10-30', 'home', 96, false),
     expenseRow('r3', 'Rent', '2026-10-27', 'home', 950, true),
   ];
-
-  Future<void> tap(WidgetTester tester, Finder target) async {
-    await tester.tap(target);
-    await tester.pumpAndSettle();
-  }
 
   List<String> names(WidgetTester tester) {
     final shown = {

@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:liquid/src/rust/api/database.dart';
 import 'package:liquid/src/rust/api/workspace.dart';
 
+import 'focus_kit.dart';
 import 'page_kit.dart';
 
 void main() {
@@ -11,11 +12,6 @@ void main() {
   final dateTotal = find.byKey(const ValueKey('total date'));
   final amountTotal = find.byKey(const ValueKey('total amount'));
   Finder inMenu(Finder finder) => find.descendant(of: menu, matching: finder);
-
-  Future<void> tap(WidgetTester tester, Finder target) async {
-    await tester.tap(target);
-    await tester.pumpAndSettle();
-  }
 
   testWidgets('a field\'s footer cell picks a total that the View counts', (
     tester,

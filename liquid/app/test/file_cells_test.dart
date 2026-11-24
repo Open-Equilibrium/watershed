@@ -9,6 +9,7 @@ import 'package:liquid/src/rust/api/workspace.dart';
 import 'package:liquid/src/workspace/media_block.dart';
 import 'package:liquid/src/workspace/paste.dart';
 
+import 'focus_kit.dart';
 import 'page_kit.dart';
 
 const fields = [
@@ -88,11 +89,6 @@ void main() {
       row('r1', 'Hotel', held),
       row('r2', 'Train to Porto', const []),
     ]);
-    await tester.pumpAndSettle();
-  }
-
-  Future<void> tap(WidgetTester tester, Finder finder) async {
-    await tester.tap(finder);
     await tester.pumpAndSettle();
   }
 

@@ -4,20 +4,13 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:liquid/src/rust/api/workspace.dart';
 import 'package:liquid/src/workspace/workspace_state.dart';
 
+import 'focus_kit.dart';
 import 'page_kit.dart';
-
-void expectOne(Finder finder) => expect(finder, findsOneWidget);
-void expectNone(Finder finder) => expect(finder, findsNothing);
 
 void main() {
   final kit = PageKit();
 
   List<BridgeView> views() => kit.fake.views[kit.page]!;
-
-  Future<void> tap(WidgetTester tester, Finder target) async {
-    await tester.tap(target);
-    await tester.pumpAndSettle();
-  }
 
   Future<void> setTile(
     WidgetTester tester,

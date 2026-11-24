@@ -11,6 +11,7 @@ import 'package:liquid/src/whiteboard/board_controller.dart';
 import 'package:liquid/src/whiteboard/ink_geometry.dart';
 import 'package:liquid/src/workspace/workspace_state.dart';
 
+import 'focus_kit.dart';
 import 'page_kit.dart';
 
 List<Offset> across(double y, {double step = 5}) => [
@@ -64,11 +65,6 @@ void main() {
       tester.getTopLeft(find.byKey(const Key('whiteboard canvas'))) +
       at +
       const Offset(20, 20);
-
-  Future<void> tap(WidgetTester tester, Finder finder) async {
-    await tester.tap(finder);
-    await tester.pumpAndSettle();
-  }
 
   Future<void> clickAt(WidgetTester tester, Offset at) async {
     await tester.tapAt(screen(tester, at));

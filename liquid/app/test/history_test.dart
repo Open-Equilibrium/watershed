@@ -6,6 +6,7 @@ import 'package:liquid/src/workspace/page_icon.dart';
 
 import 'fake_workspace.dart';
 import 'page_kit.dart';
+import 'focus_kit.dart';
 
 const you = BridgeActor(kind: BridgeActorKind.person, id: 'benni');
 
@@ -30,11 +31,6 @@ BridgeEntry entry(
   purged: purged,
   deletedTable: deletedTable,
 );
-
-Future<void> tap(WidgetTester tester, Finder finder) async {
-  await tester.tap(finder);
-  await tester.pumpAndSettle();
-}
 
 Finder inHistory(Finder finder) =>
     find.descendant(of: find.byKey(const Key('history')), matching: finder);

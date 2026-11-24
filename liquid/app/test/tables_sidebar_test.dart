@@ -8,6 +8,7 @@ import 'package:liquid/src/workspace/table_page.dart';
 import 'package:liquid/src/workspace/workspace_state.dart';
 
 import 'fake_workspace.dart';
+import 'focus_kit.dart';
 import 'page_kit.dart';
 
 void main() {
@@ -18,11 +19,6 @@ void main() {
     expenseRow('r2', 'Electricity', '2026-10-30', 'home', 96, false),
     expenseRow('r3', 'Rent', '2026-10-27', 'home', 950, true),
   ];
-
-  Future<void> tap(WidgetTester tester, Finder target) async {
-    await tester.tap(target);
-    await tester.pumpAndSettle();
-  }
 
   Finder inSidebar(Finder finder) =>
       find.descendant(of: find.byType(Explorer), matching: finder);

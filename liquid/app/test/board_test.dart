@@ -7,10 +7,8 @@ import 'package:liquid/src/workspace/cell_pickers.dart';
 import 'package:liquid/src/workspace/table_cells.dart';
 import 'package:liquid/src/workspace/workspace_state.dart';
 
+import 'focus_kit.dart';
 import 'page_kit.dart';
-
-void expectOne(Finder finder) => expect(finder, findsOneWidget);
-void expectNone(Finder finder) => expect(finder, findsNothing);
 
 void main() {
   final kit = PageKit();
@@ -24,11 +22,6 @@ void main() {
   BridgeView view() => kit.fake.views[kit.page]!.firstWhere(
     (view) => view.kind == BridgeBlockKind.database,
   );
-
-  Future<void> tap(WidgetTester tester, Finder target) async {
-    await tester.tap(target);
-    await tester.pumpAndSettle();
-  }
 
   Future<void> board(
     WidgetTester tester,

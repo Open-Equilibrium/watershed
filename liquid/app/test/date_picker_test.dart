@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:liquid/src/rust/api/database.dart';
 import 'package:liquid/src/rust/api/workspace.dart';
 
+import 'focus_kit.dart';
 import 'page_kit.dart';
 
 void main() {
@@ -19,11 +20,6 @@ void main() {
       .widget<TextField>(inPicker(find.byType(TextField)))
       .controller!
       .text;
-
-  Future<void> tap(WidgetTester tester, Finder finder) async {
-    await tester.tap(finder);
-    await tester.pumpAndSettle();
-  }
 
   Future<void> type(WidgetTester tester, String text) async {
     await tester.enterText(inPicker(find.byType(TextField)), text);

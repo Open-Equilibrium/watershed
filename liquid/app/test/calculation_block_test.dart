@@ -9,12 +9,10 @@ import 'package:liquid/src/rust/api/workspace.dart';
 import 'package:liquid/src/workspace/calculation_block.dart';
 import 'package:liquid/src/workspace/workspace_state.dart';
 
+import 'focus_kit.dart';
 import 'page_kit.dart';
 
 const amount = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
-
-void expectOne(Finder finder) => expect(finder, findsOneWidget);
-void expectNone(Finder finder) => expect(finder, findsNothing);
 
 void main() {
   final kit = PageKit();
@@ -38,11 +36,6 @@ void main() {
   Finder value() => field('A value, or = and a formula');
   String valueText(WidgetTester tester) =>
       tester.widget<TextField>(value()).controller!.text;
-
-  Future<void> tap(WidgetTester tester, Finder finder) async {
-    await tester.tap(finder);
-    await tester.pumpAndSettle();
-  }
 
   Future<void> type(WidgetTester tester, String text) async {
     tester.testTextInput.updateEditingValue(

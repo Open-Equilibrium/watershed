@@ -5,6 +5,7 @@ import 'package:liquid/src/rust/api/workspace.dart';
 import 'package:liquid/src/workspace/paste.dart';
 import 'package:liquid/src/workspace/workspace_state.dart';
 
+import 'focus_kit.dart';
 import 'page_kit.dart';
 
 void main() {
@@ -25,11 +26,6 @@ void main() {
     for (final view in kit.fake.views[kit.page]!)
       if (view.kind == BridgeBlockKind.database) view,
   ];
-
-  Future<void> tap(WidgetTester tester, Finder target) async {
-    await tester.tap(target);
-    await tester.pumpAndSettle();
-  }
 
   Future<void> viewAction(WidgetTester tester, String action) async {
     await tap(tester, find.byKey(const Key('View actions')));

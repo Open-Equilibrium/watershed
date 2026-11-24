@@ -8,6 +8,7 @@ import 'package:liquid/src/rust/api/workspace.dart';
 import 'package:liquid/src/workspace/chart_block.dart';
 import 'package:liquid/src/workspace/workspace_state.dart';
 
+import 'focus_kit.dart';
 import 'page_kit.dart';
 
 void main() {
@@ -20,11 +21,6 @@ void main() {
     kind: BridgeChartKind.bar,
     value: BridgeChartValue.count,
   );
-
-  Future<void> tap(WidgetTester tester, Finder finder) async {
-    await tester.tap(finder);
-    await tester.pumpAndSettle();
-  }
 
   Future<void> type(WidgetTester tester, String text) async {
     tester.testTextInput.updateEditingValue(

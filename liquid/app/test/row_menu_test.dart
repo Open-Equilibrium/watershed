@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:liquid/src/rust/api/workspace.dart';
 import 'package:liquid/src/workspace/workspace_state.dart';
 
+import 'focus_kit.dart';
 import 'page_kit.dart';
 
 void main() {
@@ -42,11 +43,6 @@ void main() {
     await hover(tester, tester.getCenter(finder));
     await mouse.down(tester.getCenter(finder));
     await mouse.up();
-    await tester.pumpAndSettle();
-  }
-
-  Future<void> tap(WidgetTester tester, Finder finder) async {
-    await tester.tap(finder);
     await tester.pumpAndSettle();
   }
 

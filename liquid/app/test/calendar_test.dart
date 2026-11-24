@@ -6,6 +6,7 @@ import 'package:liquid/src/rust/api/database.dart';
 import 'package:liquid/src/rust/api/workspace.dart';
 import 'package:liquid/src/workspace/workspace_state.dart';
 
+import 'focus_kit.dart';
 import 'page_kit.dart';
 
 void main() {
@@ -14,11 +15,6 @@ void main() {
   String day(int month, int day) =>
       DateFormat('yyyy-MM-dd')
           .format(DateTime(now.year, now.month + month, day));
-
-  Future<void> tap(WidgetTester tester, Finder target) async {
-    await tester.tap(target);
-    await tester.pumpAndSettle();
-  }
 
   Future<void> calendar(WidgetTester tester, List<BridgeRow> rows) async {
     await kit.show(tester, [TablePart(rows)]);
