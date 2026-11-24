@@ -19,7 +19,6 @@ pub const API_VERSION: u32 = 1;
 pub struct Pairing {
     pub name: String,
     pub token: String,
-    #[serde(default)]
     pub access: Access,
 }
 
@@ -344,12 +343,7 @@ pub struct Status {
     pub t3_version: String,
     pub pid: u32,
     pub revision: u64,
-    #[serde(default = "reconciled_when_absent")]
     pub reconciled: bool,
-}
-
-fn reconciled_when_absent() -> bool {
-    true
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
@@ -357,16 +351,4 @@ pub struct RemoteStatus {
     pub port: u16,
     pub addresses: Vec<String>,
     pub waiting: Option<String>,
-}
-
-#[cfg(test)]
-mod tests {
-    use super::Status;
-
-    #[test]
-    fn a_status_of_an_older_service_reads_as_reconciled() {
-        let status: Status =
-            serde_json::from_str(r#"{"t3_version":"0.1.9","pid":7,"revision":3}"#).unwrap();
-        assert!(status.reconciled);
-    }
 }

@@ -67,9 +67,7 @@ pub struct Agent {
     pub thread: String,
     pub previous: Option<String>,
     pub generation: u64,
-    #[serde(default)]
     pub next_run_ms: Option<u64>,
-    #[serde(default)]
     pub threads: Vec<String>,
 }
 
@@ -134,7 +132,6 @@ pub const MAX_MEMORY_BYTES: u64 = 100 * 1024 * 1024;
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct AgentCarry {
     pub name: String,
-    #[serde(default = "named_default")]
     pub named: bool,
     pub model: ModelChoice,
     pub permissions: Permissions,
@@ -154,10 +151,6 @@ pub struct AgentMoveFacts {
     pub memory_bytes: u64,
     pub routines: u32,
     pub earlier: u32,
-}
-
-fn named_default() -> bool {
-    true
 }
 
 pub(crate) fn free_name(db: &Connection, home: &Path, name: &str) -> Result<String, String> {

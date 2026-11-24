@@ -1,11 +1,11 @@
 use std::path::{Path, PathBuf};
 
-use serde_json::{Value, json};
+use serde_json::Value;
 
 use super::Dir;
 use super::fake_t3::Fake;
+use crate::AcpAgent;
 use crate::host::write_settings;
-use crate::{AcpAgent, ThreadSummary};
 
 fn home() -> Dir {
     let home = Dir::new();
@@ -89,17 +89,6 @@ fn a_remote_name_with_a_slash_is_removed_whole_before_the_branch_is_compared() {
     let tracks = Some("refs/remotes/team/origin/topic");
     assert_eq!(tracking_reason("topic", "team/origin", tracks), None);
     assert!(tracking_reason("origin/topic", "team/origin", tracks).is_some());
-}
-
-#[test]
-fn a_summary_from_an_older_service_says_its_harness_is_not_reported() {
-    let older: ThreadSummary = serde_json::from_value(json!({
-        "id": "t1", "title": "Build", "updated_ms": null, "branch": null,
-        "worktree": null, "running": false, "archived": false,
-    }))
-    .unwrap();
-    assert!(!older.harness_known);
-    assert_eq!(older.harness, None);
 }
 
 #[tokio::test(flavor = "multi_thread")]

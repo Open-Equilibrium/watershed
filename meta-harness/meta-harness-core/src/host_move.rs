@@ -76,11 +76,8 @@ pub struct MoveCheck {
     pub branch: Option<String>,
     pub remote_url: Option<String>,
     pub blocked: Option<String>,
-    #[serde(default)]
     pub moved: bool,
-    #[serde(default)]
     pub moving: Option<Moving>,
-    #[serde(default)]
     pub agent: Option<crate::agents::AgentMoveFacts>,
 }
 
@@ -96,10 +93,8 @@ pub struct MovePackage {
     pub handoff: String,
     pub transcript: Vec<ChatItem>,
     pub transcript_capped: bool,
-    #[serde(default)]
     pub queued: Vec<String>,
     pub transfer: String,
-    #[serde(default)]
     pub agent: Option<Box<crate::agents::AgentCarry>>,
 }
 

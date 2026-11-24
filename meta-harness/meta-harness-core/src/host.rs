@@ -301,13 +301,9 @@ pub struct ThreadSummary {
     pub worktree: Option<PathBuf>,
     pub running: bool,
     pub archived: bool,
-    #[serde(default)]
     pub harness: Option<Harness>,
-    #[serde(default)]
     pub harness_known: bool,
-    #[serde(default)]
     pub moving: Option<crate::host_move::Moving>,
-    #[serde(default)]
     pub visited_ms: Option<u64>,
 }
 
@@ -355,7 +351,6 @@ pub struct StartThread {
     pub model: ModelChoice,
     pub workspace: Workspace,
     pub permissions: Permissions,
-    #[serde(default)]
     pub message_id: Option<String>,
 }
 
