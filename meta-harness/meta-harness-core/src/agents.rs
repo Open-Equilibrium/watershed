@@ -1,3 +1,4 @@
+use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use rusqlite::{Connection, OptionalExtension, params};
@@ -186,7 +187,12 @@ pub(crate) fn memory_files(folder: &Path) -> Result<Vec<(String, PathBuf, u64)>,
             let kind = entry
                 .file_type()
                 .map_err(|e| format!("Could not read {}: {e}", entry.path().display()))?;
-            let name = entry.file_name().to_string_lossy().into_owned();
+            let name = entry.file_name().into_string().map_err(|_| {
+                format!(
+                    "{} has a name that is not valid UTF-8, so a move cannot carry it.",
+                    entry.path().display()
+                )
+            })?;
             let relative = if prefix.is_empty() {
                 name
             } else {
@@ -224,21 +230,31 @@ pub(crate) fn too_large(bytes: u64) -> Option<String> {
     })
 }
 
-pub(crate) fn pack(agent: &Agent, routines: Vec<Value>) -> Result<AgentCarry, String> {
-    if let Some(reason) = too_large(memory_bytes(agent)?) {
-        return Err(reason);
-    }
-    let files = memory_files(&agent.memory)?
-        .into_iter()
-        .map(|(path, full, _)| {
-            let bytes = std::fs::read(&full)
-                .map_err(|e| format!("Could not read {}: {e}", full.display()))?;
-            Ok(CarriedFile {
-                path,
-                bytes: crate::util::base64url_encode(&bytes),
-            })
+pub(crate) fn read_within(path: &Path, carried: u64) -> Result<Vec<u8>, String> {
+    let mut bytes = Vec::new();
+    std::fs::File::open(path)
+        .and_then(|file| {
+            file.take(MAX_MEMORY_BYTES.saturating_sub(carried) + 1)
+                .read_to_end(&mut bytes)
         })
-        .collect::<Result<_, String>>()?;
+        .map_err(|e| format!("Could not read {}: {e}", path.display()))?;
+    match too_large(carried + bytes.len() as u64) {
+        Some(reason) => Err(reason),
+        None => Ok(bytes),
+    }
+}
+
+pub(crate) fn pack(agent: &Agent, routines: Vec<Value>) -> Result<AgentCarry, String> {
+    let mut carried = 0;
+    let mut files = Vec::new();
+    for (path, full, _) in memory_files(&agent.memory)? {
+        let bytes = read_within(&full, carried)?;
+        carried += bytes.len() as u64;
+        files.push(CarriedFile {
+            path,
+            bytes: crate::util::base64url_encode(&bytes),
+        });
+    }
     Ok(AgentCarry {
         name: agent.name.clone(),
         named: agent.named,
@@ -250,6 +266,7 @@ pub(crate) fn pack(agent: &Agent, routines: Vec<Value>) -> Result<AgentCarry, St
 }
 
 pub(crate) fn unpack(folder: &Path, files: &[CarriedFile]) -> Result<(), String> {
+    let mut listed = std::collections::HashSet::new();
     for file in files {
         let relative = Path::new(&file.path);
         let plain = relative
@@ -258,6 +275,12 @@ pub(crate) fn unpack(folder: &Path, files: &[CarriedFile]) -> Result<(), String>
         if !plain || file.path.is_empty() {
             return Err(format!(
                 "A carried memory file has no plain path: {:?}",
+                file.path
+            ));
+        }
+        if !listed.insert(relative) {
+            return Err(format!(
+                "The carried memory file {} is listed twice.",
                 file.path
             ));
         }

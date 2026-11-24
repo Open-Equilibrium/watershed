@@ -54,6 +54,7 @@ struct Item {
 #[derive(Default)]
 struct State {
     out: Option<mpsc::UnboundedSender<Message>>,
+    serving: Option<tokio::task::AbortHandle>,
     waiters: HashMap<String, Waiter>,
     closed: bool,
     stopping: bool,
@@ -193,7 +194,11 @@ impl Client {
     }
 
     pub fn close(&self) {
-        lock(&self.link).stopping = true;
+        let mut state = lock(&self.link);
+        state.stopping = true;
+        if let Some(serving) = state.serving.take() {
+            serving.abort();
+        }
     }
 }
 
@@ -218,7 +223,7 @@ async fn reconnect(origin: &str, issue: &Issue, link: &Link) -> Option<Socket> {
             return None;
         }
         if let Ok(socket) = open(origin, issue).await {
-            return Some(socket);
+            return (!lock(link).stopping).then_some(socket);
         }
     }
     None
@@ -226,6 +231,7 @@ async fn reconnect(origin: &str, issue: &Issue, link: &Link) -> Option<Socket> {
 
 fn install(link: &Link, socket: Socket) -> JoinHandle<()> {
     let (out, outgoing) = mpsc::unbounded_channel();
+    let serving = tokio::spawn(serve(socket, outgoing, out.clone(), link.clone()));
     {
         let mut state = lock(link);
         for waiter in state.waiters.values() {
@@ -236,9 +242,14 @@ fn install(link: &Link, socket: Socket) -> JoinHandle<()> {
                 let _ = out.send(frame_message(frame));
             }
         }
-        state.out = Some(out.clone());
+        state.out = Some(out);
+        if state.stopping {
+            serving.abort();
+        } else {
+            state.serving = Some(serving.abort_handle());
+        }
     }
-    tokio::spawn(serve(socket, outgoing, out, link.clone()))
+    serving
 }
 
 fn lose_connection(state: &mut State) {

@@ -12,11 +12,20 @@ use crate::{
     ThreadEvent, ThreadSummary, Turn, UsageLimits, Watch,
 };
 
+fn text_path(path: &Path) -> Result<String, String> {
+    path.to_str().map(str::to_owned).ok_or_else(|| {
+        format!(
+            "{} is not valid UTF-8, so Meta-Harness cannot send it.",
+            path.display()
+        )
+    })
+}
+
 impl Host {
     pub async fn project(&self, root: &Path) -> Result<Project, String> {
         let project = Project {
             host: self.clone(),
-            root: root.to_string_lossy().into_owned(),
+            root: text_path(root)?,
         };
         project.threads().await?;
         Ok(project)
@@ -308,7 +317,7 @@ impl Thread {
     pub async fn set_branch(&self, branch: &str, worktree: Option<&Path>) -> Result<(), String> {
         self.call(ThreadCall::SetBranch {
             branch: branch.to_owned(),
-            worktree: worktree.map(|p| p.to_string_lossy().into_owned()),
+            worktree: worktree.map(text_path).transpose()?,
         })
         .await
     }

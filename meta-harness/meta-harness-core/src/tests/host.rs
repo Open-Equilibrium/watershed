@@ -84,6 +84,14 @@ fn the_agents_are_merged_into_the_settings_and_no_temporary_file_is_left() {
 }
 
 #[test]
+fn a_remote_name_with_a_slash_is_removed_whole_before_the_branch_is_compared() {
+    use crate::host::projects::tracking_reason;
+    let tracks = Some("refs/remotes/team/origin/topic");
+    assert_eq!(tracking_reason("topic", "team/origin", tracks), None);
+    assert!(tracking_reason("origin/topic", "team/origin", tracks).is_some());
+}
+
+#[test]
 fn a_summary_from_an_older_service_says_its_harness_is_not_reported() {
     let older: ThreadSummary = serde_json::from_value(json!({
         "id": "t1", "title": "Build", "updated_ms": null, "branch": null,

@@ -196,11 +196,11 @@ async fn depart_once(
     commit: bool,
     message: Option<String>,
 ) -> Result<MovePackage, String> {
+    host_move::owned_by(&shared.store.db(), transfer, thread.id())?;
     if host_move::phase(&shared.store.db(), transfer)? == Some(host_move::Phase::Preparing) {
         reconcile(thread, &shared.store, transfer).await?;
     }
     let facts = thread.move_facts().await?;
-    host_move::owned_by(&shared.store.db(), transfer, thread.id())?;
     let fresh = host_move::phase(&shared.store.db(), transfer)?.is_none();
     if fresh
         && let Some(agent) = super::agents::move_facts(shared, thread).await?

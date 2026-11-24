@@ -206,7 +206,7 @@ impl Git {
         }
     }
 
-    pub(crate) async fn has_one_remote(&self) -> Result<bool, String> {
+    pub(crate) async fn one_remote(&self) -> Result<Option<String>, String> {
         let mut cursor = 0;
         let mut names = std::collections::BTreeSet::new();
         loop {
@@ -225,11 +225,11 @@ impl Git {
                     .filter_map(|r| r["remoteName"].as_str().map(str::to_owned)),
             );
             if names.len() > 1 {
-                return Ok(false);
+                return Ok(None);
             }
             match result["nextCursor"].as_u64() {
                 Some(next) => cursor = next,
-                None => return Ok(names.len() == 1),
+                None => return Ok(names.pop_first()),
             }
         }
     }

@@ -63,11 +63,15 @@ impl Host {
     }
 }
 
-fn tracking_reason(branch: &str, upstream: Option<&str>) -> Option<String> {
+pub(crate) fn tracking_reason(
+    branch: &str,
+    remote: &str,
+    upstream: Option<&str>,
+) -> Option<String> {
     let tracked = upstream
         .and_then(|upstream| upstream.strip_prefix("refs/remotes/"))
-        .and_then(|rest| rest.split_once('/'))
-        .map(|(_, tracked)| tracked);
+        .and_then(|rest| rest.strip_prefix(remote))
+        .and_then(|rest| rest.strip_prefix('/'));
     match upstream {
         None => Some(format!(
             "{branch} has no upstream branch, so it cannot be fast-forwarded to the moved session's pushed head."
@@ -116,18 +120,20 @@ impl Project {
         let Some(local) = self.git().local_branch(branch).await? else {
             return Ok(Landing::NewWorktree);
         };
-        if !self.git().has_one_remote().await? {
+        let Some(remote) = self.git().one_remote().await? else {
             return Ok(Landing::Blocked {
                 reason: format!(
                     "This project has more than one Git remote, so the session cannot move onto {branch} here."
                 ),
             });
-        }
+        };
         let Some(checkout) = &local.worktree else {
-            return Ok(match tracking_reason(branch, local.upstream.as_deref()) {
-                Some(reason) => Landing::Blocked { reason },
-                None => Landing::Attach,
-            });
+            return Ok(
+                match tracking_reason(branch, &remote, local.upstream.as_deref()) {
+                    Some(reason) => Landing::Blocked { reason },
+                    None => Landing::Attach,
+                },
+            );
         };
         let path = checkout.to_string_lossy().into_owned();
         let in_use = self.threads().await?.iter().any(|thread| {
@@ -139,7 +145,7 @@ impl Project {
             format!(
                 "{branch} is checked out at {path} by a session that has not moved, so the session cannot move there."
             )
-        } else if let Some(reason) = tracking_reason(branch, local.upstream.as_deref()) {
+        } else if let Some(reason) = tracking_reason(branch, &remote, local.upstream.as_deref()) {
             reason
         } else if !status.changes.is_empty() {
             format!(

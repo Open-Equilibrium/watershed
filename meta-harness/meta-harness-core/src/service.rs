@@ -251,8 +251,13 @@ fn take_lock(home: &Path) -> Result<std::fs::File, String> {
 
 pub(crate) fn write_private(path: &Path, text: &str) -> Result<(), String> {
     use std::io::Write;
-    let temporary = path.with_extension("tmp");
-    let _ = std::fs::remove_file(&temporary);
+    let mut random = [0u8; 8];
+    getrandom::fill(&mut random).expect("the operating system provides random bytes");
+    let name = path.file_name().unwrap_or_default().to_string_lossy();
+    let temporary = path.with_file_name(format!(
+        ".{name}.{}.meta-harness-tmp",
+        crate::util::hex(&random)
+    ));
     let mut options = std::fs::OpenOptions::new();
     options.write(true).create_new(true);
     #[cfg(unix)]
@@ -260,13 +265,19 @@ pub(crate) fn write_private(path: &Path, text: &str) -> Result<(), String> {
     let mut file = options
         .open(&temporary)
         .map_err(|e| format!("Could not write {}: {e}", temporary.display()))?;
-    #[cfg(windows)]
-    crate::platform::owner_only(&temporary, false)?;
-    file.write_all(text.as_bytes())
-        .and_then(|()| file.sync_all())
-        .map_err(|e| format!("Could not write {}: {e}", temporary.display()))?;
-    std::fs::rename(&temporary, path)
-        .map_err(|e| format!("Could not write {}: {e}", path.display()))
+    let result = (|| {
+        #[cfg(windows)]
+        crate::platform::owner_only(&temporary, false)?;
+        file.write_all(text.as_bytes())
+            .and_then(|()| file.sync_all())
+            .map_err(|e| format!("Could not write {}: {e}", temporary.display()))?;
+        std::fs::rename(&temporary, path)
+            .map_err(|e| format!("Could not write {}: {e}", path.display()))
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_file(&temporary);
+    }
+    result
 }
 
 async fn relink(shared: Arc<Shared>) {
@@ -476,7 +487,7 @@ fn frame_of(reply: &Reply) -> Message {
     )
 }
 
-async fn answer(
+pub(crate) async fn answer(
     out: &mpsc::Sender<Message>,
     id: u64,
     first: Value,
@@ -487,7 +498,10 @@ async fn answer(
     while let Some(item) = items.next().await {
         let reply = match item {
             Ok(item) => Reply::Item { id, item },
-            Err(error) => Reply::Error { id, error },
+            Err(error) => {
+                let _ = out.send(frame_of(&Reply::Error { id, error })).await;
+                return;
+            }
         };
         if out.send(frame_of(&reply)).await.is_err() {
             return;

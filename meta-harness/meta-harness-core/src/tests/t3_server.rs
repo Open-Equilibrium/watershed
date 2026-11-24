@@ -16,13 +16,11 @@ async fn a_server_that_ends_during_its_start_is_started_again() {
     let script = format!(
         "#!/bin/sh\n\
          [ \"$1\" = serve ] || exit 1\n\
-         echo start >> \"{starts}\"\n\
-         if [ ! -e \"{started}\" ]; then : > \"{started}\"; exit 1; fi\n\
+         echo start >> \"$T3CODE_HOME/../starts\"\n\
+         if [ ! -e \"$T3CODE_HOME/../started\" ]; then : > \"$T3CODE_HOME/../started\"; exit 1; fi\n\
          printf '{{\"pid\":%s,\"serverVersion\":\"{version}\",\"origin\":\"http://127.0.0.1:1\"}}' $$ \
          > \"$T3CODE_HOME/userdata/server-runtime.json\"\n\
          exec sleep 30\n",
-        started = dir.join("started").display(),
-        starts = dir.join("starts").display(),
         version = t3_version(),
     );
     std::fs::write(&binary, script).unwrap();

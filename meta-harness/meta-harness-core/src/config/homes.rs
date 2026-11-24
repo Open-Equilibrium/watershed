@@ -122,7 +122,12 @@ fn write_skills(
     .collect();
     let root = home.join("skills");
     real_folder(&root)?;
-    for name in managed.iter().chain(skills.keys()) {
+    let pending: Vec<&String> = managed.iter().chain(skills.keys()).collect();
+    write(
+        &manifest,
+        &serde_json::to_string(&pending).expect("names serialize"),
+    )?;
+    for name in &pending {
         let folder = root.join(name);
         match std::fs::remove_dir_all(&folder) {
             Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(failed(&folder, &e)),

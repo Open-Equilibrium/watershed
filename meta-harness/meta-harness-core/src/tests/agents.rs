@@ -228,6 +228,14 @@ fn a_moving_agent_carries_its_memory_files_and_refuses_unsafe_paths() {
             "{unsafe_path:?} is refused"
         );
     }
+    let twice = agents::CarriedFile {
+        path: "days/raw.bin".to_owned(),
+        bytes: String::new(),
+    };
+    assert!(
+        agents::unpack(&home.join("twice"), &[twice.clone(), twice]).is_err(),
+        "a path listed twice is refused"
+    );
     assert!(!home.join("escape.md").exists());
     assert!(agents::too_large(agents::MAX_MEMORY_BYTES).is_none());
     assert!(
@@ -235,6 +243,41 @@ fn a_moving_agent_carries_its_memory_files_and_refuses_unsafe_paths() {
             .unwrap()
             .contains("at most 100 MiB")
     );
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn a_memory_name_that_is_not_utf8_is_refused_instead_of_carried_under_a_changed_name() {
+    use std::os::unix::ffi::OsStrExt;
+    let home = Dir::new();
+    let store = Store::open(&home.join("meta-harness.sqlite")).unwrap();
+    let agent = agents::create(&store.db(), &home, &new_agent("news-bot"), "thread-1").unwrap();
+    for name in [&b"caf\xe9.md"[..], &b"caf\xe8.md"[..]] {
+        std::fs::write(agent.memory.join(std::ffi::OsStr::from_bytes(name)), "text").unwrap();
+    }
+    assert!(agents::pack(&agent, Vec::new()).is_err());
+}
+
+#[test]
+fn packing_reads_a_file_only_within_the_budget_its_predecessors_left() {
+    let home = Dir::new();
+    let file = home.join("grown.md");
+    std::fs::write(&file, "0123456789").unwrap();
+    assert_eq!(agents::read_within(&file, 0).unwrap(), b"0123456789");
+    assert!(agents::read_within(&file, agents::MAX_MEMORY_BYTES - 10).is_ok());
+    assert!(agents::read_within(&file, agents::MAX_MEMORY_BYTES - 9).is_err());
+}
+
+#[test]
+fn saving_instructions_leaves_a_memory_file_named_like_its_temporary_file_alone() {
+    let home = Dir::new();
+    let store = Store::open(&home.join("meta-harness.sqlite")).unwrap();
+    let agent = agents::create(&store.db(), &home, &new_agent("news-bot"), "thread-1").unwrap();
+    let kept = agent.memory.join("instructions.tmp");
+    std::fs::write(&kept, "kept").unwrap();
+    agents::write_instructions(&agent, "# news-bot\nNew.").unwrap();
+    assert_eq!(std::fs::read_to_string(&kept).unwrap(), "kept");
+    assert_eq!(agents::instructions(&agent).unwrap(), "# news-bot\nNew.");
 }
 
 #[test]
