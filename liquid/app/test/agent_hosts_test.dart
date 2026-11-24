@@ -89,6 +89,14 @@ class FakeLinks implements AgentHostLinks {
   }
 }
 
+class _UnreachableLinks extends FakeLinks {
+  _UnreachableLinks(super.started);
+
+  @override
+  Future<void> connect(String? address) async =>
+      throw const FileSystemException('no answer');
+}
+
 Future<void> tap(WidgetTester tester, Finder finder) async {
   await tester.tap(finder);
   await tester.pumpAndSettle();
@@ -591,6 +599,71 @@ void main() {
       );
       expect(saved.last.activeAddress, isNull);
     }
+  });
+
+  test('a delayed save never publishes over a later choice', () async {
+    final gate = Completer<void>();
+    var saves = 0;
+    final hosts = controller(
+      settings: AgentHostsSettings([mini]),
+      save: (next) async {
+        if (saves++ == 0) await gate.future;
+        saved.add(next);
+      },
+    );
+
+    final choosing = hosts.use(remote);
+    await pumpEventQueue();
+    final choosingNone = hosts.use(null);
+    gate.complete();
+    await choosing;
+    await choosingNone;
+
+    expect(hosts.value.activeAddress, isNull);
+    expect(saved.last.activeAddress, isNull);
+    expect(switched, [null], reason: 'the superseded choice never starts');
+  });
+
+  test(
+    'a pairing that waits for a save keeps the host it did not wait for',
+    () async {
+      final gate = Completer<void>();
+      var saves = 0;
+      final hosts = controller(
+        save: (next) async {
+          if (saves++ == 0) await gate.future;
+          saved.add(next);
+        },
+      );
+      const lab = 'ws://lab:3774';
+
+      final first = hosts.pair(remote, 'AAAA-AAAA');
+      await pumpEventQueue();
+      final second = hosts.pair(lab, 'BBBB-BBBB');
+      gate.complete();
+      await first;
+      await second;
+
+      expect(hosts.value.hosts.map((host) => host.address), [remote, lab]);
+      expect(saved.last.hosts.map((host) => host.address), [remote, lab]);
+    },
+  );
+
+  test('a host that cannot connect after it is saved leaves the list and its token is forgotten', () async {
+    final hosts = AgentHostsController(
+      settings: const AgentHostsSettings(),
+      bridge: bridge,
+      save: (next) async => saved.add(next),
+      links: _UnreachableLinks(switched),
+    );
+
+    await expectLater(
+      hosts.pair(remote, 'AAAA-AAAA'),
+      throwsA(isA<AgentHostsError>()),
+    );
+    expect(hosts.value.hosts, isEmpty);
+    expect(saved.last.hosts, isEmpty);
+    expect(bridge.calls.last, 'forget $remote');
   });
 
   test('a failed switch keeps a host paired while it was running', () async {

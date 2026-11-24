@@ -166,6 +166,8 @@ class AgentHostsController extends ValueNotifier<AgentHostsSettings> {
 
   int _changes = 0;
 
+  Future<void> _pending = Future.value();
+
   bool get changing => _changes > 0;
 
   Future<T> _change<T>(Future<T> Function() change) async {
@@ -187,10 +189,19 @@ class AgentHostsController extends ValueNotifier<AgentHostsSettings> {
     }
   }
 
-  Future<void> _write(AgentHostsSettings next) async {
+  Future<T> _serial<T>(Future<T> Function() work) {
+    final run = _pending.then((_) => work());
+    _pending = run.then<void>((_) {}, onError: (Object _) {});
+    return run;
+  }
+
+  Future<void> _write(
+    AgentHostsSettings Function(AgentHostsSettings current) change,
+  ) => _serial(() async {
+    final next = change(value);
     await save(next);
     value = next;
-  }
+  });
 
   Future<SavedAgentHost> pair(String address, String code) async {
     const failed = 'Could not add the agent host; nothing changed in Liquid.';
@@ -200,12 +211,23 @@ class AgentHostsController extends ValueNotifier<AgentHostsSettings> {
       address: address,
       client: paired.client,
     );
+    var registered = false;
     try {
-      await _write(value.added(host));
+      await _write((current) => current.added(host));
+      registered = true;
       await links.connect(address);
     } on Object catch (error) {
       final kept =
           '${paired.host} keeps this device paired as ${paired.client}; run meta host revoke ${paired.client} there to remove it.';
+      if (registered) {
+        try {
+          await _write((current) => current.without(address));
+        } on Object catch (removing) {
+          throw AgentHostsError(
+            'Could not add the agent host. $kept ${messageOf(error)} It stays in the list, because ${messageOf(removing)}',
+          );
+        }
+      }
       try {
         await bridge.forget(address);
       } on Object catch (forgetting) {
@@ -227,7 +249,7 @@ class AgentHostsController extends ValueNotifier<AgentHostsSettings> {
     );
     await _step(
       'Could not remove ${host.name} from the list; its token here is forgotten, so remove it again to finish.',
-      () => _write(value.without(host.address)),
+      () => _write((current) => current.without(host.address)),
     );
     links.disconnect(host.address);
     if (!host.active) return;
@@ -245,11 +267,12 @@ class AgentHostsController extends ValueNotifier<AgentHostsSettings> {
     final previous = value;
     final failed =
         'Could not use ${_nameOf(address, previous)} for sessions; nothing changed.';
-    await _step(failed, () => _write(previous.withActive(address)));
+    await _step(failed, () => _write((current) => current.withActive(address)));
+    if (choice != _choices) return;
     final failure = await links.startOn(address);
     if (failure == null || choice != _choices) return;
     try {
-      await _write(value.withActive(previous.activeAddress));
+      await _write((current) => current.withActive(previous.activeAddress));
     } on Object catch (error) {
       throw AgentHostsError(
         'Could not use ${_nameOf(address, previous)} for sessions, and the saved choice could not be restored, so the next start uses ${_nameOf(address, previous)}. ${messageOf(error)}',
