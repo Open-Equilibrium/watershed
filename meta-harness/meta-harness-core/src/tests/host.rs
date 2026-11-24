@@ -44,6 +44,22 @@ fn an_unreadable_settings_file_is_kept_and_reported() {
 
 #[cfg(unix)]
 #[test]
+fn a_replaced_settings_file_stays_owner_only() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let home = home();
+    std::fs::write(settings(&home), r#"{"theme":"dark"}"#).unwrap();
+    std::fs::set_permissions(settings(&home), std::fs::Permissions::from_mode(0o600)).unwrap();
+    write_settings(&home, &[agent()]).unwrap();
+    let mode = std::fs::metadata(settings(&home))
+        .unwrap()
+        .permissions()
+        .mode();
+    assert_eq!(mode & 0o777, 0o600);
+}
+
+#[cfg(unix)]
+#[test]
 fn a_settings_write_that_cannot_finish_keeps_the_previous_settings() {
     use std::os::unix::fs::PermissionsExt;
 
