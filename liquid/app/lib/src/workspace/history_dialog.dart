@@ -442,7 +442,7 @@ class _HistoryDialogState extends State<HistoryDialog> {
         '${dayOf(at, DateTime.now())} ${DateFormat.Hm('en_US').format(at)}',
       ),
       ('Allowed by', entry.allowedBy),
-      if (pageTitle != null) ('On', pageTitle.isEmpty ? 'Untitled' : pageTitle),
+      if (pageTitle != null) ('On', pageTitle.isEmpty ? untitled : pageTitle),
     ];
     return ListView(
       padding: const EdgeInsets.all(WsMetrics.space6),

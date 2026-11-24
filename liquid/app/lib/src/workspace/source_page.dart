@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
+import 'explorer.dart' show untitled;
 import '../controls.dart';
 import '../rust/api/chart.dart';
 import '../rust/api/source.dart';
@@ -443,7 +444,7 @@ class _SourcePageState extends State<SourcePage> {
                       color: ws.text,
                     ),
                     decoration: InputDecoration.collapsed(
-                      hintText: 'Untitled',
+                      hintText: untitled,
                       hintStyle: TextStyle(color: ws.textFaint),
                     ),
                   )

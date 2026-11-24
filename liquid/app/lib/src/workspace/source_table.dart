@@ -5,6 +5,7 @@ import '../theme/icons.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
 import '../controls.dart';
+import 'explorer.dart' show untitled;
 import 'page_icon.dart';
 import 'workspace_state.dart';
 
@@ -131,11 +132,11 @@ class SourceTable extends StatelessWidget {
     for (final area in state.areas.value) {
       for (final known in state.pages(area.id).value) {
         if (known.id == page) {
-          return known.title.isEmpty ? 'Untitled' : known.title;
+          return known.title.isEmpty ? untitled : known.title;
         }
       }
     }
-    return 'Untitled';
+    return untitled;
   }
 }
 
@@ -176,7 +177,7 @@ class _PagePicker extends StatelessWidget {
             key: ValueKey('use in ${page.id}'),
             onPressed: () => onPage(page.id),
             leadingIcon: PageIcon(page.icon),
-            child: Text(page.title.isEmpty ? 'Untitled' : page.title),
+            child: Text(page.title.isEmpty ? untitled : page.title),
           ),
     ],
     builder: (context, controller, _) => SecondaryButton(
