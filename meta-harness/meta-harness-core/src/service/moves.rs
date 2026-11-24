@@ -43,9 +43,9 @@ impl Session {
     ) -> Result<Value, String> {
         let shared = self.shared.clone();
         let thread = thread.clone();
-        to(detached(
-            async move { depart(&shared, &thread, &transfer, &target, commit, message).await },
-        )
+        to(detached(&self.shared, async move {
+            depart(&shared, &thread, &transfer, &target, commit, message).await
+        })
         .await?)
     }
 
@@ -57,7 +57,10 @@ impl Session {
     ) -> Result<Value, String> {
         let shared = self.shared.clone();
         let thread = thread.clone();
-        detached(async move { finish_move(&shared, &thread, &transfer, finish).await }).await?;
+        detached(&self.shared, async move {
+            finish_move(&shared, &thread, &transfer, finish).await
+        })
+        .await?;
         to(())
     }
 
@@ -70,8 +73,10 @@ impl Session {
         let shared = self.shared.clone();
         let project = project.clone();
         let root = root.to_owned();
-        let thread =
-            detached(async move { arrive(&shared, &project, &root, package).await }).await?;
+        let thread = detached(&self.shared, async move {
+            arrive(&shared, &project, &root, package).await
+        })
+        .await?;
         let id = thread.id().to_owned();
         self.keep(thread).await;
         to(id)
@@ -79,9 +84,25 @@ impl Session {
 }
 
 async fn detached<T: Send + 'static>(
+    shared: &Shared,
     work: impl Future<Output = Result<T, String>> + Send + 'static,
 ) -> Result<T, String> {
-    match tokio::spawn(work).await {
+    let task = tokio::spawn(work);
+    {
+        let mut tasks = crate::util::lock(&shared.detached);
+        tasks.retain(|task| !task.is_finished());
+        tasks.push(task.abort_handle());
+    }
+    match task.await {
+        Ok(result) => result,
+        Err(error) => Err(format!("The move did not finish: {error}")),
+    }
+}
+
+async fn blocking<T: Send + 'static>(
+    work: impl FnOnce() -> Result<T, String> + Send + 'static,
+) -> Result<T, String> {
+    match tokio::task::spawn_blocking(work).await {
         Ok(result) => result,
         Err(error) => Err(format!("The move did not finish: {error}")),
     }
@@ -173,7 +194,7 @@ enum Entry {
 }
 
 async fn depart(
-    shared: &Shared,
+    shared: &Arc<Shared>,
     thread: &Thread,
     transfer: &str,
     target: &(String, String, String),
@@ -189,7 +210,7 @@ async fn depart(
 }
 
 async fn depart_once(
-    shared: &Shared,
+    shared: &Arc<Shared>,
     thread: &Thread,
     transfer: &str,
     target: &(String, String, String),
@@ -264,9 +285,13 @@ async fn depart_once(
         .await?;
     package.queued = host_move::queued(&store.db(), transfer)?;
     package.agent = super::agents::carry(shared, thread).await?.map(Box::new);
-    let text = serde_json::to_string(&package).map_err(|e| e.to_string())?;
-    host_move::hand(&store.db(), transfer, &text, now_ms())?;
-    Ok(package)
+    let (owner, transfer) = (shared.clone(), transfer.to_owned());
+    blocking(move || {
+        let text = serde_json::to_string(&package).map_err(|e| e.to_string())?;
+        host_move::hand(&owner.store.db(), &transfer, &text, now_ms())?;
+        Ok(package)
+    })
+    .await
 }
 
 async fn finish_move(

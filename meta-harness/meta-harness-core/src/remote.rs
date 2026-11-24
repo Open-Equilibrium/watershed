@@ -47,7 +47,7 @@ fn refused_version(response: &Response<Option<Vec<u8>>>) -> String {
         None => "another API version".to_owned(),
     };
     format!(
-        "Meta-Harness speaks {speaks}; this client needs {}. Update Meta-Harness or Liquid.",
+        "Meta-Harness speaks {speaks}; this client needs {}. Restart Meta-Harness, or update whichever side is older.",
         api::API_VERSION
     )
 }
@@ -184,10 +184,16 @@ impl Host {
             tokio_tungstenite::tungstenite::Error::Http(response)
                 if response.status() == StatusCode::UNAUTHORIZED =>
             {
-                format!(
-                    "Meta-Harness at {url} no longer accepts this device's pairing; pair this \
+                match self.inner.endpoint {
+                    Endpoint::File(_) => format!(
+                        "Meta-Harness at {url} does not accept the token in connection.json; \
+                         restart Meta-Harness."
+                    ),
+                    Endpoint::Fixed { .. } => format!(
+                        "Meta-Harness at {url} no longer accepts this device's pairing; pair this \
                          device again."
-                )
+                    ),
+                }
             }
             e => format!("Could not reach Meta-Harness at {url}: {e}"),
         })?;

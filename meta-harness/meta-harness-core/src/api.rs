@@ -15,6 +15,8 @@ pub const TUNNEL_HEADER: &str = "meta-harness-tunnel";
 
 pub const API_VERSION: u32 = 1;
 
+pub const UNKNOWN_REQUEST: &str = "Meta-Harness does not understand this request";
+
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct Pairing {
     pub name: String,

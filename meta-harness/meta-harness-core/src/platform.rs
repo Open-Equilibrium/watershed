@@ -25,8 +25,19 @@ fn signal(pid: u32, signal: rustix::process::Signal) {
 }
 
 #[cfg(unix)]
+fn signal_tree(pid: u32, how: rustix::process::Signal) {
+    match i32::try_from(pid)
+        .ok()
+        .and_then(rustix::process::Pid::from_raw)
+    {
+        Some(group) if rustix::process::kill_process_group(group, how).is_ok() => {}
+        _ => signal(pid, how),
+    }
+}
+
+#[cfg(unix)]
 pub(crate) fn terminate(pid: u32) {
-    signal(pid, rustix::process::Signal::TERM);
+    signal_tree(pid, rustix::process::Signal::TERM);
 }
 
 #[cfg(windows)]
@@ -36,7 +47,7 @@ pub(crate) fn terminate(pid: u32) {
 
 #[cfg(unix)]
 pub(crate) fn kill(pid: u32) {
-    signal(pid, rustix::process::Signal::KILL);
+    signal_tree(pid, rustix::process::Signal::KILL);
 }
 
 #[cfg(windows)]

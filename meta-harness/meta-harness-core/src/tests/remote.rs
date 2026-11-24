@@ -88,7 +88,7 @@ async fn a_refused_connection_says_why_and_is_not_retried() {
     let cases: [Refusal; 2] = [
         (
             b"HTTP/1.1 426 Upgrade Required\r\nmeta-harness-api: 2\r\ncontent-length: 0\r\nconnection: close\r\n\r\n",
-            |_| "Meta-Harness speaks API version 2; this client needs 1. Update Meta-Harness or Liquid.".to_owned(),
+            |_| "Meta-Harness speaks API version 2; this client needs 1. Restart Meta-Harness, or update whichever side is older.".to_owned(),
         ),
         (
             b"HTTP/1.1 401 Unauthorized\r\ncontent-length: 0\r\nconnection: close\r\n\r\n",
@@ -107,6 +107,30 @@ async fn a_refused_connection_says_why_and_is_not_retried() {
             "a refusal is not retried: {error}"
         );
     }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_connection_file_whose_token_is_refused_says_to_restart_meta_harness() {
+    let home = crate::tests::Dir::new();
+    let url = refusing_peer(
+        b"HTTP/1.1 401 Unauthorized\r\ncontent-length: 0\r\nconnection: close\r\n\r\n",
+    )
+    .await;
+    std::fs::write(
+        home.join(crate::service::CONNECTION_FILE),
+        serde_json::json!({"url": url, "token": "token"}).to_string(),
+    )
+    .unwrap();
+    let error = Host::connect(&home, "test")
+        .await
+        .err()
+        .expect("the connection is refused");
+    assert_eq!(
+        error,
+        format!(
+            "Meta-Harness at {url} does not accept the token in connection.json; restart Meta-Harness."
+        )
+    );
 }
 
 #[tokio::test]

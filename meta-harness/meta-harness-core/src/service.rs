@@ -28,7 +28,7 @@ use crate::host_move;
 use crate::hosts::{self, Links};
 
 use crate::util::IDLE;
-use crate::{AcpAgent, Host, HostConfig, Project, Thread, tunnel};
+use crate::{AcpAgent, Host, HostConfig, Project, Thread, Watch, tunnel};
 use admit::{Admission, Caller, Listener, admit, header, revoked};
 
 pub const CONNECTION_FILE: &str = "connection.json";
@@ -40,8 +40,6 @@ const FOLLOWED: usize = 32;
 const HANDSHAKES: usize = 32;
 
 const HANDSHAKE: std::time::Duration = std::time::Duration::from_secs(10);
-
-const REPLY_WAIT: std::time::Duration = std::time::Duration::from_secs(10);
 
 const REQUESTS: usize = 256;
 
@@ -79,6 +77,7 @@ pub struct Service {
     accept: JoinHandle<()>,
     relink: JoinHandle<()>,
     retry: JoinHandle<()>,
+    pauses: JoinHandle<()>,
     stopping: tokio::sync::watch::Sender<bool>,
     connection_file: PathBuf,
 }
@@ -99,10 +98,12 @@ struct Shared {
     remote: std::sync::Mutex<listener::Remote>,
     remote_serial: tokio::sync::Mutex<()>,
     links: Links,
-    handshakes: Arc<tokio::sync::Semaphore>,
+    local_handshakes: Arc<tokio::sync::Semaphore>,
+    remote_handshakes: Arc<tokio::sync::Semaphore>,
     sign_ins: Arc<tokio::sync::RwLock<()>>,
     moves: tokio::sync::RwLock<()>,
     transfers: transfers::TransferLocks,
+    detached: std::sync::Mutex<Vec<tokio::task::AbortHandle>>,
 }
 
 impl Service {
@@ -175,18 +176,20 @@ impl Service {
             remote: std::sync::Mutex::new(listener::Remote::default()),
             remote_serial: tokio::sync::Mutex::default(),
             links,
-            handshakes: Arc::new(tokio::sync::Semaphore::new(HANDSHAKES)),
+            local_handshakes: Arc::new(tokio::sync::Semaphore::new(HANDSHAKES)),
+            remote_handshakes: Arc::new(tokio::sync::Semaphore::new(HANDSHAKES)),
             sign_ins: Arc::new(tokio::sync::RwLock::new(())),
             moves: tokio::sync::RwLock::default(),
             transfers: transfers::TransferLocks::default(),
+            detached: std::sync::Mutex::default(),
         });
         let remembered = hosts::remote_port(&shared.store.db())?;
+        shared.links.start_tunnels(&shared.store).await?;
         if let Some(port) = remembered
             && let Err(error) = listener::start(&shared, port).await
         {
             eprintln!("meta: remote access is not listening yet: {error}");
         }
-        shared.links.start_tunnels(&shared.store).await?;
         let accept = tokio::spawn(accept(
             listener,
             shared.clone(),
@@ -194,7 +197,7 @@ impl Service {
             shared.stopping.clone(),
         ));
         let relink = tokio::spawn(relink(shared.clone()));
-        tokio::spawn(moves::retry_pauses(shared.clone()));
+        let pauses = tokio::spawn(moves::retry_pauses(shared.clone()));
         agents::start_all(&shared);
         let retry = tokio::spawn(listener::retry(shared.clone()));
         Ok(Self {
@@ -205,6 +208,7 @@ impl Service {
             accept,
             relink,
             retry,
+            pauses,
             stopping,
             connection_file,
         })
@@ -222,6 +226,10 @@ impl Drop for Service {
         self.accept.abort();
         self.relink.abort();
         self.retry.abort();
+        self.pauses.abort();
+        for task in crate::util::lock(&self.shared.detached).drain(..) {
+            task.abort();
+        }
         self.shared.links.stop();
         self.shared.agents.stop_all();
         drop(crate::util::lock(&self.shared.remote).listening.take());
@@ -294,10 +302,11 @@ async fn accept(
     ends: tokio::sync::watch::Receiver<bool>,
 ) {
     crate::util::accept_each(listener, move |socket| {
-        let slot = match kind {
-            Listener::Local => Ok(None),
-            Listener::Remote => shared.handshakes.clone().try_acquire_owned().map(Some),
+        let gate = match kind {
+            Listener::Local => &shared.local_handshakes,
+            Listener::Remote => &shared.remote_handshakes,
         };
+        let slot = gate.clone().try_acquire_owned();
         let (shared, ends) = (shared.clone(), ends.clone());
         async move {
             if let Ok(slot) = slot {
@@ -314,7 +323,7 @@ async fn serve(
     socket: TcpStream,
     listener: Listener,
     ends: tokio::sync::watch::Receiver<bool>,
-    slot: Option<tokio::sync::OwnedSemaphorePermit>,
+    slot: tokio::sync::OwnedSemaphorePermit,
 ) {
     let mut client = String::new();
     let mut admission = None;
@@ -333,8 +342,17 @@ async fn serve(
         return;
     };
     drop(slot);
-    let (caller, owner) = match admission {
-        Some(Admission::Session(caller, owner)) => (caller, owner),
+    match admission {
+        Some(Admission::Session(caller, owner)) => {
+            let session = Arc::new(Session {
+                shared,
+                client: owner.clone().unwrap_or(client),
+                caller,
+                projects: Mutex::default(),
+                threads: Mutex::default(),
+            });
+            converse(socket, session, owner, ends, revocations).await;
+        }
         Some(Admission::Tunnel(owner, access)) => {
             let mut ends = ends.clone();
             tokio::select! {
@@ -348,7 +366,6 @@ async fn serve(
                 () = revoked(&mut revocations, Some(&owner)) => {}
                 _ = ends.wait_for(|stopped| *stopped) => {}
             }
-            return;
         }
         Some(Admission::Paired(token, access)) => {
             let answer = serde_json::to_string(&api::Pairing {
@@ -359,10 +376,18 @@ async fn serve(
             .expect("pairings serialize");
             let _ = socket.send(Message::Text(answer.into())).await;
             let _ = socket.close(None).await;
-            return;
         }
-        None => return,
-    };
+        None => {}
+    }
+}
+
+async fn converse(
+    socket: tokio_tungstenite::WebSocketStream<TcpStream>,
+    session: Arc<Session>,
+    owner: Option<String>,
+    mut stopping: tokio::sync::watch::Receiver<bool>,
+    mut revocations: tokio::sync::broadcast::Receiver<String>,
+) {
     let (mut sink, mut frames) = socket.split();
     let (out, mut outgoing) = mpsc::channel::<Message>(OUTGOING);
     let mut tasks = tokio::task::JoinSet::new();
@@ -373,17 +398,7 @@ async fn serve(
             }
         }
     });
-    let mut stopping = ends;
-    let session = Arc::new(Session {
-        shared,
-        client,
-        caller,
-        projects: Mutex::default(),
-        threads: Mutex::default(),
-    });
     let mut streams: HashMap<u64, AbortHandle> = HashMap::new();
-    let (stalled, mut stalls) = mpsc::channel::<()>(1);
-    let replying = Arc::new(tokio::sync::Semaphore::new(1));
     let requests = Arc::new(tokio::sync::Semaphore::new(REQUESTS));
     let mut ping = crate::util::pings();
     let mut heard = tokio::time::Instant::now();
@@ -392,7 +407,6 @@ async fn serve(
             frame = frames.next() => Some(frame),
             _ = stopping.wait_for(|stopped| *stopped) => break,
             () = revoked(&mut revocations, owner.as_deref()) => break,
-            _ = stalls.recv() => break,
             Some(_) = tasks.join_next() => continue,
             _ = ping.tick() => None,
         };
@@ -413,27 +427,15 @@ async fn serve(
                     .ok()
                     .and_then(|v| v["id"].as_u64());
                 if let Some(id) = id {
-                    let error = format!("Meta-Harness does not understand this request: {error}");
-                    let reply = frame_of(&Reply::Error { id, error });
-                    match out.try_send(reply) {
-                        Ok(()) => {}
-                        Err(mpsc::error::TrySendError::Full(reply)) => {
-                            let Ok(permit) = replying.clone().try_acquire_owned() else {
-                                break;
-                            };
-                            let (out, stalled) = (out.clone(), stalled.clone());
-                            tasks.spawn(async move {
-                                let _permit = permit;
-                                if tokio::time::timeout(REPLY_WAIT, out.send(reply))
-                                    .await
-                                    .is_err()
-                                {
-                                    let _ = stalled.try_send(());
-                                }
-                            });
-                        }
-                        Err(mpsc::error::TrySendError::Closed(_)) => break,
-                    }
+                    let Ok(permit) = requests.clone().try_acquire_owned() else {
+                        break;
+                    };
+                    let error = format!("{}: {error}", api::UNKNOWN_REQUEST);
+                    let (out, reply) = (out.clone(), frame_of(&Reply::Error { id, error }));
+                    tasks.spawn(async move {
+                        let _permit = permit;
+                        let _ = out.send(reply).await;
+                    });
                 }
                 continue;
             }
@@ -512,6 +514,14 @@ pub(crate) async fn answer(
 
 fn to(value: impl Serialize) -> Result<Value, String> {
     serde_json::to_value(value).map_err(|e| e.to_string())
+}
+
+fn watch_items<T: Clone + Serialize + Send + Sync + 'static>(
+    watch: Watch<T>,
+) -> impl futures_util::Stream<Item = Result<Value, String>> + Send {
+    unfold(watch, |mut watch| async move {
+        Some((to(watch.changed().await?), watch))
+    })
 }
 
 struct Session {
@@ -796,19 +806,11 @@ impl Session {
             }
             Stream::Servers { root, id: thread } => {
                 let watch = self.thread(&root, &thread).await?.servers().await?;
-                let first = to(watch.current())?;
-                let items = unfold(watch, |mut watch| async move {
-                    Some((to(watch.changed().await?), watch))
-                });
-                answer(out, id, first, items).await;
+                answer(out, id, to(watch.current())?, watch_items(watch)).await;
             }
             Stream::Automations { root, id: thread } => {
                 let watch = self.thread(&root, &thread).await?.automations().await?;
-                let first = to(watch.current())?;
-                let items = unfold(watch, |mut watch| async move {
-                    Some((to(watch.changed().await?), watch))
-                });
-                answer(out, id, first, items).await;
+                answer(out, id, to(watch.current())?, watch_items(watch)).await;
             }
             Stream::LineageChanges { root, id: thread } => {
                 let changes = self.thread(&root, &thread).await?.lineage_changes().await?;
