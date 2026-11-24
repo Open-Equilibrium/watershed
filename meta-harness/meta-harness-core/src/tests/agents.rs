@@ -236,3 +236,19 @@ fn a_moving_agent_carries_its_memory_files_and_refuses_unsafe_paths() {
             .contains("at most 100 MiB")
     );
 }
+
+#[test]
+fn a_profile_moves_on_once_its_context_is_four_fifths_full() {
+    let context = |tokens, window| {
+        Some(crate::Context {
+            tokens,
+            window,
+            compacts_at: None,
+        })
+    };
+    assert!(!agents::full(context(Some(799), 1000)));
+    assert!(agents::full(context(Some(800), 1000)));
+    assert!(!agents::full(context(None, 1000)));
+    assert!(!agents::full(context(Some(5), 0)));
+    assert!(!agents::full(None));
+}
