@@ -4,6 +4,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../controls.dart';
 import '../rust/api/database.dart';
 import '../theme/icons.dart';
 import '../theme/theme.dart';
@@ -117,15 +118,10 @@ class _FieldPanelState extends State<FieldPanel> {
   @override
   Widget build(BuildContext context) {
     final ws = context.ws;
-    return Container(
+    return FloatingPanel(
       key: const Key('field panel'),
       width: 250,
       padding: const EdgeInsets.all(WsMetrics.space2),
-      decoration: BoxDecoration(
-        color: ws.surface,
-        borderRadius: BorderRadius.circular(WsMetrics.radiusLg),
-        boxShadow: ws.shadow,
-      ),
       child: DefaultTextStyle.merge(
         style: TextStyle(fontSize: WsMetrics.fsUi, color: ws.text),
         child: ListView(

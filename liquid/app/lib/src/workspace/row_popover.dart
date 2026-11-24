@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 
+import '../controls.dart';
 import '../rust/api/calculation.dart';
 import '../rust/api/database.dart';
 import '../rust/api/workspace.dart';
@@ -434,15 +435,10 @@ class _RowPopoverState extends State<RowPopover> {
         }
         return KeyEventResult.ignored;
       },
-      child: Container(
+      child: FloatingPanel(
         key: const Key('row popover'),
         width: RowPopover.width,
         padding: const EdgeInsets.all(WsMetrics.space3),
-        decoration: BoxDecoration(
-          color: ws.surface,
-          borderRadius: BorderRadius.circular(WsMetrics.radiusLg),
-          boxShadow: ws.shadow,
-        ),
         child: Material(
           type: MaterialType.transparency,
           child: Column(

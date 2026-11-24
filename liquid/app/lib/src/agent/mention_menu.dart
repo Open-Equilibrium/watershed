@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../controls.dart';
 import '../session/task_tree.dart';
 import '../theme/icons.dart';
 import '../theme/theme.dart';
@@ -72,14 +73,9 @@ class MentionMenu extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final ws = context.ws;
-    return Container(
+    return FloatingPanel(
       width: 340,
       padding: const EdgeInsets.all(WsMetrics.space2),
-      decoration: BoxDecoration(
-        color: ws.surface,
-        borderRadius: BorderRadius.circular(WsMetrics.radiusLg),
-        boxShadow: ws.shadow,
-      ),
       child: SingleChildScrollView(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,

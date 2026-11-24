@@ -8,6 +8,7 @@ import 'package:desktop_drop/desktop_drop.dart';
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 
+import '../controls.dart';
 import '../rust/api/media.dart';
 import '../rust/api/workspace.dart';
 import '../theme/icons.dart';
@@ -528,13 +529,8 @@ class _MediaBlockState extends State<MediaBlock> {
 
   Widget _bar(BuildContext context, {required bool file}) {
     final ws = context.ws;
-    return Container(
+    return FloatingPanel(
       padding: const EdgeInsets.all(2),
-      decoration: BoxDecoration(
-        color: ws.surface,
-        borderRadius: BorderRadius.circular(WsMetrics.radiusLg),
-        boxShadow: ws.shadow,
-      ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -548,14 +544,9 @@ class _MediaBlockState extends State<MediaBlock> {
           AnchoredMenu(
             controller: _more,
             onTapOutside: (_) => setState(_more.hide),
-            menu: (context) => Container(
+            menu: (context) => FloatingPanel(
               width: 170,
               padding: const EdgeInsets.all(WsMetrics.space1 + 2),
-              decoration: BoxDecoration(
-                color: ws.surface,
-                borderRadius: BorderRadius.circular(WsMetrics.radiusLg),
-                boxShadow: ws.shadow,
-              ),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.stretch,

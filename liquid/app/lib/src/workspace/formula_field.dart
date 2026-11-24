@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../controls.dart';
 import '../theme/icons.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
@@ -181,14 +182,9 @@ class _FormulaFieldState extends State<FormulaField> {
     );
   }
 
-  Widget _list(WsPalette ws) => Container(
+  Widget _list(WsPalette ws) => FloatingPanel(
     width: 280,
     padding: const EdgeInsets.all(WsMetrics.space1),
-    decoration: BoxDecoration(
-      color: ws.surface,
-      borderRadius: BorderRadius.circular(WsMetrics.radiusLg),
-      boxShadow: ws.shadow,
-    ),
     child: Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,

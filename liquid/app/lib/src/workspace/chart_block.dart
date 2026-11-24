@@ -4,6 +4,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart' show NumberFormat;
 
+import '../controls.dart';
 import '../rust/api/chart.dart';
 import '../rust/api/database.dart';
 import '../rust/api/workspace.dart';
@@ -465,15 +466,10 @@ class ChoiceList extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final ws = context.ws;
-    return Container(
+    return FloatingPanel(
       width: 220,
       constraints: const BoxConstraints(maxHeight: 320),
       padding: const EdgeInsets.all(WsMetrics.space1),
-      decoration: BoxDecoration(
-        color: ws.surface,
-        borderRadius: BorderRadius.circular(WsMetrics.radiusLg),
-        boxShadow: ws.shadow,
-      ),
       child: SingleChildScrollView(
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -580,17 +576,12 @@ class ChartPanel extends StatelessWidget {
     final caption = TextStyle(fontSize: WsMetrics.fsSmall, color: ws.textFaint);
     final table = setup?.table != null;
     final file = setup?.source != null;
-    return Container(
+    return FloatingPanel(
       key: const Key('chart panel'),
       width: chartPanelWidth,
       padding: const EdgeInsets.symmetric(
         horizontal: WsMetrics.space5,
         vertical: WsMetrics.space4,
-      ),
-      decoration: BoxDecoration(
-        color: ws.surface,
-        borderRadius: BorderRadius.circular(WsMetrics.radiusLg),
-        boxShadow: ws.shadow,
       ),
       child: DefaultTextStyle.merge(
         style: TextStyle(fontSize: WsMetrics.fsCompact, color: ws.text),

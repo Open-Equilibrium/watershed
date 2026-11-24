@@ -222,16 +222,11 @@ class _PanelState extends State<_Panel> {
         }
         return KeyEventResult.ignored;
       },
-      child: Container(
+      child: FloatingPanel(
         key: const Key('table query menu'),
         width: _menuWidth,
         constraints: const BoxConstraints(maxHeight: _menuHeight),
         padding: const EdgeInsets.all(WsMetrics.space2),
-        decoration: BoxDecoration(
-          color: ws.surface,
-          borderRadius: BorderRadius.circular(WsMetrics.radiusLg),
-          boxShadow: ws.shadow,
-        ),
         child: DefaultTextStyle.merge(
           style: TextStyle(fontSize: WsMetrics.fsUi, color: ws.text),
           child: Column(

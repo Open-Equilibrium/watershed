@@ -160,14 +160,9 @@ class _MoreMenuState extends State<MoreMenu> {
       end: true,
       height: 40.0 * (widget.plain.length + widget.items.length) + 8,
       onTapOutside: (_) => _close(),
-      menu: (_) => Container(
+      menu: (_) => FloatingPanel(
         width: 220,
         padding: const EdgeInsets.all(WsMetrics.space1),
-        decoration: BoxDecoration(
-          color: ws.surface,
-          borderRadius: BorderRadius.circular(WsMetrics.radiusLg),
-          boxShadow: ws.shadow,
-        ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,

@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../controls.dart';
 import '../rust/api/workspace.dart';
 import '../theme/icons.dart';
 import '../theme/theme.dart';
@@ -552,15 +553,10 @@ class _PowerBarState extends State<PowerBar> {
             padding: const EdgeInsets.only(top: 96),
             child: Focus(
               onKeyEvent: (node, event) => _key(node, event, items),
-              child: Container(
+              child: FloatingPanel(
                 key: const Key('power bar'),
                 width: _width,
                 constraints: const BoxConstraints(maxHeight: 520),
-                decoration: BoxDecoration(
-                  color: ws.surface,
-                  borderRadius: BorderRadius.circular(WsMetrics.radiusLg),
-                  boxShadow: ws.shadow,
-                ),
                 child: Material(
                   type: MaterialType.transparency,
                   child: Column(

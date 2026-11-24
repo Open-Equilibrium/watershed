@@ -457,15 +457,10 @@ class _CodeBlockState extends State<CodeBlock> {
   Widget _pickerView(BuildContext context) {
     final ws = context.ws;
     final choices = _choices;
-    return Container(
+    return FloatingPanel(
       key: const Key('language picker'),
       width: 240,
       padding: const EdgeInsets.all(WsMetrics.space2),
-      decoration: BoxDecoration(
-        color: ws.surface,
-        borderRadius: BorderRadius.circular(WsMetrics.radiusLg),
-        boxShadow: ws.shadow,
-      ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
