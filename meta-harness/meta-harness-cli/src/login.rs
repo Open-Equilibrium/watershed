@@ -290,11 +290,16 @@ impl Manager {
         &self,
         mut run: impl FnMut(&Step) -> Result<(), String>,
     ) -> Result<Vec<String>, String> {
-        let failures = run_all(&self.stop, &mut run)?;
-        if let Some(failure) = failures.iter().find(|failure| !not_loaded(failure)) {
-            return Err(format!(
-                "The login service could not be stopped ({failure}), so nothing was removed. Stop it, then run uninstall again."
-            ));
+        let mut failures = Vec::new();
+        for step in &self.stop {
+            if let Err(failure) = run(step) {
+                if !not_loaded(&failure) {
+                    return Err(format!(
+                        "The login service could not be stopped ({failure}), so nothing was removed. Stop it, then run uninstall again."
+                    ));
+                }
+                failures.push(failure);
+            }
         }
         ignore_missing(std::fs::remove_file(&self.file))
             .map_err(|e| format!("Could not remove {}: {e}", self.file.display()))?;

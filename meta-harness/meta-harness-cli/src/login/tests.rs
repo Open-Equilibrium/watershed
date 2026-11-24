@@ -366,6 +366,21 @@ fn a_stop_that_fails_for_another_reason_keeps_the_service_file() {
     let result = manager.uninstall(|_| Err("Operation not permitted".to_owned()));
     assert!(result.is_err(), "{result:?}");
     assert!(manager.file.exists());
+
+    let task = Manager::task_scheduler(&dir.0);
+    task.install(&plan(&dir.0), |_| Ok(())).unwrap();
+    let mut ran = Vec::new();
+    let result = task.uninstall(|step| {
+        ran.push(step.args[0].clone());
+        Err("Operation not permitted".to_owned())
+    });
+    assert!(result.is_err(), "{result:?}");
+    assert_eq!(
+        ran,
+        ["/End"],
+        "the task is deleted only after its stop succeeds"
+    );
+    assert!(task.file.exists());
 }
 
 #[test]
