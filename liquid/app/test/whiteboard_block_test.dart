@@ -497,6 +497,33 @@ void main() {
     },
   );
 
+  testWidgets('a tool change mid-drag keeps the move it had shown', (
+    tester,
+  ) async {
+    await showFocused(tester, [
+      box(const Rect.fromLTWH(100, 100, 80, 50), BridgeInkColor.data1),
+    ]);
+    await key(tester, LogicalKeyboardKey.keyL);
+    await draw(tester, [
+      const Offset(80, 80),
+      const Offset(220, 80),
+      const Offset(220, 180),
+      const Offset(80, 180),
+      const Offset(80, 85),
+    ]);
+    final gesture = await tester.startGesture(
+      screen(tester, const Offset(140, 125)),
+      kind: PointerDeviceKind.mouse,
+    );
+    addTearDown(gesture.removePointer);
+    await gesture.moveTo(screen(tester, const Offset(140, 135)));
+    await key(tester, LogicalKeyboardKey.keyP);
+    await gesture.moveTo(screen(tester, const Offset(140, 150)));
+    await gesture.up();
+    await tester.pumpAndSettle();
+    expect(frameOf(stored().single).top, 110);
+  });
+
   testWidgets('⋯ › Delete removes the Whiteboard', (tester) async {
     await kit.show(tester, [
       const TextPart('Intro'),

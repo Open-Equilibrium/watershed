@@ -82,6 +82,11 @@ class BoardSurfaceState extends State<BoardSurface> {
 
   void _toolsChanged() {
     if (tools.tool != BoardTool.lasso && board.selected.isNotEmpty) {
+      if (_drag == _Drag.move ||
+          _drag == _Drag.resize ||
+          _drag == _Drag.rotate) {
+        _endTransform();
+      }
       board.select(const {});
     }
     if (mounted) setState(() {});
