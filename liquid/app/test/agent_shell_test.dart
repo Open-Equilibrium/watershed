@@ -117,18 +117,6 @@ void main() {
   BridgeTurn running(int number) =>
       turnOf(number, status: BridgeTurnStatus.running);
 
-  BridgeTranscriptItem userMessage(int turn, String text) => chatItem(
-    item(turn * 10 + 1, BridgeItemKind.userMessage, ended: true),
-    turn,
-    text,
-  );
-
-  BridgeTranscriptItem reply(int turn, String text) => chatItem(
-    item(turn * 10 + 2, BridgeItemKind.assistantMessage, ended: true),
-    turn,
-    text,
-  );
-
   String? Function() recordClipboard(WidgetTester tester) {
     String? copied;
     final messenger = tester.binding.defaultBinaryMessenger;

@@ -158,10 +158,10 @@ void main() {
     (tester) async {
       final start = DateTime(2026, 11, 18, 12);
       var now = start;
-      final gates = {
+      final holds = {
         for (var index = 0; index < 3; index++) index: Completer<void>(),
       };
-      final slow = _GatedEnvironments(gates);
+      final slow = _GatedEnvironments(holds);
       BridgeMoving movingOf(String transfer, DateTime since) => BridgeMoving(
         transfer: transfer,
         phase: BridgeMovePhase.handed,
@@ -202,11 +202,11 @@ void main() {
       await tester.runAsync(pumpEventQueue);
       unawaited(state.recoverMoves());
       await tester.runAsync(pumpEventQueue);
-      gates[0]!.complete();
+      holds[0]!.complete();
       await tester.runAsync(pumpEventQueue);
-      gates[1]!.complete();
+      holds[1]!.complete();
       await tester.runAsync(pumpEventQueue);
-      gates[2]!.complete();
+      holds[2]!.complete();
       await tester.runAsync(pumpEventQueue);
 
       final before = youngChecks();
@@ -219,14 +219,14 @@ void main() {
 }
 
 class _GatedEnvironments extends FakeProject {
-  _GatedEnvironments(this.gates);
+  _GatedEnvironments(this.holds);
 
-  final Map<int, Completer<void>> gates;
+  final Map<int, Completer<void>> holds;
   var _reads = 0;
 
   @override
   Future<String> environmentId() async {
-    await gates[_reads++]?.future;
+    await holds[_reads++]?.future;
     return environment;
   }
 }

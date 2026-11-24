@@ -11,7 +11,18 @@ import 'package:liquid/src/session/backend.dart';
 
 const fakeEnvironment = 'env-fake';
 
-class FakeProject implements ProjectBackend {
+mixin CallHooks {
+  final gates = <String, Completer<void>>{};
+  final failures = <String, Object>{};
+
+  Future<void> hook(String call) async {
+    final gate = gates.remove(call);
+    if (gate != null) await gate.future;
+    if (failures.remove(call) case final error?) throw error;
+  }
+}
+
+class FakeProject with CallHooks implements ProjectBackend {
   FakeProject({FakeSession? session, FakeGit? git})
     : session = session ?? FakeSession(),
       gitBackend = git ?? FakeGit();
@@ -70,7 +81,10 @@ class FakeProject implements ProjectBackend {
   }
 
   @override
-  Future<List<BridgeThreadSummary>> threads() async => threadList;
+  Future<List<BridgeThreadSummary>> threads() async {
+    await hook('threads');
+    return threadList;
+  }
 
   @override
   Future<SessionBackend> start(
@@ -112,6 +126,7 @@ class FakeProject implements ProjectBackend {
 
   @override
   Future<BridgeMoveCheck> moveCheck(String id) async {
+    await hook('moveCheck');
     calls.add('move check $id');
     if (moveCheckError case final error?) throw error;
     return moveCheckWith(
@@ -147,6 +162,7 @@ class FakeProject implements ProjectBackend {
 
   @override
   Future<void> moveFinish(String id, String transfer, String? toHost) async {
+    await hook('moveFinish');
     calls.add('move finish $id $transfer ${toHost ?? 'null'}');
     if (toHost != null) _sealed = true;
     moving = null;
@@ -188,6 +204,7 @@ class FakeProject implements ProjectBackend {
 
   @override
   Future<BridgeHostProject> addProject(String root) async {
+    await hook('addProject');
     calls.add('add project $root');
     if (addProjectError case final error?) throw error;
     return addedProject ??
@@ -214,6 +231,7 @@ class FakeProject implements ProjectBackend {
     CarriedMove move, {
     required String root,
   }) async {
+    await hook('moveIn');
     calls.add('move in $root');
     if (moveInError case final error?) throw error;
     if (moveInLostReplies > 0) {
@@ -258,7 +276,10 @@ class FakeProject implements ProjectBackend {
   GitBackend git() => gitBackend;
 
   @override
-  Future<List<BridgeProvider>> providers() async => providerList;
+  Future<List<BridgeProvider>> providers() async {
+    await hook('providers');
+    return providerList;
+  }
 
   @override
   Future<BridgeModelChoice?> writerModel() async => writer;
@@ -280,7 +301,10 @@ class FakeProject implements ProjectBackend {
   Future<String> environmentMachine() async => 'server';
 
   @override
-  Future<List<BridgeAgent>> agents() async => agentList;
+  Future<List<BridgeAgent>> agents() async {
+    await hook('agents');
+    return agentList;
+  }
 
   @override
   Future<BridgeAgent> agentStart(
@@ -288,6 +312,7 @@ class FakeProject implements ProjectBackend {
     BridgePermissions permissions,
     String request,
   ) async {
+    await hook('agentStart');
     calls.add('agent start $request');
     final started = agentOf('agent-1', named: false);
     agentList = [...agentList, started];
@@ -377,7 +402,10 @@ class FakeProject implements ProjectBackend {
   }
 
   @override
-  Future<List<BridgeMention>> agentMentions(String thread) async => mentionList;
+  Future<List<BridgeMention>> agentMentions(String thread) async {
+    await hook('agentMentions');
+    return mentionList;
+  }
 }
 
 BridgeAgent agentOf(
@@ -410,7 +438,7 @@ class UnreachableProject extends FakeProject {
       Future.error('the host is down');
 }
 
-class FakeSession implements SessionBackend {
+class FakeSession with CallHooks implements SessionBackend {
   FakeSession({this.id = 'thread-1'});
 
   @override
@@ -448,8 +476,10 @@ class FakeSession implements SessionBackend {
   void close() => closed = true;
 
   @override
-  Future<BridgeSubscription> subscribe() async =>
-      BridgeSubscription(id: 1, snapshot: current);
+  Future<BridgeSubscription> subscribe() async {
+    await hook('subscribe');
+    return BridgeSubscription(id: 1, snapshot: current);
+  }
 
   @override
   Stream<BridgeEvent> events(int subscription) {
@@ -466,10 +496,16 @@ class FakeSession implements SessionBackend {
   }
 
   @override
-  Future<void> confirmApplied(int applied) async => confirmed.add(applied);
+  Future<void> confirmApplied(int applied) async {
+    await hook('confirmApplied');
+    confirmed.add(applied);
+  }
 
   @override
-  Future<BridgeSnapshot> snapshot() async => current;
+  Future<BridgeSnapshot> snapshot() async {
+    await hook('snapshot');
+    return current;
+  }
 
   @override
   Future<void> send(String text, {required bool steer}) async {
@@ -481,7 +517,10 @@ class FakeSession implements SessionBackend {
   Future<void> stop() async => calls.add('stop');
 
   @override
-  Future<List<BridgeTurn>> turns() async => turnList;
+  Future<List<BridgeTurn>> turns() async {
+    await hook('turns');
+    return turnList;
+  }
 
   @override
   Future<List<BridgeFileChange>> turnChanges(
@@ -529,16 +568,23 @@ class FakeSession implements SessionBackend {
   Future<void> dismiss(String request) async => calls.add('dismiss $request');
 
   @override
-  Future<BridgeStatistics> statistics() async => stats;
+  Future<BridgeStatistics> statistics() async {
+    await hook('statistics');
+    return stats;
+  }
 
   @override
-  Future<BridgeContext?> context() async => contextWindow;
+  Future<BridgeContext?> context() async {
+    await hook('context');
+    return contextWindow;
+  }
 
   @override
   Future<BridgeModelChoice?> model() async => chosen;
 
   @override
   Future<void> setModel(BridgeModelChoice model) async {
+    await hook('setModel');
     calls.add('model ${model.model}');
     if (modelError case final error?) throw error;
     chosen = model;
@@ -546,6 +592,7 @@ class FakeSession implements SessionBackend {
 
   @override
   Future<void> setPermissions(BridgePermissions permissions) async {
+    await hook('setPermissions');
     calls.add('permissions ${permissions.name}');
     if (permissionsError case final error?) throw error;
   }
@@ -561,7 +608,10 @@ class FakeSession implements SessionBackend {
   Future<void> cancelQueued(int turn) async => calls.add('cancel $turn');
 
   @override
-  Future<String> title() async => sessionTitle;
+  Future<String> title() async {
+    await hook('title');
+    return sessionTitle;
+  }
 
   @override
   Future<String?> worktree() async => null;
@@ -570,8 +620,10 @@ class FakeSession implements SessionBackend {
   GitBackend git() => gitBackend;
 
   @override
-  Future<void> setBranch(String branch, {String? worktree}) async =>
-      calls.add('branch $branch worktree=$worktree');
+  Future<void> setBranch(String branch, {String? worktree}) async {
+    await hook('setBranch');
+    calls.add('branch $branch worktree=$worktree');
+  }
 
   @override
   Future<String> exportRecord({
@@ -635,7 +687,10 @@ class FakeSession implements SessionBackend {
       _changes('lineage', () => lineageUpdates.stream);
 
   @override
-  Future<void> mergeBack() async => calls.add('merge back');
+  Future<void> mergeBack() async {
+    await hook('mergeBack');
+    calls.add('merge back');
+  }
 
   @override
   Future<void> disconnect() async => calls.add('disconnect');
@@ -647,7 +702,7 @@ class FakeSession implements SessionBackend {
   Future<BridgeUsageLimits?> usageLimits() async => limits;
 }
 
-class FakeGit implements GitBackend {
+class FakeGit with CallHooks implements GitBackend {
   FakeGit({BridgeGitStatus? status}) : current = status ?? gitStatusOf();
   BridgeGitStatus current;
   final statuses = StreamController<BridgeGitStatus>.broadcast();
@@ -676,6 +731,7 @@ class FakeGit implements GitBackend {
 
   @override
   Stream<BridgeGitStatus> watch() async* {
+    await hook('watch');
     yield current;
     yield* statuses.stream;
   }
@@ -686,6 +742,7 @@ class FakeGit implements GitBackend {
     int cursor = 0,
     int limit = 50,
   }) async {
+    await hook('refs');
     if (refError case final error?) throw error;
     final found = [
       for (final ref in refList)
@@ -707,10 +764,14 @@ class FakeGit implements GitBackend {
   }
 
   @override
-  Future<void> init() async => calls.add('init');
+  Future<void> init() async {
+    await hook('init');
+    calls.add('init');
+  }
 
   @override
   Future<(String, String)> pull() async {
+    await hook('pull');
     calls.add('pull');
     return ('Pulled', 'Up to date');
   }
@@ -741,6 +802,7 @@ class FakeGit implements GitBackend {
 
   @override
   Future<BridgeResolvedPullRequest> resolvePullRequest(String reference) async {
+    await hook('resolvePullRequest');
     calls.add('resolve $reference');
     return const BridgeResolvedPullRequest(
       number: 42,
@@ -757,6 +819,7 @@ class FakeGit implements GitBackend {
     String reference, {
     required bool worktree,
   }) async {
+    await hook('checkOutPullRequest');
     calls.add('check out $reference worktree=$worktree');
     return BridgeCheckedOut(
       branch: 'feature',
@@ -769,7 +832,10 @@ class FakeGit implements GitBackend {
     String provider,
     String repository, {
     required bool public,
-  }) async => calls.add('publish $provider $repository public=$public');
+  }) async {
+    await hook('publish');
+    calls.add('publish $provider $repository public=$public');
+  }
 
   @override
   Future<List<BridgeFileChange>> branchChanges({
@@ -791,7 +857,10 @@ class FakeGit implements GitBackend {
     int number,
     String action, {
     String? mergeMethod,
-  }) async => calls.add('pr $number $action merge=$mergeMethod');
+  }) async {
+    await hook('runPullRequestAction');
+    calls.add('pr $number $action merge=$mergeMethod');
+  }
 
   @override
   Future<BridgeCheckedOut> pullRequestWorktree(String url) async {
@@ -967,6 +1036,18 @@ BridgeTaskStep step(String text, BridgeStepStatus status) =>
 
 BridgeTranscriptItem chatItem(BridgeItem item, int turn, String text) =>
     BridgeTranscriptItem(item: item, turn: turn, text: text);
+
+BridgeTranscriptItem userMessage(int turn, String text) => chatItem(
+  item(turn * 10 + 1, BridgeItemKind.userMessage, ended: true),
+  turn,
+  text,
+);
+
+BridgeTranscriptItem reply(int turn, String text) => chatItem(
+  item(turn * 10 + 2, BridgeItemKind.assistantMessage, ended: true),
+  turn,
+  text,
+);
 
 BridgeUsage usage(int input, int output) => BridgeUsage(
   input: input,
