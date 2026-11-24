@@ -9,9 +9,9 @@ import 'package:liquid/src/agent/session_menus.dart' show runOpener;
 import 'package:liquid/src/diff/turn_scope.dart';
 import 'package:liquid/src/rust/api/agents.dart';
 import 'package:liquid/src/session/session_state.dart';
-import 'package:liquid/src/theme/theme.dart';
 
 import 'fake_backend.dart';
+import 'focus_kit.dart';
 
 Future<SessionState> pumpCard(
   WidgetTester tester, {
@@ -32,28 +32,25 @@ Future<SessionState> pumpCard(
   addTearDown(state.dispose);
   await state.loadStart();
   await state.open('thread-1');
-  await tester.pumpWidget(
-    MaterialApp(
-      theme: liquidTheme(Brightness.light),
-      home: Material(
-        child: Align(
-          alignment: Alignment.topRight,
-          child: SizedBox(
-            width: 280,
-            height: height,
-            child: SessionCard(
-              state: state,
-              settings: SessionCardSettingsController(settings),
-              onChanges: onChanges ?? (_) {},
-              beside: beside,
-              onOutsidePress: onOutsidePress ?? () {},
-            ),
+  await pumpApp(
+    tester,
+    Material(
+      child: Align(
+        alignment: Alignment.topRight,
+        child: SizedBox(
+          width: 280,
+          height: height,
+          child: SessionCard(
+            state: state,
+            settings: SessionCardSettingsController(settings),
+            onChanges: onChanges ?? (_) {},
+            beside: beside,
+            onOutsidePress: onOutsidePress ?? () {},
           ),
         ),
       ),
     ),
   );
-  await tester.pumpAndSettle();
   return state;
 }
 

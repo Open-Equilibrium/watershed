@@ -16,11 +16,11 @@ import 'package:liquid/src/rust/api/thread.dart';
 import 'package:liquid/src/session/session_state.dart';
 import 'package:liquid/src/settings_file.dart';
 import 'package:liquid/src/theme/icons.dart';
-import 'package:liquid/src/theme/theme.dart';
 import 'package:liquid/src/workspace/workspace_state.dart';
 
 import 'fake_backend.dart';
 import 'fake_workspace.dart';
+import 'focus_kit.dart';
 
 const info = SessionInfo(project: 'acme-api');
 
@@ -31,15 +31,6 @@ class _FullDisk extends SettingsFile {
   Future<void> save(Map<String, Object?> json) async =>
       throw const FileSystemException('disk full');
 }
-
-Future<void> tap(WidgetTester tester, Finder finder) async {
-  await tester.tap(finder);
-  await tester.pumpAndSettle();
-}
-
-void expectOne(Finder finder) => expect(finder, findsOneWidget);
-
-void expectNone(Finder finder) => expect(finder, findsNothing);
 
 void main() {
   late FakeProject project;
@@ -67,13 +58,10 @@ void main() {
       ..sessionTitle = 'Login work';
     state = SessionState(project);
     await state.open('thread-1');
-    await tester.pumpWidget(
-      MaterialApp(
-        theme: liquidTheme(Brightness.light),
-        home: AgentShell(state: state, info: info, parseDiff: parsePatch),
-      ),
+    await pumpApp(
+      tester,
+      AgentShell(state: state, info: info, parseDiff: parsePatch),
     );
-    await tester.pumpAndSettle();
   }
 
   Future<void> emit(
@@ -783,13 +771,7 @@ void main() {
     await workspace.start();
     addTearDown(workspace.dispose);
     final diff = DiffSettingsController(const DiffSettings(), _FullDisk());
-    await tester.pumpWidget(
-      MaterialApp(
-        theme: liquidTheme(Brightness.light),
-        home: AgentShell(workspace: workspace, diffSettings: diff),
-      ),
-    );
-    await tester.pumpAndSettle();
+    await pumpApp(tester, AgentShell(workspace: workspace, diffSettings: diff));
     await diff.change(const DiffSettings(layout: DiffLayout.split));
     expect(
       workspace.problem.value,

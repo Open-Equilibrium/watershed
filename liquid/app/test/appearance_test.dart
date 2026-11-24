@@ -13,13 +13,9 @@ import 'package:liquid/src/settings_file.dart';
 import 'package:liquid/src/theme/tokens.g.dart';
 
 import 'fake_backend.dart';
+import 'focus_kit.dart';
 
 const info = SessionInfo(project: 'acme-api');
-
-Future<void> tap(WidgetTester tester, Finder finder) async {
-  await tester.tap(finder);
-  await tester.pumpAndSettle();
-}
 
 class _Disk extends SettingsFile {
   _Disk() : super(File('unused'));
@@ -32,9 +28,6 @@ class _Disk extends SettingsFile {
 
 AppearanceController failingAppearance() =>
     AppearanceController(const Appearance(), _Disk());
-
-void expectOne(Finder finder) => expect(finder, findsOneWidget);
-void expectNone(Finder finder) => expect(finder, findsNothing);
 
 void main() {
   test('appearance follows the system at the default size until chosen', () {

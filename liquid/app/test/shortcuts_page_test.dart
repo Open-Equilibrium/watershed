@@ -9,9 +9,9 @@ import 'package:liquid/src/session/session_state.dart';
 import 'package:liquid/src/shortcuts/keymap.dart';
 import 'package:liquid/src/shortcuts/shortcut_store.dart';
 import 'package:liquid/src/settings_page.dart';
-import 'package:liquid/src/theme/theme.dart';
 
 import 'fake_backend.dart';
+import 'focus_kit.dart';
 import 'fake_host.dart';
 
 const info = SessionInfo(project: 'acme-api');
@@ -35,13 +35,10 @@ void main() {
     shortcuts = await ShortcutController.load(store, host);
     final state = SessionState(project);
     await state.open('thread-1');
-    await tester.pumpWidget(
-      MaterialApp(
-        theme: liquidTheme(Brightness.light),
-        home: AgentShell(state: state, info: info, shortcuts: shortcuts),
-      ),
+    await pumpApp(
+      tester,
+      AgentShell(state: state, info: info, shortcuts: shortcuts),
     );
-    await tester.pumpAndSettle();
   }
 
   Future<void> press(

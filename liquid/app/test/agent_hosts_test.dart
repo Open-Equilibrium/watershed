@@ -17,9 +17,9 @@ import 'package:liquid/src/session/session_state.dart';
 import 'package:liquid/src/theme/machine_icon.dart';
 import 'package:liquid/src/shortcuts/keymap.dart';
 import 'package:liquid/src/shortcuts/shortcut_store.dart';
-import 'package:liquid/src/theme/theme.dart';
 
 import 'fake_backend.dart';
+import 'focus_kit.dart';
 import 'fake_host.dart';
 import 'fake_workspace.dart';
 
@@ -97,15 +97,6 @@ class _UnreachableLinks extends FakeLinks {
       throw const FileSystemException('no answer');
 }
 
-Future<void> tap(WidgetTester tester, Finder finder) async {
-  await tester.tap(finder);
-  await tester.pumpAndSettle();
-}
-
-void expectOne(Finder finder) => expect(finder, findsOneWidget);
-
-void expectNone(Finder finder) => expect(finder, findsNothing);
-
 void main() {
   late FakeAgentHosts bridge;
   late List<AgentHostsSettings> saved;
@@ -150,18 +141,15 @@ void main() {
     );
     final state = SessionState(FakeProject());
     await state.open('thread-1');
-    await tester.pumpWidget(
-      MaterialApp(
-        theme: liquidTheme(Brightness.light),
-        home: AgentShell(
-          state: state,
-          info: info,
-          shortcuts: shortcuts,
-          agentHosts: hosts,
-        ),
+    await pumpApp(
+      tester,
+      AgentShell(
+        state: state,
+        info: info,
+        shortcuts: shortcuts,
+        agentHosts: hosts,
       ),
     );
-    await tester.pumpAndSettle();
     await openAgentHosts(tester);
   }
 

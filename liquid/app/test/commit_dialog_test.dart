@@ -7,11 +7,7 @@ import 'package:liquid/src/session/session_state.dart';
 import 'package:liquid/src/theme/theme.dart';
 
 import 'fake_backend.dart';
-
-Future<void> tap(WidgetTester tester, Finder finder) async {
-  await tester.tap(finder);
-  await tester.pumpAndSettle();
-}
+import 'focus_kit.dart';
 
 Future<({FakeGit git, SessionState state})> openCommit(
   WidgetTester tester,

@@ -10,10 +10,10 @@ import 'package:liquid/src/agent/sidebar.dart';
 import 'package:liquid/src/rust/api/session.dart';
 import 'package:liquid/src/session/session_state.dart';
 import 'package:liquid/src/settings_page.dart';
-import 'package:liquid/src/theme/theme.dart';
 
 import 'card_harness.dart';
 import 'fake_backend.dart';
+import 'focus_kit.dart';
 
 final info = SessionInfo(project: 'acme-api', path: '/work/acme-api');
 
@@ -59,13 +59,7 @@ void main() {
       ..gitBackend.refList.add(refOf('develop'));
     state = SessionState(project);
     await state.loadStart();
-    await tester.pumpWidget(
-      MaterialApp(
-        theme: liquidTheme(Brightness.light),
-        home: AgentShell(state: state, info: info),
-      ),
-    );
-    await tester.pumpAndSettle();
+    await pumpApp(tester, AgentShell(state: state, info: info));
   }
 
   Future<void> sendFirst(WidgetTester tester, String text) async {

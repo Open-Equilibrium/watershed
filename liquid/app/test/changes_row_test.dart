@@ -4,9 +4,9 @@ import 'package:liquid/src/agent/changes_row.dart';
 import 'package:liquid/src/diff/turn_scope.dart';
 import 'package:liquid/src/rust/api/git.dart';
 import 'package:liquid/src/session/session_state.dart';
-import 'package:liquid/src/theme/theme.dart';
 
 import 'fake_backend.dart';
+import 'focus_kit.dart';
 
 void main() {
   Future<void> pump(
@@ -16,21 +16,18 @@ void main() {
   }) async {
     final state = SessionState(FakeProject(git: FakeGit(status: status)));
     addTearDown(state.dispose);
-    await tester.pumpWidget(
-      MaterialApp(
-        theme: liquidTheme(Brightness.light),
-        home: Scaffold(
-          body: Align(
-            alignment: Alignment.topLeft,
-            child: SizedBox(
-              width: 280,
-              child: ChangesRow(state: state, onOpen: onOpen),
-            ),
+    await pumpApp(
+      tester,
+      Scaffold(
+        body: Align(
+          alignment: Alignment.topLeft,
+          child: SizedBox(
+            width: 280,
+            child: ChangesRow(state: state, onOpen: onOpen),
           ),
         ),
       ),
     );
-    await tester.pumpAndSettle();
   }
 
   BridgeGitStatus branchOf({int added = 0, int removed = 0}) => gitStatusOf(

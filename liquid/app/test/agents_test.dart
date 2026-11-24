@@ -12,9 +12,9 @@ import 'package:liquid/src/rust/api/events.dart';
 import 'package:liquid/src/rust/api/session.dart';
 import 'package:liquid/src/rust/api/thread.dart';
 import 'package:liquid/src/session/session_state.dart';
-import 'package:liquid/src/theme/theme.dart';
 
 import 'fake_backend.dart';
+import 'focus_kit.dart';
 
 const info = SessionInfo(project: 'acme-api');
 
@@ -52,18 +52,10 @@ BridgeAutomation routineOf(String id, String title) => BridgeAutomation(
   lastRun: BridgeRunStatus.never,
 );
 
-Future<void> tap(WidgetTester tester, Finder finder) async {
-  await tester.tap(finder);
-  await tester.pumpAndSettle();
-}
-
 Future<void> typeInComposer(WidgetTester tester, String text) async {
   await tester.enterText(find.byKey(const Key('composer')), text);
   await tester.pumpAndSettle();
 }
-
-void expectOne(Finder finder) => expect(finder, findsOneWidget);
-void expectNone(Finder finder) => expect(finder, findsNothing);
 
 void main() {
   late FakeProject project;
@@ -94,13 +86,10 @@ void main() {
     final state = SessionState(project);
     await state.loadStart();
     if (open != null) await state.open(open);
-    await tester.pumpWidget(
-      MaterialApp(
-        theme: liquidTheme(Brightness.light),
-        home: AgentShell(state: state, info: info, parseDiff: parsePatch),
-      ),
+    await pumpApp(
+      tester,
+      AgentShell(state: state, info: info, parseDiff: parsePatch),
     );
-    await tester.pumpAndSettle();
   }
 
   testWidgets('agents are listed above the threads, and their threads only '

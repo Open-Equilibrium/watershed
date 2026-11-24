@@ -12,9 +12,9 @@ import 'package:liquid/src/controls.dart';
 import 'package:liquid/src/rust/api/events.dart';
 import 'package:liquid/src/rust/api/git.dart';
 import 'package:liquid/src/session/session_state.dart';
-import 'package:liquid/src/theme/theme.dart';
 
 import 'fake_backend.dart';
+import 'focus_kit.dart';
 
 class _ScriptedGit extends FakeGit {
   _ScriptedGit({
@@ -169,11 +169,6 @@ List<String> recordOpens() {
   return opened;
 }
 
-Future<void> tap(WidgetTester tester, Finder finder) async {
-  await tester.tap(finder);
-  await tester.pumpAndSettle();
-}
-
 Future<void> press(WidgetTester tester, LogicalKeyboardKey key) async {
   await tester.sendKeyEvent(key);
   await tester.pumpAndSettle();
@@ -189,13 +184,7 @@ Future<SessionState> pumpIn(
 ) async {
   final state = SessionState(FakeProject(git: git));
   addTearDown(state.dispose);
-  await tester.pumpWidget(
-    MaterialApp(
-      theme: liquidTheme(Brightness.light),
-      home: Scaffold(body: body(state)),
-    ),
-  );
-  await tester.pumpAndSettle();
+  await pumpApp(tester, Scaffold(body: body(state)));
   return state;
 }
 

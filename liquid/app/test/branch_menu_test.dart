@@ -9,9 +9,9 @@ import 'package:liquid/src/controls.dart';
 import 'package:liquid/src/rust/api/git.dart';
 import 'package:liquid/src/rust/api/thread.dart';
 import 'package:liquid/src/session/session_state.dart';
-import 'package:liquid/src/theme/theme.dart';
 
 import 'fake_backend.dart';
+import 'focus_kit.dart';
 
 class _BrokenGit extends FakeGit {
   @override
@@ -32,9 +32,6 @@ class _GatedRefs extends FakeGit {
     return super.refs(query, cursor: cursor, limit: limit);
   }
 }
-
-void expectOne(Finder finder) => expect(finder, findsOneWidget);
-void expectNone(Finder finder) => expect(finder, findsNothing);
 
 void main() {
   late FakeSession session;
@@ -62,18 +59,15 @@ void main() {
     state = SessionState(FakeProject(session: session, git: git));
     addTearDown(state.dispose);
     await state.open('thread-1');
-    await tester.pumpWidget(
-      MaterialApp(
-        theme: liquidTheme(Brightness.light),
-        home: Scaffold(
-          body: Align(
-            alignment: Alignment.topLeft,
-            child: SizedBox(width: 280, child: BranchRow(state: state)),
-          ),
+    await pumpApp(
+      tester,
+      Scaffold(
+        body: Align(
+          alignment: Alignment.topLeft,
+          child: SizedBox(width: 280, child: BranchRow(state: state)),
         ),
       ),
     );
-    await tester.pumpAndSettle();
   }
 
   Future<void> tap(WidgetTester tester, Finder finder) async {

@@ -8,9 +8,9 @@ import 'package:liquid/src/rust/api/events.dart';
 import 'package:liquid/src/session/session_state.dart';
 import 'package:liquid/src/shortcuts/keymap.dart';
 import 'package:liquid/src/shortcuts/shortcut_store.dart';
-import 'package:liquid/src/theme/theme.dart';
 
 import 'fake_backend.dart';
+import 'focus_kit.dart';
 
 const info = SessionInfo(project: 'acme-api');
 const macos = 'macos';
@@ -23,17 +23,14 @@ void main() {
     project = FakeProject();
     final state = SessionState(project);
     await state.open('thread-1');
-    await tester.pumpWidget(
-      MaterialApp(
-        theme: liquidTheme(Brightness.light),
-        home: AgentShell(
-          state: state,
-          info: info,
-          shortcuts: ShortcutController.memory(settings),
-        ),
+    await pumpApp(
+      tester,
+      AgentShell(
+        state: state,
+        info: info,
+        shortcuts: ShortcutController.memory(settings),
       ),
     );
-    await tester.pumpAndSettle();
   }
 
   Future<bool> chord(
