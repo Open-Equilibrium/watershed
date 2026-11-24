@@ -87,6 +87,15 @@ async fn detached<T: Send + 'static>(
     }
 }
 
+async fn blocking<T: Send + 'static>(
+    work: impl FnOnce() -> Result<T, String> + Send + 'static,
+) -> Result<T, String> {
+    match tokio::task::spawn_blocking(work).await {
+        Ok(result) => result,
+        Err(error) => Err(format!("The move did not finish: {error}")),
+    }
+}
+
 pub(super) async fn move_status(shared: &Shared, transfer: &str) -> Result<Arrival, String> {
     shared
         .transfers
@@ -173,7 +182,7 @@ enum Entry {
 }
 
 async fn depart(
-    shared: &Shared,
+    shared: &Arc<Shared>,
     thread: &Thread,
     transfer: &str,
     target: &(String, String, String),
@@ -189,7 +198,7 @@ async fn depart(
 }
 
 async fn depart_once(
-    shared: &Shared,
+    shared: &Arc<Shared>,
     thread: &Thread,
     transfer: &str,
     target: &(String, String, String),
@@ -264,9 +273,13 @@ async fn depart_once(
         .await?;
     package.queued = host_move::queued(&store.db(), transfer)?;
     package.agent = super::agents::carry(shared, thread).await?.map(Box::new);
-    let text = serde_json::to_string(&package).map_err(|e| e.to_string())?;
-    host_move::hand(&store.db(), transfer, &text, now_ms())?;
-    Ok(package)
+    let (owner, transfer) = (shared.clone(), transfer.to_owned());
+    blocking(move || {
+        let text = serde_json::to_string(&package).map_err(|e| e.to_string())?;
+        host_move::hand(&owner.store.db(), &transfer, &text, now_ms())?;
+        Ok(package)
+    })
+    .await
 }
 
 async fn finish_move(
