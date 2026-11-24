@@ -79,6 +79,7 @@ pub struct Service {
     accept: JoinHandle<()>,
     relink: JoinHandle<()>,
     retry: JoinHandle<()>,
+    pauses: JoinHandle<()>,
     stopping: tokio::sync::watch::Sender<bool>,
     connection_file: PathBuf,
 }
@@ -104,6 +105,7 @@ struct Shared {
     sign_ins: Arc<tokio::sync::RwLock<()>>,
     moves: tokio::sync::RwLock<()>,
     transfers: transfers::TransferLocks,
+    detached: std::sync::Mutex<Vec<tokio::task::AbortHandle>>,
 }
 
 impl Service {
@@ -181,6 +183,7 @@ impl Service {
             sign_ins: Arc::new(tokio::sync::RwLock::new(())),
             moves: tokio::sync::RwLock::default(),
             transfers: transfers::TransferLocks::default(),
+            detached: std::sync::Mutex::default(),
         });
         let remembered = hosts::remote_port(&shared.store.db())?;
         shared.links.start_tunnels(&shared.store).await?;
@@ -196,7 +199,7 @@ impl Service {
             shared.stopping.clone(),
         ));
         let relink = tokio::spawn(relink(shared.clone()));
-        tokio::spawn(moves::retry_pauses(shared.clone()));
+        let pauses = tokio::spawn(moves::retry_pauses(shared.clone()));
         agents::start_all(&shared);
         let retry = tokio::spawn(listener::retry(shared.clone()));
         Ok(Self {
@@ -207,6 +210,7 @@ impl Service {
             accept,
             relink,
             retry,
+            pauses,
             stopping,
             connection_file,
         })
@@ -224,6 +228,10 @@ impl Drop for Service {
         self.accept.abort();
         self.relink.abort();
         self.retry.abort();
+        self.pauses.abort();
+        for task in crate::util::lock(&self.shared.detached).drain(..) {
+            task.abort();
+        }
         self.shared.links.stop();
         self.shared.agents.stop_all();
         drop(crate::util::lock(&self.shared.remote).listening.take());

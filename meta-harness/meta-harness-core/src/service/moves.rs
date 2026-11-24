@@ -43,9 +43,9 @@ impl Session {
     ) -> Result<Value, String> {
         let shared = self.shared.clone();
         let thread = thread.clone();
-        to(detached(
-            async move { depart(&shared, &thread, &transfer, &target, commit, message).await },
-        )
+        to(detached(&self.shared, async move {
+            depart(&shared, &thread, &transfer, &target, commit, message).await
+        })
         .await?)
     }
 
@@ -57,7 +57,10 @@ impl Session {
     ) -> Result<Value, String> {
         let shared = self.shared.clone();
         let thread = thread.clone();
-        detached(async move { finish_move(&shared, &thread, &transfer, finish).await }).await?;
+        detached(&self.shared, async move {
+            finish_move(&shared, &thread, &transfer, finish).await
+        })
+        .await?;
         to(())
     }
 
@@ -70,8 +73,10 @@ impl Session {
         let shared = self.shared.clone();
         let project = project.clone();
         let root = root.to_owned();
-        let thread =
-            detached(async move { arrive(&shared, &project, &root, package).await }).await?;
+        let thread = detached(&self.shared, async move {
+            arrive(&shared, &project, &root, package).await
+        })
+        .await?;
         let id = thread.id().to_owned();
         self.keep(thread).await;
         to(id)
@@ -79,9 +84,16 @@ impl Session {
 }
 
 async fn detached<T: Send + 'static>(
+    shared: &Shared,
     work: impl Future<Output = Result<T, String>> + Send + 'static,
 ) -> Result<T, String> {
-    match tokio::spawn(work).await {
+    let task = tokio::spawn(work);
+    {
+        let mut tasks = crate::util::lock(&shared.detached);
+        tasks.retain(|task| !task.is_finished());
+        tasks.push(task.abort_handle());
+    }
+    match task.await {
         Ok(result) => result,
         Err(error) => Err(format!("The move did not finish: {error}")),
     }
