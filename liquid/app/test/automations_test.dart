@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:liquid/src/rust/api/automation.dart';
@@ -344,6 +346,89 @@ void main() {
     await tester.testTextInput.receiveAction(TextInputAction.done);
     await tester.pumpAndSettle();
     expect(lastSetup(kit).conditions.single.value?.text, '2026-02-28');
+  });
+
+  testWidgets('overlapping edits to an Automation are saved together', (
+    tester,
+  ) async {
+    final kit = PageKit();
+    final table = await showBudget(tester, kit);
+    kit.fake.automations.add(automationOf(table, flagLarge(table)));
+    await turnOn(tester, kit);
+    await openAutomations(tester);
+    await tap(tester, find.text('Flag large expenses'));
+    kit.fake.gatedKinds = {BridgeMutationKind.setAutomation};
+    kit.fake.gate = Completer<void>();
+    await tester.enterText(find.byKey(const Key('value 0')), '600');
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await tester.pump();
+    await tester.enterText(
+      find.byKey(const Key('automation name')),
+      'Big expenses',
+    );
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await tester.pump();
+    kit.fake.gate!.complete();
+    await tester.pumpAndSettle();
+    expect(lastSetup(kit).name, 'Big expenses');
+    expect(lastSetup(kit).conditions.single.value?.number, 600);
+  });
+
+  testWidgets('a rename Liquid did not save can be submitted again unchanged', (
+    tester,
+  ) async {
+    final kit = PageKit();
+    final table = await showBudget(tester, kit);
+    kit.fake.automations.add(automationOf(table, flagLarge(table)));
+    await turnOn(tester, kit);
+    await openAutomations(tester);
+    await tap(tester, find.text('Flag large expenses'));
+    kit.fake.refuseKinds = {BridgeMutationKind.setAutomation};
+    await tester.enterText(
+      find.byKey(const Key('automation name')),
+      'Big expenses',
+    );
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await tester.pumpAndSettle();
+    expectOne(find.textContaining('Liquid did not save this change'));
+
+    kit.fake.refuseKinds = {};
+    await tester.enterText(
+      find.byKey(const Key('automation name')),
+      'Big expenses',
+    );
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await tester.pumpAndSettle();
+    expect(lastSetup(kit).name, 'Big expenses');
+  });
+
+  testWidgets('a trigger field removed while the editor is open is replaced '
+      'by a field added afterwards', (tester) async {
+    final kit = PageKit();
+    final table = await showBudget(tester, kit);
+    kit.fake.automations.add(automationOf(table, flagLarge(table)));
+    await turnOn(tester, kit);
+    await openAutomations(tester);
+    await tap(tester, find.text('Flag large expenses'));
+    await kit.workspace.apply(
+      mutation(BridgeMutationKind.removeField, block: table, field: 'amount'),
+    );
+    await kit.workspace.apply(
+      mutation(
+        BridgeMutationKind.addField,
+        block: table,
+        text: 'Total',
+        fieldKind: BridgeFieldKind.number,
+      ),
+    );
+    await tester.pumpAndSettle();
+    await choose(tester, 'condition field 0', 'Total');
+    expect(
+      lastSetup(kit).conditions.single.field,
+      kit.fake.databases[table]!.fields
+          .firstWhere((field) => field.name == 'Total')
+          .id,
+    );
   });
 
   testWidgets('moving the trigger to another Table keeps a notification, '

@@ -13,6 +13,7 @@ import '../theme/tokens.g.dart';
 import 'automation_tokens.dart';
 import 'automations.dart';
 import 'explorer.dart' show untitled;
+import 'follow.dart';
 import 'roles.dart' show RunsAs;
 import 'table_view_parts.dart' show MoreMenu;
 import 'workspace_state.dart';
@@ -42,9 +43,12 @@ class AutomationEditor extends StatefulWidget {
 
 class _AutomationEditorState extends State<AutomationEditor> {
   final _databases = <String, BridgeDatabase>{};
+  final _reading = <String>{};
+  final _follows = <String, StreamSubscription<BridgeChange>>{};
   final _texts = <String, TextEditingController>{};
   final _name = TextEditingController();
-  String? _sentName;
+  BridgeAutomationSetup? _pending;
+  int _inFlight = 0;
   BridgeTriggerKind? _kind;
   String? _table;
   String? _field;
@@ -56,7 +60,8 @@ class _AutomationEditorState extends State<AutomationEditor> {
       .where((kept) => kept.id == widget.automation)
       .firstOrNull;
 
-  BridgeAutomationSetup get _setup => _automation?.setup ?? newAutomation;
+  BridgeAutomationSetup get _setup =>
+      _pending ?? _automation?.setup ?? newAutomation;
 
   BridgeDatabase? get _database => _databases[_table];
 
@@ -75,6 +80,9 @@ class _AutomationEditorState extends State<AutomationEditor> {
     _state.automations.removeListener(_changed);
     _state.tables.removeListener(_changed);
     _name.dispose();
+    for (final follow in _follows.values) {
+      unawaited(follow.cancel());
+    }
     for (final text in _texts.values) {
       text.dispose();
     }
@@ -85,6 +93,7 @@ class _AutomationEditorState extends State<AutomationEditor> {
 
   void _changed() {
     if (_automation == null && _seen) return widget.onBack();
+    if (_inFlight == 0) _pending = null;
     _sync();
     if (mounted) setState(() {});
   }
@@ -110,8 +119,18 @@ class _AutomationEditorState extends State<AutomationEditor> {
   }
 
   void _need(String table) {
-    if (_databases.containsKey(table)) return;
-    _databases[table] = const BridgeDatabase(name: '', fields: []);
+    _follows.putIfAbsent(
+      table,
+      () => follow(
+        _state.workspace,
+        BridgeResource(kind: BridgeResourceKind.table, block: table),
+      ).listen((_) => _read(table), onError: _state.readFailed),
+    );
+    _read(table);
+  }
+
+  void _read(String table) {
+    if (!_reading.add(table)) return;
     unawaited(() async {
       try {
         final answer = await _state.read(
@@ -124,6 +143,8 @@ class _AutomationEditorState extends State<AutomationEditor> {
         );
       } on Object catch (error) {
         _state.readFailed(error);
+      } finally {
+        _reading.remove(table);
       }
     }());
   }
@@ -139,23 +160,35 @@ class _AutomationEditorState extends State<AutomationEditor> {
     List<BridgeStep>? steps,
   }) {
     final setup = _setup;
-    _mutate(
-      mutation(
-        BridgeMutationKind.setAutomation,
-        automation: widget.automation,
-        automationSetup: BridgeAutomationSetup(
-          name: name ?? setup.name,
-          trigger: trigger ?? setup.trigger,
-          conditions: conditions ?? setup.conditions,
-          steps: steps ?? setup.steps,
-        ),
-      ),
+    final next = BridgeAutomationSetup(
+      name: name ?? setup.name,
+      trigger: trigger ?? setup.trigger,
+      conditions: conditions ?? setup.conditions,
+      steps: steps ?? setup.steps,
+    );
+    _pending = next;
+    _inFlight++;
+    unawaited(
+      _state
+          .apply(
+            mutation(
+              BridgeMutationKind.setAutomation,
+              automation: widget.automation,
+              automationSetup: next,
+            ),
+          )
+          .then<void>(
+            (_) {},
+            onError: (Object _) {
+              if (identical(_pending, next)) _pending = null;
+            },
+          )
+          .whenComplete(() => _inFlight--),
     );
   }
 
   void _rename(String name) {
-    if (name == (_sentName ?? _setup.name)) return;
-    _sentName = name;
+    if (name == _setup.name) return;
     _write(name: name);
   }
 
