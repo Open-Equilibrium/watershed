@@ -110,7 +110,7 @@ void main() {
     expect(find.byTooltip('Change icon'), findsOneWidget);
     expect(
       tester.getSemantics(find.bySemanticsLabel('money')),
-      containsSemantics(
+      isSemantics(
         label: 'money',
         isButton: true,
         isSelected: true,
@@ -119,7 +119,7 @@ void main() {
     );
     expect(
       tester.getSemantics(find.bySemanticsLabel('chart')),
-      containsSemantics(
+      isSemantics(
         label: 'chart',
         isButton: true,
         isSelected: false,
@@ -128,7 +128,7 @@ void main() {
     );
     expect(
       tester.getSemantics(find.bySemanticsLabel('Emoji')),
-      containsSemantics(
+      isSemantics(
         label: 'Emoji',
         isButton: true,
         isSelected: true,
@@ -139,7 +139,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(
       tester.getSemantics(find.bySemanticsLabel('rocket')),
-      containsSemantics(label: 'rocket', isButton: true, hasTapAction: true),
+      isSemantics(label: 'rocket', isButton: true, hasTapAction: true),
     );
     semantics.dispose();
   });
