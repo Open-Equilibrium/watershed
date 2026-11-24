@@ -250,35 +250,8 @@ fn an_invalid_change_is_refused_with_its_reason() {
 }
 
 #[test]
-fn a_revision_the_homes_cannot_take_is_not_approved() {
-    let fixture = Fixture::new();
-    let store = &fixture.store;
-    let number = propose(store, vec![instruction("a", "x")]);
-    let written = RefCell::new(Vec::new());
-    let failed = store.approve("cli", number, |blocks| {
-        written
-            .borrow_mut()
-            .push(blocks.instructions.contains_key("a"));
-        if blocks.instructions.is_empty() {
-            Ok(())
-        } else {
-            Err("The disk is full.".to_owned())
-        }
-    });
-    assert_eq!(written.into_inner(), [true, false]);
-    assert_eq!(failed, Err("The disk is full.".to_owned()));
-    assert_eq!(store.current().unwrap().revision, 0);
-    assert_eq!(
-        store.pending().unwrap().len(),
-        1,
-        "it can be approved again"
-    );
-    assert_eq!(store.log().unwrap().len(), 1, "only the proposal is logged");
-}
-
-#[test]
 fn a_failure_after_the_homes_took_the_revision_puts_the_current_one_back() {
-    for fault in ["revision", "log", "commit"] {
+    for fault in ["revision", "log", "commit", "homes"] {
         let fixture = Fixture::new();
         let store = &fixture.store;
         let number = propose(store, vec![instruction("rules", "x")]);
@@ -287,6 +260,7 @@ fn a_failure_after_the_homes_took_the_revision_puts_the_current_one_back() {
             "commit" => raw
                 .execute_batch("BEGIN; SELECT count(*) FROM revision;")
                 .unwrap(),
+            "homes" => {}
             table => raw
                 .execute_batch(&format!(
                     "CREATE TRIGGER refuse BEFORE INSERT ON {table} \
@@ -298,14 +272,22 @@ fn a_failure_after_the_homes_took_the_revision_puts_the_current_one_back() {
         let written = RefCell::new(Vec::new());
         let result = store.approve("cli", number, |blocks| {
             written.borrow_mut().push(blocks.clone());
-            Ok(())
+            if fault == "homes" && !blocks.instructions.is_empty() {
+                Err("The disk is full.".to_owned())
+            } else {
+                Ok(())
+            }
         });
-        assert!(result.is_err(), "{fault}");
+        let error = result.expect_err(fault);
+        if fault == "homes" {
+            assert_eq!(error, "The disk is full.");
+        }
         let written = written.into_inner();
         assert_eq!(written.len(), 2, "{fault}");
         assert_eq!(written.last(), Some(&before.blocks), "{fault}");
         assert_eq!(store.current().unwrap(), before, "{fault}");
         assert_eq!(store.pending().unwrap().len(), 1, "{fault}");
+        assert_eq!(store.log().unwrap().len(), 1, "{fault}");
     }
 }
 
