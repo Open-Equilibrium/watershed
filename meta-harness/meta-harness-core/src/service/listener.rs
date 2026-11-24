@@ -44,9 +44,7 @@ impl Listening {
             let _ = task.await;
         }
     }
-}
 
-impl Listening {
     fn status(&self) -> RemoteStatus {
         RemoteStatus {
             port: self.port,
@@ -136,7 +134,9 @@ pub(super) async fn on(shared: &Arc<Shared>, port: u16) -> Result<RemoteStatus, 
         return Err("Remote access needs a port from 1 to 65535.".to_owned());
     }
     let _serial = shared.remote_serial.lock().await;
-    if let Some(status) = listening_status(shared).filter(|status| status.port == port) {
+    if let Some(status) =
+        status(shared).filter(|status| status.port == port && status.waiting.is_none())
+    {
         return Ok(status);
     }
     let listening = serve_on(shared, port, sockets(shared, port).await?)?;
@@ -157,13 +157,6 @@ pub(super) async fn off(shared: &Arc<Shared>) -> Result<(), String> {
         listening.stop().await;
     }
     Ok(())
-}
-
-fn listening_status(shared: &Shared) -> Option<RemoteStatus> {
-    lock(&shared.remote)
-        .listening
-        .as_ref()
-        .map(Listening::status)
 }
 
 pub(super) fn status(shared: &Shared) -> Option<RemoteStatus> {
