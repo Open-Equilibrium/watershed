@@ -228,6 +228,14 @@ fn a_moving_agent_carries_its_memory_files_and_refuses_unsafe_paths() {
             "{unsafe_path:?} is refused"
         );
     }
+    let twice = agents::CarriedFile {
+        path: "days/raw.bin".to_owned(),
+        bytes: String::new(),
+    };
+    assert!(
+        agents::unpack(&home.join("twice"), &[twice.clone(), twice]).is_err(),
+        "a path listed twice is refused"
+    );
     assert!(!home.join("escape.md").exists());
     assert!(agents::too_large(agents::MAX_MEMORY_BYTES).is_none());
     assert!(
@@ -235,6 +243,19 @@ fn a_moving_agent_carries_its_memory_files_and_refuses_unsafe_paths() {
             .unwrap()
             .contains("at most 100 MiB")
     );
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn a_memory_name_that_is_not_utf8_is_refused_instead_of_carried_under_a_changed_name() {
+    use std::os::unix::ffi::OsStrExt;
+    let home = Dir::new();
+    let store = Store::open(&home.join("meta-harness.sqlite")).unwrap();
+    let agent = agents::create(&store.db(), &home, &new_agent("news-bot"), "thread-1").unwrap();
+    for name in [&b"caf\xe9.md"[..], &b"caf\xe8.md"[..]] {
+        std::fs::write(agent.memory.join(std::ffi::OsStr::from_bytes(name)), "text").unwrap();
+    }
+    assert!(agents::pack(&agent, Vec::new()).is_err());
 }
 
 #[test]

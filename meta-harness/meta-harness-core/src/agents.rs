@@ -186,7 +186,12 @@ pub(crate) fn memory_files(folder: &Path) -> Result<Vec<(String, PathBuf, u64)>,
             let kind = entry
                 .file_type()
                 .map_err(|e| format!("Could not read {}: {e}", entry.path().display()))?;
-            let name = entry.file_name().to_string_lossy().into_owned();
+            let name = entry.file_name().into_string().map_err(|_| {
+                format!(
+                    "{} has a name that is not valid UTF-8, so a move cannot carry it.",
+                    entry.path().display()
+                )
+            })?;
             let relative = if prefix.is_empty() {
                 name
             } else {
@@ -250,6 +255,7 @@ pub(crate) fn pack(agent: &Agent, routines: Vec<Value>) -> Result<AgentCarry, St
 }
 
 pub(crate) fn unpack(folder: &Path, files: &[CarriedFile]) -> Result<(), String> {
+    let mut listed = std::collections::HashSet::new();
     for file in files {
         let relative = Path::new(&file.path);
         let plain = relative
@@ -258,6 +264,12 @@ pub(crate) fn unpack(folder: &Path, files: &[CarriedFile]) -> Result<(), String>
         if !plain || file.path.is_empty() {
             return Err(format!(
                 "A carried memory file has no plain path: {:?}",
+                file.path
+            ));
+        }
+        if !listed.insert(relative) {
+            return Err(format!(
+                "The carried memory file {} is listed twice.",
                 file.path
             ));
         }
