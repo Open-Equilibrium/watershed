@@ -236,6 +236,36 @@ void main() {
     expect(await store.load(), diff);
   });
 
+  test(
+    'a failed Liquid key turn-off keeps a rebinding made while it is pending',
+    () async {
+      final host = FakeHost();
+      final shortcuts = await ShortcutController.load(store, host);
+      await shortcuts.change(ShortcutSettings.liquidKey());
+
+      final disable = Completer<void>();
+      host.gate = disable;
+      final off = shortcuts.change(ShortcutSettings.standard());
+      await pumpEventQueue();
+      final rebound = ShortcutSettings.standard().change(
+        Command.diff,
+        const Keys(LogicalKeyboardKey.keyE, meta: true),
+      );
+      final kept = shortcuts.change(rebound);
+      host.failure = denied;
+      disable.complete();
+      await Future.wait([off, kept]);
+
+      expect(
+        shortcuts.value.liquidKey,
+        isTrue,
+        reason: 'the Liquid key is still on',
+      );
+      expect(shortcuts.value.label(Command.diff), '⌘E');
+      expect((await store.load())!.label(Command.diff), '⌘E');
+    },
+  );
+
   test('the first frame does not wait for the Liquid key', () async {
     await store.save(ShortcutSettings.liquidKey());
     final host = FakeHost()..gate = Completer();
