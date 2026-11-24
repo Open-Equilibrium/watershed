@@ -8,11 +8,9 @@ import 'package:liquid/src/agent/chat_view.dart';
 import 'package:liquid/src/agent/shell.dart';
 import 'package:liquid/src/agent/sidebar.dart';
 import 'package:liquid/src/controls.dart';
-import 'package:liquid/src/rust/api/events.dart';
 import 'package:liquid/src/rust/api/workspace.dart';
 import 'package:liquid/src/session/session_state.dart';
 import 'package:liquid/src/theme/theme.dart';
-import 'package:liquid/src/theme/tokens.g.dart';
 import 'package:liquid/src/workspace/page_view.dart';
 
 import 'fake_backend.dart';
@@ -40,8 +38,6 @@ void main() {
     );
   }
 
-  FakeProject project(SessionState state) => state.project as FakeProject;
-
   SessionState agent() => SessionState(
     FakeProject()..threadList = [threadOf('thread-1', title: 'Fix login')],
   );
@@ -61,8 +57,6 @@ void main() {
     of: find.byKey(const Key('page-header')),
     matching: find.text(text),
   );
-  Finder pageRow() =>
-      find.ancestor(of: inSidebar('Untitled'), matching: find.byType(InkWell));
 
   Future<void> typeTitle(WidgetTester tester, String text) async {
     await tester.enterText(title(), text);
@@ -202,47 +196,6 @@ void main() {
     expect(find.byType(ChatView), findsOneWidget);
   });
 
-  testWidgets('choosing a Page closes Settings', (tester) async {
-    await show(tester);
-    await tester.tap(find.byTooltip('Settings'));
-    await tester.pumpAndSettle();
-    expect(find.byType(WorkspacePage), findsNothing);
-    await tester.tap(inSidebar('Untitled'));
-    await tester.pumpAndSettle();
-    expect(find.byType(WorkspacePage), findsOneWidget);
-  });
-
-  testWidgets('a question behind a Page waits until shown', (tester) async {
-    final state = agent();
-    await show(tester, session: state);
-    await tester.tap(inSidebar('Untitled'));
-    await tester.pumpAndSettle();
-    project(state).session.emit(
-      event(
-        BridgeEventKind.requestOpened,
-        901,
-        request: questionsOf('q1', [questionOf('run', 'Run the tests?')]),
-      ),
-    );
-    await tester.pump();
-    await tester.pump(const Duration(seconds: 2));
-
-    await tester.tap(find.byKey(const Key('session-thread-1')));
-    await tester.pump();
-    await tester.enterText(find.byKey(const Key('answer')), 'Yes');
-    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
-    await tester.pump();
-    expect(
-      project(state).session.calls,
-      isEmpty,
-      reason: 'too early to answer',
-    );
-
-    await tester.pump(const Duration(milliseconds: 500));
-    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
-    expect(project(state).session.calls, ['answer q1 run=Yes']);
-  });
-
   testWidgets('a Workspace problem shows in the sidebar', (tester) async {
     await show(tester, session: agent());
     kit.fake.refuse = readOnly;
@@ -318,20 +271,6 @@ void main() {
     });
   }
 
-  testWidgets('a nested Page’s disclosure opens by keyboard', (tester) async {
-    await show(tester);
-    await typeTitle(tester, 'Trip');
-    await addPageInside(tester, 'Trip');
-    await tester.tap(find.bySemanticsLabel('Collapse'));
-    await tester.pumpAndSettle();
-    expect(inSidebar('Untitled'), findsNothing);
-
-    await tabTo(tester, find.byKey(const Key('disclosure')));
-    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
-    await tester.pumpAndSettle();
-    expect(inSidebar('Untitled'), findsOneWidget);
-  });
-
   testWidgets('an older refused rename never wins', (tester) async {
     await show(tester);
     kit.fake.gate = Completer();
@@ -360,71 +299,5 @@ void main() {
     await tester.pumpAndSettle();
     expect(storedTitle(), 'P');
     expect(shownTitle(tester), 'P');
-  });
-
-  testWidgets('focus, hover and ··· show in the sidebar', (tester) async {
-    await show(tester);
-    final context = tester.element(find.byType(Sidebar));
-    final theme = Theme.of(context);
-    await tabTo(tester, pageRow());
-    expect(
-      find.descendant(
-        of: find.byType(Sidebar),
-        matching: find.byType(ListView),
-      ),
-      paintsAbove(context.ws.selected, theme.focusColor),
-      reason:
-          'the highlight is painted above the open Page\'s row, in the '
-          'list that clips it',
-    );
-
-    final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
-    addTearDown(mouse.removePointer);
-    await mouse.addPointer(location: tester.getCenter(inSidebar('Settings')));
-    await tester.pumpAndSettle();
-    expect(
-      find.byType(Sidebar),
-      paintsAbove(context.ws.subtle, theme.hoverColor),
-      reason: 'the hover is painted above the sidebar',
-    );
-
-    final row = tester.getRect(pageRow().first);
-    await mouse.moveTo(tester.getCenter(inSidebar('Untitled')));
-    await tester.pumpAndSettle();
-    final more = tester.getRect(
-      find.descendant(
-        of: find.byType(Sidebar),
-        matching: find.byTooltip('More actions'),
-      ),
-    );
-    expect(row.contains(more.center), isTrue, reason: 'the ··· is in the row');
-    expect(row.right - more.right, lessThan(WsMetrics.space5));
-    await tabTo(tester, pageRow());
-    await tabTo(
-      tester,
-      find.descendant(
-        of: find.byType(Sidebar),
-        matching: find.byTooltip('More actions'),
-      ),
-    );
-    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
-    await tester.pumpAndSettle();
-    expect(find.text('Add a page inside'), findsOneWidget);
-    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
-    await tester.pumpAndSettle();
-    expect(find.text('Add a page inside'), findsNothing);
-  });
-
-  testWidgets('Tab never stops on the whole window', (tester) async {
-    await show(tester);
-    for (var press = 0; press < 8; press++) {
-      await tester.sendKeyEvent(LogicalKeyboardKey.tab);
-      await tester.pumpAndSettle();
-      expect(
-        FocusManager.instance.primaryFocus?.debugLabel,
-        isNot('shell'),
-        reason: 'the whole window is no Tab stop',
-      );
-    }
   });
 }

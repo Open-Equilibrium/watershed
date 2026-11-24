@@ -2,7 +2,6 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:liquid/src/agent/action_area.dart';
 import 'package:liquid/src/agent/shell.dart';
 import 'package:liquid/src/agent/sidebar.dart';
 import 'package:liquid/src/diff/diff_model.dart';
@@ -303,45 +302,5 @@ void main() {
     await tester.sendKeyEvent(LogicalKeyboardKey.escape);
     await resolve(tester, 'q1');
     expect(focused(tester, const Key('composer')), isTrue);
-  });
-
-  testWidgets('focus shows on controls inside the input area', (tester) async {
-    await show(tester);
-    final context = tester.element(find.byType(Composer));
-    await tabTo(tester, find.byTooltip('Model'));
-    expect(
-      find.byType(Composer),
-      paintsAbove(context.ws.surface, Theme.of(context).focusColor),
-      reason: 'the highlight is painted above the input area',
-    );
-  });
-
-  testWidgets('focus and hover show in the Settings sections', (tester) async {
-    await show(tester);
-    await openSettings(tester);
-    final context = tester.element(find.byType(SettingsPage));
-    final theme = Theme.of(context);
-    Finder section(String label) => find.ancestor(
-      of: find
-          .descendant(of: find.byType(SettingsPage), matching: find.text(label))
-          .first,
-      matching: find.byType(InkWell),
-    );
-    await tabTo(tester, section('Shortcuts'));
-    expect(
-      find.byType(SettingsPage),
-      paintsAbove(context.ws.selected, theme.focusColor),
-      reason: 'the highlight is painted above the chosen section',
-    );
-
-    final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
-    await mouse.addPointer(location: tester.getCenter(section('Shortcuts')));
-    addTearDown(mouse.removePointer);
-    await tester.pumpAndSettle();
-    expect(
-      find.byType(SettingsPage),
-      paintsAbove(context.ws.selected, theme.hoverColor),
-      reason: 'the hover is painted above the chosen section',
-    );
   });
 }

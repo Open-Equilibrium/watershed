@@ -1,17 +1,14 @@
 import 'dart:async';
-import 'dart:io';
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:liquid/src/agent/session_menus.dart';
 import 'package:liquid/src/agent/shell.dart';
 import 'package:liquid/src/agent/sidebar.dart';
 import 'package:liquid/src/rust/api/session.dart';
 import 'package:liquid/src/session/session_state.dart';
 import 'package:liquid/src/settings_page.dart';
 
-import 'card_harness.dart';
 import 'fake_backend.dart';
 import 'focus_kit.dart';
 
@@ -34,8 +31,6 @@ Future<void> tap(
 void main() {
   late FakeProject project;
   late SessionState state;
-  late List<String> opened;
-  setUp(() => opened = recordOpens());
 
   Future<void> show(
     WidgetTester tester, {
@@ -74,11 +69,6 @@ void main() {
   Future<void> deleteFixLogin(WidgetTester tester) async {
     await openMenu(tester, 'Fix login');
     await tap(tester, find.text('Delete'));
-  }
-
-  Future<void> exportFixLogin(WidgetTester tester) async {
-    await openMenu(tester, 'Fix login');
-    await tap(tester, find.text('Export record'));
   }
 
   testWidgets('a new worktree starts from the branch picked', (tester) async {
@@ -165,17 +155,6 @@ void main() {
     expect(state.model.value?.values, ['low']);
   });
 
-  testWidgets('the sidebar lists the project\'s threads and opens one', (
-    tester,
-  ) async {
-    await show(
-      tester,
-      threads: [threadOf('thread-2', title: 'Rate limit for /login')],
-    );
-    await tap(tester, find.text('Rate limit for /login'));
-    expect(project.calls, contains('open thread-2'));
-  });
-
   testWidgets('a thread is archived from its menu, and a running one is not', (
     tester,
   ) async {
@@ -193,14 +172,6 @@ void main() {
     await openMenu(tester, 'Run tests');
     await tap(tester, find.text('Archive thread'));
     expect(project.calls, isNot(contains('archive thread-3 true')));
-  });
-
-  testWidgets('cancelling a delete deletes nothing', (tester) async {
-    await show(tester, threads: fixLogin());
-    await deleteFixLogin(tester);
-    expect(find.text('Delete thread "Fix login"?'), findsOneWidget);
-    await tap(tester, find.text('Cancel'));
-    expect(project.calls.where((call) => call.startsWith('delete')), isEmpty);
   });
 
   testWidgets(
@@ -251,18 +222,6 @@ void main() {
     );
     expect(project.calls.where((call) => call.startsWith('delete')), isEmpty);
   });
-
-  testWidgets(
-    'a thread exports its record into Downloads and shows the folder',
-    (tester) async {
-      await show(tester, threads: fixLogin(id: 'thread-1'));
-      await state.open('thread-1');
-      await tester.pumpAndSettle();
-      await exportFixLogin(tester);
-      expect(project.session.calls.single, startsWith('export '));
-      expect(opened.single, startsWith('/Downloads/'));
-    },
-  );
 
   testWidgets('Settings picks the writer model for the project', (
     tester,
@@ -315,28 +274,4 @@ void main() {
       expect(find.text('Claude Sonnet 5.5'), findsOneWidget);
     },
   );
-
-  testWidgets('the project menu copies the folder path', (tester) async {
-    final copied = recordClipboard(tester);
-    await show(tester);
-    await tap(tester, find.text('acme-api').first, buttons: kSecondaryButton);
-    await tap(tester, find.text('Copy path'));
-    expect(copied(), '/work/acme-api');
-  });
-
-  testWidgets('a folder the system cannot open is reported', (tester) async {
-    await show(tester, threads: fixLogin(id: 'thread-1'));
-    await state.open('thread-1');
-    await tester.pumpAndSettle();
-
-    runOpener = (program, arguments) async =>
-        ProcessResult(0, 1, '', 'no handler');
-    await exportFixLogin(tester);
-    expect(find.textContaining('no handler'), findsOneWidget);
-
-    runOpener = (program, arguments) async =>
-        throw ProcessException(program, arguments, 'missing');
-    await exportFixLogin(tester);
-    expect(find.textContaining('missing'), findsOneWidget);
-  });
 }

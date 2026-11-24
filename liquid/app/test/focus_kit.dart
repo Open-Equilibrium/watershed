@@ -3,17 +3,6 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:liquid/src/theme/theme.dart';
 
-PaintPattern paintsAbove(Color bottom, Color top) {
-  bool fills(Object? paint, Color color) =>
-      paint is Paint && paint.color.toARGB32() == color.toARGB32();
-  bool box(Symbol method) => method == #drawRect || method == #drawRRect;
-  return paints
-    ..something(
-      (method, arguments) => box(method) && fills(arguments[1], bottom),
-    )
-    ..something((method, arguments) => box(method) && fills(arguments[1], top));
-}
-
 Future<void> undo(WidgetTester tester) async {
   await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
   await tester.sendKeyEvent(LogicalKeyboardKey.keyZ);

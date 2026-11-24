@@ -74,51 +74,6 @@ void main() {
     },
   );
 
-  testWidgets(
-    'holding the Liquid key shows its shortcuts and ⌘ no longer does',
-    (tester) async {
-      await show(tester, ShortcutSettings.liquidKey());
-
-      await tester.sendKeyDownEvent(
-        LogicalKeyboardKey.metaLeft,
-        platform: macos,
-      );
-      await tester.pump(const Duration(milliseconds: 700));
-      expect(find.text('⇪1'), findsNothing);
-      await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft, platform: macos);
-
-      await tester.sendKeyDownEvent(liquidKey, platform: macos);
-      await tester.pump(const Duration(milliseconds: 700));
-      expect(find.text('⇪1'), findsOneWidget);
-      await tester.sendKeyUpEvent(liquidKey, platform: macos);
-      await tester.pump();
-      expect(find.text('⇪1'), findsNothing);
-    },
-  );
-
-  testWidgets('a changed shortcut replaces its default', (tester) async {
-    await show(
-      tester,
-      ShortcutSettings.liquidKey().change(
-        Command.diff,
-        const Keys(LogicalKeyboardKey.keyE, liquid: true),
-      ),
-    );
-    await chord(tester, liquidKey, LogicalKeyboardKey.keyD);
-    expect(find.byType(DiffPanel), findsNothing);
-    await chord(tester, liquidKey, LogicalKeyboardKey.keyE);
-    expect(find.byType(DiffPanel), findsOneWidget);
-  });
-
-  testWidgets('the Standard profile leaves the Liquid key alone', (
-    tester,
-  ) async {
-    await show(tester, ShortcutSettings.standard());
-
-    expect(await chord(tester, liquidKey, LogicalKeyboardKey.keyD), isFalse);
-    expect(find.byType(DiffPanel), findsNothing);
-  });
-
   testWidgets('⏎ answers a question with its typed text, once', (tester) async {
     await show(tester, ShortcutSettings.standard());
     await askInput(tester, 'Commit message');

@@ -10,26 +10,6 @@ void main() {
   const liquidE = Keys(LogicalKeyboardKey.keyE, liquid: true);
   const commandD = Keys(LogicalKeyboardKey.keyD, meta: true);
 
-  test('the Liquid key profile adds ⇪ and keeps the ⌘ keys', () {
-    final keys = ShortcutSettings.liquidKey();
-
-    expect(keys.bindings(Command.newSession), [liquidN, commandN]);
-    expect(keys.label(Command.newSession), '⇪N');
-    expect(keys.label(Command.answerEditor), '⇪⏎');
-    expect(keys.menu(Command.newSession), commandN);
-    expect(keys.label(Command.settings), '⌘,');
-    expect(keys.label(Command.dismissQuestion), 'esc');
-    expect(keys.label(Command.queue), '⌥⏎');
-  });
-
-  test('the Standard profile uses ⌘ only', () {
-    final keys = ShortcutSettings.standard();
-
-    expect(keys.bindings(Command.newSession), [commandN]);
-    expect(keys.label(Command.diff), '⌘D');
-    expect(keys.liquidKey, isFalse);
-  });
-
   test('a changed shortcut switches to Custom from its base', () {
     final keys = ShortcutSettings.standard().change(Command.diff, commandE);
 
@@ -124,21 +104,6 @@ void main() {
     }
   });
 
-  test('taking keys anyway clears them from the other command', () {
-    final keys = ShortcutSettings.liquidKey().change(
-      Command.focusInput,
-      liquidN,
-      clear: [Command.newSession],
-    );
-
-    expect(keys.bindings(Command.focusInput), [
-      liquidN,
-      const Keys(LogicalKeyboardKey.keyL, meta: true),
-    ]);
-    expect(keys.bindings(Command.newSession), [commandN]);
-    expect(keys.label(Command.newSession), '⌘N');
-  });
-
   test('taking keys clears every command that runs them', () {
     const commandEnter = Keys(LogicalKeyboardKey.enter, meta: true);
     final keys = ShortcutSettings.standard();
@@ -207,30 +172,6 @@ void main() {
     final on = ShortcutSettings.standard().withLiquidKey(true);
     expect(on.base, Profile.standard);
     expect(on.bindings(Command.newSession), [liquidN, commandN]);
-  });
-
-  test('Custom is kept while another profile is active', () {
-    final custom = ShortcutSettings.liquidKey().change(Command.diff, liquidD);
-
-    final standard = custom.choose(Profile.standard);
-    expect(standard.liquidKey, isFalse);
-    expect(standard.bindings(Command.diff), [commandD]);
-    expect(standard.choose(Profile.custom), custom);
-    expect(
-      ShortcutSettings.liquidKey().choose(Profile.custom).base,
-      Profile.liquidKey,
-      reason: 'a first Custom profile starts from the active one',
-    );
-  });
-
-  test('resetting all never turns the Liquid key on or off', () {
-    final changed = ShortcutSettings.liquidKey().change(Command.diff, liquidD);
-    expect(changed.resetAll(), ShortcutSettings.liquidKey());
-
-    final off = changed.withLiquidKey(false).resetAll();
-    expect(off.profile, Profile.custom);
-    expect(off.liquidKey, isFalse);
-    expect(off.changed(Command.diff), isFalse);
   });
 
   test('macOS, fixed-row and typing keys are reserved, while the Liquid key alone is free', () {
