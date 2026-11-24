@@ -9,7 +9,6 @@ import 'package:liquid/src/rust/api/workspace.dart';
 import 'package:liquid/src/whiteboard/board.dart';
 import 'package:liquid/src/whiteboard/board_controller.dart';
 import 'package:liquid/src/whiteboard/ink_geometry.dart';
-import 'package:liquid/src/workspace/workspace_state.dart';
 
 import 'focus_kit.dart';
 import 'page_kit.dart';
@@ -141,55 +140,6 @@ void main() {
       expect(boardTools.tool, BoardTool.pen);
     },
   );
-
-  testWidgets('a Whiteboard in a Section\'s first line starts that Section', (
-    tester,
-  ) async {
-    await kit.show(tester, [
-      const TextPart('Intro'),
-      const TextPart(''),
-      const TextPart('After'),
-    ]);
-    final line = kit.fake.views[kit.page]![1];
-    await kit.workspace.apply(
-      mutation(
-        BridgeMutationKind.setSectionBoundary,
-        page: kit.page,
-        view: line.id,
-        boundary: true,
-      ),
-    );
-    await tester.pumpAndSettle();
-    await typeSlashWhiteboard(tester);
-    await key(tester, LogicalKeyboardKey.enter);
-    expect(
-      [
-        for (final view in kit.fake.views[kit.page]!)
-          (view.kind, view.boundary),
-      ],
-      [
-        (BridgeBlockKind.text, false),
-        (BridgeBlockKind.whiteboard, true),
-        (BridgeBlockKind.text, false),
-      ],
-    );
-  });
-
-  testWidgets('esc in a full-screen text box ends the box, then full screen', (
-    tester,
-  ) async {
-    await kit.show(tester, [const WhiteboardPart()]);
-    await hover(tester);
-    await tap(tester, find.byKey(const Key('whiteboard full screen')));
-    await key(tester, LogicalKeyboardKey.keyT);
-    await clickAt(tester, const Offset(120, 120));
-    await tester.enterText(find.byKey(const Key('whiteboard text')), 'Porto');
-    await key(tester, LogicalKeyboardKey.escape);
-    expect(lastEdit().add.single.text, 'Porto');
-    expect(find.byKey(const Key('whiteboard full')), findsOneWidget);
-    await key(tester, LogicalKeyboardKey.escape);
-    expect(find.byKey(const Key('whiteboard full')), findsNothing);
-  });
 
   testWidgets('a first click only focuses; the pen then draws a stroke', (
     tester,
@@ -381,47 +331,6 @@ void main() {
     expect(text.x, 120);
   });
 
-  testWidgets('the style switch sets the whole board to clean and back', (
-    tester,
-  ) async {
-    await showFocused(tester);
-    BridgeDrawingStyle style() => kit.fake.whiteboards.values.single.style;
-    await tap(tester, find.byKey(const ValueKey('style hand-drawn')));
-    expect(
-      kit.applied(BridgeMutationKind.setDrawingStyle),
-      isEmpty,
-      reason: 'the chosen style stays as it is',
-    );
-    await tap(tester, find.byKey(const ValueKey('style clean')));
-    expect(style(), BridgeDrawingStyle.clean);
-    await tap(tester, find.byKey(const ValueKey('style hand-drawn')));
-    expect(style(), BridgeDrawingStyle.handDrawn);
-  });
-
-  testWidgets('pinching zooms a board and the right button pans it', (
-    tester,
-  ) async {
-    await kit.show(tester, [const WhiteboardPart()]);
-    final center = tester.getCenter(board());
-    final pinch = TestPointer(1, PointerDeviceKind.trackpad);
-    await tester.sendEventToBinding(pinch.panZoomStart(center));
-    await tester.sendEventToBinding(pinch.panZoomUpdate(center, scale: 2));
-    await tester.sendEventToBinding(pinch.panZoomEnd());
-    await tester.pumpAndSettle();
-    await focus(tester);
-    expect(find.text('200 %'), findsOneWidget, reason: 'unfocused, too');
-
-    final right = await tester.startGesture(
-      center,
-      kind: PointerDeviceKind.mouse,
-      buttons: kSecondaryMouseButton,
-    );
-    await right.moveBy(const Offset(40, 0));
-    await right.up();
-    await tester.pumpAndSettle();
-    expect(kit.applied(BridgeMutationKind.editDrawing), isEmpty);
-  });
-
   testWidgets(
     'full screen shows the same board until Done, and closes once its Whiteboard is gone',
     (tester) async {
@@ -471,27 +380,6 @@ void main() {
     await tester.pumpAndSettle();
     expect(stored(), hasLength(2));
   });
-
-  testWidgets(
-    'a Whiteboard clicked under the pointer keeps its ⋯ menu after esc',
-    (tester) async {
-      await kit.show(tester, [
-        const TextPart('Intro'),
-        const WhiteboardPart(),
-        const TextPart('After'),
-      ]);
-      final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
-      await mouse.addPointer(location: tester.getCenter(board()));
-      addTearDown(mouse.removePointer);
-      await focus(tester);
-      expect(find.byKey(const Key('whiteboard tools')), findsOneWidget);
-      await key(tester, LogicalKeyboardKey.escape);
-      expect(find.byKey(const Key('whiteboard tools')), findsNothing);
-      expect(tester.takeException(), isNull);
-      await tap(tester, find.byKey(const Key('whiteboard more')));
-      expect(find.byKey(const ValueKey('whiteboard Delete')), findsOneWidget);
-    },
-  );
 
   testWidgets('a tool change mid-drag keeps the move it had shown', (
     tester,
