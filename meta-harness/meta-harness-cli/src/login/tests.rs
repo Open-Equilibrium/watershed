@@ -52,9 +52,10 @@ fn installed(manager: &Manager, plan: &Plan) -> (String, Vec<String>) {
 #[test]
 fn the_service_gets_absolute_folders_and_the_person_s_harness_logins() {
     let dir = Dir::new();
+    let codex = dir.0.join("codex-work");
     let variables = |name: &str| match name {
         "PATH" => Some("/usr/bin:.::bin:/opt/homebrew/bin".to_owned()),
-        "CODEX_HOME" => Some("/Users/p/.codex-work".to_owned()),
+        "CODEX_HOME" => Some(codex.to_string_lossy().into_owned()),
         "CLAUDE_CONFIG_DIR" => Some("relative".to_owned()),
         _ => None,
     };
@@ -69,7 +70,7 @@ fn the_service_gets_absolute_folders_and_the_person_s_harness_logins() {
         [
             "PATH=/usr/bin:/opt/homebrew/bin".to_owned(),
             format!("META_HARNESS_HOME={}", dir.0.join("data").display()),
-            "CODEX_HOME=/Users/p/.codex-work".to_owned(),
+            format!("CODEX_HOME={}", codex.display()),
         ]
     );
     let broken = Plan::new(dir.0.join("meta"), dir.0.join("da\nta"), |_| None);
@@ -322,6 +323,24 @@ fn a_windows_logon_task_runs_meta_serve_hidden_and_logs_to_the_data_folder() {
         "{task}"
     );
     assert_eq!(manager.recorded_home(), Ok(Some(PathBuf::from(home))));
+}
+
+#[test]
+fn a_windows_logon_task_passes_the_harness_logins_on_to_meta_serve() {
+    let dir = Dir::new();
+    let codex = dir.0.join("codex");
+    let plan = Plan::new(dir.0.join("bin/meta"), dir.0.join("data"), |name| {
+        (name == "CODEX_HOME").then(|| codex.to_string_lossy().into_owned())
+    })
+    .unwrap();
+    assert!(task_of(&plan).contains(&format!("--env \"CODEX_HOME={}\"", codex.display())));
+    assert_eq!(
+        split_environment(&["serve", "--env", "CODEX_HOME=/a", "--env", "PATH=/x"]),
+        (
+            vec![("CODEX_HOME", "/a")],
+            vec!["serve", "--env", "PATH=/x"]
+        )
+    );
 }
 
 #[test]

@@ -68,6 +68,10 @@ const CLIENT: &str = "meta";
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let args: Vec<&str> = args.iter().map(String::as_str).collect();
+    let (environment, args) = login::split_environment(&args);
+    for (name, value) in environment {
+        unsafe { std::env::set_var(name, value) }
+    }
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()

@@ -42,7 +42,7 @@ impl Plan {
             ("META_HARNESS_HOME", utf8(&home)?),
         ];
         for name in PASSED {
-            if let Some(value) = var(name).filter(|v| v.starts_with('/')) {
+            if let Some(value) = var(name).filter(|v| Path::new(v).is_absolute()) {
                 environment.push((name, value));
             }
         }
@@ -66,6 +66,29 @@ impl Plan {
     fn log(&self) -> PathBuf {
         self.home.join("service.log")
     }
+}
+
+pub fn split_environment<'a>(args: &[&'a str]) -> (Vec<(&'a str, &'a str)>, Vec<&'a str>) {
+    let mut environment = Vec::new();
+    let mut rest = Vec::new();
+    let mut index = 0;
+    while index < args.len() {
+        let pair = args
+            .get(index + 1)
+            .copied()
+            .and_then(|pair| pair.split_once('='));
+        match pair {
+            Some((name, value)) if args[index] == "--env" && PASSED.contains(&name) => {
+                environment.push((name, value));
+                index += 2;
+            }
+            _ => {
+                rest.push(args[index]);
+                index += 1;
+            }
+        }
+    }
+    (environment, rest)
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -441,6 +464,12 @@ fn task_of(plan: &Plan) -> String {
     let program = xml(&argument(&plan.program.to_string_lossy()));
     let home = xml(&argument(&plan.home.to_string_lossy()));
     let log = xml(&argument(&plan.log().to_string_lossy()));
+    let environment: String = plan
+        .environment
+        .iter()
+        .filter(|(name, _)| PASSED.contains(name))
+        .map(|(name, value)| format!(" --env {}", xml(&argument(&format!("{name}={value}")))))
+        .collect();
     let user = xml(&task_user());
     format!(
         r#"<?xml version="1.0" encoding="UTF-16"?>
@@ -476,7 +505,7 @@ fn task_of(plan: &Plan) -> String {
   <Actions Context="Author">
     <Exec>
       <Command>conhost.exe</Command>
-      <Arguments>--headless {program} serve --home {home} --log {log}</Arguments>
+      <Arguments>--headless {program} serve --home {home} --log {log}{environment}</Arguments>
     </Exec>
   </Actions>
 </Task>
