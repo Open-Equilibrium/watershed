@@ -1,5 +1,5 @@
 use super::*;
-use meta_harness_core::{Thread, ThreadEvent};
+use meta_harness_core::{ItemKind, StepStatus, TaskStep, Thread, ThreadEvent};
 
 async fn wait_core(thread: &Thread, done: impl Fn(&Snapshot) -> bool) -> Snapshot {
     let waited = tokio::time::timeout(Duration::from_secs(60), async {
@@ -212,4 +212,34 @@ async fn a_snapshot_names_the_events_it_already_contains() {
     );
     assert!(after.transcript.iter().any(|item| item.text == "Appended."));
     host.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_agent_s_plan_reaches_the_transcript_as_a_task_list() {
+    let (_dir, repo, home) = fixture();
+    let (service, host) = start_service(&home).await;
+    let project = host.project(&repo).await.unwrap();
+    let thread = project
+        .start(start("plan", worktree(), Permissions::FullAccess))
+        .await
+        .unwrap();
+
+    let snapshot = wait(&thread, completed(1)).await;
+
+    let tasks = snapshot
+        .transcript
+        .iter()
+        .find(|item| item.kind == ItemKind::TaskList)
+        .expect("the plan is a task list item");
+    let step = |text: &str| TaskStep {
+        text: text.to_owned(),
+        status: StepStatus::Completed,
+    };
+    assert_eq!(
+        tasks.detail,
+        ItemDetail::Tasks {
+            steps: vec![step("Explore"), step("Explore › scraper-1")]
+        }
+    );
+    service.stop().await;
 }

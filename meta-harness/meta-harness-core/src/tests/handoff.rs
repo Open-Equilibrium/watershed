@@ -1,5 +1,5 @@
 use crate::event::{ItemDetail, ItemId, ItemKind, ItemStatus, TurnId};
-use crate::handoff::{HANDOFF_BYTES, render};
+use crate::handoff::{HANDOFF_BYTES, cap_transcript, render};
 use crate::thread::ChatItem;
 
 fn item(kind: ItemKind, text: String, n: u64) -> ChatItem {
@@ -55,4 +55,19 @@ fn a_short_transcript_is_rendered_whole_in_order() {
     assert!(!text.contains("not shown"), "reasoning is left out");
     assert!(text.contains("Selected 3 intact items; omitted 0 items."));
     assert!(text.contains("[Historical assistant; command_execution]\nCommand: \ncargo test"));
+}
+
+#[test]
+fn a_transcript_over_the_cap_drops_its_oldest_items() {
+    let transcript: Vec<ChatItem> = (0..10)
+        .map(|n| item(ItemKind::AssistantMessage, "y".repeat(100), n))
+        .collect();
+    let one = serde_json::to_vec(&transcript[0]).unwrap().len() + 1;
+    let (kept, capped) = cap_transcript(transcript.clone(), one * 3);
+    assert!(capped);
+    assert_eq!(kept, transcript[7..].to_vec());
+
+    let (kept, capped) = cap_transcript(transcript.clone(), one * 10);
+    assert!(!capped);
+    assert_eq!(kept, transcript);
 }

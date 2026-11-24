@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use futures_util::StreamExt;
+use futures_util::{SinkExt, StreamExt};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::TcpListener;
 use tokio_tungstenite::tungstenite::Message;
@@ -26,6 +26,24 @@ async fn dropping_the_last_handle_closes_the_connection_to_the_service() {
         .await
         .expect("the service sees the connection end")
         .unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_call_dropped_before_its_answer_stops_waiting_for_it() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("ws://{}", listener.local_addr().unwrap());
+    tokio::spawn(async move {
+        let (socket, _) = listener.accept().await.unwrap();
+        let mut socket = tokio_tungstenite::accept_async(socket).await.unwrap();
+        while socket.send(Message::Ping(Vec::new().into())).await.is_ok() {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    });
+    let host = Host::connect_to(&url, "token", "test").await.unwrap();
+    for _ in 0..5 {
+        let _ = tokio::time::timeout(Duration::from_millis(50), host.hosts()).await;
+    }
+    assert_eq!(host.waiting().await, 0);
 }
 
 async fn refusing_peer(reply: &'static [u8]) -> String {

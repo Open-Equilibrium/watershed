@@ -417,3 +417,16 @@ impl Links {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{RELINK_AFTER_MS, is_due};
+
+    #[test]
+    fn a_link_is_made_again_only_once_it_is_older_than_25_days() {
+        let now = 100 * RELINK_AFTER_MS;
+        assert!(is_due(None, now));
+        assert!(!is_due(Some(now - RELINK_AFTER_MS), now));
+        assert!(is_due(Some(now - RELINK_AFTER_MS - 1), now));
+    }
+}

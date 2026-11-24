@@ -916,3 +916,29 @@ async fn a_handoff_run_that_was_aborted_does_not_settle_the_move() {
         "a handoff run that was aborted must not let the move land"
     );
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn dropping_a_followed_thread_interrupts_its_stream_on_t3() {
+    let (fake, thread) = follow(projection(json!({})), 1).await;
+    let id = fake.request_id(SUBSCRIBE);
+    drop(thread);
+    tokio::time::timeout(WAIT, fake.interrupted(&id))
+        .await
+        .expect("T3 receives the interrupt");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn subscribers_end_when_t3_ends_the_thread_stream() {
+    let (fake, thread) = follow(projection(json!({})), 1).await;
+    let (_, mut events) = thread.subscribe();
+    fake.close();
+    let ended = tokio::time::timeout(WAIT, events.recv())
+        .await
+        .expect("the subscription ends");
+    assert!(ended.is_none());
+    let (_, mut later) = thread.subscribe();
+    let ended = tokio::time::timeout(WAIT, later.recv())
+        .await
+        .expect("a later subscription ends too");
+    assert!(ended.is_none());
+}

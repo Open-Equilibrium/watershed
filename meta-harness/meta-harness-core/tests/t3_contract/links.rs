@@ -106,6 +106,11 @@ async fn a_host_links_another_hosts_t3_through_a_tunnel_behind_the_switch_and_re
     assert!(a.host_remove(&name).await.is_err());
     assert_eq!(a.hosts().await.unwrap().hosts.len(), 1);
     assert!(std::net::TcpStream::connect(("127.0.0.1", tunnel)).is_ok());
+    assert_eq!(
+        peer_row(&home_a, &name).1,
+        None,
+        "a failed removal links again"
+    );
     db(&home_a)
         .execute_batch("DROP TRIGGER refuse_peer_delete")
         .unwrap();
