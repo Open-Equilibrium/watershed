@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:liquid/src/rust/api/workspace.dart';
 import 'package:liquid/src/workspace/inline_math.dart';
 import 'package:liquid/src/workspace/math_block.dart';
+import 'package:liquid/src/workspace/page_editor.dart' show textEdit;
 import 'package:liquid/src/workspace/text_block.dart';
 import 'package:liquid/src/workspace/workspace_state.dart';
 
@@ -170,5 +171,90 @@ void main() {
     );
     await key(tester, LogicalKeyboardKey.arrowDown);
     expect(field(tester, 1).focusNode!.hasFocus, isTrue, reason: 'and leaves');
+  });
+
+  testWidgets('a Math Block source opens only after its LaTeX has loaded', (
+    tester,
+  ) async {
+    await kit.show(tester, [TextPart(r'\frac{a}{b}')]);
+    kit.fake.deferredKinds = {BridgeQueryKind.math};
+    kit.fake.deferred = [];
+    await kit.workspace.apply(
+      mutation(
+        BridgeMutationKind.turnIntoMath,
+        page: kit.page,
+        block: kit.fake.views[kit.page]!.first.block,
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byType(MathBlock));
+    await type(tester, 'x');
+    expect(source, findsNothing, reason: 'nothing is typed before the load');
+    kit.fake.deferredKinds = {};
+    for (final release in [...kit.fake.deferred!]) {
+      release.complete();
+    }
+    await tester.pumpAndSettle();
+    await tester.tap(find.byType(MathBlock));
+    await tester.pumpAndSettle();
+    expect(source, findsOneWidget);
+  });
+
+  testWidgets('a read during IME composition keeps the composing source', (
+    tester,
+  ) async {
+    await kit.show(tester, [TextPart(r'\frac{a}{b}')]);
+    final block = kit.fake.views[kit.page]!.first.block;
+    await kit.workspace.apply(
+      mutation(BridgeMutationKind.turnIntoMath, page: kit.page, block: block),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byType(MathBlock));
+    await tester.pumpAndSettle();
+    tester.testTextInput.updateEditingValue(
+      const TextEditingValue(
+        text: r'\frac{a}{b}+c',
+        selection: TextSelection.collapsed(offset: 13),
+        composing: TextRange(start: 11, end: 13),
+      ),
+    );
+    await kit.workspace.apply(
+      textEdit(kit.page, block, r'\frac{a}{b}', r'\frac{a}{b}x'),
+    );
+    await tester.pumpAndSettle();
+    expect(
+      tester.widget<TextField>(source).controller!.text,
+      r'\frac{a}{b}+c',
+      reason: 'the composing text survives the read',
+    );
+  });
+
+  testWidgets('arrow keys stay in the LaTeX while an IME composes', (
+    tester,
+  ) async {
+    await kit.show(tester, [
+      const TextPart('Roots'),
+      const TextPart('x'),
+      const TextPart('Below'),
+    ]);
+    await kit.workspace.apply(
+      mutation(
+        BridgeMutationKind.turnIntoMath,
+        page: kit.page,
+        block: kit.fake.views[kit.page]![1].block,
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byType(MathBlock));
+    await tester.pumpAndSettle();
+    tester.testTextInput.updateEditingValue(
+      const TextEditingValue(
+        text: 'x+1',
+        selection: TextSelection.collapsed(offset: 3),
+        composing: TextRange(start: 0, end: 3),
+      ),
+    );
+    await key(tester, LogicalKeyboardKey.arrowDown);
+    expect(source, findsOneWidget, reason: 'the IME keeps the arrow keys');
   });
 }
