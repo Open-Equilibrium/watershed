@@ -634,31 +634,49 @@ void main() {
     expect(kit.fake.textsOf(kit.page), ['PlanBefore we go']);
   });
 
-  testWidgets('quitting writes an open composition in a Block', (tester) async {
+  Future<void> openBlockComposition(WidgetTester tester) async {
     await show(tester, ['One']);
     await caret(tester, 0, 3);
     ime(tester, 'Oneni', const TextRange(start: 3, end: 5));
     await tester.pump();
-    var drained = false;
-    unawaited(kit.workspace.drain().then((_) => drained = true));
-    await tester.pump();
-    expect(drained, isTrue);
-    expect(kit.fake.textsOf(kit.page), ['Oneni']);
-  });
+  }
 
-  testWidgets('quitting writes an open first-line composition', (tester) async {
+  Future<void> openFirstLineComposition(WidgetTester tester) async {
     await show(tester);
     await tester.tap(find.byKey(const Key('first-line')));
     await tester.pump();
     ime(tester, 'ni', const TextRange(start: 0, end: 2));
     await tester.pump();
+  }
+
+  Future<void> quit(WidgetTester tester) async {
     var drained = false;
     unawaited(kit.workspace.drain().then((_) => drained = true));
     await tester.pump();
     await tester.pump();
     expect(drained, isTrue);
-    expect(kit.fake.textsOf(kit.page), ['ni']);
-  });
+  }
+
+  Future<void> leave(WidgetTester tester) async {
+    await tester.tap(find.byTooltip('Settings'));
+    await tester.pumpAndSettle();
+  }
+
+  for (final (start, open, text) in [
+    ('a Block', openBlockComposition, 'Oneni'),
+    ('the first line', openFirstLineComposition, 'ni'),
+  ]) {
+    for (final (exit, go) in [
+      ('quitting', quit),
+      ('leaving the Page', leave),
+    ]) {
+      testWidgets('$exit writes an open composition in $start', (tester) async {
+        await open(tester);
+        await go(tester);
+        expect(kit.fake.textsOf(kit.page), [text]);
+      });
+    }
+  }
 
   testWidgets('⌫ replayed after ⏎ deletes a whole character', (tester) async {
     await show(tester, ['One']);
@@ -685,27 +703,6 @@ void main() {
     },
     variant: TargetPlatformVariant.only(TargetPlatform.macOS),
   );
-
-  testWidgets('leaving the Page writes an open composition', (tester) async {
-    await show(tester, ['One']);
-    await caret(tester, 0, 3);
-    ime(tester, 'Oneni', const TextRange(start: 3, end: 5));
-    await tester.pump();
-    await tester.tap(find.byTooltip('Settings'));
-    await tester.pumpAndSettle();
-    expect(kit.fake.textsOf(kit.page), ['Oneni']);
-  });
-
-  testWidgets('leaving an empty Page writes its first line', (tester) async {
-    await show(tester);
-    await tester.tap(find.byKey(const Key('first-line')));
-    await tester.pump();
-    ime(tester, 'ni', const TextRange(start: 0, end: 2));
-    await tester.pump();
-    await tester.tap(find.byTooltip('Settings'));
-    await tester.pumpAndSettle();
-    expect(kit.fake.textsOf(kit.page), ['ni']);
-  });
 
   testWidgets('another Text Block edits as usual while ⏎ waits', (
     tester,

@@ -6,7 +6,6 @@ import 'package:liquid/src/rust/api/workspace.dart';
 import 'package:liquid/src/workspace/inline_math.dart';
 import 'package:liquid/src/workspace/math_block.dart';
 import 'package:liquid/src/workspace/text_block.dart';
-import 'package:liquid/src/workspace/workspace_state.dart';
 
 import 'page_kit.dart';
 
@@ -32,14 +31,7 @@ void main() {
 
   Future<void> math(WidgetTester tester, String latex) async {
     await kit.show(tester, [TextPart(latex)]);
-    await kit.workspace.apply(
-      mutation(
-        BridgeMutationKind.turnIntoMath,
-        page: kit.page,
-        block: kit.fake.views[kit.page]!.first.block,
-      ),
-    );
-    await tester.pumpAndSettle();
+    await kit.applyOn(tester, BridgeMutationKind.turnIntoMath);
   }
 
   testWidgets('/math turns an empty line into a Math Block that sets its '
@@ -147,14 +139,7 @@ void main() {
       const TextPart('x'),
       const TextPart('Below'),
     ]);
-    await kit.workspace.apply(
-      mutation(
-        BridgeMutationKind.turnIntoMath,
-        page: kit.page,
-        block: kit.fake.views[kit.page]![1].block,
-      ),
-    );
-    await tester.pumpAndSettle();
+    await kit.applyOn(tester, BridgeMutationKind.turnIntoMath, at: 1);
     await tester.tap(block(0));
     await tester.pump();
     field(tester, 0).controller!.selection = const TextSelection.collapsed(
@@ -178,14 +163,7 @@ void main() {
     await kit.show(tester, [TextPart(r'\frac{a}{b}')]);
     kit.fake.deferredKinds = {BridgeQueryKind.math};
     kit.fake.deferred = [];
-    await kit.workspace.apply(
-      mutation(
-        BridgeMutationKind.turnIntoMath,
-        page: kit.page,
-        block: kit.fake.views[kit.page]!.first.block,
-      ),
-    );
-    await tester.pumpAndSettle();
+    await kit.applyOn(tester, BridgeMutationKind.turnIntoMath);
     await tester.tap(find.byType(MathBlock));
     await type(tester, 'x');
     expect(source, findsNothing, reason: 'nothing is typed before the load');
@@ -207,14 +185,7 @@ void main() {
       const TextPart('x'),
       const TextPart('Below'),
     ]);
-    await kit.workspace.apply(
-      mutation(
-        BridgeMutationKind.turnIntoMath,
-        page: kit.page,
-        block: kit.fake.views[kit.page]![1].block,
-      ),
-    );
-    await tester.pumpAndSettle();
+    await kit.applyOn(tester, BridgeMutationKind.turnIntoMath, at: 1);
     await tester.tap(find.byType(MathBlock));
     await tester.pumpAndSettle();
     tester.testTextInput.updateEditingValue(

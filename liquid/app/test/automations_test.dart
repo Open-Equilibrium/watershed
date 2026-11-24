@@ -10,6 +10,7 @@ import 'package:liquid/src/workspace/workspace_state.dart';
 
 import 'fake_workspace.dart';
 import 'page_kit.dart';
+import 'focus_kit.dart';
 
 const buttonFields = [
   ...expenseFields,
@@ -22,27 +23,34 @@ const buttonFields = [
   ),
 ];
 
-BridgeAutomationSetup flagLarge(String table) => BridgeAutomationSetup(
-  name: 'Flag large expenses',
-  trigger: BridgeTrigger(
-    kind: BridgeTriggerKind.fieldChanged,
-    table: table,
-    field: 'amount',
-  ),
-  conditions: [
-    BridgeFilter(
-      field: 'amount',
-      matches: BridgeMatch.above,
-      value: cell(BridgeCellKind.number, number: 500),
-    ),
-  ],
-  steps: const [
+BridgeAutomationSetup flagLarge(
+  String table, {
+  String name = 'Flag large expenses',
+  String field = 'amount',
+  BridgeMatch matches = BridgeMatch.above,
+  BridgeCell? value,
+  List<BridgeStep> steps = const [
     BridgeStep(
       kind: BridgeStepKind.notify,
       cells: [],
       message: 'Large expense: {name}',
     ),
   ],
+}) => BridgeAutomationSetup(
+  name: name,
+  trigger: BridgeTrigger(
+    kind: BridgeTriggerKind.fieldChanged,
+    table: table,
+    field: field,
+  ),
+  conditions: [
+    BridgeFilter(
+      field: field,
+      matches: matches,
+      value: value ?? cell(BridgeCellKind.number, number: 500),
+    ),
+  ],
+  steps: steps,
 );
 
 BridgeWorkspaceAutomation automationOf(
@@ -55,11 +63,6 @@ BridgeWorkspaceAutomation automationOf(
   owner: table,
   role: canEdit,
 );
-
-Future<void> tap(WidgetTester tester, Finder finder) async {
-  await tester.tap(finder);
-  await tester.pumpAndSettle();
-}
 
 Future<String> showBudget(
   WidgetTester tester,
@@ -88,8 +91,25 @@ Future<void> turnOn(WidgetTester tester, PageKit kit) async {
 BridgeAutomationSetup lastSetup(PageKit kit) =>
     kit.applied(BridgeMutationKind.setAutomation).last.automationSetup!;
 
-void expectOne(Finder finder) => expect(finder, findsOneWidget);
-void expectNone(Finder finder) => expect(finder, findsNothing);
+Future<void> rename(WidgetTester tester, String name) async {
+  await tester.enterText(find.byKey(const Key('automation name')), name);
+  await tester.testTextInput.receiveAction(TextInputAction.done);
+  await tester.pumpAndSettle();
+}
+
+Future<String> openEditor(
+  WidgetTester tester,
+  PageKit kit,
+  BridgeAutomationSetup Function(String table) setup,
+) async {
+  final table = await showBudget(tester, kit);
+  final automation = setup(table);
+  kit.fake.automations.add(automationOf(table, automation));
+  await turnOn(tester, kit);
+  await openAutomations(tester);
+  await tap(tester, find.text(automation.name));
+  return table;
+}
 
 void main() {
   testWidgets('the Automations dialog lists each with its trigger, owner and '
@@ -271,31 +291,15 @@ void main() {
   testWidgets('a large number condition is shown without clamping to the '
       'integer range', (tester) async {
     final kit = PageKit();
-    final table = await showBudget(tester, kit);
-    kit.fake.automations.add(
-      automationOf(
+    await openEditor(
+      tester,
+      kit,
+      (table) => flagLarge(
         table,
-        BridgeAutomationSetup(
-          name: 'Flag large expenses',
-          trigger: BridgeTrigger(
-            kind: BridgeTriggerKind.fieldChanged,
-            table: table,
-            field: 'amount',
-          ),
-          conditions: [
-            BridgeFilter(
-              field: 'amount',
-              matches: BridgeMatch.above,
-              value: cell(BridgeCellKind.number, number: 1e20),
-            ),
-          ],
-          steps: const [],
-        ),
+        value: cell(BridgeCellKind.number, number: 1e20),
+        steps: const [],
       ),
     );
-    await turnOn(tester, kit);
-    await openAutomations(tester);
-    await tap(tester, find.text('Flag large expenses'));
     final shown = tester
         .widget<EditableText>(
           find.descendant(
@@ -311,31 +315,18 @@ void main() {
   testWidgets('a date that does not exist is refused, not moved to the next '
       'day', (tester) async {
     final kit = PageKit();
-    final table = await showBudget(tester, kit);
-    kit.fake.automations.add(
-      automationOf(
+    await openEditor(
+      tester,
+      kit,
+      (table) => flagLarge(
         table,
-        BridgeAutomationSetup(
-          name: 'Due soon',
-          trigger: BridgeTrigger(
-            kind: BridgeTriggerKind.fieldChanged,
-            table: table,
-            field: 'date',
-          ),
-          conditions: [
-            BridgeFilter(
-              field: 'date',
-              matches: BridgeMatch.is_,
-              value: cell(BridgeCellKind.date, text: '2026-11-01'),
-            ),
-          ],
-          steps: const [],
-        ),
+        name: 'Due soon',
+        field: 'date',
+        matches: BridgeMatch.is_,
+        value: cell(BridgeCellKind.date, text: '2026-11-01'),
+        steps: const [],
       ),
     );
-    await turnOn(tester, kit);
-    await openAutomations(tester);
-    await tap(tester, find.text('Due soon'));
     await tester.enterText(find.byKey(const Key('value 0')), '2026-02-30');
     await tester.testTextInput.receiveAction(TextInputAction.done);
     await tester.pumpAndSettle();
@@ -352,11 +343,7 @@ void main() {
     tester,
   ) async {
     final kit = PageKit();
-    final table = await showBudget(tester, kit);
-    kit.fake.automations.add(automationOf(table, flagLarge(table)));
-    await turnOn(tester, kit);
-    await openAutomations(tester);
-    await tap(tester, find.text('Flag large expenses'));
+    await openEditor(tester, kit, flagLarge);
     kit.fake.gatedKinds = {BridgeMutationKind.setAutomation};
     kit.fake.gate = Completer<void>();
     await tester.enterText(find.byKey(const Key('value 0')), '600');
@@ -378,38 +365,20 @@ void main() {
     tester,
   ) async {
     final kit = PageKit();
-    final table = await showBudget(tester, kit);
-    kit.fake.automations.add(automationOf(table, flagLarge(table)));
-    await turnOn(tester, kit);
-    await openAutomations(tester);
-    await tap(tester, find.text('Flag large expenses'));
+    await openEditor(tester, kit, flagLarge);
     kit.fake.refuseKinds = {BridgeMutationKind.setAutomation};
-    await tester.enterText(
-      find.byKey(const Key('automation name')),
-      'Big expenses',
-    );
-    await tester.testTextInput.receiveAction(TextInputAction.done);
-    await tester.pumpAndSettle();
+    await rename(tester, 'Big expenses');
     expectOne(find.textContaining('Liquid did not save this change'));
 
     kit.fake.refuseKinds = {};
-    await tester.enterText(
-      find.byKey(const Key('automation name')),
-      'Big expenses',
-    );
-    await tester.testTextInput.receiveAction(TextInputAction.done);
-    await tester.pumpAndSettle();
+    await rename(tester, 'Big expenses');
     expect(lastSetup(kit).name, 'Big expenses');
   });
 
   testWidgets('a trigger field removed while the editor is open is replaced '
       'by a field added afterwards', (tester) async {
     final kit = PageKit();
-    final table = await showBudget(tester, kit);
-    kit.fake.automations.add(automationOf(table, flagLarge(table)));
-    await turnOn(tester, kit);
-    await openAutomations(tester);
-    await tap(tester, find.text('Flag large expenses'));
+    final table = await openEditor(tester, kit, flagLarge);
     await kit.workspace.apply(
       mutation(BridgeMutationKind.removeField, block: table, field: 'amount'),
     );
