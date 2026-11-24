@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:liquid/src/rust/api/history.dart';
+import 'package:liquid/src/workspace/page_icon.dart';
 
 import 'fake_workspace.dart';
 import 'page_kit.dart';
@@ -241,5 +242,21 @@ void main() {
     await tap(tester, find.text('Delete earlier versions…'));
     await tap(tester, find.text('Delete earlier versions'));
     expect(kit.fake.purged.last, (null, table));
+  });
+
+  testWidgets('the Page filter lists each Page with its icon', (tester) async {
+    final kit = PageKit();
+    await kit.show(tester, const [TextPart('October')]);
+    await kit.workspace.setPageIcon(kit.page, '💰');
+    await tester.pumpAndSettle();
+    await tap(tester, find.byKey(const Key('sidebar history')));
+    await tap(tester, find.byKey(const Key('filter page')));
+    expect(
+      find.descendant(
+        of: find.byType(PopupMenuItem<VoidCallback>),
+        matching: find.byType(PageIcon),
+      ),
+      findsOneWidget,
+    );
   });
 }
