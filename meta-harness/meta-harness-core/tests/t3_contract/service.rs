@@ -393,3 +393,25 @@ async fn a_client_that_stops_reading_is_disconnected_and_one_that_reads_gets_eve
     }
     service.stop().await;
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_path_that_is_not_utf8_is_refused_before_it_is_sent() {
+    use std::os::unix::ffi::OsStrExt;
+    let (_dir, repo, home) = fixture();
+    let (service, host) = start_service(&home).await;
+    let not_utf8 = Path::new(std::ffi::OsStr::from_bytes(b"/tmp/\xff"));
+    let refused = host.project(not_utf8).await.err().unwrap();
+    assert!(refused.contains("not valid UTF-8"), "{refused}");
+    let project = host.project(&repo).await.unwrap();
+    let thread = project
+        .start(start("wait", Workspace::Checkout, Permissions::FullAccess))
+        .await
+        .unwrap();
+    let refused = thread
+        .set_branch("main", Some(not_utf8))
+        .await
+        .err()
+        .unwrap();
+    assert!(refused.contains("not valid UTF-8"), "{refused}");
+    service.stop().await;
+}
