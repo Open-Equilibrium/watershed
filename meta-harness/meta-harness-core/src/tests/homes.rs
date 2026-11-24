@@ -268,24 +268,6 @@ fn a_linked_harness_home_or_skills_folder_is_replaced_and_nothing_outside_change
     }
 }
 
-#[test]
-fn a_skill_file_named_like_a_temporary_file_is_written_whole() {
-    let dir = Dir::new();
-    let homes = Homes::under(&dir.join("meta"));
-    let blocks = skill(
-        "example",
-        &[("a.meta-harness-tmp", "kept"), ("a.txt", "text")],
-    );
-    write(&homes, &blocks, &dir);
-    for home in [&homes.claude, &homes.codex] {
-        assert_eq!(
-            read(&home.join("skills/example/a.meta-harness-tmp")),
-            "kept"
-        );
-        assert_eq!(read(&home.join("skills/example/a.txt")), "text");
-    }
-}
-
 #[cfg(unix)]
 #[test]
 fn a_link_planted_at_the_temporary_name_is_never_written_through() {

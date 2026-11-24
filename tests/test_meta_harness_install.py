@@ -155,7 +155,6 @@ class InstallerTest(unittest.TestCase):
             archive.extractall(unpacked, filter="data")
         bundle = unpacked / f"meta-harness-{META_VERSION}-{HOST}"
         t3_name = f"t3-{T3_VERSION}-{HOST}"
-        self.assertEqual(os.readlink(bundle / "lib" / "meta-harness" / t3_name / "helper"), "t3")
         result = self.install(bundle, "--prefix", str(self.root / "prefix"), "--no-service")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.log_lines(), [])

@@ -483,7 +483,7 @@ mod tests {
     }
 
     #[test]
-    fn uninstall_refuses_a_data_folder_inside_what_it_removes() {
+    fn uninstall_refuses_a_data_folder_inside_what_it_removes_or_the_login_service_keeps() {
         let prefix = Path::new("/opt/mh");
         for (home, refused) in [
             ("/opt/mh/lib/meta-harness/data", true),
@@ -495,11 +495,6 @@ mod tests {
         ] {
             assert_eq!(removes_data(prefix, Path::new(home)), refused, "{home}");
         }
-    }
-
-    #[test]
-    fn uninstall_checks_the_data_folder_the_login_service_keeps_as_well() {
-        let prefix = Path::new("/opt/mh");
         let recorded = PathBuf::from("/opt/mh/lib/meta-harness/data");
         let shell = Path::new("/home/p/.meta-harness");
         assert_eq!(
