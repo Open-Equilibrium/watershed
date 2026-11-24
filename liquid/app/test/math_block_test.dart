@@ -5,7 +5,6 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:liquid/src/rust/api/workspace.dart';
 import 'package:liquid/src/workspace/inline_math.dart';
 import 'package:liquid/src/workspace/math_block.dart';
-import 'package:liquid/src/workspace/page_editor.dart' show textEdit;
 import 'package:liquid/src/workspace/text_block.dart';
 import 'package:liquid/src/workspace/workspace_state.dart';
 
@@ -198,35 +197,6 @@ void main() {
     await tester.tap(find.byType(MathBlock));
     await tester.pumpAndSettle();
     expect(source, findsOneWidget);
-  });
-
-  testWidgets('a read during IME composition keeps the composing source', (
-    tester,
-  ) async {
-    await kit.show(tester, [TextPart(r'\frac{a}{b}')]);
-    final block = kit.fake.views[kit.page]!.first.block;
-    await kit.workspace.apply(
-      mutation(BridgeMutationKind.turnIntoMath, page: kit.page, block: block),
-    );
-    await tester.pumpAndSettle();
-    await tester.tap(find.byType(MathBlock));
-    await tester.pumpAndSettle();
-    tester.testTextInput.updateEditingValue(
-      const TextEditingValue(
-        text: r'\frac{a}{b}+c',
-        selection: TextSelection.collapsed(offset: 13),
-        composing: TextRange(start: 11, end: 13),
-      ),
-    );
-    await kit.workspace.apply(
-      textEdit(kit.page, block, r'\frac{a}{b}', r'\frac{a}{b}x'),
-    );
-    await tester.pumpAndSettle();
-    expect(
-      tester.widget<TextField>(source).controller!.text,
-      r'\frac{a}{b}+c',
-      reason: 'the composing text survives the read',
-    );
   });
 
   testWidgets('arrow keys stay in the LaTeX while an IME composes', (

@@ -35,7 +35,6 @@ class _MathBlockState extends State<MathBlock> {
   );
   String? _stored;
   bool _quiet = false;
-  bool _deferred = false;
   int _reads = 0;
   var _edits = EditChain();
   StreamSubscription<BridgeChange>? _followed;
@@ -102,10 +101,6 @@ class _MathBlockState extends State<MathBlock> {
     }
     final text = answer.text;
     if (!mounted || read != _reads || text == null) return;
-    if (_composing) {
-      _deferred = true;
-      return;
-    }
     if (!clean || views.pending(_block) > 0 || sent != views.sent(_block)) {
       return;
     }
@@ -136,10 +131,6 @@ class _MathBlockState extends State<MathBlock> {
     setState(() {});
     if (_composing && !_state.quitting) return;
     _send(_text.text);
-    if (_deferred) {
-      _deferred = false;
-      unawaited(_read());
-    }
   }
 
   void _send(String text) {
