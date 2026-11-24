@@ -353,4 +353,26 @@ void main() {
     await tap(tester, filterMatch);
     expect(tester.widget<TextField>(filterValue).focusNode!.hasFocus, isTrue);
   });
+
+  testWidgets('a table with no field to filter disables Filter', (
+    tester,
+  ) async {
+    await kit.show(tester, [
+      TablePart(
+        rows,
+        fields: const [
+          BridgeField(
+            id: 'total',
+            name: 'Total',
+            kind: BridgeFieldKind.formula,
+            options: [],
+            formula: '',
+          ),
+        ],
+      ),
+    ]);
+    expect(find.byTooltip('No field can be filtered'), findsOneWidget);
+    await tap(tester, filterButton);
+    expect(find.byKey(const Key('table query menu')), findsNothing);
+  });
 }

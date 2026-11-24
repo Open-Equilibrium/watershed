@@ -127,6 +127,12 @@ extension _TableBlockQuery on _TableBlockState {
       return '${field.name}, ${sort.descending ? 'descending' : 'ascending'}';
     }
 
+    final filterable = [
+      for (final field in database.fields)
+        if (field.kind != BridgeFieldKind.formula &&
+            field.kind != BridgeFieldKind.button)
+          field,
+    ];
     return Padding(
       padding: const EdgeInsets.only(
         top: WsMetrics.space1,
@@ -174,15 +180,11 @@ extension _TableBlockQuery on _TableBlockState {
                                 numbers,
                                 shownDays(days),
                               ),
-                        onTap: toggle,
+                        onTap: filterable.isEmpty ? null : toggle,
+                        disabledReason: 'No field can be filtered',
                       ),
                       menu: (close) => FilterMenu(
-                        fields: [
-                          for (final field in database.fields)
-                            if (field.kind != BridgeFieldKind.formula &&
-                                field.kind != BridgeFieldKind.button)
-                              field,
-                        ],
+                        fields: filterable,
                         filter: _liveFilter,
                         numbers: numbers,
                         locale: days,
