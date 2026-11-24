@@ -345,7 +345,8 @@ impl Thread {
             .turn_items
             .iter()
             .rev()
-            .filter(|item| item["runId"] == run["id"] && item["type"] == "assistant_message")
+            .filter(|item| run["status"] != "rolled_back" && item["runId"] == run["id"])
+            .filter(|item| item["type"] == "assistant_message")
             .find_map(|item| item["text"].as_str())
             .unwrap_or_default()
             .to_owned();

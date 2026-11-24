@@ -227,7 +227,10 @@ pub(crate) fn carries_credential(remote: &str) -> bool {
     let Some((userinfo, _host)) = authority.rsplit_once('@') else {
         return false;
     };
-    let web = matches!(scheme.to_ascii_lowercase().as_str(), "http" | "https");
+    let web = matches!(
+        scheme.to_ascii_lowercase().as_str(),
+        "http" | "https" | "ftp" | "ftps"
+    );
     userinfo.contains(':') || (web && !userinfo.is_empty())
 }
 

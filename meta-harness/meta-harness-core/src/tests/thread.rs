@@ -917,10 +917,14 @@ async fn a_reply_whose_run_was_reverted_is_ended_and_a_running_one_is_not() {
     let (_fake, thread) = follow(
         projection(json!({
             "runs": [run("r1", 1, "rolled_back", "m1"), run("r2", 2, "running", "m2")],
+            "turnItems": [
+                {"id": "a1", "runId": "r1", "type": "assistant_message", "text": "withdrawn"},
+                {"id": "a2", "runId": "r2", "type": "assistant_message", "text": "so far"},
+            ],
         })),
         1,
     )
     .await;
     assert_eq!(thread.reply_to("m1"), Some((true, String::new())));
-    assert_eq!(thread.reply_to("m2"), Some((false, String::new())));
+    assert_eq!(thread.reply_to("m2"), Some((false, "so far".to_owned())));
 }

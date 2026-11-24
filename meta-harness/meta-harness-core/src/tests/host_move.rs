@@ -213,6 +213,7 @@ fn a_remote_that_carries_a_credential_blocks_the_move_and_an_ssh_user_does_not()
     for remote in [
         "https://ghp_token@example.invalid/acme/app.git",
         "https:///ghp_token@example.invalid/acme/app.git",
+        "ftps://ghp_token@example.invalid/acme/app.git",
         "https://user:pass@example.invalid/acme/app.git",
         "https:///user:token@example.invalid/acme/app.git",
         "ssh://git:pass@example.invalid/acme/app.git",
