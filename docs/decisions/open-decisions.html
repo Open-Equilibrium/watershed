@@ -116,7 +116,7 @@
             <ul><li>Pro: no work; the code is short-lived and single-use.</li><li>Con: a local user who watches the process list can link first.</li></ul>
           </div>
         </div>
-        <p><strong>Recommendation:</strong> A, B until T3 offers stdin.</p>
+        <p><strong>Recommendation:</strong> B now; A once T3 reads the code from stdin.</p>
         <p><strong>Acceptance criterion:</strong> no pairing code appears in <code>ps</code> output or in the arguments of any process Meta-Harness starts.</p>
       </details>
       <details id="d-118" class="decision wide">
@@ -144,7 +144,8 @@
       </details>
       <details id="d-119" class="decision wide">
         <summary><h3>D-119 - Why A Remote Stream Ended</h3></summary>
-        <p><strong>Status:</strong> Open; found by Clawpatch in the Meta-Harness review gate. A stream from another host (<code>meta-harness-core/src/remote.rs</code>) that fails after it started, loses its connection or falls behind ends like a finished stream, so Liquid cannot tell the person that something went wrong.</p>
+        <p><strong>Status:</strong> Open; found by Clawpatch in the Meta-Harness review gate, in <code>meta-harness-core/src/remote.rs</code>.</p>
+        <p><strong>Problem:</strong> A stream from another host that fails after it started, loses its connection or falls behind ends like a finished stream, so Liquid cannot tell the person that something went wrong.</p>
         <p><strong>Question:</strong> Should a stream say why it ended?</p>
         <div class="dia">
           <div class="opt rec"><h4>A: Say it and show it <span class="tag">Recommended</span></h4>

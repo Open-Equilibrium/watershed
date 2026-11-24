@@ -1,8 +1,7 @@
-use std::time::{SystemTime, UNIX_EPOCH};
-
 use serde_json::{Value, json};
 
 use super::Thread;
+use crate::store::now_ms;
 use crate::t3::{Watch, millis};
 
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq, Eq)]
@@ -216,14 +215,6 @@ fn schedule_json(schedule: &Schedule) -> Value {
         ScheduleKind::Once => json!({"type": "once", "runAt": schedule.run_at}),
         ScheduleKind::Webhook => json!({"type": "webhook"}),
     }
-}
-
-fn now_ms() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .ok()
-        .and_then(|elapsed| u64::try_from(elapsed.as_millis()).ok())
-        .unwrap_or_default()
 }
 
 impl Thread {
