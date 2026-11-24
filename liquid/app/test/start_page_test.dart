@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/gestures.dart';
@@ -282,6 +283,44 @@ void main() {
     expect(project.calls, contains('writer claude-sonnet-5-5'));
     expect(find.text('Claude Sonnet 5.5'), findsOneWidget);
   });
+
+  testWidgets('a superseded writer model save that fails shows no notice', (
+    tester,
+  ) async {
+    await show(tester);
+    await tap(tester, find.byTooltip('Settings'));
+    await tap(tester, find.text('Writer model'));
+    final opus = project.writerGates['claude-opus-5-5'] = Completer<void>();
+    await tap(tester, find.text('Choose model'));
+    await tap(tester, find.text('Claude Opus 5.5'));
+    await tap(tester, find.byTooltip('Model'));
+    await tap(tester, find.text('Claude Sonnet 5.5'));
+    opus.completeError(StateError('disk full'));
+    await tester.pumpAndSettle();
+    expect(
+      find.textContaining('Could not save the writer model'),
+      findsNothing,
+    );
+    expect(project.writer?.model, 'claude-sonnet-5-5');
+  });
+
+  testWidgets(
+    'the stored writer model is the latest selection when saves finish late',
+    (tester) async {
+      await show(tester);
+      await tap(tester, find.byTooltip('Settings'));
+      await tap(tester, find.text('Writer model'));
+      final opus = project.writerGates['claude-opus-5-5'] = Completer<void>();
+      await tap(tester, find.text('Choose model'));
+      await tap(tester, find.text('Claude Opus 5.5'));
+      await tap(tester, find.byTooltip('Model'));
+      await tap(tester, find.text('Claude Sonnet 5.5'));
+      opus.complete();
+      await tester.pumpAndSettle();
+      expect(project.writer?.model, 'claude-sonnet-5-5');
+      expect(find.text('Claude Sonnet 5.5'), findsOneWidget);
+    },
+  );
 
   testWidgets('the project menu copies the folder path', (tester) async {
     final copied = recordClipboard(tester);

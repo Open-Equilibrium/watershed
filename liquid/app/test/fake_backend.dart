@@ -24,6 +24,7 @@ class FakeProject implements ProjectBackend {
   List<BridgeThreadSummary> threadList = [];
   List<BridgeProvider> providerList = [providerOf()];
   BridgeModelChoice? writer;
+  final writerGates = <String, Completer<void>>{};
   bool onlyInWorktree = false;
   Object? openError;
   Completer<void>? hold;
@@ -265,6 +266,7 @@ class FakeProject implements ProjectBackend {
   @override
   Future<void> setWriterModel(BridgeModelChoice model) async {
     calls.add('writer ${model.model}');
+    await writerGates[model.model]?.future;
     writer = model;
   }
 
