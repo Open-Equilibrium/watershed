@@ -55,8 +55,6 @@ void expectNoRepeats(List<List<String?>> shown) {
 }
 
 class _GatedUndo extends FakeWorkspace {
-  Completer<void>? gate;
-
   @override
   Future<bool> undo() async {
     await gate?.future;
