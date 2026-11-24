@@ -483,6 +483,36 @@ void main() {
     expect(actions(), ['answer q1 scope=Small style=Plain+Bold']);
   });
 
+  testWidgets('leaving a question cancels its delayed advance', (tester) async {
+    await show(
+      tester,
+      requests: [
+        questionsOf('q1', [
+          questionOf('scope', 'Which scope?', options: ['Small', 'Large']),
+          questionOf(
+            'style',
+            'Which styles?',
+            options: ['Plain', 'Bold'],
+            multiSelect: true,
+          ),
+        ]),
+      ],
+    );
+    await read(tester);
+    await tester.tap(find.text('Small'));
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.pumpAndSettle();
+    await tap(tester, find.text('Plain'));
+    await tap(tester, find.text('Previous'));
+    await tester.tap(find.text('Small'));
+    await tester.pump();
+    await tester.tap(find.text('Next question'));
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.pumpAndSettle();
+    expectOne(find.text('Which styles?'));
+    expect(actions(), isEmpty);
+  });
+
   testWidgets('a question can be dismissed without answering it', (
     tester,
   ) async {
