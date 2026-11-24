@@ -139,6 +139,7 @@ class _AgentShellState extends State<AgentShell> {
   @override
   void initState() {
     super.initState();
+    widget.workspaces?.shellMounted();
     HardwareKeyboard.instance.addHandler(_liquidTap);
     _lifecycle;
     _diffSettings.addListener(_hideWhitespace);
@@ -246,6 +247,7 @@ class _AgentShellState extends State<AgentShell> {
 
   @override
   void dispose() {
+    widget.workspaces?.shellUnmounted();
     HardwareKeyboard.instance.removeHandler(_liquidTap);
     _liquidAlone?.cancel();
     _powerBar.dispose();

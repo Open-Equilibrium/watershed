@@ -541,6 +541,7 @@ class FakeWorkspace implements LiquidWorkspace {
     required int subscription,
     required BridgeResource resource,
   }) {
+    _live();
     final controller = StreamController<BridgeChange>();
     _followers[subscription] = (resource, controller);
     controller.add(BridgeChange(resource: resource, seq: _seqs[resource] ?? 0));
@@ -549,7 +550,12 @@ class FakeWorkspace implements LiquidWorkspace {
 
   @override
   Future<void> close({required int subscription}) async {
+    _live();
     await _followers.remove(subscription)?.$2.close();
+  }
+
+  void _live() {
+    if (isDisposed) throw StateError('RustArc used after disposed');
   }
 
   void _changed(BridgeResource resource) {

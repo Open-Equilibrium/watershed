@@ -106,6 +106,32 @@ void main() {
     expect(workspaces.at, 1);
   });
 
+  testWidgets('a switch raises no error, and the macOS menu bar stays set', (
+    tester,
+  ) async {
+    final menus = <List<Object?>>[];
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+      SystemChannels.menu,
+      (call) async {
+        if (call.method == 'Menu.setMenus') {
+          menus.add((call.arguments as Map)['0'] as List<Object?>);
+        }
+        return null;
+      },
+    );
+    addTearDown(
+      () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        SystemChannels.menu,
+        null,
+      ),
+    );
+    await show(tester);
+    await tap(tester, find.byKey(const Key('new workspace')));
+    await tap(tester, find.byKey(const Key('workspace 0')));
+    expect(tester.takeException(), isNull);
+    expect(menus.last, isNotEmpty);
+  }, variant: TargetPlatformVariant.only(TargetPlatform.macOS));
+
   testWidgets('a Workspace that did not open still lets another be chosen', (
     tester,
   ) async {
