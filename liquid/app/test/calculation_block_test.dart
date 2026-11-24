@@ -221,6 +221,55 @@ void main() {
     expect(linesOf(0).single.formula, '"=1+2"');
   });
 
+  testWidgets('a label and a restyle made before the lines reload both '
+      'persist', (tester) async {
+    await kit.show(tester, [
+      CalculationPart([setup('Old', '')]),
+    ]);
+    final line = find.byKey(const ValueKey('line 0'));
+    final label = find.descendant(of: line, matching: find.byType(TextField));
+    kit.fake.deferredKinds = {BridgeQueryKind.calculation};
+    kit.fake.deferred = [];
+    await tap(tester, label);
+    await type(tester, 'New');
+    FocusManager.instance.primaryFocus?.unfocus();
+    await tester.pumpAndSettle();
+    await tap(
+      tester,
+      find.descendant(
+        of: line,
+        matching: find.byKey(const Key('Line actions')),
+      ),
+    );
+    await tap(tester, find.text('Total'));
+    kit.fake.deferredKinds = {};
+    for (final release in [...kit.fake.deferred!]) {
+      release.complete();
+    }
+    await tester.pumpAndSettle();
+    expect(linesOf(0).single.label, 'New');
+    expect(linesOf(0).single.style, BridgeLineStyle.total);
+  });
+
+  testWidgets('a label typed and not submitted is saved when its block is '
+      'left', (tester) async {
+    await kit.show(tester, [
+      CalculationPart([setup('Old', '')]),
+    ]);
+    final block = blockOf(0);
+    await tap(
+      tester,
+      find.descendant(
+        of: find.byKey(const ValueKey('line 0')),
+        matching: find.byType(TextField),
+      ),
+    );
+    await type(tester, 'New');
+    kit.workspace.open.value = null;
+    await tester.pumpAndSettle();
+    expect(kit.fake.calculations[block]!.single.label, 'New');
+  });
+
   testWidgets('enter then leaving a changed line saves it once', (
     tester,
   ) async {

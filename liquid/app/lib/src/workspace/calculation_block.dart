@@ -66,6 +66,7 @@ class _CalculationBlockState extends State<CalculationBlock> {
     },
   );
   final _nameFocus = FocusNode(debugLabel: 'Calculation title');
+  Future<void> _writes = Future.value();
 
   @override
   void initState() {
@@ -139,20 +140,29 @@ class _CalculationBlockState extends State<CalculationBlock> {
     String? label,
     String? formula,
     BridgeLineStyle? style,
-  }) async {
-    await _write(
-      mutation(
-        BridgeMutationKind.setLine,
-        page: _page,
-        block: _block,
-        line: line.id,
-        lineSetup: BridgeLineSetup(
-          label: label ?? line.label,
-          formula: formula ?? line.formula,
-          style: style ?? line.style,
+  }) {
+    final run = _writes.then((_) async {
+      final stored = await _state.read(
+        query(BridgeQueryKind.calculation, page: _page, block: _block),
+      );
+      final current =
+          stored.lines.where((kept) => kept.id == line.id).firstOrNull ?? line;
+      await _write(
+        mutation(
+          BridgeMutationKind.setLine,
+          page: _page,
+          block: _block,
+          line: line.id,
+          lineSetup: BridgeLineSetup(
+            label: label ?? current.label,
+            formula: formula ?? current.formula,
+            style: style ?? current.style,
+          ),
         ),
-      ),
-    );
+      );
+    });
+    _writes = run.then<void>((_) {}, onError: (Object _) {});
+    return run;
   }
 
   Future<void> _add() async {
@@ -250,6 +260,7 @@ class _CalculationBlockState extends State<CalculationBlock> {
             _Line(
               key: ValueKey(line.id),
               line: line,
+              finishing: _state.finishing,
               editing: _editing == line.id,
               focusLabel: _labelled == line.id,
               known: () => _known(line),
@@ -282,6 +293,7 @@ class _Line extends StatefulWidget {
   const _Line({
     super.key,
     required this.line,
+    required this.finishing,
     required this.editing,
     required this.focusLabel,
     required this.known,
@@ -293,6 +305,7 @@ class _Line extends StatefulWidget {
   });
 
   final BridgeLine line;
+  final Set<VoidCallback> finishing;
   final bool editing;
   final bool focusLabel;
   final List<Suggestion> Function() known;
@@ -317,6 +330,7 @@ class _LineState extends State<_Line> {
   void initState() {
     super.initState();
     _labelFocus.addListener(_leftLabel);
+    widget.finishing.add(_saveLabel);
     _takeLabel();
   }
 
@@ -331,6 +345,8 @@ class _LineState extends State<_Line> {
 
   @override
   void dispose() {
+    widget.finishing.remove(_saveLabel);
+    _saveLabel();
     _label.dispose();
     _labelFocus.dispose();
     super.dispose();
@@ -345,7 +361,12 @@ class _LineState extends State<_Line> {
   }
 
   void _leftLabel() {
-    if (_labelFocus.hasFocus || _label.text == _line.label) return;
+    if (_labelFocus.hasFocus) return;
+    _saveLabel();
+  }
+
+  void _saveLabel() {
+    if (_label.text == _line.label) return;
     unawaited(widget.set(label: _label.text).then((_) {}, onError: (_) {}));
   }
 
