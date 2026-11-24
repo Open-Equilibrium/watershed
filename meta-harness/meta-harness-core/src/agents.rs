@@ -1,4 +1,4 @@
-use std::io::Read;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
 use rusqlite::{Connection, OptionalExtension, params};
@@ -260,6 +260,15 @@ pub(crate) fn pack(agent: &Agent, routines: Vec<Value>) -> Result<AgentCarry, St
 }
 
 pub(crate) fn unpack(folder: &Path, files: &[CarriedFile]) -> Result<(), String> {
+    let staging = folder.with_extension("unpacking");
+    let _ = std::fs::remove_dir_all(&staging);
+    crate::service::create_private_dir(&staging)?;
+    let placed = stage(&staging, files).and_then(|()| place(&staging, folder, files));
+    let _ = std::fs::remove_dir_all(&staging);
+    placed
+}
+
+fn stage(staging: &Path, files: &[CarriedFile]) -> Result<(), String> {
     let mut listed = std::collections::HashSet::new();
     for file in files {
         let relative = Path::new(&file.path);
@@ -280,11 +289,27 @@ pub(crate) fn unpack(folder: &Path, files: &[CarriedFile]) -> Result<(), String>
         }
         let bytes = crate::util::base64url_decode(&file.bytes)
             .ok_or_else(|| format!("The carried memory file {} is not readable.", file.path))?;
-        let target = folder.join(relative);
+        let target = staging.join(relative);
         if let Some(parent) = target.parent() {
             crate::service::create_private_dir(parent)?;
         }
-        std::fs::write(&target, &bytes)
+        std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&target)
+            .and_then(|mut out| out.write_all(&bytes))
+            .map_err(|e| format!("Could not write {}: {e}", target.display()))?;
+    }
+    Ok(())
+}
+
+fn place(staging: &Path, folder: &Path, files: &[CarriedFile]) -> Result<(), String> {
+    for file in files {
+        let target = folder.join(&file.path);
+        if let Some(parent) = target.parent() {
+            crate::service::create_private_dir(parent)?;
+        }
+        std::fs::rename(staging.join(&file.path), &target)
             .map_err(|e| format!("Could not write {}: {e}", target.display()))?;
         crate::platform::owner_only(&target, false)?;
     }

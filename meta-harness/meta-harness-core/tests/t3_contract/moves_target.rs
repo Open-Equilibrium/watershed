@@ -199,6 +199,71 @@ async fn a_move_abort_removes_the_thread_keeps_the_worktree_and_refuses_the_tran
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn a_starting_arrival_is_not_retried_in_another_project_folder() {
+    let pair = Pair::codex().await;
+    pushed_branch(&pair.repo_a, "feature/elsewhere");
+    let home_b = pair.dir.path().join("host-b");
+    let (project_a, project_b) = pair.projects().await;
+    let package = handoff(&appended(&project_a).await).await;
+    let token = package.transfer.as_str();
+    db(&home_b)
+        .execute(
+            "INSERT INTO arrival (transfer, state, root, thread, at_ms) \
+             VALUES (?1, 'starting', ?2, 'thread-in-folder-a', 0)",
+            rusqlite::params![token, pair.repo_a.to_string_lossy()],
+        )
+        .unwrap();
+
+    let refused = project_b.move_in(package.clone()).await.err().unwrap();
+    assert!(refused.contains("another project folder"), "{refused}");
+    assert!(project_b.threads().await.unwrap().is_empty());
+    let root: String = db(&home_b)
+        .query_row("SELECT root FROM arrival", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(root, pair.repo_a.to_string_lossy());
+    pair.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_abort_after_a_failed_adoption_leaves_no_agent_behind() {
+    let pair = Pair::codex().await;
+    pushed_branch(&pair.repo_a, "feature/adopted");
+    let home_b = pair.dir.path().join("host-b");
+    let (project_a, project_b) = pair.projects().await;
+    let created = pair
+        .host_a
+        .agent_create(NewAgent {
+            name: Some("news-bot".to_owned()),
+            root: pair.repo_a.to_string_lossy().into_owned(),
+            model: codex_start("").model,
+            permissions: Permissions::FullAccess,
+            instructions: "Keep the news page current.".to_owned(),
+            request: None,
+        })
+        .await
+        .unwrap();
+    let thread = project_a.open(&created.thread).await.unwrap();
+    wait(&thread, completed(1)).await;
+    let package = move_out(&thread, &transfer(), None).await.unwrap();
+    let token = package.transfer.as_str();
+    db(&home_b)
+        .execute_batch(
+            "CREATE TRIGGER refuse_seen BEFORE UPDATE OF seen_instructions ON agent_profile \
+             BEGIN SELECT RAISE(ABORT, 'refused'); END;",
+        )
+        .unwrap();
+    assert!(project_b.move_in(package.clone()).await.is_err());
+    assert_eq!(arrival(&pair.host_b, token).await, Arrival::Starting);
+    assert_eq!(withdraw(&pair.host_b, token).await, Arrival::Refused);
+    assert!(
+        pair.host_b.agents().await.unwrap().is_empty(),
+        "a refused arrival keeps no agent"
+    );
+    assert!(project_b.threads().await.unwrap().is_empty());
+    pair.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn a_move_abort_racing_a_landing_answers_what_landed() {
     let pair = Pair::codex().await;
     pushed_branch(&pair.repo_a, "feature/raced");

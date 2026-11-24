@@ -111,6 +111,7 @@ impl Thread {
             self.push(action, message).await?;
             let pushed = self.git().status().await?;
             if pushed.branch.as_deref() != Some(branch.as_str())
+                || (commit && !pushed.changes.is_empty())
                 || self
                     .turns()
                     .iter()

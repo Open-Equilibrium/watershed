@@ -242,6 +242,33 @@ fn a_moving_agent_carries_its_memory_files_and_refuses_unsafe_paths() {
     );
 }
 
+#[test]
+fn carried_memory_files_that_share_one_destination_file_are_refused_whole() {
+    let home = Dir::new();
+    std::fs::write(home.join("probe"), "").unwrap();
+    let case_insensitive = home.join("PROBE").exists();
+    let file = |path: &str, text: &str| agents::CarriedFile {
+        path: path.to_owned(),
+        bytes: crate::util::base64url_encode(text.as_bytes()),
+    };
+    let folder = home.join("arrived");
+    let outcome = agents::unpack(
+        &folder,
+        &[file("notes.md", "first"), file("NOTES.md", "second")],
+    );
+    assert_eq!(outcome.is_err(), case_insensitive, "{outcome:?}");
+    if !case_insensitive {
+        assert_eq!(
+            std::fs::read_to_string(folder.join("notes.md")).unwrap(),
+            "first"
+        );
+        assert_eq!(
+            std::fs::read_to_string(folder.join("NOTES.md")).unwrap(),
+            "second"
+        );
+    }
+}
+
 #[cfg(target_os = "linux")]
 #[test]
 fn a_memory_name_that_is_not_utf8_is_refused_instead_of_carried_under_a_changed_name() {

@@ -364,6 +364,15 @@ pub(super) async fn adopt(
     Ok(())
 }
 
+pub(super) async fn forget(shared: &Shared, thread: &str) -> Result<(), String> {
+    let _serial = shared.agents.serial.lock().await;
+    if let Some(agent) = agents::of_thread(&shared.store.db(), &shared.home, thread)? {
+        agents::remove(&shared.store.db(), &agent.id)?;
+        shared.agents.stop(&agent.id);
+    }
+    Ok(())
+}
+
 pub(super) async fn moved_away(shared: &Shared, thread: &Thread) -> Result<(), String> {
     let _serial = shared.agents.serial.lock().await;
     let agent = agents::of_thread(&shared.store.db(), &shared.home, thread.id())?;

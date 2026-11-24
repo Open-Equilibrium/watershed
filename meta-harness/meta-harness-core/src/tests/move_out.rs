@@ -1,12 +1,15 @@
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use serde_json::{Value, json};
 use tokio_tungstenite::tungstenite::Message;
 
+use super::Dir;
 use super::fake_t3::{Fake, chunk, ok};
 use super::thread::{attach, follow_answering, projection};
-use crate::host_move::{Departure, Harness, Movable};
+use crate::host_move::{ArrivalRow, Departure, Harness, Movable, queued_id, set_arrival};
+use crate::store::Store;
 use crate::thread::move_out::Saving;
 use crate::{ModelChoice, Permissions, Thread};
 
@@ -19,6 +22,11 @@ fn run(id: &str, ordinal: u64, status: &str) -> Value {
 
 fn status(branch: &str) -> Value {
     json!({"refName": branch, "isRepo": true, "workingTree": {"files": []}})
+}
+
+fn edited(branch: &str) -> Value {
+    json!({"refName": branch, "isRepo": true,
+        "workingTree": {"files": [{"path": "notes.md", "insertions": 1, "deletions": 0}]}})
 }
 
 fn movable() -> Movable {
@@ -46,12 +54,12 @@ fn update(subscription: &str, sequence: u64, run: Value) -> Message {
 }
 
 async fn live_thread(
-    runs: Vec<Value>,
+    records: Value,
     answer: impl Fn(&str, &Value, &str, &str) -> Vec<Message> + Send + 'static,
 ) -> (Fake, Thread) {
     let subscription = Arc::new(Mutex::new(String::new()));
     let snapshot = json!({"kind": "snapshot", "snapshotSequence": 1,
-        "projection": projection(json!({"runs": runs}))});
+        "projection": projection(records)});
     let fake = Fake::start({
         let subscription = subscription.clone();
         move |tag, payload, id| {
@@ -75,7 +83,7 @@ async fn idle_thread(runs: Value) -> (Fake, Thread) {
     .await
 }
 
-async fn moving(thread: &Thread) -> Result<crate::MovePackage, String> {
+async fn moving(thread: &Thread, commit: bool) -> Result<crate::MovePackage, String> {
     let saving = Saving {
         save: &|_, _| Ok(()),
         unsave: &|_| {},
@@ -86,7 +94,7 @@ async fn moving(thread: &Thread) -> Result<crate::MovePackage, String> {
         from_host: "host-a",
     };
     thread
-        .move_out(movable(), departure, false, None, saving)
+        .move_out(movable(), departure, commit, None, saving)
         .await
 }
 
@@ -133,7 +141,7 @@ async fn a_move_that_ended_takes_no_further_step_after_it_ended() {
 #[tokio::test(flavor = "multi_thread")]
 async fn a_move_is_refused_when_its_branch_or_turns_change_while_it_starts() {
     let (_fake, thread) = live_thread(
-        vec![run("run-2", 2, "running")],
+        json!({"runs": [run("run-2", 2, "running")]}),
         |tag, payload, id, subscription| match tag {
             "orchestration.dispatchCommand" if payload["type"] == "thread.stop" => vec![
                 update(subscription, 2, run("run-2", 2, "interrupted")),
@@ -151,13 +159,13 @@ async fn a_move_is_refused_when_its_branch_or_turns_change_while_it_starts() {
         },
     )
     .await;
-    let refused = moving(&thread).await.unwrap_err();
+    let refused = moving(&thread, false).await.unwrap_err();
     assert!(
         refused.contains("changed while the move started"),
         "{refused}"
     );
 
-    let (_fake, thread) = live_thread(Vec::new(), |tag, _, id, subscription| match tag {
+    let (_fake, thread) = live_thread(json!({}), |tag, _, id, subscription| match tag {
         "vcs.refreshStatus" => vec![ok(id, status("feature/x"))],
         "git.runStackedAction" => vec![
             update(subscription, 2, run("run-3", 3, "completed")),
@@ -170,9 +178,82 @@ async fn a_move_is_refused_when_its_branch_or_turns_change_while_it_starts() {
         _ => vec![ok(id, json!({}))],
     })
     .await;
-    let refused = moving(&thread).await.unwrap_err();
+    let refused = moving(&thread, false).await.unwrap_err();
     assert!(
         refused.contains("changed while the move started"),
         "{refused}"
     );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_edit_made_while_the_branch_is_pushed_refuses_a_move_that_commits() {
+    let statuses = Arc::new(AtomicUsize::new(0));
+    let (_fake, thread) = live_thread(json!({}), move |tag, _, id, _| match tag {
+        "vcs.refreshStatus" => {
+            let after_push = statuses.fetch_add(1, Ordering::SeqCst) > 0;
+            vec![ok(
+                id,
+                if after_push {
+                    edited("feature/x")
+                } else {
+                    status("feature/x")
+                },
+            )]
+        }
+        "git.runStackedAction" => vec![
+            chunk(
+                id,
+                vec![json!({"kind": "action_finished", "result": {"toast": {"title": "Pushed"}}})],
+            ),
+            ok(id, json!({})),
+        ],
+        _ => vec![ok(id, json!({}))],
+    })
+    .await;
+    let refused = moving(&thread, true).await.unwrap_err();
+    assert!(
+        refused.contains("changed while the move started"),
+        "{refused}"
+    );
+}
+
+fn held(id: &str, ordinal: u64, message: &str, status: &str) -> Value {
+    json!({"id": id, "ordinal": ordinal, "status": status, "userMessageId": message, "queuePosition": 1})
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_moved_message_is_started_by_its_own_turn_when_another_queued_turn_has_its_text() {
+    let home = Dir::new();
+    let store = Store::open(&home.join("meta-harness.sqlite")).unwrap();
+    let mine = queued_id("tr-1", 0);
+    let landed = ArrivalRow {
+        state: "landed".to_owned(),
+        root: "/repo".to_owned(),
+        thread: "thread-1".to_owned(),
+        queued: vec!["same".to_owned(), "same".to_owned()],
+        delivered: 1,
+    };
+    set_arrival(&store.db(), "tr-1", &landed, 0).unwrap();
+    let started = mine.clone();
+    let (_fake, thread) = live_thread(
+        json!({
+            "runs": [held("run-other", 1, "msg-other", "queued"), held("run-mine", 2, &mine, "queued")],
+            "messages": [{"id": "msg-other", "text": "same"}, {"id": mine, "text": "same"}],
+        }),
+        move |tag, payload, id, subscription| match tag {
+            "orchestration.dispatchCommand" if payload["type"] == "queued-run.start" => {
+                let run = if payload["runId"] == "run-mine" {
+                    held("run-mine", 2, &started, "running")
+                } else {
+                    held("run-other", 1, "msg-other", "running")
+                };
+                vec![update(subscription, 2, run), ok(id, json!({}))]
+            }
+            _ => vec![ok(id, json!({}))],
+        },
+    )
+    .await;
+    crate::service::moves::deliver(&store, &thread, "tr-1")
+        .await
+        .unwrap();
 }

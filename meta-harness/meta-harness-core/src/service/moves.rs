@@ -180,10 +180,11 @@ async fn withdraw(shared: &Shared, row: &ArrivalRow) -> Result<(), String> {
     if project.is_listed(&row.thread).await? {
         if let Ok(thread) = project.open(&row.thread).await {
             let _ = thread.stop().await;
+            super::agents::moved_away(shared, &thread).await?;
         }
         project.discard_id(&row.thread).await?;
     }
-    Ok(())
+    super::agents::forget(shared, &row.thread).await
 }
 
 const NOT_FINISHED: &str = "The moved messages are not all delivered yet, so the session has not finished moving; try again.";
@@ -382,14 +383,14 @@ async fn resume(shared: &Shared, project: &Project, transfer: &str) -> Result<()
     deliver(&shared.store, &thread, transfer).await
 }
 
-async fn deliver(store: &Store, thread: &Thread, transfer: &str) -> Result<(), String> {
+pub(crate) async fn deliver(store: &Store, thread: &Thread, transfer: &str) -> Result<(), String> {
     let Some(row) = host_move::arrival(&store.db(), transfer)? else {
         return Ok(());
     };
     let done = usize::try_from(row.delivered).unwrap_or(usize::MAX);
     for (index, text) in row.queued.iter().enumerate().skip(done) {
-        if let Some(previous) = index.checked_sub(1).map(|earlier| &row.queued[earlier]) {
-            start_held(thread, previous).await?;
+        if let Some(previous) = index.checked_sub(1) {
+            start_held(thread, &host_move::queued_id(transfer, previous)).await?;
         }
         thread
             .send_once(&host_move::queued_id(transfer, index), text, false)
@@ -399,14 +400,8 @@ async fn deliver(store: &Store, thread: &Thread, transfer: &str) -> Result<(), S
     Ok(())
 }
 
-async fn start_held(thread: &Thread, text: &str) -> Result<(), String> {
-    let queued = |thread: &Thread| {
-        thread
-            .turns()
-            .into_iter()
-            .find(|turn| turn.prompt == text && turn.status == TurnStatus::Queued)
-    };
-    let Some(turn) = queued(thread) else {
+async fn start_held(thread: &Thread, message: &str) -> Result<(), String> {
+    let Some(turn) = thread.queued_turn(message) else {
         return Ok(());
     };
     if thread
@@ -416,8 +411,12 @@ async fn start_held(thread: &Thread, text: &str) -> Result<(), String> {
     {
         return Ok(());
     }
-    thread.send_queued_now(turn.number).await?;
-    if until(DELIVERY_WAIT, POLL, || queued(thread).is_none()).await {
+    thread.send_queued_now(turn).await?;
+    if until(DELIVERY_WAIT, POLL, || {
+        thread.queued_turn(message).is_none()
+    })
+    .await
+    {
         Ok(())
     } else {
         Err(
@@ -453,6 +452,12 @@ async fn arrive(
                     return Err(NOT_FINISHED.to_owned());
                 }
                 return Ok(thread);
+            }
+            Some(row) if row.root != root => {
+                return Err(
+                    "This transfer started in another project folder, so the session did not move here."
+                        .to_owned(),
+                );
             }
             Some(row) if project.is_listed(&row.thread).await? => {
                 let thread = project.open(&row.thread).await?;
