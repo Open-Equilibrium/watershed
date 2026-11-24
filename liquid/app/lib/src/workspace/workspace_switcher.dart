@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../controls.dart';
 import '../theme/icons.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
@@ -293,15 +294,10 @@ class _CurrentState extends State<_Current> {
       controller: _menu,
       height: 220,
       onTapOutside: (_) => _close(),
-      menu: (_) => Container(
+      menu: (_) => FloatingPanel(
         key: const Key('workspace menu'),
         width: 216,
         padding: const EdgeInsets.all(WsMetrics.space3),
-        decoration: BoxDecoration(
-          color: ws.surface,
-          borderRadius: BorderRadius.circular(WsMetrics.radiusLg),
-          boxShadow: ws.shadow,
-        ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -481,14 +477,9 @@ class _MoreState extends State<_More> {
       end: true,
       height: 32.0 * (widget.hidden.length + 1) + 8,
       onTapOutside: (_) => _close(),
-      menu: (_) => Container(
+      menu: (_) => FloatingPanel(
         width: 200,
         padding: const EdgeInsets.all(WsMetrics.space1),
-        decoration: BoxDecoration(
-          color: ws.surface,
-          borderRadius: BorderRadius.circular(WsMetrics.radiusLg),
-          boxShadow: ws.shadow,
-        ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,

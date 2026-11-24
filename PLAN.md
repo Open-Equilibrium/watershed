@@ -55,7 +55,7 @@ M2 delivers Meta-Harness as a **self-contained, host-scoped headless control pla
 
 **Wedge:** prove safe human/agent co-editing of local-first Workspace state with attributed, reviewable and reversible History. Liquid remains useful without agents, network or a hosted service. Do not build a generic Notion clone.
 
-The target product is canonical in [`docs/concept/V-Spec_Liquid.html`](docs/concept/V-Spec_Liquid.html). M3 is staged so workspace fundamentals prove value before sync, community extensions and broad integrations. Chat between people and a calendar follow after Release 1 (ADR-0236). Review leftovers are tracked as GitHub issues [#61](https://github.com/Open-Equilibrium/watershed/issues/61)–[#67](https://github.com/Open-Equilibrium/watershed/issues/67).
+The target product is canonical in [`docs/concept/V-Spec_Liquid.html`](docs/concept/V-Spec_Liquid.html). M3 is staged so workspace fundamentals prove value before sync, community extensions and broad integrations. Chat between people and a calendar follow after Release 1 (ADR-0236). Review leftovers are tracked as GitHub issues [#62](https://github.com/Open-Equilibrium/watershed/issues/62), [#63](https://github.com/Open-Equilibrium/watershed/issues/63) and [#65](https://github.com/Open-Equilibrium/watershed/issues/65).
 
 #### Liquid agent surface — early slice
 
@@ -67,8 +67,8 @@ The macOS Liquid app runs its agent sessions on a pinned T3 Code server through 
 
 #### M3a — Local Workspace foundation
 
-- Linux, Windows and Android follow with their clients, each keeping the database key in its operating system's keystore (ADR-0216); `liquid-core`'s CI, which runs Automerge on Linux and macOS, adds Windows and Android with them (ADR-0238).
-- Delivery order, one PR each: Page icons, Markdown import and export, and Settings as a dialog.
+- Linux, Windows and Android follow with their clients, each keeping the database key in its operating system's keystore (ADR-0237); `liquid-core`'s CI, which runs Automerge on Linux and macOS, adds Windows and Android with them (ADR-0238).
+- Delivery order, one PR each: Markdown import and export, and Settings as a dialog.
 - A missing replica file is reported, not opened as a new Workspace, after its mockup (ADR-0249); the core refuses writes past its size caps (ADR-0251), which must also bound a Page's document as a whole: a drawing's caps leave its text and erased ink uncounted, and several Blocks add up.
 - Left from the Media Block (ADR-0305), approved 2026-11-17: a pasted link becomes a link in its line, as in Microsoft Loop, with inline marks: Liquid's link icon and the link text the clipboard carries, else the link's host, fetching nothing; hovering shows the address with Edit, which changes the title and address, and Copy link, and a click opens the default browser. Embeds come with the built-in browser (M3b); paste on Windows, Linux and Android needs a clipboard reader each, as macOS has.
 - Left from the Whiteboard Block (ADR-0306): sticky notes, images on the board, arrows that stay attached to shapes, GoodNotes' circle to lasso, converting ink to a text box (low priority) and a pen stroke, or Draw in the first line, that starts a Whiteboard on an empty Page; a file going into a file cell shows no progress yet.
@@ -77,27 +77,20 @@ The macOS Liquid app runs its agent sessions on a pinned T3 Code server through 
 - Left from Automations (ADR-0317): the step that creates a Page from a template, with templates; setting fields of the row an added row gets, and conditions on formula fields; a button in Board and Calendar cards; its PowerBar entry; removing a select option, once the core can, turns off the Automations that use it, as removing a field does.
 - Left from Roles (ADR-0321): rights and protection for Pages and Sources, once something besides their owner can change them; Roles for people with sync and for agent profiles with agents, with the changes each Role marks as sensitive; Settings as a dialog with its Workspace › General section (Workspace settings mockups).
 - Left from History (ADR-0323), approved in its mockup: marking what changed in a version's preview, and an entry's detail listing the changed objects with their state before; the Revert dialog listing what comes back; the conflict dialog naming the later change, with Show the later change; a version's preview saying when a Table it restores is shown on other Pages too; Block history from a Block's menu; History's and Page history's PowerBar entries; Media Blocks in a version's preview, whose files the preview does not read; with sync, deleting for good across replicas, and retention rules and legal holds on the Sync Server.
+- Liquid simplification after the review gate: give the Table Block and the session state owned sub-states (rows and totals; Diff), so their `part` files stop sharing one large private state.
+- Left from the review gate's Clawpatch run: undoing a group that types and then erases the same text keeps that text, and inverting in sequence needs inverses that follow restored elements, since positional ones break pinned revision tests; erased stroke pieces move above later elements; a Section with many Text Blocks builds all of them; a remote edit during IME composition in a Text or Math Block (with ADR-0322); a literal that reads as a formula or number turns into one when edited; Arrow Up in full screen on short Pages; a paged list can publish a window invalidated during its read; a Media upload removes the empty line it replaces even when typed into meanwhile; a page-window drawing read copies all off-page annotation text.
 - Left from Sources (ADR-0324): Sources in formulas and Automations; moving a Source in the Explorer; Markdown shown formatted, with Markdown import; files in encodings other than UTF-8; a folder unfolded in the Explorer rereads only when it unfolds; deleting a removed Source for good, with its path on the device; adding a Source under a Page.
-- Left from the PowerBar: its entries for Page icons, Duplicate Page and templates come with their slices; searching a Table's cells and a Media Block's name.
+- Left from the PowerBar: its entries for Duplicate Page and templates come with their slices; searching a Table's cells and a Media Block's name.
 - Left from Arrange mode (ADR-0312): the Phone preview and the phone client's long press and focused surfaces; changing a Table's fixed height.
 - Left from the tabs, Board and Calendar (ADR-0311): dragging rows in a Table, also between its groups; grouping by text, number or date; a week in the Calendar; choosing the fields a card shows; rows as Pages, once D-115 is decided; Duplicate and Copy for the other Blocks, with Block handles; the deletion dialog listing a Table's Connections and Automations before it goes (Blocks mockup, section 3). A View stored before tabs gets its tabs on its first tab write; before sync, that must happen once, not on two devices at a time.
 - Left from the Table View so far: keys to insert and delete rows on a selected cell follow with their own mockup (Keyboard first); changing an option's name or color, once the core can; several sorts and filter conditions.
 - Sections as rich text (ADR-0322), before more Text work: a spike picks the editor (D-116), then Sections replace Text Blocks without migration, columns inside a Section go, and the formatting marks follow their [mockup](docs/design/mockups/liquid-text-formatting.html).
-- Left from the Explorer and Pages slice for later ones: toggles and indentation in Sections, the Section outline on hover, Page icons, templates, the other Blocks, Existing Block… and Page templates in slash commands, Block handles that select, move and delete a whole Block, Liquid's own texts in the person's language (ADR-0246) and the device-local cache of View heights (client architecture rule 5).
+- Left from the Explorer and Pages slice for later ones: toggles and indentation in Sections, the Section outline on hover, templates, the other Blocks, Existing Block… and Page templates in slash commands, Block handles that select, move and delete a whole Block, Liquid's own texts in the person's language (ADR-0246) and the device-local cache of View heights (client architecture rule 5).
 - A Page title keystroke rereads the area's whole Page tree; fixing it needs the bridge's change events to tell a rename apart (ADR-0216 rule 3), so it is decided together with a virtualized Explorer.
 - Tables (ADR-0244), after the Table View: field formats for decimals, thousands, percent and currency; finding a new field's kind from its first value, with a core mutation that changes a field's kind; with Views on several Pages, whether a row opens as a Page.
 - Database and drawing bounds (ADR-0243, ADR-0306, ADR-0307): sync must keep a Database's reads within 500 fields and options, and a drawing's within its element and point caps, per page and in all, when replicas add them concurrently; loading fields in pages or asynchronously may replace the Database caps.
 - Date cells hold days only (ADR-0242); the Inbox and tasks slice decides how a time is stored, as the wall clock or as an instant with its zone, as Notion does.
 - The app's structure (ADR-0239, ADR-0241): rail, tabs with splits, Chats as Blocks, the Inbox and Templates; mockups for implementation and their place in this order follow. Calls and meetings come after the core works. Until the Inbox, a question from an agent while a Page is open shows only as "waiting" on its thread in the sidebar.
-- Flutter clients over the Rust core follow the [client architecture](docs/concept/liquid-client-architecture.md) invariants (ADR-0182).
-- Page templates create use-case compositions rather than new Page Types.
-- PowerBar for finding Workspace objects, creating Blocks and invoking permitted Workspace actions.
-- Content-first flow followed by explicit responsive Arrange mode. Mobile retains every Block; complex Views open focused surfaces. Safe compact OS widgets remain post-MVP.
-- Chart, Calculation, Math, Whiteboard and Embed Blocks.
-- Synchronized multi-Page Views over one canonical Block. Duplicate creates a new Block; deleting the last View deletes the Block (a Table's last View on a Page asks first, ADR-0309), its Connections and owned Automations in one reversible Action, while independent dependent Automations are disabled for repair.
-- Connections/formulas for direct logic and Workspace Automations for when/if/then logic.
-- Allow-only Roles with default-denied unlisted access; explicit deny rules are post-MVP.
-- One mutation pipeline and History for every M3a write surface, including UI, Connections/formulas, Automations and import. History and revert follow ADR-0235.
 
 **M3a DoD:** offline, a user can create and navigate Pages/Sources, act immediately on a blank Page, edit and connect Blocks, reuse a Block through synchronized Views, arrange the Page responsively, assign a Role, run a simple Automation and recover the tested deletion cascade through History.
 
@@ -109,16 +102,14 @@ The macOS Liquid app runs its agent sessions on a pinned T3 Code server through 
 - Reviewing agent changes: what an agent changed is marked on the Page and filterable in History, from Automerge's attributed changes (ADR-0238), and the person can approve or revert it at any time; an approved mockup comes first.
 - App SDK for AI/user-built Workspace-local Apps, with versioned state, Views and typed App actions.
 - Workspace CLI/API (D-027) exposes compact typed reads, mutation proposals/execution and permitted App actions to agents.
-- Liquid AI uses the same Role, capability, mutation and History boundaries.
-- Liquid AI, CLI/API, App and Meta-Harness integrations join the same permissioned mutation/History pipeline.
-- Optional Meta-Harness projections show friendly harness/adapter-configuration/location/session choices and separate config management while preserving instance identity, freshness and authority. Flow Agent selection requires an explicit Flow from its global authority; other adapters retain their documented selection model. Live commands route to the owning instance; a future portable checkpoint continued elsewhere appears as a new child Run/branch, not the same live process.
+- Liquid AI, CLI/API, Apps and Meta-Harness integrations use the same Role, capability, mutation and History pipeline.
 
 **M3b DoD:** a user can prompt Liquid AI to build an interactive App over connected Block data, use it without build/deploy/CI knowledge, inspect or restore its versions through History, share it within the Workspace and allow an agent to invoke only selected App actions through the CLI/API.
 
 #### M3c — Central sync, mobile and headless execution
 
 - Central Sync Server with resumable star-topology exchange, merging with Automerge 3 (ADR-0238); a concurrent edit of one field shows both values, after an approved mockup.
-- ⏎ at the start of a line that shares its sort key with the line above gives that line a new key first (ADR-0303). ⏎ inside such a line moves its tail past the whole tied group today, across another Block or Section; how that split is placed is decided with this work, unless Sections (ADR-0322) replace Text Blocks first.
+- ⏎ at the start of a line that shares its sort key with the line above gives that line a new key first. ⏎ inside such a line moves its tail past the whole tied group today, across another Block or Section; how that split is placed is decided with this work, unless Sections (ADR-0322) replace Text Blocks first.
 - Authorized user devices sync complete Workspaces and continue offline from local replicas.
 - An optional headless replica receives only explicitly enabled Workspaces and exposes the same Role/mutation boundary to Automations, schedules and agents on its host while user devices are offline.
 - Sync applies received actions through the same permissioned mutation/History pipeline.

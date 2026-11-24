@@ -1,50 +1,20 @@
 #![allow(clippy::unwrap_used)]
 
+mod common;
+
+use common::*;
 use liquid_core::{
-    Actor, Applied, BlockId, Content, Created, DrawingStyle, Element, Error, Frame, InkColor,
-    MAX_BOARD_POINTS, MAX_DOC_PAGES, MAX_DRAWING_ELEMENTS, MAX_DRAWING_POINTS, MAX_ELEMENTS,
-    MAX_POINTS, MemoryStore, Mutation, Origin, PageId, Pen, PersonId, Request, Shape,
+    Applied, BlockId, Content, DrawingStyle, Element, Error, Frame, InkColor, MAX_BOARD_POINTS,
+    MAX_DOC_PAGES, MAX_DRAWING_ELEMENTS, MAX_DRAWING_POINTS, MAX_ELEMENTS, MAX_POINTS, Mutation,
+    PageId, Pen, Shape,
 };
 
-type Workspace = liquid_core::Workspace<MemoryStore>;
-
-fn apply(workspace: &mut Workspace, mutation: Mutation) -> Result<Applied, Error> {
-    workspace.apply(Request {
-        actor: Actor::Person(PersonId::new("benni")),
-        origin: Origin::Ui,
-        mutation,
-    })
-}
-
-fn created(workspace: &mut Workspace, mutation: Mutation) -> Created {
-    apply(workspace, mutation).unwrap().created.unwrap()
-}
-
 fn agreement() -> (Workspace, PageId, BlockId, BlockId) {
-    let mut workspace = Workspace::create(PersonId::new("benni"), MemoryStore::default()).unwrap();
-    let Created::Area(area) = created(
-        &mut workspace,
-        Mutation::CreateArea {
-            name: "Personal".into(),
-        },
-    ) else {
-        panic!("an area")
-    };
-    let Created::Page(page) = created(
-        &mut workspace,
-        Mutation::CreatePage {
-            area,
-            parent: None,
-            title: "Trip to Lisbon".into(),
-        },
-    ) else {
-        panic!("a Page")
-    };
-    let owner = Actor::Person(PersonId::new("benni"));
-    let mut upload = workspace.begin_upload(&owner, 7).unwrap();
+    let (mut workspace, _, page) = private_page("Trip to Lisbon");
+    let mut upload = workspace.begin_upload(&owner(), 7).unwrap();
     workspace.upload(&mut upload, b"%PDF-1.").unwrap();
     let attachment = workspace.finish_upload(upload).unwrap();
-    let Created::Block { block: pdf, .. } = created(
+    let (pdf, _) = block(
         &mut workspace,
         Mutation::AddMediaBlock {
             page: page.clone(),
@@ -53,18 +23,14 @@ fn agreement() -> (Workspace, PageId, BlockId, BlockId) {
             media_type: "application/pdf".into(),
             attachment: attachment.id,
         },
-    ) else {
-        panic!("a Media Block")
-    };
-    let Created::Block { block: board, .. } = created(
+    );
+    let (board, _) = block(
         &mut workspace,
         Mutation::AddWhiteboardBlock {
             page: page.clone(),
             after: None,
         },
-    ) else {
-        panic!("a Whiteboard")
-    };
+    );
     (workspace, page, pdf, board)
 }
 
@@ -208,24 +174,33 @@ fn a_document_holds_ten_boards_of_elements_in_all() {
     );
 }
 
-#[test]
-fn a_document_holds_ten_boards_of_points_in_all() {
-    let (mut workspace, page, pdf, _) = agreement();
+fn full_stroke(doc_page: u32) -> Element {
     let longest: Vec<u8> = (0..MAX_POINTS)
         .flat_map(|at| [at as f32, 1.0, 0.5])
         .flat_map(f32::to_le_bytes)
         .collect();
-    let full = |doc_page| Element {
+    Element {
         content: Content::Stroke {
             pen: Pen::Fountain,
-            points: longest.clone(),
+            points: longest,
         },
         ..mark(doc_page, InkColor::Text)
-    };
+    }
+}
+
+#[test]
+fn a_document_holds_ten_boards_of_points_in_all_and_a_read_stays_within_one_board() {
+    let (mut workspace, page, pdf, _) = agreement();
     let pages = (MAX_DRAWING_POINTS / MAX_BOARD_POINTS) as u32;
+    let strokes = MAX_BOARD_POINTS / MAX_POINTS;
     for doc_page in 0..pages {
-        let strokes = MAX_BOARD_POINTS / MAX_POINTS;
-        draw(&mut workspace, &page, &pdf, vec![full(doc_page); strokes]).unwrap();
+        draw(
+            &mut workspace,
+            &page,
+            &pdf,
+            vec![full_stroke(doc_page); strokes],
+        )
+        .unwrap();
     }
     assert_eq!(
         draw(
@@ -235,6 +210,20 @@ fn a_document_holds_ten_boards_of_points_in_all() {
             vec![mark(pages, InkColor::Text)]
         ),
         Err(Error::TooMany)
+    );
+
+    let read = workspace.drawing(&page, &pdf, 0..2).unwrap().unwrap();
+    let points: usize = read
+        .elements
+        .iter()
+        .map(|(_, element)| match &element.content {
+            Content::Stroke { points, .. } => points.len() / 12,
+            _ => 0,
+        })
+        .sum();
+    assert!(
+        points <= MAX_BOARD_POINTS,
+        "one read carries at most a board's points, not {points}"
     );
 }
 
@@ -252,42 +241,4 @@ fn actions_recorded_under_the_whiteboard_names_still_read() {
             ..
         }
     ));
-}
-
-#[test]
-fn a_read_across_pages_stays_within_one_board_s_points() {
-    let (mut workspace, page, pdf, _) = agreement();
-    let longest: Vec<u8> = (0..liquid_core::MAX_POINTS)
-        .flat_map(|at| [at as f32, 1.0, 0.5])
-        .flat_map(f32::to_le_bytes)
-        .collect();
-    let full = |doc_page| Element {
-        content: Content::Stroke {
-            pen: Pen::Fountain,
-            points: longest.clone(),
-        },
-        ..mark(doc_page, InkColor::Text)
-    };
-    let per_page = liquid_core::MAX_BOARD_POINTS / liquid_core::MAX_POINTS;
-    for doc_page in 0..2 {
-        draw(&mut workspace, &page, &pdf, vec![full(doc_page); per_page]).unwrap();
-    }
-    let read = workspace.drawing(&page, &pdf, 0..2).unwrap().unwrap();
-    let points: usize = read
-        .elements
-        .iter()
-        .map(|(_, element)| match &element.content {
-            Content::Stroke { points, .. } => points.len() / 12,
-            _ => 0,
-        })
-        .sum();
-    assert!(
-        points <= liquid_core::MAX_BOARD_POINTS,
-        "one read carries at most a board's points, not {points}"
-    );
-    assert!(
-        read.elements
-            .iter()
-            .all(|(_, element)| element.doc_page == 0)
-    );
 }

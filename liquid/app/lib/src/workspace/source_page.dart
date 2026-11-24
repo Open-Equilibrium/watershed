@@ -1,10 +1,10 @@
 import 'dart:async';
 import 'dart:io';
-import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
+import 'explorer.dart' show untitled;
 import '../controls.dart';
 import '../rust/api/chart.dart';
 import '../rust/api/source.dart';
@@ -12,7 +12,11 @@ import '../rust/api/workspace.dart';
 import '../theme/icons.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
-import 'pdf_pages.dart';
+import 'source_cards.dart';
+import 'source_kind.dart';
+import 'source_listing.dart';
+import 'source_pdf.dart';
+import 'source_table.dart';
 import 'stored_name.dart';
 import 'table_view_parts.dart' show MoreMenu;
 import 'workspace_state.dart';
@@ -20,35 +24,6 @@ import 'workspace_state.dart';
 abstract final class SourceOpener {
   static Future<ProcessResult> Function(String program, List<String> arguments)
   run = Process.run;
-}
-
-String fileSize(int bytes) => switch (bytes) {
-  < 1024 => '$bytes B',
-  < 1024 * 1024 => '${(bytes / 1024).round()} KB',
-  _ => '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB',
-};
-
-String kindOf(String name) {
-  final dot = name.lastIndexOf('.');
-  return switch (dot < 0 ? '' : name.substring(dot + 1).toLowerCase()) {
-    'csv' => 'CSV',
-    'tsv' => 'TSV',
-    'md' || 'markdown' => 'Markdown',
-    'txt' => 'Text',
-    'pdf' => 'PDF',
-    'png' || 'jpg' || 'jpeg' || 'gif' || 'webp' || 'heic' => 'Image',
-    _ => 'File',
-  };
-}
-
-IconData sourceIcon(String name, {required bool folder}) {
-  if (folder) return LucideIcons.folder;
-  return switch (kindOf(name)) {
-    'CSV' || 'TSV' => LucideIcons.fileSpreadsheet,
-    'Image' => LucideIcons.image,
-    'Markdown' || 'Text' => LucideIcons.fileText,
-    _ => LucideIcons.file,
-  };
 }
 
 class SourcePage extends StatefulWidget {
@@ -71,6 +46,7 @@ class _SourcePageState extends State<SourcePage> {
   StreamSubscription<String>? _located;
   Timer? _settle;
   int _reads = 0;
+  int _generation = 0;
   late final _name = StoredName(
     _entry?.name ?? '',
     rename: (name) =>
@@ -171,6 +147,7 @@ class _SourcePageState extends State<SourcePage> {
         _file = file;
         _users = users;
         _readAt = DateTime.now();
+        _generation++;
       });
     } on Object catch (error) {
       _state.readFailed(error);
@@ -245,6 +222,16 @@ class _SourcePageState extends State<SourcePage> {
     if (confirmed == true) await _state.removeSource(_source);
   }
 
+  void _openPage(String page) {
+    final area = _state.areas.value
+        .where(
+          (area) =>
+              _state.pages(area.id).value.any((known) => known.id == page),
+        )
+        .firstOrNull;
+    if (area != null) _state.open.value = OpenPage(area.id, page);
+  }
+
   Future<void> _useInBlock(String page) async {
     final file = _file;
     if (file == null) return;
@@ -270,13 +257,7 @@ class _SourcePageState extends State<SourcePage> {
           ),
         ),
       );
-      final area = _state.areas.value
-          .where(
-            (area) =>
-                _state.pages(area.id).value.any((known) => known.id == page),
-          )
-          .firstOrNull;
-      if (area != null) _state.open.value = OpenPage(area.id, page);
+      _openPage(page);
     } on Object catch (error) {
       _state.report('Liquid did not add the Chart: $error');
     }
@@ -465,7 +446,7 @@ class _SourcePageState extends State<SourcePage> {
                       color: ws.text,
                     ),
                     decoration: InputDecoration.collapsed(
-                      hintText: 'Untitled',
+                      hintText: untitled,
                       hintStyle: TextStyle(color: ws.textFaint),
                     ),
                   )
@@ -494,23 +475,40 @@ class _SourcePageState extends State<SourcePage> {
     }
     if (folder != null) {
       children
-        ..add(_listing(context, folder.entries))
+        ..add(
+          Expanded(
+            child: SourceListing(
+              entries: folder.entries,
+              inside: _inside,
+              onOpen: _open,
+            ),
+          ),
+        )
         ..add(const SizedBox(height: WsMetrics.space3))
         ..add(
           Text('Liquid reads this folder and never writes it.', style: caption),
         );
-      return _column(children);
+      return _column(children, fill: true);
     }
     final shown = file!;
+    void launch() => unawaited(_launch(shown.path));
     switch (shown.read) {
       case BridgeRead.tooLarge:
         children.add(
-          _card(context, 'Liquid reads at most 50 MiB of a file.', shown.path),
+          SourceCard(
+            text: 'Liquid reads at most 50 MiB of a file.',
+            path: shown.path,
+            onOpen: launch,
+          ),
         );
         return _column(children);
       case BridgeRead.unreadable:
         children.add(
-          _card(context, 'Liquid can\'t read this file as text.', shown.path),
+          SourceCard(
+            text: 'Liquid can\'t read this file as text.',
+            path: shown.path,
+            onOpen: launch,
+          ),
         );
         return _column(children);
       case BridgeRead.missing || BridgeRead.read:
@@ -518,7 +516,15 @@ class _SourcePageState extends State<SourcePage> {
     }
     switch (shown.shown) {
       case BridgeFileView.table:
-        return _table(context, children, shown);
+        return SourceTable(
+          state: _state,
+          file: shown,
+          head: children,
+          users: _users,
+          root: _inside.isEmpty,
+          onPage: (page) => unawaited(_useInBlock(page)),
+          onOpenPage: _openPage,
+        );
       case BridgeFileView.text:
         children.add(
           Container(
@@ -533,16 +539,24 @@ class _SourcePageState extends State<SourcePage> {
         );
       case BridgeFileView.image:
         children.add(
-          Image.file(File(shown.path), key: const Key('source image')),
+          Image.memory(shown.bytes!, key: const Key('source image')),
         );
       case BridgeFileView.pdf:
-        children.add(_PdfSource(key: ValueKey(shown.path), path: shown.path));
+        children.add(
+          Expanded(
+            child: SourcePdf(
+              key: ValueKey((shown.path, _generation)),
+              bytes: shown.bytes!,
+            ),
+          ),
+        );
+        return _column(children, fill: true);
       case BridgeFileView.other:
         children.add(
-          _card(
-            context,
-            'Liquid shows no preview for this kind of file.',
-            shown.path,
+          SourceCard(
+            text: 'Liquid shows no preview for this kind of file.',
+            path: shown.path,
+            onOpen: launch,
           ),
         );
     }
@@ -558,14 +572,14 @@ class _SourcePageState extends State<SourcePage> {
     ].join(', ');
   }
 
-  Widget _column(List<Widget> children) => SingleChildScrollView(
-    padding: const EdgeInsets.fromLTRB(
+  Widget _column(List<Widget> children, {bool fill = false}) {
+    const padding = EdgeInsets.fromLTRB(
       WsMetrics.space7,
       28,
       WsMetrics.space7,
       WsMetrics.space8,
-    ),
-    child: Center(
+    );
+    final column = Center(
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: WsMetrics.widthReading),
         child: Column(
@@ -573,8 +587,11 @@ class _SourcePageState extends State<SourcePage> {
           children: children,
         ),
       ),
-    ),
-  );
+    );
+    return fill
+        ? Padding(padding: padding, child: column)
+        : SingleChildScrollView(padding: padding, child: column);
+  }
 
   Widget _missing(BuildContext context, BridgeSource entry) {
     final ws = context.ws;
@@ -619,384 +636,6 @@ class _SourcePageState extends State<SourcePage> {
             ),
         ],
       ),
-    );
-  }
-
-  Widget _card(BuildContext context, String text, String path) {
-    final ws = context.ws;
-    final name = path.split(Platform.pathSeparator).last;
-    return Container(
-      key: const Key('source card'),
-      padding: const EdgeInsets.all(WsMetrics.space4),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(WsMetrics.radiusLg),
-        border: Border.all(color: ws.border),
-      ),
-      child: Row(
-        children: [
-          Icon(LucideIcons.file, size: 22, color: ws.textFaint),
-          const SizedBox(width: WsMetrics.space3),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(name),
-                Text(
-                  text,
-                  style: TextStyle(
-                    fontSize: WsMetrics.fsSmall,
-                    color: ws.textFaint,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          SecondaryButton(
-            label: 'Open in default app',
-            onPressed: () => unawaited(_launch(path)),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _listing(BuildContext context, List<BridgeFileEntry> entries) {
-    final ws = context.ws;
-    final faint = TextStyle(fontSize: WsMetrics.fsCompact, color: ws.textFaint);
-    final day = DateFormat.MMMd('en_US');
-    Widget row(List<Widget> cells, {VoidCallback? onTap, Key? key}) => InkWell(
-      key: key,
-      onTap: onTap,
-      child: Container(
-        height: WsMetrics.rowTable,
-        padding: const EdgeInsets.symmetric(horizontal: WsMetrics.space3),
-        decoration: BoxDecoration(
-          border: Border(bottom: BorderSide(color: ws.border)),
-        ),
-        child: Row(children: cells),
-      ),
-    );
-    return Container(
-      key: const Key('source listing'),
-      clipBehavior: Clip.antiAlias,
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(WsMetrics.radiusLg),
-        border: Border.all(color: ws.border),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          row([
-            Expanded(child: Text('Name', style: faint)),
-            SizedBox(width: 110, child: Text('Kind', style: faint)),
-            SizedBox(
-              width: 90,
-              child: Text('Size', style: faint, textAlign: TextAlign.right),
-            ),
-            const SizedBox(width: WsMetrics.space4),
-            SizedBox(width: 80, child: Text('Modified', style: faint)),
-          ]),
-          if (entries.isEmpty)
-            Padding(
-              padding: const EdgeInsets.all(WsMetrics.space4),
-              child: Text('This folder is empty.', style: faint),
-            ),
-          for (final entry in entries)
-            row(
-              key: ValueKey('source entry ${entry.name}'),
-              onTap: () => _open(
-                _inside.isEmpty ? entry.name : '$_inside/${entry.name}',
-              ),
-              [
-                Icon(
-                  sourceIcon(entry.name, folder: entry.folder),
-                  size: 14,
-                  color: ws.textFaint,
-                ),
-                const SizedBox(width: WsMetrics.space2),
-                Expanded(
-                  child: Text(
-                    entry.name,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-                SizedBox(
-                  width: 110,
-                  child: Text(entry.folder ? 'Folder' : kindOf(entry.name)),
-                ),
-                SizedBox(
-                  width: 90,
-                  child: Text(
-                    entry.folder ? '—' : fileSize(entry.size.toInt()),
-                    textAlign: TextAlign.right,
-                  ),
-                ),
-                const SizedBox(width: WsMetrics.space4),
-                SizedBox(
-                  width: 80,
-                  child: Text(
-                    entry.modified == null
-                        ? ''
-                        : day.format(
-                            DateTime.fromMillisecondsSinceEpoch(
-                              entry.modified!.toInt(),
-                            ),
-                          ),
-                  ),
-                ),
-              ],
-            ),
-        ],
-      ),
-    );
-  }
-
-  Widget _table(
-    BuildContext context,
-    List<Widget> head,
-    BridgeSourceFile file,
-  ) {
-    final ws = context.ws;
-    final faint = TextStyle(fontSize: WsMetrics.fsCompact, color: ws.textFaint);
-    final caption = TextStyle(fontSize: WsMetrics.fsSmall, color: ws.textFaint);
-    Widget line(List<String> cells, {bool header = false}) => Container(
-      height: header ? 30 : WsMetrics.rowTable,
-      decoration: BoxDecoration(
-        color: header ? ws.subtle : null,
-        border: Border(bottom: BorderSide(color: ws.border)),
-      ),
-      child: Row(
-        children: [
-          for (final (at, cell) in cells.indexed)
-            Expanded(
-              child: Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: WsMetrics.space3,
-                ),
-                child: Text(
-                  cell,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  textAlign: file.columns[at].number
-                      ? TextAlign.right
-                      : TextAlign.left,
-                  style: header ? faint : null,
-                ),
-              ),
-            ),
-        ],
-      ),
-    );
-    final tail = <Widget>[
-      const SizedBox(height: WsMetrics.space4),
-      if (_inside.isEmpty) ...[
-        Row(
-          spacing: WsMetrics.space3,
-          children: [
-            _PagePicker(
-              state: _state,
-              onPage: (page) => unawaited(_useInBlock(page)),
-            ),
-            Flexible(
-              child: Text(
-                'Liquid reads this file and never writes it.',
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: caption,
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: WsMetrics.space4),
-        Text('Used by', style: caption),
-        const SizedBox(height: WsMetrics.space1),
-        if (_users.isEmpty) Text('Nothing yet.', style: caption),
-        for (final (page, _, title) in _users)
-          InkWell(
-            key: ValueKey('source user $page'),
-            onTap: () {
-              final area = _state.areas.value
-                  .where(
-                    (area) => _state
-                        .pages(area.id)
-                        .value
-                        .any((known) => known.id == page),
-                  )
-                  .firstOrNull;
-              if (area != null) _state.open.value = OpenPage(area.id, page);
-            },
-            child: SizedBox(
-              height: 32,
-              child: Row(
-                children: [
-                  Icon(LucideIcons.barChart3, size: 14, color: ws.textFaint),
-                  const SizedBox(width: WsMetrics.space2),
-                  Expanded(child: Text(title)),
-                  Text('Chart · ${_pageTitle(page)}', style: caption),
-                ],
-              ),
-            ),
-          ),
-      ],
-    ];
-    return CustomScrollView(
-      slivers: [
-        SliverPadding(
-          padding: const EdgeInsets.fromLTRB(
-            WsMetrics.space7,
-            28,
-            WsMetrics.space7,
-            WsMetrics.space8,
-          ),
-          sliver: SliverCrossAxisConstrained(
-            maxCrossAxisExtent: WsMetrics.widthReading,
-            child: SliverList.list(
-              children: [
-                ...head,
-                line([
-                  for (final column in file.columns) column.name,
-                ], header: true),
-                for (final row in file.rows) line(row),
-                ...tail,
-              ],
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-
-  String _pageTitle(String page) {
-    for (final area in _state.areas.value) {
-      for (final known in _state.pages(area.id).value) {
-        if (known.id == page) {
-          return known.title.isEmpty ? 'Untitled' : known.title;
-        }
-      }
-    }
-    return 'Untitled';
-  }
-}
-
-class SliverCrossAxisConstrained extends StatelessWidget {
-  const SliverCrossAxisConstrained({
-    super.key,
-    required this.maxCrossAxisExtent,
-    required this.child,
-  });
-
-  final double maxCrossAxisExtent;
-  final Widget child;
-
-  @override
-  Widget build(BuildContext context) => SliverLayoutBuilder(
-    builder: (context, constraints) {
-      final extra = constraints.crossAxisExtent - maxCrossAxisExtent;
-      return SliverPadding(
-        padding: EdgeInsets.symmetric(horizontal: extra > 0 ? extra / 2 : 0),
-        sliver: child,
-      );
-    },
-  );
-}
-
-class _PagePicker extends StatelessWidget {
-  const _PagePicker({required this.state, required this.onPage});
-
-  final WorkspaceState state;
-  final ValueChanged<String> onPage;
-
-  @override
-  Widget build(BuildContext context) => MenuAnchor(
-    menuChildren: [
-      for (final area in state.areas.value)
-        for (final page in state.pages(area.id).value)
-          MenuItemButton(
-            key: ValueKey('use in ${page.id}'),
-            onPressed: () => onPage(page.id),
-            child: Text(page.title.isEmpty ? 'Untitled' : page.title),
-          ),
-    ],
-    builder: (context, controller, _) => SecondaryButton(
-      label: 'Use in a Block…',
-      icon: LucideIcons.link,
-      onPressed: () =>
-          controller.isOpen ? controller.close() : controller.open(),
-    ),
-  );
-}
-
-class _PdfSource extends StatefulWidget {
-  const _PdfSource({super.key, required this.path});
-
-  final String path;
-
-  @override
-  State<_PdfSource> createState() => _PdfSourceState();
-}
-
-class _PdfSourceState extends State<_PdfSource> {
-  PdfPages? _pdf;
-  final _pages = <int, ui.Image>{};
-  bool _failed = false;
-
-  @override
-  void initState() {
-    super.initState();
-    unawaited(_open());
-  }
-
-  Future<void> _open() async {
-    try {
-      final pdf = await PdfPages.open(await File(widget.path).readAsBytes());
-      if (!mounted) {
-        await pdf.close();
-        return;
-      }
-      setState(() => _pdf = pdf);
-      for (var at = 0; at < pdf.sizes.length && mounted; at++) {
-        final image = await pdf.render(at, 1400);
-        if (!mounted) return;
-        setState(() => _pages[at] = image);
-      }
-    } on Object {
-      if (mounted) setState(() => _failed = true);
-    }
-  }
-
-  @override
-  void dispose() {
-    unawaited(_pdf?.close());
-    for (final image in _pages.values) {
-      image.dispose();
-    }
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final ws = context.ws;
-    if (_failed) {
-      return Text(
-        'Liquid could not show this PDF.',
-        style: TextStyle(color: ws.textFaint),
-      );
-    }
-    final pdf = _pdf;
-    if (pdf == null) return const SizedBox(height: 200);
-    return Column(
-      key: const Key('source pdf'),
-      spacing: WsMetrics.space3,
-      children: [
-        for (final (at, size) in pdf.sizes.indexed)
-          AspectRatio(
-            aspectRatio: size.width / size.height,
-            child: _pages[at] == null
-                ? ColoredBox(color: ws.subtle)
-                : RawImage(image: _pages[at], fit: BoxFit.contain),
-          ),
-      ],
     );
   }
 }

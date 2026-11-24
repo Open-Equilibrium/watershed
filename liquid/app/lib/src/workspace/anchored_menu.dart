@@ -15,6 +15,7 @@ class AnchoredMenu extends StatefulWidget {
     this.onTapOutside,
     this.end = false,
     this.beside,
+    this.minLeft = 0,
     this.group,
   });
 
@@ -23,6 +24,8 @@ class AnchoredMenu extends StatefulWidget {
   final bool end;
 
   final double? beside;
+
+  final double minLeft;
 
   final OverlayPortalController? controller;
 
@@ -73,7 +76,7 @@ class _AnchoredMenuState extends State<AnchoredMenu> {
           return Positioned(
             left: right
                 ? anchor.right + gap
-                : math.max(0, anchor.left - gap - width),
+                : math.max(widget.minLeft, anchor.left - gap - width),
             top: math.max(
               WsMetrics.space1,
               math.min(

@@ -139,6 +139,7 @@ class _AgentShellState extends State<AgentShell> {
   @override
   void initState() {
     super.initState();
+    widget.workspaces?.shellMounted();
     HardwareKeyboard.instance.addHandler(_liquidTap);
     _lifecycle;
     _diffSettings.addListener(_hideWhitespace);
@@ -246,6 +247,7 @@ class _AgentShellState extends State<AgentShell> {
 
   @override
   void dispose() {
+    widget.workspaces?.shellUnmounted();
     HardwareKeyboard.instance.removeHandler(_liquidTap);
     _liquidAlone?.cancel();
     _powerBar.dispose();
@@ -479,131 +481,131 @@ class _AgentShellState extends State<AgentShell> {
                   () => unawaited(workspaces.switchTo(index)),
               ]),
           },
-          child: Focus(
-            focusNode: _focus,
-            autofocus: true,
-            skipTraversal: true,
-            child: _withPowerBar(
-              Material(
-                color: ws.canvas,
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    Sidebar(
-                      state: widget.state,
-                      info: widget.info,
-                      workspace: widget.workspace,
-                      workspaceProblem: widget.workspaceProblem,
-                      workspaces: widget.workspaces,
-                      agentProblem: widget.agentProblem,
-                      onSettings: _toggleSettings,
-                      onAutomations: widget.workspace == null
-                          ? null
-                          : () => _automations.value = true,
-                      onHistory: widget.workspace == null
-                          ? null
-                          : () => _history.value = true,
-                      onSearch: widget.workspace == null
-                          ? null
-                          : () => _powerBar.value = true,
-                      onNewSession: _newSession,
-                      onShowSession: _showSession,
-                      onMove: widget.state == null
-                          ? null
-                          : (listed) => unawaited(
-                              moveSession(
-                                context,
-                                widget.state!,
-                                listed,
-                                nameOf: _hostName,
-                              ),
-                            ),
-                    ),
-                    Expanded(
-                      child: ListenableBuilder(
-                        listenable: Listenable.merge([
-                          _settings,
-                          ?widget.workspace?.open,
-                        ]),
-                        builder: (context, agent) {
-                          if (_settings.value case final section?) {
-                            return SettingsPage(
-                              shortcuts: _shortcuts,
-                              section: section,
-                              onSection: (next) => _settings.value = next,
-                              appearance: widget.appearance,
-                              cardSettings: _cardSettings,
-                              onClose: _toggleSettings,
-                              saveFailure: _saveFailure,
-                              onDismissSaveFailure: () =>
-                                  _saveFailure.value = null,
-                              writer: project == null
-                                  ? null
-                                  : WriterModelPane(project: project),
-                              roles: switch (widget.workspace) {
-                                final workspace? => RolesPane(state: workspace),
-                                null => null,
-                              },
-                              agentHosts: widget.agentHosts == null
-                                  ? null
-                                  : AgentHostsPane(
-                                      hosts: widget.agentHosts!,
-                                      saveOutcome: (failure) => _saveOutcome(
-                                        widget.agentHosts!,
-                                        failure,
-                                      ),
+          child: UndoScope(
+            state: widget.workspace,
+            active: () => _settings.value == null,
+            child: FocusScope(
+              child: Focus(
+                focusNode: _focus,
+                autofocus: true,
+                skipTraversal: true,
+                child: _withPowerBar(
+                  Material(
+                    color: ws.canvas,
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Sidebar(
+                          state: widget.state,
+                          info: widget.info,
+                          workspace: widget.workspace,
+                          workspaceProblem: widget.workspaceProblem,
+                          workspaces: widget.workspaces,
+                          agentProblem: widget.agentProblem,
+                          onSettings: _toggleSettings,
+                          onAutomations: widget.workspace == null
+                              ? null
+                              : () => _automations.value = true,
+                          onHistory: widget.workspace == null
+                              ? null
+                              : () => _history.value = true,
+                          onSearch: widget.workspace == null
+                              ? null
+                              : () => _powerBar.value = true,
+                          onNewSession: _newSession,
+                          onShowSession: _showSession,
+                          onMove: widget.state == null
+                              ? null
+                              : (listed) => unawaited(
+                                  moveSession(
+                                    context,
+                                    widget.state!,
+                                    listed,
+                                    nameOf: _hostName,
+                                  ),
+                                ),
+                        ),
+                        Expanded(
+                          child: ListenableBuilder(
+                            listenable: Listenable.merge([
+                              _settings,
+                              ?widget.workspace?.open,
+                            ]),
+                            builder: (context, agent) {
+                              if (_settings.value case final section?) {
+                                return SettingsPage(
+                                  shortcuts: _shortcuts,
+                                  section: section,
+                                  onSection: (next) => _settings.value = next,
+                                  appearance: widget.appearance,
+                                  cardSettings: _cardSettings,
+                                  onClose: _toggleSettings,
+                                  saveFailure: _saveFailure,
+                                  onDismissSaveFailure: () =>
+                                      _saveFailure.value = null,
+                                  writer: project == null
+                                      ? null
+                                      : WriterModelPane(project: project),
+                                  roles: switch (widget.workspace) {
+                                    final workspace? => RolesPane(
+                                      state: workspace,
                                     ),
-                            );
-                          }
-                          final open = widget.workspace?.open.value;
-                          return IndexedStack(
-                            index: open == null ? 0 : 1,
-                            sizing: StackFit.expand,
-                            children: [
-                              agent ?? const SizedBox.shrink(),
-                              if (open?.table case final table?)
-                                UndoScope(
-                                  state: widget.workspace!,
-                                  child: TablePage(
-                                    key: ValueKey(table),
-                                    state: widget.workspace!,
-                                    table: table,
-                                  ),
-                                )
-                              else if (open?.source case final source?)
-                                UndoScope(
-                                  state: widget.workspace!,
-                                  child: SourcePage(
-                                    key: ValueKey((source, open!.inside)),
-                                    state: widget.workspace!,
-                                    open: open,
-                                  ),
-                                )
-                              else if (open != null)
-                                UndoScope(
-                                  state: widget.workspace!,
-                                  child: WorkspacePage(
-                                    key: ValueKey(open.page),
-                                    state: widget.workspace!,
-                                    open: open,
-                                  ),
-                                )
-                              else
-                                const SizedBox.shrink(),
-                            ],
-                          );
-                        },
-                        child: switch ((widget.state, widget.info)) {
-                          (final state?, final info?) => _agentSurface(
-                            context,
-                            state,
-                            info,
+                                    null => null,
+                                  },
+                                  agentHosts: widget.agentHosts == null
+                                      ? null
+                                      : AgentHostsPane(
+                                          hosts: widget.agentHosts!,
+                                          saveOutcome: (failure) =>
+                                              _saveOutcome(
+                                                widget.agentHosts!,
+                                                failure,
+                                              ),
+                                        ),
+                                );
+                              }
+                              final open = widget.workspace?.open.value;
+                              return IndexedStack(
+                                index: open == null ? 0 : 1,
+                                sizing: StackFit.expand,
+                                children: [
+                                  agent ?? const SizedBox.shrink(),
+                                  if (open?.table case final table?)
+                                    TablePage(
+                                      key: ValueKey(table),
+                                      state: widget.workspace!,
+                                      table: table,
+                                    )
+                                  else if (open?.source case final source?)
+                                    SourcePage(
+                                      key: ValueKey((source, open!.inside)),
+                                      state: widget.workspace!,
+                                      open: open,
+                                    )
+                                  else if (open != null)
+                                    WorkspacePage(
+                                      key: ValueKey(open.page),
+                                      state: widget.workspace!,
+                                      open: open,
+                                    )
+                                  else
+                                    const SizedBox.shrink(),
+                                ],
+                              );
+                            },
+                            child: switch ((widget.state, widget.info)) {
+                              (final state?, final info?) => _agentSurface(
+                                context,
+                                state,
+                                info,
+                              ),
+                              _ => null,
+                            },
                           ),
-                          _ => null,
-                        },
-                      ),
+                        ),
+                      ],
                     ),
-                  ],
+                  ),
                 ),
               ),
             ),

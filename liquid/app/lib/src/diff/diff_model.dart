@@ -84,20 +84,27 @@ const shownChars = 1000;
   return (text: text.substring(0, end), cut: true);
 }
 
-List<String> widestLines(List<DiffLine> lines, {int count = 8}) {
-  int columns(String text) {
-    var sum = 0;
-    for (var index = 0; index < text.length; index++) {
-      sum += text.codeUnitAt(index) < 0x80 ? 1 : 2;
-    }
-    return sum;
+int columnsOf(String text) {
+  var sum = 0;
+  for (var index = 0; index < text.length; index++) {
+    sum += text.codeUnitAt(index) < 0x80 ? 1 : 2;
+  }
+  return sum;
+}
+
+({List<String> texts, int columns}) widestLines(
+  List<DiffLine> lines, {
+  int count = 8,
+}) {
+  String shownLine(String raw) {
+    final shown = shownText(raw);
+    return shown.cut ? '${shown.text}…' : shown.text;
   }
 
   List<String> longest(int Function(String text) measure) {
     final widest = <({String text, int columns})>[];
     for (final line in lines) {
-      final shown = shownText(line.text);
-      final text = shown.cut ? '${shown.text}…' : shown.text;
+      final text = shownLine(line.text);
       final width = measure(text);
       if (widest.length == count && width <= widest.last.columns) continue;
       final at = widest.indexWhere((wide) => wide.columns < width);
@@ -107,7 +114,14 @@ List<String> widestLines(List<DiffLine> lines, {int count = 8}) {
     return [for (final wide in widest) wide.text];
   }
 
-  return {...longest((text) => text.length), ...longest(columns)}.toList();
+  var columns = 0;
+  for (final line in lines) {
+    columns = math.max(columns, columnsOf(shownLine(line.text)));
+  }
+  return (
+    texts: {...longest((text) => text.length), ...longest(columnsOf)}.toList(),
+    columns: columns,
+  );
 }
 
 final _hunk = RegExp(r'^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@');

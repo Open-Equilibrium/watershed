@@ -17,6 +17,8 @@ use crate::api::session::{
 };
 use crate::api::thread::{BridgeSnapshot, BridgeTurnStatus};
 
+const STREAM_DEADLINE: Duration = Duration::from_secs(60);
+
 fn git(dir: &Path, args: &[&str]) {
     let ok = std::process::Command::new("git")
         .args(args)
@@ -53,6 +55,19 @@ impl Fixture {
 
     fn home(&self) -> PathBuf {
         self.0.join("meta-harness")
+    }
+
+    fn push_to_origin(&self) {
+        git(
+            &self.0,
+            &["init", "-q", "--bare", "-b", "main", "remote.git"],
+        );
+        let remote = self.0.join("remote.git");
+        git(
+            &self.repo(),
+            &["remote", "add", "origin", &remote.to_string_lossy()],
+        );
+        git(&self.repo(), &["push", "-q", "-u", "origin", "main"]);
     }
 }
 
@@ -114,6 +129,17 @@ fn begin(project: &AgentProject, prompt: &str) -> AgentSession {
         .expect("session starts")
 }
 
+fn send(session: &AgentSession, prompt: &str) {
+    session.send(prompt.to_owned(), false).expect("sent");
+}
+
+fn turn_ended(event: &BridgeEvent) -> bool {
+    matches!(
+        event.kind,
+        BridgeEventKind::TurnCompleted | BridgeEventKind::TurnAborted
+    )
+}
+
 fn follow_until(
     session: &AgentSession,
     done: impl Fn(&AgentSession, &BridgeSnapshot, &[BridgeEvent]) -> bool,
@@ -133,8 +159,6 @@ fn follow_until(
     }
     (snapshot, events)
 }
-
-const STREAM_DEADLINE: Duration = Duration::from_secs(60);
 
 fn next_before<T>(receiver: &mpsc::Receiver<T>, deadline: Instant) -> Option<T> {
     let left = deadline.checked_duration_since(Instant::now())?;
@@ -170,13 +194,7 @@ fn follow_turns(session: &AgentSession, turns: usize) -> (BridgeSnapshot, Vec<Br
                 BridgeTurnStatus::Queued | BridgeTurnStatus::Running
             )
         });
-        let ended = events.iter().any(|e| {
-            matches!(
-                e.kind,
-                BridgeEventKind::TurnCompleted | BridgeEventKind::TurnAborted
-            )
-        });
-        completed(turns)(session) && (!running || ended)
+        completed(turns)(session) && (!running || events.iter().any(turn_ended))
     })
 }
 
@@ -190,14 +208,15 @@ fn answer_reached_liquid(snapshot: &BridgeSnapshot, events: &[BridgeEvent]) -> b
             .any(|item| item.text == "Appended.")
 }
 
+fn answered(event: &BridgeEvent, text: &str) -> bool {
+    event.kind == BridgeEventKind::ItemCompleted && event.text.as_deref() == Some(text)
+}
+
 #[track_caller]
 fn until(ready: impl Fn() -> bool) {
-    let deadline = std::time::Instant::now() + Duration::from_secs(60);
+    let deadline = Instant::now() + Duration::from_secs(60);
     while !ready() {
-        assert!(
-            std::time::Instant::now() < deadline,
-            "T3 did not apply the change"
-        );
+        assert!(Instant::now() < deadline, "T3 did not apply the change");
         std::thread::sleep(Duration::from_millis(50));
     }
 }
@@ -226,9 +245,7 @@ fn a_session_streams_diffs_reverts_and_exports_through_the_bridge() {
         answer_reached_liquid(&snapshot, &events),
         "the answer reaches Liquid"
     );
-    session
-        .send("append second".to_owned(), false)
-        .expect("second turn");
+    send(&session, "append second");
     follow_turns(&session, 2);
 
     let changes = session.turn_changes(2, 2, false).expect("changes");
@@ -395,19 +412,10 @@ fn follows_resume_after_meta_harness_restarts() {
     while lineage_seen.try_recv().is_ok() {}
     let (service, _) = host(&fixture);
     receive_until(&receiver, |e| e.kind == BridgeEventKind::FellBehind);
-    session
-        .send("append second".to_owned(), false)
-        .expect("second turn");
-    let events = receive_until(&receiver, |e| {
-        matches!(
-            e.kind,
-            BridgeEventKind::TurnCompleted | BridgeEventKind::TurnAborted
-        )
-    });
+    send(&session, "append second");
+    let events = receive_until(&receiver, turn_ended);
     assert!(
-        events.iter().any(|e| {
-            e.kind == BridgeEventKind::ItemCompleted && e.text.as_deref() == Some("append second")
-        }),
+        events.iter().any(|e| answered(e, "append second")),
         "the second turn reaches Liquid: {events:?}"
     );
     let wait = Duration::from_secs(60);
@@ -429,9 +437,7 @@ fn an_event_stream_takes_the_subscription_it_names() {
     let (service, host) = host(&fixture);
     let session = begin(&project_at(&host, &fixture.repo()), "append first");
     let first = session.subscribe().expect("the first subscription");
-    session
-        .send("append second".to_owned(), false)
-        .expect("second turn");
+    send(&session, "append second");
     follow_turns(&session, 2);
     let second = session.subscribe().expect("the second subscription");
     assert_ne!(first.id, second.id);
@@ -498,16 +504,9 @@ fn concurrent_forwards_of_one_session_each_stream_their_own_events() {
     let followers: Vec<_> = (0..ROUNDS)
         .flat_map(|_| follow_together(&session))
         .collect();
-    session
-        .send("append second".to_owned(), false)
-        .expect("second turn");
+    send(&session, "append second");
     for (after, receiver) in followers {
-        let events = receive_until(&receiver, |e| {
-            matches!(
-                e.kind,
-                BridgeEventKind::TurnCompleted | BridgeEventKind::TurnAborted
-            )
-        });
+        let events = receive_until(&receiver, turn_ended);
         assert!(
             events
                 .iter()
@@ -515,10 +514,7 @@ fn concurrent_forwards_of_one_session_each_stream_their_own_events() {
             "every event is past the follow's snapshot: {events:?}"
         );
         assert!(
-            events.iter().any(|e| {
-                e.kind == BridgeEventKind::ItemCompleted
-                    && e.text.as_deref() == Some("append second")
-            }),
+            events.iter().any(|e| answered(e, "append second")),
             "the second turn reaches every follow: {events:?}"
         );
     }
@@ -838,16 +834,7 @@ fn git_switches_commits_pulls_pushes_and_initializes_through_the_bridge() {
     let fixture = Fixture::new();
     let (service, host) = host(&fixture);
     let repo = fixture.repo();
-    git(
-        &fixture.0,
-        &["init", "-q", "--bare", "-b", "main", "remote.git"],
-    );
-    let remote = fixture.0.join("remote.git");
-    git(
-        &repo,
-        &["remote", "add", "origin", &remote.to_string_lossy()],
-    );
-    git(&repo, &["push", "-q", "-u", "origin", "main"]);
+    fixture.push_to_origin();
     let hook = repo.join(".git").join("hooks").join("pre-commit");
     std::fs::write(&hook, "#!/bin/sh\necho checking the hook\n").expect("hook");
     make_executable(&hook);
@@ -951,7 +938,7 @@ fn make_executable(path: &Path) {
 fn make_executable(_: &Path) {}
 
 #[test]
-fn a_move_in_lands_in_the_project_it_names_not_the_handles_one() {
+fn a_move_in_lands_in_the_project_it_names_and_an_unknown_transfer_has_no_thread() {
     let fixture = Fixture::new();
     let (service, host) = host(&fixture);
     let repo = fixture.repo();
@@ -1002,14 +989,6 @@ fn a_move_in_lands_in_the_project_it_names_not_the_handles_one() {
         "the project named for the move has no remote: {}",
         refused.message
     );
-    stop(service);
-}
-
-#[test]
-fn a_transfer_that_never_landed_answers_no_thread() {
-    let fixture = Fixture::new();
-    let (service, host) = host(&fixture);
-
     let arrival = host
         .move_status("never-sent".to_owned())
         .expect("the status of a transfer");
@@ -1023,16 +1002,7 @@ fn a_target_project_answers_where_a_move_would_land() {
     let fixture = Fixture::new();
     let (service, host) = host(&fixture);
     let repo = fixture.repo();
-    git(
-        &fixture.0,
-        &["init", "-q", "--bare", "-b", "main", "remote.git"],
-    );
-    let remote = fixture.0.join("remote.git");
-    git(
-        &repo,
-        &["remote", "add", "origin", &remote.to_string_lossy()],
-    );
-    git(&repo, &["push", "-q", "-u", "origin", "main"]);
+    fixture.push_to_origin();
     let path = repo.to_string_lossy().into_owned();
     host.add_host_project(path.clone())
         .expect("the project the move names");

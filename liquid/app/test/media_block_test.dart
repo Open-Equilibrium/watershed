@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:convert';
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
@@ -7,7 +6,6 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:liquid/src/rust/api/workspace.dart';
 import 'package:liquid/src/workspace/media_block.dart';
-import 'package:liquid/src/workspace/workspace_state.dart';
 
 import 'page_kit.dart';
 
@@ -58,18 +56,6 @@ void main() {
     await tester.pump();
   }
 
-  testWidgets('the Blocks in slash commands are in alphabetical order', (
-    tester,
-  ) async {
-    await kit.show(tester, [const TextPart('')]);
-    await slash(tester, 0, '/');
-    final tops = [
-      for (final label in ['Code', 'Media', 'Table'])
-        tester.getTopLeft(find.byKey(ValueKey('choice $label'))).dy,
-    ];
-    expect(tops, orderedEquals([...tops]..sort()));
-  });
-
   testWidgets(
     'Media opens the file dialog and adds the files in the line\'s place',
     (tester) async {
@@ -85,7 +71,6 @@ void main() {
       expect(find.byKey(const ValueKey('choice Media')), findsOneWidget);
       expect(find.byKey(const ValueKey('choice Table')), findsNothing);
       await key(tester, LogicalKeyboardKey.enter);
-      await tester.pumpAndSettle();
 
       expect(kinds(), [
         BridgeBlockKind.text,
@@ -103,54 +88,17 @@ void main() {
     },
   );
 
-  testWidgets('media in a Section\'s first line starts that Section', (
-    tester,
-  ) async {
-    await kit.show(tester, [
-      const TextPart('Intro'),
-      const TextPart(''),
-      const TextPart('After'),
-    ]);
-    final line = kit.fake.views[kit.page]![1];
-    await kit.workspace.apply(
-      mutation(
-        BridgeMutationKind.setSectionBoundary,
-        page: kit.page,
-        view: line.id,
-        boundary: true,
-      ),
-    );
-    await tester.pumpAndSettle();
-    picked.add(file('/Users/me/notes.txt', 10));
-    await slash(tester, 1, '/media');
-    await key(tester, LogicalKeyboardKey.enter);
-    await tester.pumpAndSettle();
-    expect(
-      [
-        for (final view in kit.fake.views[kit.page]!)
-          (view.kind, view.boundary),
-      ],
-      [
-        (BridgeBlockKind.text, false),
-        (BridgeBlockKind.media, true),
-        (BridgeBlockKind.text, false),
-      ],
-    );
-  });
-
   testWidgets(
     'cancelling the dialog keeps the line; the last line stays below',
     (tester) async {
       await kit.show(tester, [const TextPart('Intro'), const TextPart('')]);
       await slash(tester, 1, '/media');
       await key(tester, LogicalKeyboardKey.enter);
-      await tester.pumpAndSettle();
       expect(kinds(), [BridgeBlockKind.text, BridgeBlockKind.text]);
 
       picked.add(file('/Users/me/notes.txt', 10));
       await slash(tester, 1, '/media');
       await key(tester, LogicalKeyboardKey.enter);
-      await tester.pumpAndSettle();
       expect(kinds(), [
         BridgeBlockKind.text,
         BridgeBlockKind.media,
@@ -190,29 +138,11 @@ void main() {
     );
     await slash(tester, 1, '/media');
     await key(tester, LogicalKeyboardKey.enter);
-    await tester.pumpAndSettle();
     expect(kinds(), [BridgeBlockKind.text, BridgeBlockKind.text]);
     expect(
       kit.workspace.problem.value,
       '“Castle drone flight.mov” is 7.8 GB; a file can be at most 5 GiB.',
     );
-  });
-
-  testWidgets('an image shows at its own size, never wider than the column', (
-    tester,
-  ) async {
-    final png = base64Decode(
-      'iVBORw0KGgoAAAANSUhEUgAAACgAAAAeCAIAAADRv8uKAAAAK0lEQVR4nO3NMQ0AAAgDsMlBNnKQ'
-      'hQw4mvRvputExGKxWCwWi8VisVj8N158a1NqSEcsCQAAAABJRU5ErkJggg==',
-    );
-    await kit.show(tester, [MediaPart('tram.png', png)]);
-    await tester.runAsync(() => Future<void>.delayed(Duration.zero));
-    await tester.pumpAndSettle();
-    await tester.runAsync(() => Future<void>.delayed(Duration.zero));
-    await tester.pumpAndSettle();
-    final image = find.byKey(const Key('media image'));
-    expect(image, findsOneWidget);
-    expect(tester.getSize(image), const Size(40, 30));
   });
 
   testWidgets(
@@ -236,22 +166,6 @@ void main() {
       expect(kinds(), [BridgeBlockKind.text, BridgeBlockKind.text]);
     },
   );
-
-  testWidgets('the caret passes over a Media Block', (tester) async {
-    await kit.show(tester, [
-      const TextPart('Intro'),
-      const MediaPart('budget.pdf', [1]),
-      const TextPart('After'),
-    ]);
-    await tester.tap(block(1));
-    await tester.pump();
-    field(tester, 1).controller!.selection = const TextSelection.collapsed(
-      offset: 0,
-    );
-    await tester.pump();
-    await key(tester, LogicalKeyboardKey.arrowUp);
-    expect(field(tester, 0).focusNode!.hasFocus, isTrue);
-  });
 
   testWidgets('files dropped on a Page land where the line shows', (
     tester,

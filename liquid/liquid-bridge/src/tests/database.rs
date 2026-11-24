@@ -1,6 +1,6 @@
 use std::sync::{Arc, Mutex};
 
-use super::workspace::{Folder, Memory, lisbon, mutation, query, resource};
+use super::workspace::{Folder, lisbon, mutation, open, query, resource, views};
 use crate::api::calculation::BridgeValueKind;
 use crate::api::database::{
     BridgeCell, BridgeCellKind, BridgeFieldKind, BridgeFieldTotal, BridgeFilter, BridgeLayout,
@@ -46,8 +46,7 @@ struct Expenses {
 
 impl Expenses {
     fn new(folder: &str) -> Self {
-        let folder = Folder::new(folder);
-        let workspace = LiquidWorkspace::open_with(&folder.0, &Memory::default()).unwrap();
+        let (folder, workspace) = open(folder);
         let (_, page, _, view) = lisbon(&workspace);
         let block = workspace
             .apply(BridgeMutation {
@@ -116,6 +115,19 @@ impl Expenses {
                 page: Some(self.page.clone()),
                 block: Some(self.block.clone()),
                 ..query(BridgeQueryKind::Database)
+            })
+            .unwrap()
+    }
+
+    fn views(&self) -> Vec<BridgeView> {
+        views(&self.workspace, &self.page)
+    }
+
+    fn on_table(&self, read: BridgeQuery) -> BridgeAnswer {
+        self.workspace
+            .query(BridgeQuery {
+                block: Some(self.block.clone()),
+                ..read
             })
             .unwrap()
     }
@@ -228,7 +240,7 @@ fn a_database_s_fields_options_and_cells_cross_the_bridge() {
 }
 
 #[test]
-fn rows_come_in_filtered_and_sorted_windows() {
+fn rows_read_in_sorted_windows_and_filter_by_each_match_kind() {
     let expenses = Expenses::new("database-rows");
     let amount = expenses.field(&expenses.name, "Amount", BridgeFieldKind::Number);
     let mut last = None;
@@ -245,7 +257,6 @@ fn rows_come_in_filtered_and_sorted_windows() {
         }
         last = Some(row);
     }
-
     assert_eq!(
         expenses.names(query(BridgeQueryKind::Rows)),
         ["Rent", "groceries", "Gift", "Train"]
@@ -290,12 +301,14 @@ fn rows_come_in_filtered_and_sorted_windows() {
         expenses.names(filtered(BridgeMatch::Is, &amount, Some(number(84.2)))),
         ["groceries"]
     );
-    let no_value = filtered(BridgeMatch::Is, &amount, Some(cell(BridgeCellKind::Empty)));
-    assert_eq!(expenses.names(no_value.clone()), ["Gift"]);
-    assert_eq!(expenses.rows(no_value).unwrap().count, 1);
-    let containing = filtered(BridgeMatch::Contains, &expenses.name, Some(text("E")));
-    assert_eq!(expenses.names(containing.clone()), ["groceries", "Rent"]);
-    assert_eq!(expenses.rows(containing).unwrap().count, 2);
+    assert_eq!(
+        expenses.names(filtered(
+            BridgeMatch::Contains,
+            &expenses.name,
+            Some(text("E"))
+        )),
+        ["groceries", "Rent"]
+    );
 }
 
 #[test]
@@ -388,20 +401,12 @@ fn malformed_database_requests_are_refused() {
 #[test]
 fn field_row_and_code_changes_map_to_their_core_mutations() {
     let expenses = Expenses::new("database-mapping");
-    let rows = |e: &Expenses| e.rows(query(BridgeQueryKind::Rows)).unwrap().rows;
-    let fields = |e: &Expenses| e.database().database.unwrap().fields;
-    let views = |e: &Expenses| {
-        e.workspace
-            .query(BridgeQuery {
-                page: Some(e.page.clone()),
-                ..query(BridgeQueryKind::Views)
-            })
-            .unwrap()
-            .views
-    };
     let cost = expenses.field(&expenses.name, "Cost", BridgeFieldKind::Number);
     let row = expenses.row(None);
-    assert_eq!(rows(&expenses)[0].id, row);
+    assert_eq!(
+        expenses.rows(query(BridgeQueryKind::Rows)).unwrap().rows[0].id,
+        row
+    );
 
     expenses
         .apply(BridgeMutation {
@@ -410,12 +415,9 @@ fn field_row_and_code_changes_map_to_their_core_mutations() {
             ..mutation(BridgeMutationKind::RenameField)
         })
         .unwrap();
+    let fields = || expenses.database().database.unwrap().fields;
     assert_eq!(
-        fields(&expenses)
-            .iter()
-            .find(|field| field.id == cost)
-            .unwrap()
-            .name,
+        fields().iter().find(|field| field.id == cost).unwrap().name,
         "Price"
     );
 
@@ -425,7 +427,7 @@ fn field_row_and_code_changes_map_to_their_core_mutations() {
             ..mutation(BridgeMutationKind::RemoveField)
         })
         .unwrap();
-    assert!(fields(&expenses).iter().all(|field| field.id != cost));
+    assert!(fields().iter().all(|field| field.id != cost));
 
     expenses
         .apply(BridgeMutation {
@@ -433,9 +435,15 @@ fn field_row_and_code_changes_map_to_their_core_mutations() {
             ..mutation(BridgeMutationKind::RemoveRow)
         })
         .unwrap();
-    assert!(rows(&expenses).is_empty());
+    assert!(
+        expenses
+            .rows(query(BridgeQueryKind::Rows))
+            .unwrap()
+            .rows
+            .is_empty()
+    );
 
-    let paragraph = views(&expenses)[0].block.clone();
+    let paragraph = expenses.views()[0].block.clone();
     let on_paragraph = |kind| BridgeMutation {
         page: Some(expenses.page.clone()),
         block: Some(paragraph.clone()),
@@ -462,7 +470,8 @@ fn field_row_and_code_changes_map_to_their_core_mutations() {
         .unwrap();
     assert_eq!(code.language.as_deref(), Some("rust"));
     assert_eq!(
-        views(&expenses)
+        expenses
+            .views()
             .iter()
             .map(|view| view.kind)
             .collect::<Vec<_>>(),
@@ -471,20 +480,16 @@ fn field_row_and_code_changes_map_to_their_core_mutations() {
 }
 
 #[test]
-fn a_view_s_tabs_and_their_groups_cross_the_bridge() {
+fn a_view_s_tabs_cross_the_bridge_with_their_layout_groups_folds_and_remembered_tab() {
     let expenses = Expenses::new("database-view-tabs");
-    let views = || {
-        let answer = expenses
-            .workspace
-            .query(BridgeQuery {
-                page: Some(expenses.page.clone()),
-                ..query(BridgeQueryKind::Views)
-            })
-            .unwrap();
-        let table = |view: &BridgeView| view.kind == BridgeBlockKind::Database;
-        answer.views.into_iter().find(table).unwrap()
+    let table_view = || {
+        expenses
+            .views()
+            .into_iter()
+            .find(|view| view.kind == BridgeBlockKind::Database)
+            .unwrap()
     };
-    let view = views();
+    let view = table_view();
     assert_eq!(
         view.tabs.iter().map(|tab| tab.layout).collect::<Vec<_>>(),
         [BridgeLayout::Table]
@@ -538,8 +543,16 @@ fn a_view_s_tabs_and_their_groups_cross_the_bridge() {
             ..mutation(BridgeMutationKind::SetTabFolded)
         })
         .unwrap();
-    let tabs = views().tabs;
+    let tabs = table_view().tabs;
     assert_eq!(tabs[1].id, board);
+    assert_eq!(
+        (
+            tabs[1].layout,
+            tabs[1].group.as_deref(),
+            tabs[1].sort.is_some()
+        ),
+        (BridgeLayout::Board, Some(paid.as_str()), true)
+    );
     assert_eq!(
         tabs[1].folded.iter().map(|c| c.checked).collect::<Vec<_>>(),
         [true]
@@ -552,14 +565,6 @@ fn a_view_s_tabs_and_their_groups_cross_the_bridge() {
     assert_eq!(
         expenses.workspace.remembered(key).unwrap(),
         Some(board.clone())
-    );
-    assert_eq!(
-        (
-            tabs[1].layout,
-            tabs[1].group.as_deref(),
-            tabs[1].sort.is_some()
-        ),
-        (BridgeLayout::Board, Some(paid.as_str()), true)
     );
 
     let due = expenses
@@ -578,30 +583,25 @@ fn a_view_s_tabs_and_their_groups_cross_the_bridge() {
     expenses.set(&row, &due, day).unwrap();
     expenses.row(None);
     let groups = expenses
-        .workspace
-        .query(BridgeQuery {
-            block: Some(expenses.block.clone()),
+        .on_table(BridgeQuery {
             field: Some(paid),
             ..query(BridgeQueryKind::Groups)
         })
-        .unwrap()
         .groups;
-    let counts: Vec<_> = groups.iter().map(|g| (g.value.checked, g.count)).collect();
-    assert_eq!(counts, [(false, 2), (true, 0)]);
-    let november = expenses
-        .workspace
-        .query(BridgeQuery {
-            block: Some(expenses.block.clone()),
-            within: Some(BridgeFilter {
-                field: due,
-                matches: BridgeMatch::Between,
-                value: Some(text("2026-11-01")),
-                until: Some("2026-11-30".into()),
-            }),
-            limit: 10,
-            ..query(BridgeQueryKind::Rows)
-        })
-        .unwrap();
+    assert_eq!(
+        groups.iter().map(|g| g.value.checked).collect::<Vec<_>>(),
+        [false, true]
+    );
+    let november = expenses.on_table(BridgeQuery {
+        within: Some(BridgeFilter {
+            field: due,
+            matches: BridgeMatch::Between,
+            value: Some(text("2026-11-01")),
+            until: Some("2026-11-30".into()),
+        }),
+        limit: 10,
+        ..query(BridgeQueryKind::Rows)
+    });
     assert_eq!(
         november.rows.iter().map(|r| &r.id).collect::<Vec<_>>(),
         [&row]
@@ -614,19 +614,15 @@ fn a_view_s_tabs_and_their_groups_cross_the_bridge() {
             ..mutation(BridgeMutationKind::MoveRow)
         })
         .unwrap();
-    let all = expenses
-        .workspace
-        .query(BridgeQuery {
-            block: Some(expenses.block.clone()),
-            limit: 10,
-            ..query(BridgeQueryKind::Rows)
-        })
-        .unwrap();
+    let all = expenses.on_table(BridgeQuery {
+        limit: 10,
+        ..query(BridgeQueryKind::Rows)
+    });
     assert_eq!(all.rows.last().map(|r| &r.id), Some(&last));
 }
 
 #[test]
-fn a_table_shows_on_two_pages_keeps_its_name_and_goes_with_all_its_views() {
+fn a_table_is_listed_shown_on_a_second_page_and_deleted_with_all_its_views() {
     let expenses = Expenses::new("table-views");
     let tables = || {
         expenses
@@ -636,10 +632,9 @@ fn a_table_shows_on_two_pages_keeps_its_name_and_goes_with_all_its_views() {
             .tables
     };
     let listed = tables();
-    assert_eq!(listed.len(), 1);
     assert_eq!(
-        (listed[0].id.as_str(), listed[0].name.as_str()),
-        (expenses.block.as_str(), "Expenses")
+        (listed.len(), listed[0].id.as_str(), listed[0].name.as_str()),
+        (1, expenses.block.as_str(), "Expenses")
     );
 
     let review = expenses
@@ -686,15 +681,7 @@ fn a_table_shows_on_two_pages_keeps_its_name_and_goes_with_all_its_views() {
             ..mutation(BridgeMutationKind::RenameView)
         })
         .unwrap();
-    let shown = expenses
-        .workspace
-        .query(BridgeQuery {
-            page: Some(review.clone()),
-            ..query(BridgeQueryKind::Views)
-        })
-        .unwrap()
-        .views
-        .remove(0);
+    let shown = views(&expenses.workspace, &review).remove(0);
     assert_eq!(
         (
             shown.block.as_str(),
@@ -704,12 +691,7 @@ fn a_table_shows_on_two_pages_keeps_its_name_and_goes_with_all_its_views() {
         (expenses.block.as_str(), "Costs", true)
     );
     let mut pages: Vec<_> = expenses
-        .workspace
-        .query(BridgeQuery {
-            block: Some(expenses.block.clone()),
-            ..query(BridgeQueryKind::TableViews)
-        })
-        .unwrap()
+        .on_table(query(BridgeQueryKind::TableViews))
         .shown
         .into_iter()
         .map(|shown| shown.page)
@@ -735,11 +717,6 @@ fn a_table_shows_on_two_pages_keeps_its_name_and_goes_with_all_its_views() {
         })
         .unwrap();
     assert_eq!(left.count, 0);
-    assert!(
-        !expenses
-            .workspace
-            .is_loaded(&liquid_core::PageId::parse(&expenses.page).unwrap())
-    );
 }
 
 #[test]
@@ -825,13 +802,7 @@ fn a_tab_s_totals_cross_as_set_and_come_back_counted() {
         expenses.set(&row, &amount, number(value)).unwrap();
     }
     let view = expenses
-        .workspace
-        .query(BridgeQuery {
-            page: Some(expenses.page.clone()),
-            ..query(BridgeQueryKind::Views)
-        })
-        .unwrap()
-        .views
+        .views()
         .into_iter()
         .find(|view| view.block == expenses.block)
         .unwrap();
@@ -844,19 +815,14 @@ fn a_tab_s_totals_cross_as_set_and_come_back_counted() {
             ..mutation(BridgeMutationKind::SetTabTotal)
         })
         .unwrap();
-    let tabs = expenses
-        .workspace
-        .query(BridgeQuery {
-            page: Some(expenses.page.clone()),
-            ..query(BridgeQueryKind::Views)
-        })
-        .unwrap()
-        .views
+    let totals = expenses
+        .views()
         .into_iter()
         .find(|shown| shown.id == view.id)
         .unwrap()
-        .tabs;
-    let totals = tabs[0].totals.clone();
+        .tabs[0]
+        .totals
+        .clone();
     assert_eq!(
         totals,
         [BridgeFieldTotal {

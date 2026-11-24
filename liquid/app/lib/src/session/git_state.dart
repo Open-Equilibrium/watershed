@@ -23,8 +23,6 @@ class QuickAction {
   final QuickKind kind;
   final BridgeGitAction? action;
   final String? hint;
-
-  bool get disabled => kind == QuickKind.showHint;
 }
 
 enum MenuItem { commit, push, createPullRequest }

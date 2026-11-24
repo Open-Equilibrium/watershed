@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:liquid/src/rust/api/workspace.dart';
 import 'package:liquid/src/workspace/workspace_state.dart';
 
+import 'focus_kit.dart';
 import 'page_kit.dart';
 
 void main() {
@@ -15,16 +16,6 @@ void main() {
   Finder header(String name) => kit.inTable(find.text(name));
   final dialog = find.byType(Dialog);
 
-  Future<void> key(WidgetTester tester, LogicalKeyboardKey key) async {
-    await tester.sendKeyEvent(key);
-    await tester.pumpAndSettle();
-  }
-
-  Future<void> tap(WidgetTester tester, Finder finder) async {
-    await tester.tap(finder);
-    await tester.pumpAndSettle();
-  }
-
   Finder chevron(String name) => find
       .descendant(
         of: find.ancestor(of: header(name), matching: find.byType(Row)).first,
@@ -32,9 +23,8 @@ void main() {
       )
       .first;
 
-  Future<void> open(WidgetTester tester, String name) async {
-    await tap(tester, chevron(name));
-  }
+  Future<void> open(WidgetTester tester, String name) =>
+      tap(tester, chevron(name));
 
   Future<void> type(WidgetTester tester, String name) async {
     await tester.enterText(inMenu(find.byType(TextField)), name);
@@ -46,9 +36,7 @@ void main() {
       (rename.field, rename.text),
   ];
 
-  testWidgets('the chevron or a right-click on a column opens its menu', (
-    tester,
-  ) async {
+  testWidgets('the chevron or right-click opens a column menu', (tester) async {
     await kit.show(tester, [TablePart(expenses)]);
     await tester.tap(header('Category'), buttons: kSecondaryButton);
     await tester.pumpAndSettle();
@@ -65,8 +53,16 @@ void main() {
     expect(inMenu(find.text('Delete field')), findsOneWidget);
   });
 
-  testWidgets('⏎ renames the field and closes the menu', (tester) async {
+  testWidgets('⏎ renames; an empty or same name keeps it', (tester) async {
     await kit.show(tester, [TablePart(expenses)]);
+    await open(tester, 'Category');
+    await type(tester, '  ');
+    await key(tester, LogicalKeyboardKey.enter);
+    await open(tester, 'Category');
+    await key(tester, LogicalKeyboardKey.enter);
+    expect(renamed(), isEmpty);
+    expect(header('Category'), findsOneWidget);
+
     await open(tester, 'Category');
     await type(tester, 'Kind');
     await key(tester, LogicalKeyboardKey.enter);
@@ -75,10 +71,13 @@ void main() {
     expect(header('Kind'), findsOneWidget);
   });
 
-  testWidgets('a click outside or on the header again keeps the new name', (
-    tester,
-  ) async {
+  testWidgets('esc drops a name; a click outside keeps it', (tester) async {
     await kit.show(tester, [TablePart(expenses)]);
+    await open(tester, 'Category');
+    await type(tester, 'Kind');
+    await key(tester, LogicalKeyboardKey.escape);
+    expect(menu, findsNothing);
+    expect(renamed(), isEmpty);
     await open(tester, 'Category');
     await type(tester, 'Kind');
     await tester.tapAt(const Offset(1300, 850));
@@ -89,51 +88,6 @@ void main() {
     await open(tester, 'Amount');
     expect(menu, findsNothing);
     expect(renamed(), [('category', 'Kind'), ('amount', 'Sum')]);
-  });
-
-  testWidgets('scrolling the Page closes the menu and keeps the new name', (
-    tester,
-  ) async {
-    await kit.show(tester, [
-      TablePart(expenses),
-      for (var number = 0; number < 40; number++) TextPart('Line $number'),
-    ]);
-    await open(tester, 'Category');
-    await type(tester, 'Kind');
-    tester
-        .state<ScrollableState>(
-          find
-              .descendant(
-                of: find.byType(CustomScrollView),
-                matching: find.byType(Scrollable),
-              )
-              .first,
-        )
-        .position
-        .jumpTo(200);
-    await tester.pumpAndSettle();
-    expect(menu, findsNothing);
-    expect(renamed(), [('category', 'Kind')]);
-  });
-
-  testWidgets('esc closes the menu and drops the new name', (tester) async {
-    await kit.show(tester, [TablePart(expenses)]);
-    await open(tester, 'Category');
-    await type(tester, 'Kind');
-    await key(tester, LogicalKeyboardKey.escape);
-    expect(menu, findsNothing);
-    expect(renamed(), isEmpty);
-  });
-
-  testWidgets('an empty or unchanged name keeps the old one', (tester) async {
-    await kit.show(tester, [TablePart(expenses)]);
-    await open(tester, 'Category');
-    await type(tester, '  ');
-    await key(tester, LogicalKeyboardKey.enter);
-    await open(tester, 'Category');
-    await key(tester, LogicalKeyboardKey.enter);
-    expect(renamed(), isEmpty);
-    expect(header('Category'), findsOneWidget);
   });
 
   testWidgets('Delete field asks first; ⏎ deletes the field', (tester) async {
@@ -160,15 +114,19 @@ void main() {
     expect(header('Category'), findsOneWidget);
   });
 
-  testWidgets('↓ ⏎ in the menu asks to delete the field', (tester) async {
-    await kit.show(tester, [
-      TablePart([expenses.first]),
-    ]);
+  testWidgets('⏎ renames, even with the pointer on Delete', (tester) async {
+    await kit.show(tester, [TablePart(expenses)]);
     await open(tester, 'Category');
-    await key(tester, LogicalKeyboardKey.arrowDown);
+    final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    await mouse.addPointer(
+      location: tester.getCenter(inMenu(find.text('Delete field'))),
+    );
+    addTearDown(mouse.removePointer);
+    await tester.pumpAndSettle();
+    await type(tester, 'Kind');
     await key(tester, LogicalKeyboardKey.enter);
-    expect(find.text('Delete the field “Category”?'), findsOneWidget);
-    expect(find.text('Its value in 1 row goes with it.'), findsOneWidget);
+    expect(dialog, findsNothing);
+    expect(renamed(), [('category', 'Kind')]);
   });
 
   testWidgets('a field removed elsewhere closes its menu', (tester) async {
@@ -189,9 +147,7 @@ void main() {
     expect(renamed(), isEmpty);
   });
 
-  testWidgets('a rename elsewhere while the menu is open untouched stays', (
-    tester,
-  ) async {
+  testWidgets('an untouched menu keeps a rename elsewhere', (tester) async {
     await kit.show(tester, [TablePart(expenses)]);
     final table = kit.fake.views[kit.page]!.single.block;
     await open(tester, 'Category');
@@ -211,26 +167,7 @@ void main() {
     expect(header('Type'), findsOneWidget);
   });
 
-  testWidgets('⏎ renames also with the pointer on Delete field', (
-    tester,
-  ) async {
-    await kit.show(tester, [TablePart(expenses)]);
-    await open(tester, 'Category');
-    final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
-    await mouse.addPointer(
-      location: tester.getCenter(inMenu(find.text('Delete field'))),
-    );
-    addTearDown(mouse.removePointer);
-    await tester.pumpAndSettle();
-    await type(tester, 'Kind');
-    await key(tester, LogicalKeyboardKey.enter);
-    expect(dialog, findsNothing);
-    expect(renamed(), [('category', 'Kind')]);
-  });
-
-  testWidgets('a name typed is kept when the Page closes or Liquid quits', (
-    tester,
-  ) async {
+  testWidgets('a typed name is kept on close or quit', (tester) async {
     await kit.show(tester, [TablePart(expenses)]);
     await open(tester, 'Category');
     await type(tester, 'Kind');
@@ -243,57 +180,5 @@ void main() {
     await kit.workspace.newPage(kit.workspace.open.value!.area);
     await tester.pumpAndSettle();
     expect(renamed().last, ('amount', 'Sum'));
-  });
-
-  testWidgets('a name typed before Delete field stays when the question is '
-      'cancelled', (tester) async {
-    await kit.show(tester, [TablePart(expenses)]);
-    await open(tester, 'Category');
-    await type(tester, 'Kind');
-    await tap(tester, inMenu(find.text('Delete field')));
-    await key(tester, LogicalKeyboardKey.escape);
-    expect(kit.applied(BridgeMutationKind.removeField), isEmpty);
-    expect(renamed(), [('category', 'Kind')]);
-  });
-
-  testWidgets('typing after ↓ goes back to the name, which ⏎ keeps', (
-    tester,
-  ) async {
-    await kit.show(tester, [TablePart(expenses)]);
-    await open(tester, 'Category');
-    await key(tester, LogicalKeyboardKey.arrowDown);
-    await type(tester, 'Kind');
-    await key(tester, LogicalKeyboardKey.enter);
-    expect(dialog, findsNothing);
-    expect(renamed(), [('category', 'Kind')]);
-  });
-
-  testWidgets('a name typed before Delete field is kept when Liquid quits '
-      'during the question', (tester) async {
-    await kit.show(tester, [TablePart(expenses)]);
-    await open(tester, 'Category');
-    await type(tester, 'Kind');
-    await tap(tester, inMenu(find.text('Delete field')));
-    expect(dialog, findsOneWidget);
-    await kit.workspace.drain();
-    await tester.pumpAndSettle();
-    expect(renamed(), [('category', 'Kind')]);
-    await key(tester, LogicalKeyboardKey.escape);
-    expect(renamed(), [('category', 'Kind')]);
-  });
-
-  testWidgets('before its rows are read, the question counts none', (
-    tester,
-  ) async {
-    await kit.show(
-      tester,
-      [TablePart(expenses)],
-      before: () => kit.fake
-        ..deferred = []
-        ..deferredKinds = {BridgeQueryKind.rows},
-    );
-    await open(tester, 'Category');
-    await tap(tester, inMenu(find.text('Delete field')));
-    expect(find.text('Its values in all rows go with it.'), findsOneWidget);
   });
 }

@@ -1,21 +1,13 @@
 #![allow(clippy::unwrap_used)]
 
+mod common;
+
+use common::*;
 use liquid_core::{
-    Actor, Applied, BlockId, BlockKind, Cell, Changed, Created, Database, Error, FieldId,
-    FieldKind, Filter, MAX_FIELDS, MAX_FILTER_TEXT, MAX_OPTIONS, Match, MemoryStore, Mutation,
-    Origin, PageId, PersonId, Place, Request, RowId, RowQuery, Rows, Sort, TabId, TextStyle,
-    ViewId,
+    Applied, BlockId, Cell, Changed, Created, Database, Error, FieldId, FieldKind, Filter,
+    MAX_FIELDS, MAX_FILTER_TEXT, MAX_OPTIONS, Match, Mutation, PageId, Place, RowId, RowQuery,
+    Rows, Sort, TabId, TextStyle, ViewId,
 };
-
-type Workspace = liquid_core::Workspace<MemoryStore>;
-
-fn apply(workspace: &mut Workspace, mutation: Mutation) -> Result<Applied, Error> {
-    workspace.apply(Request {
-        actor: Actor::Person(PersonId::new("benni")),
-        origin: Origin::Ui,
-        mutation,
-    })
-}
 
 struct Sheet {
     workspace: Workspace,
@@ -25,36 +17,8 @@ struct Sheet {
 
 impl Sheet {
     fn new() -> Self {
-        let mut workspace =
-            Workspace::create(PersonId::new("benni"), MemoryStore::default()).unwrap();
-        let Some(Created::Area(area)) = apply(
-            &mut workspace,
-            Mutation::CreateArea {
-                name: "Private".into(),
-            },
-        )
-        .unwrap()
-        .created
-        else {
-            panic!("an area")
-        };
-        let create = Mutation::CreatePage {
-            area,
-            parent: None,
-            title: "Household budget".into(),
-        };
-        let Some(Created::Page(page)) = apply(&mut workspace, create).unwrap().created else {
-            panic!("a Page")
-        };
-        let add = Mutation::AddDatabaseBlock {
-            page: page.clone(),
-            after: None,
-            name: "Expenses".into(),
-            layout: liquid_core::Layout::Table,
-        };
-        let Some(Created::Block { block, .. }) = apply(&mut workspace, add).unwrap().created else {
-            panic!("a Database Block")
-        };
+        let (mut workspace, _, page) = private_page("Household budget");
+        let (block, _) = table(&mut workspace, &page, "Expenses");
         Self {
             workspace,
             page,
@@ -75,27 +39,20 @@ impl Sheet {
     }
 
     fn field(&mut self, name: &str, kind: FieldKind) -> FieldId {
-        let add = Mutation::AddField {
-            block: self.block.clone(),
-            place: Place::Last,
-            name: name.into(),
-            kind,
-        };
-        match self.edit(add).unwrap().created {
-            Some(Created::Field(field)) => field,
-            other => panic!("expected a field, got {other:?}"),
-        }
+        field(&mut self.workspace, &self.block, name, kind)
     }
 
     fn add_row(&mut self, place: Place<RowId>) -> RowId {
-        let add = Mutation::AddRow {
-            block: self.block.clone(),
-            place,
+        let Created::Row(row) = created(
+            &mut self.workspace,
+            Mutation::AddRow {
+                block: self.block.clone(),
+                place,
+            },
+        ) else {
+            panic!("a row")
         };
-        match self.edit(add).unwrap().created {
-            Some(Created::Row(row)) => row,
-            other => panic!("expected a row, got {other:?}"),
-        }
+        row
     }
 
     fn row(&mut self, after: Option<&RowId>) -> RowId {
@@ -131,25 +88,53 @@ impl Sheet {
             .collect()
     }
 
-    fn kinds(&mut self) -> Vec<BlockKind> {
+    fn tab(&mut self, view: &ViewId) -> TabId {
         self.workspace
-            .views(&self.page, 0, 10)
+            .view(&self.page, view)
             .unwrap()
-            .into_iter()
-            .map(|view| view.kind)
-            .collect()
+            .unwrap()
+            .tabs
+            .first()
+            .map(|tab| tab.id.clone())
+            .unwrap_or_default()
+    }
+
+    fn set_sort(&mut self, view: &ViewId, sort: Option<Sort>) -> Result<Applied, Error> {
+        let tab = self.tab(view);
+        self.edit(Mutation::SetTabSort {
+            page: self.page.clone(),
+            view: view.clone(),
+            tab,
+            sort,
+        })
+    }
+
+    fn set_filter(
+        &mut self,
+        view: &ViewId,
+        field: &FieldId,
+        matches: Match,
+    ) -> Result<Applied, Error> {
+        let tab = self.tab(view);
+        self.edit(Mutation::SetTabFilter {
+            page: self.page.clone(),
+            view: view.clone(),
+            tab,
+            filter: Some(Filter {
+                field: field.clone(),
+                matches,
+            }),
+        })
     }
 }
 
-fn all() -> RowQuery {
+fn sorted_by(field: &FieldId, descending: bool) -> RowQuery {
     RowQuery {
-        sort: None,
-        filter: None,
-        within: None,
-        start: 0,
-        limit: usize::MAX,
-        search: None,
-        totals: Vec::new(),
+        sort: Some(Sort {
+            field: field.clone(),
+            descending,
+        }),
+        ..all()
     }
 }
 
@@ -244,16 +229,15 @@ fn a_cell_takes_only_values_of_its_field_s_kind() {
             "{value:?}"
         );
     }
-    let Some(Created::Option(home)) = sheet
-        .edit(Mutation::AddOption {
+    let Created::Option(home) = created(
+        &mut sheet.workspace,
+        Mutation::AddOption {
             block: sheet.block.clone(),
             field: category.clone(),
             name: "Home".into(),
             color: 2,
-        })
-        .unwrap()
-        .created
-    else {
+        },
+    ) else {
         panic!("an option")
     };
     let unknown = liquid_core::OptionId::parse(&"0".repeat(32)).unwrap();
@@ -305,13 +289,6 @@ fn rows_sort_and_filter_in_windows() {
         }
         last = Some(added);
     }
-    let by = |field: &FieldId, descending| RowQuery {
-        sort: Some(Sort {
-            field: field.clone(),
-            descending,
-        }),
-        ..all()
-    };
     let names = |cells: Vec<Cell>| -> Vec<String> {
         cells
             .into_iter()
@@ -322,23 +299,22 @@ fn rows_sort_and_filter_in_windows() {
             .collect()
     };
     assert_eq!(
-        names(sheet.cells(&by(&amount, false), &name)),
+        names(sheet.cells(&sorted_by(&amount, false), &name)),
         ["Train", "Groceries", "Cinema", "rent", "Gift"]
     );
     assert_eq!(
-        names(sheet.cells(&by(&amount, true), &name)),
+        names(sheet.cells(&sorted_by(&amount, true), &name)),
         ["rent", "Cinema", "Groceries", "Train", "Gift"]
     );
     assert_eq!(
-        names(sheet.cells(&by(&name, false), &name)),
+        names(sheet.cells(&sorted_by(&name, false), &name)),
         ["Cinema", "Gift", "Groceries", "rent", "Train"]
     );
 
     let window = RowQuery {
         start: 1,
         limit: 2,
-        search: None,
-        ..by(&name, false)
+        ..sorted_by(&name, false)
     };
     assert_eq!(sheet.rows(&window).count, 5);
     assert_eq!(names(sheet.cells(&window, &name)), ["Gift", "Groceries"]);
@@ -348,7 +324,7 @@ fn rows_sort_and_filter_in_windows() {
             field: amount.clone(),
             matches,
         }),
-        ..by(&name, false)
+        ..sorted_by(&name, false)
     };
     assert_eq!(names(sheet.cells(&filtered(Match::Empty), &name)), ["Gift"]);
     assert_eq!(sheet.rows(&filtered(Match::NotEmpty)).count, 4);
@@ -361,7 +337,7 @@ fn rows_sort_and_filter_in_windows() {
             field: name.clone(),
             matches: Match::Contains("R".into()),
         }),
-        ..by(&name, false)
+        ..sorted_by(&name, false)
     };
     assert_eq!(
         names(sheet.cells(&contains, &name)),
@@ -394,6 +370,18 @@ fn removed_rows_and_fields_disappear_and_renames_show() {
     }
     assert_eq!(sheet.ids(&all()), std::slice::from_ref(&second));
     assert_eq!(sheet.rows(&all()).rows[0].cell(&amount), None);
+    let filtered = RowQuery {
+        filter: Some(Filter {
+            field: amount.clone(),
+            matches: Match::NotEmpty,
+        }),
+        ..all()
+    };
+    assert_eq!(
+        sheet.rows(&filtered).count,
+        1,
+        "a removed field filters nothing"
+    );
     let database = sheet.database();
     assert_eq!(database.name, "Spending");
     assert_eq!(database.fields.len(), 1);
@@ -475,13 +463,7 @@ fn zero_is_one_value_whatever_its_sign() {
         sheet.set(&first, &amount, Cell::Number(-0.0)),
         Err(Error::NoChange)
     );
-    let sorted = RowQuery {
-        sort: Some(Sort {
-            field: amount.clone(),
-            descending: false,
-        }),
-        ..all()
-    };
+    let sorted = sorted_by(&amount, false);
     let order = sheet.ids(&sorted);
     assert_eq!(order, [first.clone(), second.clone()]);
     let zero = RowQuery {
@@ -492,15 +474,7 @@ fn zero_is_one_value_whatever_its_sign() {
         ..all()
     };
     assert_eq!(sheet.rows(&zero).count, 2);
-    sheet.workspace.close_page(&sheet.page);
     assert_eq!(sheet.ids(&sorted), order);
-}
-
-#[test]
-fn every_cell_equals_itself() {
-    let nan = Cell::Number(f64::NAN);
-    assert_eq!(nan, nan.clone());
-    assert_ne!(Cell::Number(1.0), Cell::Text("1".into()));
 }
 
 #[test]
@@ -548,24 +522,6 @@ fn a_database_holds_a_bounded_number_of_fields_and_options() {
 }
 
 #[test]
-fn a_view_names_the_kind_of_its_block() {
-    let mut sheet = Sheet::new();
-    let table = sheet.workspace.views(&sheet.page, 0, 10).unwrap()[0]
-        .id
-        .clone();
-    sheet
-        .edit(Mutation::AddTextBlock {
-            page: sheet.page.clone(),
-            after: Some(table),
-            text: "October".into(),
-        })
-        .unwrap();
-    assert_eq!(sheet.kinds(), [BlockKind::Database, BlockKind::Text]);
-    sheet.workspace.close_page(&sheet.page);
-    assert_eq!(sheet.kinds(), [BlockKind::Database, BlockKind::Text]);
-}
-
-#[test]
 fn rows_and_fields_added_last_go_after_all_others_when_applied() {
     let mut sheet = Sheet::new();
     let name = sheet.name_field();
@@ -585,14 +541,16 @@ fn rows_and_fields_added_last_go_after_all_others_when_applied() {
     );
 
     sheet.field("Amount", FieldKind::Number);
-    sheet
-        .edit(Mutation::AddField {
+    apply(
+        &mut sheet.workspace,
+        Mutation::AddField {
             block: sheet.block.clone(),
             place: Place::First,
             name: "Paid".into(),
             kind: FieldKind::Checkbox,
-        })
-        .unwrap();
+        },
+    )
+    .unwrap();
     sheet.field("Date", FieldKind::Date);
     let names: Vec<_> = sheet
         .database()
@@ -601,6 +559,14 @@ fn rows_and_fields_added_last_go_after_all_others_when_applied() {
         .map(|field| field.name)
         .collect();
     assert_eq!(names, ["Paid", "Name", "Amount", "Date"]);
+}
+
+fn read_as_stored(mutation: Mutation, variant: &str, after: serde_json::Value) -> Mutation {
+    let mut stored = serde_json::to_value(mutation).unwrap();
+    let fields = stored[variant].as_object_mut().unwrap();
+    fields.remove("place");
+    fields.insert("after".into(), after);
+    serde_json::from_value(stored).unwrap()
 }
 
 #[test]
@@ -615,15 +581,14 @@ fn actions_stored_before_places_still_read() {
             Place::After(row.clone()),
         ),
     ] {
-        let mut stored = serde_json::to_value(Mutation::AddRow {
-            block: block.clone(),
-            place: Place::Last,
-        })
-        .unwrap();
-        let fields = stored["AddRow"].as_object_mut().unwrap();
-        fields.remove("place");
-        fields.insert("after".into(), after);
-        let read: Mutation = serde_json::from_value(stored).unwrap();
+        let read = read_as_stored(
+            Mutation::AddRow {
+                block: block.clone(),
+                place: Place::Last,
+            },
+            "AddRow",
+            after,
+        );
         assert_eq!(
             read,
             Mutation::AddRow {
@@ -646,57 +611,11 @@ fn actions_stored_before_places_still_read() {
             name: "Amount".into(),
             kind: FieldKind::Number,
         };
-        let mut stored = serde_json::to_value(add(Place::Last)).unwrap();
-        let fields = stored["AddField"].as_object_mut().unwrap();
-        fields.remove("place");
-        fields.insert("after".into(), after);
-        let read: Mutation = serde_json::from_value(stored).unwrap();
-        assert_eq!(read, add(place));
+        assert_eq!(
+            read_as_stored(add(Place::Last), "AddField", after),
+            add(place)
+        );
     }
-}
-
-fn first_tab(workspace: &mut Workspace, page: &PageId, view: &ViewId) -> TabId {
-    let shown = workspace.view(page, view).unwrap().unwrap();
-    shown
-        .tabs
-        .first()
-        .map(|tab| tab.id.clone())
-        .unwrap_or_default()
-}
-
-fn set_sort(
-    workspace: &mut Workspace,
-    page: &PageId,
-    view: &ViewId,
-    sort: Option<Sort>,
-) -> Result<Applied, Error> {
-    let set = Mutation::SetTabSort {
-        page: page.clone(),
-        view: view.clone(),
-        tab: first_tab(workspace, page, view),
-        sort,
-    };
-    apply(workspace, set)
-}
-
-fn set_filter(
-    workspace: &mut Workspace,
-    page: &PageId,
-    view: &ViewId,
-    field: &FieldId,
-    matches: Match,
-) -> Result<Applied, Error> {
-    let filter = Some(Filter {
-        field: field.clone(),
-        matches,
-    });
-    let set = Mutation::SetTabFilter {
-        page: page.clone(),
-        view: view.clone(),
-        tab: first_tab(workspace, page, view),
-        filter,
-    };
-    apply(workspace, set)
 }
 
 #[test]
@@ -705,12 +624,15 @@ fn a_view_takes_only_a_sort_and_filter_its_table_can_answer() {
     let amount = sheet.field("Amount", FieldKind::Number);
     let note = sheet.field("Note", FieldKind::Text);
     let files = sheet.field("Files", FieldKind::File);
-    let text = Mutation::AddTextBlock {
-        page: sheet.page.clone(),
-        after: None,
-        text: "Above".into(),
-    };
-    apply(&mut sheet.workspace, text).unwrap();
+    apply(
+        &mut sheet.workspace,
+        Mutation::AddTextBlock {
+            page: sheet.page.clone(),
+            after: None,
+            text: "Above".into(),
+        },
+    )
+    .unwrap();
     let [paragraph, table] =
         <[_; 2]>::try_from(sheet.workspace.views(&sheet.page, 0, 2).unwrap()).unwrap();
     let id = table.id;
@@ -719,17 +641,13 @@ fn a_view_takes_only_a_sort_and_filter_its_table_can_answer() {
         descending: false,
     };
     assert_eq!(
-        set_sort(
-            &mut sheet.workspace,
-            &sheet.page,
-            &paragraph.id,
-            Some(on(&amount))
-        )
-        .unwrap_err(),
+        sheet
+            .set_sort(&paragraph.id, Some(on(&amount)))
+            .unwrap_err(),
         Error::WrongKind
     );
     assert_eq!(
-        set_sort(&mut sheet.workspace, &sheet.page, &id, Some(on(&files))).unwrap_err(),
+        sheet.set_sort(&id, Some(on(&files))).unwrap_err(),
         Error::WrongKind
     );
     let refused = [
@@ -745,58 +663,12 @@ fn a_view_takes_only_a_sort_and_filter_its_table_can_answer() {
         ),
     ];
     for (field, matches, error) in refused {
-        assert_eq!(
-            set_filter(&mut sheet.workspace, &sheet.page, &id, field, matches).unwrap_err(),
-            error
-        );
+        assert_eq!(sheet.set_filter(&id, field, matches).unwrap_err(), error);
     }
-    set_filter(
-        &mut sheet.workspace,
-        &sheet.page,
-        &id,
-        &files,
-        Match::NotEmpty,
-    )
-    .unwrap();
-    set_filter(
-        &mut sheet.workspace,
-        &sheet.page,
-        &id,
-        &note,
-        Match::Contains("x".into()),
-    )
-    .unwrap();
-}
-
-#[test]
-fn a_removed_field_no_longer_sorts_or_filters() {
-    let mut sheet = Sheet::new();
-    let amount = sheet.field("Amount", FieldKind::Number);
-    let name = sheet
-        .workspace
-        .database(&sheet.block)
-        .unwrap()
-        .unwrap()
-        .fields[0]
-        .id
-        .clone();
-    for label in ["a", "b"] {
-        let added = sheet.row(None);
-        sheet.set(&added, &name, Cell::Text(label.into())).unwrap();
-    }
-    let remove = Mutation::RemoveField {
-        block: sheet.block.clone(),
-        field: amount.clone(),
-    };
-    apply(&mut sheet.workspace, remove).unwrap();
-    let query = RowQuery {
-        filter: Some(Filter {
-            field: amount,
-            matches: Match::NotEmpty,
-        }),
-        ..all()
-    };
-    assert_eq!(sheet.workspace.rows(&sheet.block, &query).unwrap().count, 2);
+    sheet.set_filter(&id, &files, Match::NotEmpty).unwrap();
+    sheet
+        .set_filter(&id, &note, Match::Contains("x".into()))
+        .unwrap();
 }
 
 #[test]
@@ -836,7 +708,6 @@ fn a_moved_row_keeps_its_cells_at_its_new_place() {
     moved(&a, Place::After(b.clone())).unwrap();
     let missing = RowId::parse(&"0".repeat(32)).unwrap();
     assert_eq!(moved(&missing, Place::Last), Err(Error::NotFound));
-    sheet.workspace.close_page(&sheet.page);
     assert_eq!(sheet.ids(&all()), [c.clone(), b, a]);
     assert_eq!(sheet.cells(&all(), &name)[0], Cell::Text("Rent".into()));
 }

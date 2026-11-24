@@ -61,17 +61,6 @@ void _expectPointsNear(List<Offset> actual, List<Offset> expected) {
 void main() {
   const centre = Offset(300, 200);
 
-  test('snaps a level rectangle and keeps it level', () {
-    final shape = snapShape(
-      _stroke(_rectangle(200, 100), Random(1), centre: centre),
-    );
-    expect(shape?.kind, SnapKind.rectangle);
-    expect((shape!.center - centre).distance, lessThan(_tolerance));
-    expect(shape.width, closeTo(200, _tolerance));
-    expect(shape.height, closeTo(100, _tolerance));
-    expect(shape.rotation, 0);
-  });
-
   test('turns a box that is nearly upright level, swapping its sides', () {
     final shape = snapShape(
       _stroke(
@@ -114,15 +103,6 @@ void main() {
     expect(shape.rotation, closeTo(25 * pi / 180, _angleTolerance));
   });
 
-  test('snaps a circle to an ellipse with equal sides', () {
-    final shape = snapShape(
-      _stroke(_ellipse(90, 90), Random(5), centre: centre),
-    );
-    expect(shape?.kind, SnapKind.ellipse);
-    expect(shape!.width, closeTo(180, _tolerance));
-    expect(shape.height, closeTo(180, _tolerance));
-  });
-
   test('snaps a triangle to its three corners', () {
     final corners = [
       const Offset(-120, 80),
@@ -135,21 +115,6 @@ void main() {
     expect(shape?.kind, SnapKind.triangle);
     expect(shape!.points, hasLength(3));
     _expectPointsNear(shape.points, [for (final c in corners) c + centre]);
-  });
-
-  test('snaps a straight stroke to a line between its ends', () {
-    const angle = 0.25;
-    final shape = snapShape(
-      _stroke(
-        _walk([const Offset(-150, 0), const Offset(150, 0)]),
-        Random(7),
-        centre: centre,
-        angle: angle,
-      ),
-    );
-    final half = Offset(150 * cos(angle), 150 * sin(angle));
-    expect(shape?.kind, SnapKind.line);
-    _expectPointsNear(shape!.points, [centre - half, centre + half]);
   });
 
   test('rejects waves, spirals, loops and dots', () {

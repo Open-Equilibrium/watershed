@@ -150,7 +150,8 @@ class _SessionCardState extends State<SessionCard> {
     final servers = shown.shows(CardItem.servers)
         ? state.servers.value
         : const <BridgeLocalServer>[];
-    final automations = shown.shows(CardItem.automations)
+    final showAutomations = shown.shows(CardItem.automations);
+    final automations = showAutomations
         ? state.automations.value
         : const <BridgeAutomation>[];
     final agent = state.agents.composing.value ? null : state.agents.open.value;
@@ -175,8 +176,9 @@ class _SessionCardState extends State<SessionCard> {
       hasPull,
       hasGit,
       hasChanges,
-      servers.isNotEmpty,
-      automations.isNotEmpty,
+      servers.length,
+      showAutomations,
+      automations.length,
       agent != null,
       hasLineage,
       hasSideChats,
@@ -242,7 +244,7 @@ class _SessionCardState extends State<SessionCard> {
             AgentSection(state: state, hosted: agent, divided: divided),
       );
     }
-    if (full && (automations.isNotEmpty || agent != null)) {
+    if (full && showAutomations && (automations.isNotEmpty || agent != null)) {
       add(
         (divided) => AutomationsSection(
           state: state,

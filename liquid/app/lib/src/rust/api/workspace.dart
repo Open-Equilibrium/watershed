@@ -456,6 +456,7 @@ enum BridgeMutationKind {
   createArea,
   createPage,
   renamePage,
+  setPageIcon,
   addTextBlock,
   editText,
   removeView,
@@ -523,11 +524,18 @@ class BridgePage {
   final String id;
   final String? parent;
   final String title;
+  final String icon;
 
-  const BridgePage({required this.id, this.parent, required this.title});
+  const BridgePage({
+    required this.id,
+    this.parent,
+    required this.title,
+    required this.icon,
+  });
 
   @override
-  int get hashCode => id.hashCode ^ parent.hashCode ^ title.hashCode;
+  int get hashCode =>
+      id.hashCode ^ parent.hashCode ^ title.hashCode ^ icon.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -536,7 +544,8 @@ class BridgePage {
           runtimeType == other.runtimeType &&
           id == other.id &&
           parent == other.parent &&
-          title == other.title;
+          title == other.title &&
+          icon == other.icon;
 }
 
 class BridgeQuery {

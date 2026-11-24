@@ -9,6 +9,7 @@ import '../theme/tokens.g.dart';
 import 'board.dart';
 import 'rough.dart';
 import 'board_controller.dart';
+import 'board_painter.dart';
 
 class BoardToolBars extends StatelessWidget {
   const BoardToolBars({super.key, required this.board});
@@ -168,24 +169,40 @@ class BoardToolBars extends StatelessWidget {
               element.kind == BridgeElementKind.shape &&
               element.shape == BridgeShape.line,
         );
-        void change({BridgeInkColor? color, int? width, bool? arrowhead}) =>
-            unawaited(
-              board.edit(
-                change: [
-                  for (final element in selection)
-                    changeOf(
-                      element,
-                      color: color,
-                      width: width,
-                      arrowhead:
-                          element.kind == BridgeElementKind.shape &&
-                              element.shape == BridgeShape.line
-                          ? arrowhead
-                          : null,
-                    ),
-                ],
-              ),
-            );
+        void change({
+          BridgeInkColor? color,
+          int? width,
+          bool? arrowhead,
+        }) => unawaited(
+          board.edit(
+            change: [
+              for (final element in selection)
+                changeOf(
+                  element,
+                  frame: width != null && element.kind == BridgeElementKind.text
+                      ? Rect.fromLTWH(
+                          element.x,
+                          element.y,
+                          element.w,
+                          BoardPainter.textHeight(
+                            element.text,
+                            element.w,
+                            width,
+                            board.handDrawn,
+                          ),
+                        )
+                      : null,
+                  color: color,
+                  width: width,
+                  arrowhead:
+                      element.kind == BridgeElementKind.shape &&
+                          element.shape == BridgeShape.line
+                      ? arrowhead
+                      : null,
+                ),
+            ],
+          ),
+        );
         return [
           ...colors(first.color, (color) => change(color: color)),
           const _Separator(),

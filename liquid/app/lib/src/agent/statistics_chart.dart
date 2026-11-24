@@ -69,6 +69,14 @@ class TurnChart extends StatefulWidget {
 class _TurnChartState extends State<TurnChart> {
   int? _hovered;
 
+  @override
+  void didUpdateWidget(TurnChart old) {
+    super.didUpdateWidget(old);
+    if (_hovered case final hovered? when hovered >= widget.columns.length) {
+      _hovered = null;
+    }
+  }
+
   int? _columnAt(double x, double width) {
     final plot = width - _axisWidth;
     if (widget.columns.isEmpty || x < _axisWidth || plot <= 0) return null;

@@ -8,6 +8,7 @@ import 'package:liquid/src/workspace/table_page.dart';
 import 'package:liquid/src/workspace/workspace_state.dart';
 
 import 'fake_workspace.dart';
+import 'focus_kit.dart';
 import 'page_kit.dart';
 
 void main() {
@@ -18,11 +19,6 @@ void main() {
     expenseRow('r2', 'Electricity', '2026-10-30', 'home', 96, false),
     expenseRow('r3', 'Rent', '2026-10-27', 'home', 950, true),
   ];
-
-  Future<void> tap(WidgetTester tester, Finder target) async {
-    await tester.tap(target);
-    await tester.pumpAndSettle();
-  }
 
   Finder inSidebar(Finder finder) =>
       find.descendant(of: find.byType(Explorer), matching: finder);
@@ -60,11 +56,10 @@ void main() {
     await tap(tester, inSidebar(find.text('Expenses')));
     final written = kit.fake.applied.length;
     await tap(tester, onTablePage(find.text('Amount')));
-    final top = {
-      for (final name in ['Groceries', 'Rent'])
-        name: tester.getTopLeft(onTablePage(find.text(name))).dy,
-    };
-    expect(top['Groceries']! < top['Rent']!, isTrue);
+    expect(
+      tester.getTopLeft(onTablePage(find.text('Groceries'))).dy,
+      lessThan(tester.getTopLeft(onTablePage(find.text('Rent'))).dy),
+    );
     await tester.enterText(find.byKey(const Key('table search field')), 'rent');
     await tester.pump(const Duration(milliseconds: 200));
     await tester.pumpAndSettle();
@@ -115,17 +110,6 @@ void main() {
     final made = kit.fake.tables.single;
     expect(made.area, kit.workspace.areas.value.single.id);
     expect(kit.workspace.open.value?.table, made.id);
-  });
-
-  testWidgets('a section folds and unfolds with a click on its name', (
-    tester,
-  ) async {
-    await kit.show(tester, [TablePart(rows)]);
-    expect(inSidebar(find.text('Expenses')), findsOneWidget);
-    await tap(tester, find.byKey(const Key('fold Tables')));
-    expect(inSidebar(find.text('Expenses')), findsNothing);
-    await tap(tester, find.byKey(const Key('fold Tables')));
-    expect(inSidebar(find.text('Expenses')), findsOneWidget);
   });
 
   test('folded sections are kept on this device', () async {

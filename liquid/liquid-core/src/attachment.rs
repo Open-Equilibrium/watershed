@@ -118,9 +118,11 @@ impl<S: Store> Workspace<S> {
             self.store.discard_upload(&upload.key)?;
             return Err(Error::Changed);
         }
-        if !upload.buffer.is_empty() {
-            self.flush(&mut upload)?;
-        }
+        let staged = if upload.buffer.is_empty() {
+            Ok(())
+        } else {
+            self.flush(&mut upload)
+        };
         let id = AttachmentId(
             upload
                 .hasher
@@ -129,8 +131,14 @@ impl<S: Store> Workspace<S> {
                 .map(|byte| format!("{byte:02x}"))
                 .collect(),
         );
-        self.store
-            .finish_upload(&upload.key, &id, upload.size, upload.parts)?;
+        let stored = staged.and_then(|()| {
+            self.store
+                .finish_upload(&upload.key, &id, upload.size, upload.parts)
+        });
+        if let Err(error) = stored {
+            let _ = self.store.discard_upload(&upload.key);
+            return Err(error);
+        }
         Ok(Attachment {
             id,
             size: upload.size,

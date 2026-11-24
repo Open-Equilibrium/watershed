@@ -10,7 +10,8 @@ use crate::store::Store;
 use crate::workspace::Written;
 use crate::{
     Action, ActionId, Actor, AutomationId, BlockId, Cell, Changed, Document, Error, FieldId,
-    FieldKind, Filter, Operation, Origin, Permission, Place, RowId, Value, Workspace, database,
+    FieldKind, Filter, Match, Operation, Origin, Permission, Place, RowId, Value, Workspace,
+    database,
 };
 
 const AUTOMATIONS: &str = "automations";
@@ -271,6 +272,9 @@ impl<S: Store> Workspace<S> {
             }
         }
         for condition in &setup.conditions {
+            if matches!(condition.matches, Match::Between(..)) {
+                return Err(Error::WrongKind);
+            }
             database::check_filter(self.table_doc(table)?, table, condition)?;
         }
         for step in &setup.steps {

@@ -14,8 +14,6 @@ import '../workspace/row_menu.dart';
 import 'checkout_pull_request.dart';
 import 'session_card_rows.dart';
 
-const _stopFirst = 'Stop the current turn to switch worktrees.';
-
 class BranchRow extends StatefulWidget {
   const BranchRow({super.key, required this.state});
 
@@ -177,10 +175,7 @@ Future<void> showBranchMenu(BuildContext context, SessionState state) async {
     builder: (_) => _BranchPicker(state: state, status: status),
   );
   if (!context.mounted || picked == null) return;
-  if (state.status.value != RunStatus.idle) {
-    state.notify(NoticeLevel.warning, _stopFirst);
-    return;
-  }
+  if (refusedWhileRunning(state)) return;
   switch (picked) {
     case _Switch(:final ref):
       await _switchTo(context, state, ref);
@@ -212,6 +207,7 @@ Future<void> _switchTo(
     if (!await _carryChanges(context, state, branch) || !context.mounted) {
       return;
     }
+    if (refusedWhileRunning(state)) return;
     await state.git.value.backend.switchTo(branch);
   } on Object catch (error) {
     state.notify(NoticeLevel.error, 'Failed to switch ref. $error');
@@ -227,6 +223,7 @@ Future<void> _create(
     if (!await _carryChanges(context, state, name) || !context.mounted) {
       return;
     }
+    if (refusedWhileRunning(state)) return;
     await state.git.value.backend.createBranch(name);
   } on Object catch (error) {
     state.notify(NoticeLevel.error, 'Failed to create and switch ref. $error');
@@ -273,6 +270,7 @@ class _BranchPicker extends StatefulWidget {
 class _BranchPickerState extends State<_BranchPicker> {
   final _query = TextEditingController();
   BridgeRefs? _refs;
+  String? _refsQuery;
 
   int _attempt = 0;
 
@@ -289,13 +287,19 @@ class _BranchPickerState extends State<_BranchPicker> {
     super.dispose();
   }
 
+  BridgeRefs? get _current => _refsQuery == _query.text.trim() ? _refs : null;
+
   Future<void> _read() async {
     final attempt = ++_attempt;
+    final query = _query.text.trim();
     try {
-      final refs = await widget.state.git.value.backend.refs(
-        _query.text.trim(),
-      );
-      if (mounted && attempt == _attempt) setState(() => _refs = refs);
+      final refs = await widget.state.git.value.backend.refs(query);
+      if (mounted && attempt == _attempt) {
+        setState(() {
+          _refs = refs;
+          _refsQuery = query;
+        });
+      }
     } on Object catch (error) {
       if (!mounted || attempt != _attempt) return;
       widget.state.notify(NoticeLevel.error, 'Could not list the refs: $error');
@@ -305,7 +309,7 @@ class _BranchPickerState extends State<_BranchPicker> {
 
   String? _newName() {
     final name = _query.text.trim().replaceAll(RegExp(r'[ \t\n\r\f\v]+'), '-');
-    final refs = _refs;
+    final refs = _current;
     if (name.isEmpty ||
         refs == null ||
         refs.refs.any((ref) => ref.name == name)) {
@@ -317,7 +321,7 @@ class _BranchPickerState extends State<_BranchPicker> {
   void _submit() {
     if (widget.state.status.value != RunStatus.idle) return;
     final checkout = pullRequestReference(_query.text);
-    final first = _refs?.refs.firstOrNull;
+    final first = _current?.refs.firstOrNull;
     final create = _newName();
     if (checkout != null) {
       Navigator.of(context).pop(_Checkout(checkout));
@@ -375,7 +379,7 @@ class _BranchPickerState extends State<_BranchPicker> {
                             ),
                           ),
                           const SizedBox(height: WsMetrics.space1),
-                          if (running) const WarningNotice(_stopFirst),
+                          if (running) const WarningNotice(stopFirstNotice),
                           if (checkout case final reference?)
                             _MenuRow(
                               leading: Icon(

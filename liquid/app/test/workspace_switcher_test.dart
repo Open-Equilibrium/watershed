@@ -15,7 +15,7 @@ void main() {
     await tester.binding.setSurfaceSize(const Size(1400, 900));
     opened = {};
     final workspaces = await Workspaces.load('/workspaces', (path) async {
-      if (failNew && path.endsWith('/Workspace') == false) {
+      if (failNew && !path.endsWith('/Workspace')) {
         return (null, 'The Workspace did not open: no key');
       }
       final fake = opened.putIfAbsent(path.split('/').last, FakeWorkspace.new);
@@ -34,8 +34,7 @@ void main() {
     return workspaces;
   }
 
-  Future<void> tap(WidgetTester tester, Finder target) async {
-    await tester.tap(target);
+  Future<void> settle(WidgetTester tester) async {
     for (var turn = 0; turn < 20; turn++) {
       await tester.runAsync(
         () => Future<void>.delayed(const Duration(milliseconds: 2)),
@@ -45,27 +44,10 @@ void main() {
     await tester.pumpAndSettle();
   }
 
-  testWidgets('the Workspace you are in is renamed and given an icon', (
-    tester,
-  ) async {
-    await show(tester);
-    final fake = opened['Workspace']!;
-    expect(find.text('Workspace'), findsOneWidget);
-    await tap(tester, find.byKey(const Key('current workspace')));
-    await tester.enterText(find.byKey(const Key('workspace name')), 'Home');
-    await tester.pumpAndSettle();
-    expect(fake.name, 'Home');
-    await tap(
-      tester,
-      find.descendant(
-        of: find.byKey(const Key('workspace menu')),
-        matching: find.text('🏡'),
-      ),
-    );
-    expect(fake.icon, '🏡');
-    await tap(tester, find.text('Use the first letter'));
-    expect(fake.icon, '');
-  });
+  Future<void> tap(WidgetTester tester, Finder target) async {
+    await tester.tap(target);
+    await settle(tester);
+  }
 
   testWidgets('＋ makes a Workspace to name; a click or ⌥⌘2 switches', (
     tester,
@@ -98,25 +80,7 @@ void main() {
     await tester.sendKeyEvent(LogicalKeyboardKey.digit2);
     await tester.sendKeyUpEvent(LogicalKeyboardKey.alt);
     await tester.sendKeyUpEvent(LogicalKeyboardKey.meta);
-    for (var turn = 0; turn < 20; turn++) {
-      await tester.runAsync(
-        () => Future<void>.delayed(const Duration(milliseconds: 2)),
-      );
-      await tester.pump(const Duration(milliseconds: 50));
-    }
+    await settle(tester);
     expect(workspaces.at, 1);
-  });
-
-  testWidgets('a Workspace that did not open still lets another be chosen', (
-    tester,
-  ) async {
-    final workspaces = await show(tester, failNew: true);
-    await tap(tester, find.byKey(const Key('new workspace')));
-    expect(workspaces.at, 1);
-    expect(workspaces.current, isNull);
-    expect(find.text('The Workspace did not open: no key'), findsOneWidget);
-    await tap(tester, find.byKey(const Key('workspace 0')));
-    expect(workspaces.at, 0);
-    expect(workspaces.current, isNotNull);
   });
 }

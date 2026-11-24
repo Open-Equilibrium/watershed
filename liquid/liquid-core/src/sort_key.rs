@@ -219,19 +219,22 @@ mod tests {
     use super::{MAX_KEY, at, before, between, midpoint};
     use crate::{Error, Place};
 
-    #[test]
-    fn a_place_after_tied_keys_goes_after_them_and_before_the_next() {
-        let sorted = [("x", "a0"), ("y", "a0"), ("z", "a1")];
-        let place = |place| at(&sorted, place, |item| item.0, |item| Some(item.1));
-        let after = place(Place::After("x")).unwrap();
-        assert!("a0" < after.as_str() && after.as_str() < "a1", "{after}");
-        assert!(place(Place::First).unwrap().as_str() < "a0");
-        assert!(place(Place::Last).unwrap().as_str() > "a1");
-        assert!(matches!(place(Place::After("w")), Err(Error::NotFound)));
+    fn place(sorted: &[(&str, &str)], spot: Place<&str>) -> Result<String, Error> {
+        at(sorted, spot, |item| item.0, |item| Some(item.1))
     }
 
     #[test]
-    fn keys_fit_between_any_two_neighbors() {
+    fn a_place_after_tied_keys_goes_after_them_and_before_the_next() {
+        let sorted = [("x", "a0"), ("y", "a0"), ("z", "a1")];
+        let after = place(&sorted, Place::After("x")).unwrap();
+        assert!("a0" < after.as_str() && after.as_str() < "a1", "{after}");
+        assert!(place(&sorted, Place::First).unwrap().as_str() < "a0");
+        assert!(place(&sorted, Place::Last).unwrap().as_str() > "a1");
+        assert_eq!(place(&sorted, Place::After("w")), Err(Error::NotFound));
+    }
+
+    #[test]
+    fn keys_fit_between_any_two_neighbors_even_equal_ones() {
         let mut keys = vec![between(None, None).unwrap()];
         for round in 0..200 {
             let i = (round * 7) % (keys.len() + 1);
@@ -242,6 +245,7 @@ mod tests {
             keys.insert(i, key.unwrap());
         }
         assert!(keys.windows(2).all(|pair| pair[0] < pair[1]));
+        assert!(between(Some("a1"), Some("a1")).unwrap().as_str() > "a1");
     }
 
     #[test]
@@ -265,11 +269,6 @@ mod tests {
     }
 
     #[test]
-    fn equal_neighbors_get_a_key_after_both() {
-        assert!(between(Some("a1"), Some("a1")).unwrap().as_str() > "a1");
-    }
-
-    #[test]
     fn a_long_fraction_still_gets_a_midpoint() {
         let fraction = "z".repeat(100_000);
         assert_eq!(
@@ -280,48 +279,25 @@ mod tests {
 
     #[test]
     fn a_placement_needing_a_key_past_the_cap_is_refused() {
-        let place = |lower: &str| {
-            let sorted = [("x", lower), ("y", "a1")];
-            at(
-                &sorted,
-                Place::After("x"),
-                |item| item.0,
-                |item| Some(item.1),
-            )
-        };
+        let after = |lower: &str| place(&[("x", lower), ("y", "a1")], Place::After("x"));
         let longest = format!("a0{}", "z".repeat(MAX_KEY - 3));
-        assert_eq!(place(&longest).unwrap().len(), MAX_KEY);
-        let full = format!("{longest}z");
-        assert!(matches!(place(&full), Err(Error::TooLong)));
+        assert_eq!(after(&longest).unwrap().len(), MAX_KEY);
+        assert!(matches!(after(&format!("{longest}z")), Err(Error::TooLong)));
     }
 
     #[test]
-    fn nothing_goes_before_a_neighbor_without_a_usable_key() {
+    fn an_unusable_neighbor_key_counts_as_no_key() {
         let over = format!("a0{}", "z".repeat(MAX_KEY));
         for unusable in ["", "!", over.as_str()] {
             let sorted = [("x", unusable), ("y", "a1")];
-            assert!(matches!(
-                at(&sorted, Place::First, |item| item.0, |item| Some(item.1)),
-                Err(Error::TooLong)
-            ));
+            assert!(matches!(place(&sorted, Place::First), Err(Error::TooLong)));
             assert!(matches!(
                 before(&sorted, "x", |item| item.0, |item| Some(item.1)),
                 Err(Error::TooLong)
             ));
-            let after = at(
-                &sorted,
-                Place::After("x"),
-                |item| item.0,
-                |item| Some(item.1),
-            )
-            .unwrap();
+            let after = place(&sorted, Place::After("x")).unwrap();
             assert!(after.as_str() < "a1", "{after}");
         }
-    }
-
-    #[test]
-    fn a_stored_key_past_the_cap_counts_as_no_key() {
-        let over = format!("a0{}", "z".repeat(MAX_KEY));
         assert_eq!(
             between(Some(&over), Some("a1")).unwrap(),
             between(None, Some("a1")).unwrap()

@@ -12,6 +12,19 @@ import 'page_kit.dart';
 const amount = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
 const half = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
 
+BridgeField fieldOf(
+  String id,
+  String name,
+  BridgeFieldKind kind, [
+  String formula = '',
+]) => BridgeField(
+  id: id,
+  name: name,
+  kind: kind,
+  options: const [],
+  formula: formula,
+);
+
 void main() {
   final kit = PageKit();
   final menu = find.byKey(const Key('field menu'));
@@ -41,28 +54,10 @@ void main() {
         ],
       ),
     ],
-    fields: const [
-      BridgeField(
-        id: 'name',
-        name: 'Name',
-        kind: BridgeFieldKind.text,
-        options: [],
-        formula: '',
-      ),
-      BridgeField(
-        id: amount,
-        name: 'Amount',
-        kind: BridgeFieldKind.number,
-        options: [],
-        formula: '',
-      ),
-      BridgeField(
-        id: half,
-        name: 'Half',
-        kind: BridgeFieldKind.formula,
-        options: [],
-        formula: '{$amount} / 2',
-      ),
+    fields: [
+      fieldOf('name', 'Name', BridgeFieldKind.text),
+      fieldOf(amount, 'Amount', BridgeFieldKind.number),
+      fieldOf(half, 'Half', BridgeFieldKind.formula, '{$amount} / 2'),
     ],
   );
 

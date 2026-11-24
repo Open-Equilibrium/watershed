@@ -124,10 +124,12 @@ class _MathBlockState extends State<MathBlock> {
     if (first) _takeCaret();
   }
 
+  bool get _composing => !_text.value.composing.isCollapsed;
+
   void _typed() {
     if (_quiet || _stored == null) return;
     setState(() {});
-    if (!_text.value.composing.isCollapsed && !_state.quitting) return;
+    if (_composing && !_state.quitting) return;
     _send(_text.text);
   }
 
@@ -159,6 +161,7 @@ class _MathBlockState extends State<MathBlock> {
   }
 
   void _open([int? offset]) {
+    if (_stored == null) return;
     setState(() => _editing = true);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
@@ -184,7 +187,9 @@ class _MathBlockState extends State<MathBlock> {
   }
 
   KeyEventResult _key(KeyEvent event) {
-    if (event is KeyUpEvent || _stored == null) return KeyEventResult.ignored;
+    if (event is KeyUpEvent || _composing || _stored == null) {
+      return KeyEventResult.ignored;
+    }
     final keys = HardwareKeyboard.instance;
     final selection = _text.selection;
     final text = _text.text;

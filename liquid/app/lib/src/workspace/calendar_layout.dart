@@ -119,7 +119,7 @@ class _CalendarLayoutState extends State<CalendarLayout> {
       final undated = await data.read(
         within(
           BridgeFilter(field: date.id, matches: BridgeMatch.empty),
-          _listed == '' ? _rowsRead : 0,
+          _listed == '' || _open != null ? _rowsRead : 0,
         ),
       );
       if (!mounted || read != _reads) return;
@@ -238,16 +238,11 @@ class _CalendarLayoutState extends State<CalendarLayout> {
     return AnchoredMenu(
       height: 320,
       onTapOutside: (_) => setState(() => _listed = null),
-      menu: (_) => Container(
+      menu: (_) => FloatingPanel(
         key: const Key('day list'),
         width: _listWidth,
         constraints: const BoxConstraints(maxHeight: 320),
         padding: const EdgeInsets.all(WsMetrics.space2),
-        decoration: BoxDecoration(
-          color: ws.surface,
-          borderRadius: BorderRadius.circular(WsMetrics.radiusLg),
-          boxShadow: ws.shadow,
-        ),
         child: Material(
           type: MaterialType.transparency,
           child: Column(

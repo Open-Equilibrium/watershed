@@ -446,11 +446,15 @@ class MoveModel extends ChangeNotifier {
   Future<void> addFolder(String root) async {
     final target = _selected?.candidate.project;
     if (target == null) return;
+    final turn = _selection;
     final project = await target.addProject(root);
+    final landings = await _landingsOf(target, [project]);
+    if (turn != _selection) return;
     _projects = [
       ..._projects.where((existing) => existing.root != project.root),
       project,
     ];
+    _landings.addAll(landings);
     notifyListeners();
   }
 
@@ -610,6 +614,7 @@ class MoveModel extends ChangeNotifier {
   }
 
   Future<SessionBackend> start() async {
+    if (_flow != null) throw StateError('The move has already started.');
     final plan = this.plan!;
     final target = _selected!.candidate;
     final flow = MoveFlow(

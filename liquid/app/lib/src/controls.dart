@@ -482,6 +482,40 @@ class GhostButton extends StatelessWidget {
   }
 }
 
+class FloatingPanel extends StatelessWidget {
+  const FloatingPanel({
+    super.key,
+    this.width,
+    this.constraints,
+    this.padding,
+    this.clipBehavior = Clip.none,
+    required this.child,
+  });
+
+  final double? width;
+  final BoxConstraints? constraints;
+  final EdgeInsetsGeometry? padding;
+  final Clip clipBehavior;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final ws = context.ws;
+    return Container(
+      width: width,
+      constraints: constraints,
+      padding: padding,
+      clipBehavior: clipBehavior,
+      decoration: BoxDecoration(
+        color: ws.surface,
+        borderRadius: BorderRadius.circular(WsMetrics.radiusLg),
+        boxShadow: ws.shadow,
+      ),
+      child: child,
+    );
+  }
+}
+
 class InputCard extends StatelessWidget {
   const InputCard({
     super.key,

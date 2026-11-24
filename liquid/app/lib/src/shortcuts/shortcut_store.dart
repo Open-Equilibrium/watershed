@@ -133,7 +133,7 @@ class ShortcutController extends SavedSettings<ShortcutSettings> {
             _applied = want;
           } else {
             if (identical(value, next)) {
-              value = want ? _withoutLiquidKey(value) : _settled;
+              value = want ? _withoutLiquidKey(value) : _withLiquidKey(value);
             }
             changed = true;
           }
@@ -153,6 +153,13 @@ class ShortcutController extends SavedSettings<ShortcutSettings> {
         ? settings.choose(before)
         : settings;
     return back.withoutLiquidKey();
+  }
+
+  ShortcutSettings _withLiquidKey(ShortcutSettings settings) {
+    if (settings.liquidKey) return settings;
+    return settings.changes.isEmpty
+        ? settings.choose(Profile.liquidKey)
+        : settings.withLiquidKey(true);
   }
 
   Future<bool> _apply(bool on) async {

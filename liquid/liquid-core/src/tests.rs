@@ -4,8 +4,9 @@ use automerge::AutoCommit;
 
 use crate::history::Header;
 use crate::{
-    Action, ActionId, Actor, AttachmentId, Commit, Created, Document, Error, MemoryStore, Mutation,
-    Origin, PersonId, Request, Store, Workspace,
+    Action, ActionId, Actor, Applied, AreaId, AttachmentId, BlockId, Commit, Created, Document,
+    Error, Found, MemoryStore, Mutation, Origin, PageId, PersonId, Request, Store, TextStyle,
+    ViewId, Workspace,
 };
 
 fn changes(doc: &mut AutoCommit) -> Vec<(automerge::ChangeHash, Option<Header>)> {
@@ -20,85 +21,67 @@ fn changes(doc: &mut AutoCommit) -> Vec<(automerge::ChangeHash, Option<Header>)>
         .collect()
 }
 
-#[test]
-fn every_change_of_every_document_belongs_to_a_recorded_action() {
-    let owner = Actor::Person(PersonId::new("benni"));
-    let mut workspace = Workspace::create(PersonId::new("benni"), MemoryStore::default()).unwrap();
-    let apply = |workspace: &mut Workspace<MemoryStore>, mutation| {
-        workspace
-            .apply(Request {
-                actor: owner.clone(),
-                origin: Origin::Ui,
-                mutation,
-            })
-            .unwrap()
-            .created
-    };
-    let Some(Created::Area(area)) = apply(
-        &mut workspace,
+fn apply<S: Store>(workspace: &mut Workspace<S>, mutation: Mutation) -> Result<Applied, Error> {
+    workspace.apply(Request {
+        actor: Actor::Person(PersonId::new("benni")),
+        origin: Origin::Ui,
+        mutation,
+    })
+}
+
+fn created<S: Store>(workspace: &mut Workspace<S>, mutation: Mutation) -> Created {
+    apply(workspace, mutation).unwrap().created.unwrap()
+}
+
+fn new_page<S: Store>(workspace: &mut Workspace<S>) -> (AreaId, PageId) {
+    let Created::Area(area) = created(
+        workspace,
         Mutation::CreateArea {
             name: "Trips".into(),
         },
     ) else {
         panic!("an area")
     };
-    let create_page = Mutation::CreatePage {
-        area,
-        parent: None,
-        title: "Lisbon".into(),
-    };
-    let Some(Created::Page(page)) = apply(&mut workspace, create_page) else {
+    let Created::Page(page) = created(
+        workspace,
+        Mutation::CreatePage {
+            area: area.clone(),
+            parent: None,
+            title: "Lisbon".into(),
+        },
+    ) else {
         panic!("a Page")
     };
-    let add = Mutation::AddTextBlock {
-        page: page.clone(),
-        after: None,
-        text: "Five days".into(),
+    (area, page)
+}
+
+fn add_text<S: Store>(
+    workspace: &mut Workspace<S>,
+    page: &PageId,
+    after: Option<ViewId>,
+    text: &str,
+) -> (BlockId, ViewId) {
+    let Created::Block { block, view } = created(
+        workspace,
+        Mutation::AddTextBlock {
+            page: page.clone(),
+            after,
+            text: text.into(),
+        },
+    ) else {
+        panic!("a Text Block")
     };
-    let Some(Created::Block { block, view }) = apply(&mut workspace, add) else {
-        panic!("a Block")
-    };
-    let edit = Mutation::EditText {
+    (block, view)
+}
+
+fn edit_text(page: &PageId, block: &BlockId) -> Mutation {
+    Mutation::EditText {
         page: page.clone(),
-        block,
+        block: block.clone(),
         at: 0,
         delete: 0,
         insert: "Our ".into(),
-    };
-    apply(&mut workspace, edit);
-    apply(&mut workspace, Mutation::RemoveView { page, view });
-
-    let history = workspace.history(None, usize::MAX).unwrap();
-    let recorded: HashSet<_> = history
-        .iter()
-        .flat_map(|action| {
-            let header = Header::of(action);
-            action.changes.iter().map(move |(document, hash)| {
-                (
-                    document.clone(),
-                    *hash,
-                    serde_json::to_string(&header).unwrap(),
-                )
-            })
-        })
-        .collect();
-    let mut stored = HashSet::new();
-    let documents: Vec<Document> = workspace.docs.keys().cloned().collect();
-    assert_eq!(documents.len(), 3, "the Workspace, one area and one Page");
-    for document in documents {
-        let chunks = workspace.store.chunks(&document).unwrap();
-        let mut doc = AutoCommit::load(&chunks.concat()).unwrap();
-        for (hash, header) in changes(&mut doc) {
-            let header = header.expect("every change names its Action");
-            stored.insert((
-                document.clone(),
-                hash,
-                serde_json::to_string(&header).unwrap(),
-            ));
-        }
     }
-    assert_eq!(stored, recorded);
-    assert_eq!(history.len(), 6);
 }
 
 #[derive(Default)]
@@ -107,10 +90,15 @@ struct Flaky {
     failing: bool,
     index_failing: bool,
     history_failing: bool,
+    unreadable: Option<Document>,
+    discarded: Vec<String>,
 }
 
 impl Store for Flaky {
     fn chunks(&mut self, document: &Document) -> Result<Vec<Vec<u8>>, Error> {
+        if self.unreadable.as_ref() == Some(document) {
+            return Err(Error::Storage("unreadable".into()));
+        }
         self.inner.chunks(document)
     }
 
@@ -155,6 +143,7 @@ impl Store for Flaky {
     }
 
     fn discard_upload(&mut self, upload: &str) -> Result<(), Error> {
+        self.discarded.push(upload.to_string());
         self.inner.discard_upload(upload)
     }
 
@@ -204,65 +193,65 @@ impl Store for Flaky {
 }
 
 #[test]
-fn a_write_the_store_refuses_is_not_acknowledged_and_leaves_no_trace() {
-    let owner = Actor::Person(PersonId::new("benni"));
-    let mut workspace = Workspace::create(PersonId::new("benni"), Flaky::default()).unwrap();
-    let apply = |workspace: &mut Workspace<Flaky>, mutation| {
-        workspace.apply(Request {
-            actor: owner.clone(),
-            origin: Origin::Ui,
-            mutation,
+fn every_change_of_every_document_belongs_to_a_recorded_action() {
+    let mut workspace = Workspace::create(PersonId::new("benni"), MemoryStore::default()).unwrap();
+    let (_, page) = new_page(&mut workspace);
+    let (block, view) = add_text(&mut workspace, &page, None, "Five days");
+    apply(&mut workspace, edit_text(&page, &block)).unwrap();
+    apply(&mut workspace, Mutation::RemoveView { page, view }).unwrap();
+
+    let history = workspace.history(None, usize::MAX).unwrap();
+    let recorded: HashSet<_> = history
+        .iter()
+        .flat_map(|action| {
+            let header = Header::of(action);
+            action.changes.iter().map(move |(document, hash)| {
+                (
+                    document.clone(),
+                    *hash,
+                    serde_json::to_string(&header).unwrap(),
+                )
+            })
         })
-    };
-    let Ok(Some(Created::Area(area))) = apply(
-        &mut workspace,
-        Mutation::CreateArea {
-            name: "Trips".into(),
-        },
-    )
-    .map(|applied| applied.created) else {
-        panic!("an area")
-    };
-    let create = Mutation::CreatePage {
-        area: area.clone(),
-        parent: None,
-        title: "Lisbon".into(),
-    };
-    let Ok(Some(Created::Page(page))) =
-        apply(&mut workspace, create).map(|applied| applied.created)
-    else {
-        panic!("a Page")
-    };
-    let add = Mutation::AddTextBlock {
-        page: page.clone(),
-        after: None,
-        text: "Five days".into(),
-    };
-    let Ok(Some(Created::Block { block, .. })) =
-        apply(&mut workspace, add).map(|applied| applied.created)
-    else {
-        panic!("a Block")
-    };
+        .collect();
+    let mut stored = HashSet::new();
+    let documents: Vec<Document> = workspace.docs.keys().cloned().collect();
+    assert_eq!(documents.len(), 3, "the Workspace, one area and one Page");
+    for document in documents {
+        let chunks = workspace.store.chunks(&document).unwrap();
+        let mut doc = AutoCommit::load(&chunks.concat()).unwrap();
+        for (hash, header) in changes(&mut doc) {
+            let header = header.expect("every change names its Action");
+            stored.insert((
+                document.clone(),
+                hash,
+                serde_json::to_string(&header).unwrap(),
+            ));
+        }
+    }
+    assert_eq!(stored, recorded);
+    assert_eq!(history.len(), 6);
+}
+
+#[test]
+fn a_write_the_store_refuses_is_not_acknowledged_and_leaves_no_trace() {
+    let mut workspace = Workspace::create(PersonId::new("benni"), Flaky::default()).unwrap();
+    let (area, page) = new_page(&mut workspace);
+    let (block, _) = add_text(&mut workspace, &page, None, "Five days");
     let recorded = workspace.history(None, usize::MAX).unwrap().len();
 
     workspace.store.failing = true;
-    let edit = Mutation::EditText {
-        page: page.clone(),
-        block: block.clone(),
-        at: 0,
-        delete: 0,
-        insert: "Our ".into(),
-    };
+    let edit = edit_text(&page, &block);
     let rename = Mutation::RenamePage {
         page: page.clone(),
         title: "Porto".into(),
     };
-    let new_page = Mutation::CreatePage {
+    let second_page = Mutation::CreatePage {
         area: area.clone(),
         parent: None,
         title: "Porto".into(),
     };
-    for mutation in [edit.clone(), rename, new_page] {
+    for mutation in [edit.clone(), rename, second_page] {
         let refused = apply(&mut workspace, mutation);
         assert_eq!(refused.unwrap_err(), Error::Storage("disk full".into()));
     }
@@ -286,35 +275,9 @@ fn a_write_the_store_refuses_is_not_acknowledged_and_leaves_no_trace() {
 
 #[test]
 fn the_view_order_index_matches_the_page_document() {
-    let owner = Actor::Person(PersonId::new("benni"));
     let mut workspace = Workspace::create(PersonId::new("benni"), MemoryStore::default()).unwrap();
-    let apply = |workspace: &mut Workspace<MemoryStore>, mutation| {
-        workspace
-            .apply(Request {
-                actor: owner.clone(),
-                origin: Origin::Ui,
-                mutation,
-            })
-            .unwrap()
-            .created
-    };
-    let Some(Created::Area(area)) = apply(
-        &mut workspace,
-        Mutation::CreateArea {
-            name: "Trips".into(),
-        },
-    ) else {
-        panic!("an area")
-    };
-    let create = Mutation::CreatePage {
-        area,
-        parent: None,
-        title: "Lisbon".into(),
-    };
-    let Some(Created::Page(page)) = apply(&mut workspace, create) else {
-        panic!("a Page")
-    };
-    let mut views: Vec<crate::ViewId> = Vec::new();
+    let (_, page) = new_page(&mut workspace);
+    let mut views: Vec<ViewId> = Vec::new();
     for round in 0..60usize {
         let count = workspace.view_count(&page).unwrap();
         if round % 5 == 4 && count > 0 {
@@ -323,23 +286,20 @@ fn the_view_order_index_matches_the_page_document() {
                 .unwrap()
                 .remove(0)
                 .id;
-            let remove = Mutation::RemoveView {
-                page: page.clone(),
-                view,
-            };
-            apply(&mut workspace, remove);
+            apply(
+                &mut workspace,
+                Mutation::RemoveView {
+                    page: page.clone(),
+                    view,
+                },
+            )
+            .unwrap();
             continue;
         }
         let after =
             (round % 3 > 0 && !views.is_empty()).then(|| views[round % views.len()].clone());
-        let add = Mutation::AddTextBlock {
-            page: page.clone(),
-            after,
-            text: format!("Block {round}"),
-        };
-        if let Some(Created::Block { view, .. }) = apply(&mut workspace, add) {
-            views.push(view);
-        }
+        let (_, view) = add_text(&mut workspace, &page, after, &format!("Block {round}"));
+        views.push(view);
         views.retain(|view| {
             workspace
                 .views(&page, 0, usize::MAX)
@@ -358,42 +318,9 @@ fn the_view_order_index_matches_the_page_document() {
 
 #[test]
 fn a_closed_page_leaves_memory_and_loads_again_unchanged() {
-    let owner = Actor::Person(PersonId::new("benni"));
     let mut workspace = Workspace::create(PersonId::new("benni"), MemoryStore::default()).unwrap();
-    let apply = |workspace: &mut Workspace<MemoryStore>, mutation| {
-        workspace
-            .apply(Request {
-                actor: owner.clone(),
-                origin: Origin::Ui,
-                mutation,
-            })
-            .unwrap()
-            .created
-    };
-    let Some(Created::Area(area)) = apply(
-        &mut workspace,
-        Mutation::CreateArea {
-            name: "Trips".into(),
-        },
-    ) else {
-        panic!("an area")
-    };
-    let create = Mutation::CreatePage {
-        area,
-        parent: None,
-        title: "Lisbon".into(),
-    };
-    let Some(Created::Page(page)) = apply(&mut workspace, create) else {
-        panic!("a Page")
-    };
-    let add = Mutation::AddTextBlock {
-        page: page.clone(),
-        after: None,
-        text: "Five days".into(),
-    };
-    let Some(Created::Block { block, .. }) = apply(&mut workspace, add) else {
-        panic!("a Block")
-    };
+    let (_, page) = new_page(&mut workspace);
+    let (block, _) = add_text(&mut workspace, &page, None, "Five days");
 
     workspace.close_page(&page);
     assert!(!workspace.docs.contains_key(&Document::Page(page.clone())));
@@ -405,51 +332,10 @@ fn a_closed_page_leaves_memory_and_loads_again_unchanged() {
 fn a_block_of_an_unknown_kind_is_neither_read_nor_changed_as_text() {
     use automerge::transaction::Transactable;
 
-    let owner = Actor::Person(PersonId::new("benni"));
     let mut workspace = Workspace::create(PersonId::new("benni"), MemoryStore::default()).unwrap();
-    let apply = |workspace: &mut Workspace<MemoryStore>, mutation| {
-        workspace.apply(Request {
-            actor: owner.clone(),
-            origin: Origin::Ui,
-            mutation,
-        })
-    };
-    let Ok(Some(Created::Area(area))) = apply(
-        &mut workspace,
-        Mutation::CreateArea {
-            name: "Trips".into(),
-        },
-    )
-    .map(|applied| applied.created) else {
-        panic!("an area")
-    };
-    let create = Mutation::CreatePage {
-        area,
-        parent: None,
-        title: "Lisbon".into(),
-    };
-    let Ok(Some(Created::Page(page))) = apply(&mut workspace, create).map(|a| a.created) else {
-        panic!("a Page")
-    };
-    let add = Mutation::AddTextBlock {
-        page: page.clone(),
-        after: None,
-        text: "Five days".into(),
-    };
-    let Ok(Some(Created::Block { block, view })) = apply(&mut workspace, add).map(|a| a.created)
-    else {
-        panic!("a Text Block")
-    };
-    let below = Mutation::AddTextBlock {
-        page: page.clone(),
-        after: Some(view.clone()),
-        text: "Porto".into(),
-    };
-    let Ok(Some(Created::Block { view: below, .. })) =
-        apply(&mut workspace, below).map(|a| a.created)
-    else {
-        panic!("a Text Block")
-    };
+    let (_, page) = new_page(&mut workspace);
+    let (block, view) = add_text(&mut workspace, &page, None, "Five days");
+    let (_, below) = add_text(&mut workspace, &page, Some(view.clone()), "Porto");
     let loaded = workspace
         .docs
         .get_mut(&Document::Page(page.clone()))
@@ -459,22 +345,18 @@ fn a_block_of_an_unknown_kind_is_neither_read_nor_changed_as_text() {
     loaded.doc.commit();
 
     assert_eq!(workspace.text(&page, &block), Ok(None));
-    let edit = Mutation::EditText {
-        page: page.clone(),
-        block: block.clone(),
-        at: 0,
-        delete: 0,
-        insert: "x".into(),
-    };
     let split = Mutation::SplitTextBlock {
         page: page.clone(),
-        block,
+        block: block.clone(),
         view,
         at: 0,
-        style: crate::TextStyle::Paragraph,
+        style: TextStyle::Paragraph,
     };
-    let join = Mutation::JoinTextBlock { page, view: below };
-    for refused in [edit, split, join] {
+    let join = Mutation::JoinTextBlock {
+        page: page.clone(),
+        view: below,
+    };
+    for refused in [edit_text(&page, &block), split, join] {
         assert_eq!(
             apply(&mut workspace, refused).map(|_| ()),
             Err(Error::NotFound)
@@ -488,38 +370,9 @@ fn a_start_split_puts_the_new_text_block_above_a_view_whose_key_another_shares()
     use automerge::transaction::Transactable;
 
     use crate::model::{self, BLOCK, BLOCKS, KIND, SORT, STYLE, TEXT, VIEWS};
-    use crate::{BlockId, ViewId};
 
-    let owner = Actor::Person(PersonId::new("benni"));
     let mut workspace = Workspace::create(PersonId::new("benni"), MemoryStore::default()).unwrap();
-    let apply = |workspace: &mut Workspace<MemoryStore>, mutation| {
-        workspace
-            .apply(Request {
-                actor: owner.clone(),
-                origin: Origin::Ui,
-                mutation,
-            })
-            .unwrap()
-            .created
-    };
-    let Some(Created::Area(area)) = apply(
-        &mut workspace,
-        Mutation::CreateArea {
-            name: "Trips".into(),
-        },
-    ) else {
-        panic!("an area")
-    };
-    let Some(Created::Page(page)) = apply(
-        &mut workspace,
-        Mutation::CreatePage {
-            area,
-            parent: None,
-            title: "Lisbon".into(),
-        },
-    ) else {
-        panic!("a Page")
-    };
+    let (_, page) = new_page(&mut workspace);
     let loaded = workspace
         .docs
         .get_mut(&Document::Page(page.clone()))
@@ -545,9 +398,9 @@ fn a_start_split_puts_the_new_text_block_above_a_view_whose_key_another_shares()
         block: BlockId::stored("b2"),
         view: ViewId::stored("v-b2"),
         at: 0,
-        style: crate::TextStyle::Paragraph,
+        style: TextStyle::Paragraph,
     };
-    let Some(Created::Block { view: added, .. }) = apply(&mut workspace, split) else {
+    let Created::Block { view: added, .. } = created(&mut workspace, split) else {
         panic!("a Text Block")
     };
     let views = workspace.views(&page, 0, usize::MAX).unwrap();
@@ -574,6 +427,22 @@ fn an_upload_whose_part_the_store_refused_never_finishes() {
 }
 
 #[test]
+fn an_upload_whose_last_part_the_store_refuses_discards_its_parts() {
+    let owner = Actor::Person(PersonId::new("benni"));
+    let mut workspace = Workspace::create(PersonId::new("benni"), Flaky::default()).unwrap();
+    let mut upload = workspace
+        .begin_upload(&owner, crate::PART as u64 + 1)
+        .unwrap();
+    workspace
+        .upload(&mut upload, &vec![7; crate::PART])
+        .unwrap();
+    workspace.store.failing = true;
+    workspace.upload(&mut upload, &[7]).unwrap();
+    assert!(workspace.finish_upload(upload).is_err());
+    assert_eq!(workspace.store.discarded.len(), 1);
+}
+
+#[test]
 fn a_failed_index_version_write_leaves_a_created_workspace_usable() {
     let store = Flaky {
         index_failing: true,
@@ -596,37 +465,24 @@ fn a_run_whose_later_step_fails_leaves_no_row_of_an_earlier_one() {
 
     let owner = PersonId::new("benni");
     let mut workspace = Workspace::create(owner.clone(), MemoryStore::default()).unwrap();
-    let apply = |workspace: &mut Workspace<MemoryStore>, mutation| {
-        workspace
-            .apply(Request {
-                actor: Actor::Person(owner.clone()),
-                origin: Origin::Ui,
-                mutation,
-            })
-            .unwrap()
-    };
-    let Some(Created::Area(area)) = apply(
+    let Created::Area(area) = created(
         &mut workspace,
         Mutation::CreateArea {
             name: "Private".into(),
         },
-    )
-    .created
-    else {
+    ) else {
         panic!("an area")
     };
-    let Some(Created::Table(table)) = apply(
+    let Created::Table(table) = created(
         &mut workspace,
         Mutation::CreateTable {
             area,
             name: "Bills".into(),
         },
-    )
-    .created
-    else {
+    ) else {
         panic!("a Table")
     };
-    let Some(Created::Field(category)) = apply(
+    let Created::Field(category) = created(
         &mut workspace,
         Mutation::AddField {
             block: table.clone(),
@@ -634,9 +490,7 @@ fn a_run_whose_later_step_fails_leaves_no_row_of_an_earlier_one() {
             name: "Category".into(),
             kind: crate::FieldKind::Select,
         },
-    )
-    .created
-    else {
+    ) else {
         panic!("a field")
     };
     let setup = crate::AutomationSetup {
@@ -648,14 +502,12 @@ fn a_run_whose_later_step_fails_leaves_no_row_of_an_earlier_one() {
             cells: Vec::new(),
         }],
     };
-    let Some(Created::Automation(automation)) = apply(
+    let Created::Automation(automation) = created(
         &mut workspace,
         Mutation::CreateAutomation {
             setup: Box::new(setup.clone()),
         },
-    )
-    .created
-    else {
+    ) else {
         panic!("an Automation")
     };
     let broken = crate::AutomationSetup {
@@ -688,6 +540,7 @@ fn a_run_whose_later_step_fails_leaves_no_row_of_an_earlier_one() {
             place: crate::Place::Last,
         },
     )
+    .unwrap()
     .ran;
     assert_eq!(ran[0].outcome, Err(Error::NotFound));
     let rows = workspace
@@ -709,44 +562,10 @@ fn a_run_whose_later_step_fails_leaves_no_row_of_an_earlier_one() {
 
 #[test]
 fn an_undo_the_store_refuses_leaves_the_text_as_it_was() {
-    let owner = Actor::Person(PersonId::new("benni"));
     let mut workspace = Workspace::create(PersonId::new("benni"), Flaky::default()).unwrap();
-    let mut apply = |mutation| {
-        workspace
-            .apply(Request {
-                actor: owner.clone(),
-                origin: Origin::Ui,
-                mutation,
-            })
-            .unwrap()
-            .created
-    };
-    let Some(Created::Area(area)) = apply(Mutation::CreateArea {
-        name: "Trips".into(),
-    }) else {
-        panic!("an area")
-    };
-    let Some(Created::Page(page)) = apply(Mutation::CreatePage {
-        area,
-        parent: None,
-        title: "Lisbon".into(),
-    }) else {
-        panic!("a Page")
-    };
-    let Some(Created::Block { block, .. }) = apply(Mutation::AddTextBlock {
-        page: page.clone(),
-        after: None,
-        text: "Five days".into(),
-    }) else {
-        panic!("a Block")
-    };
-    apply(Mutation::EditText {
-        page: page.clone(),
-        block: block.clone(),
-        at: 0,
-        delete: 0,
-        insert: "Our ".into(),
-    });
+    let (_, page) = new_page(&mut workspace);
+    let (block, _) = add_text(&mut workspace, &page, None, "Five days");
+    apply(&mut workspace, edit_text(&page, &block)).unwrap();
 
     workspace.store.failing = true;
     let owner = Actor::Person(PersonId::new("benni"));
@@ -762,50 +581,12 @@ fn an_undo_the_store_refuses_leaves_the_text_as_it_was() {
 
 #[test]
 fn a_purge_that_fails_keeps_the_page_s_history() {
-    let owner = Actor::Person(PersonId::new("benni"));
     let mut workspace = Workspace::create(PersonId::new("benni"), Flaky::default()).unwrap();
-    let mut apply = |mutation| {
-        workspace
-            .apply(Request {
-                actor: owner.clone(),
-                origin: Origin::Ui,
-                mutation,
-            })
-            .unwrap()
-    };
-    let Some(Created::Area(area)) = apply(Mutation::CreateArea {
-        name: "Trips".into(),
-    })
-    .created
-    else {
-        panic!("an area")
-    };
-    let Some(Created::Page(page)) = apply(Mutation::CreatePage {
-        area,
-        parent: None,
-        title: "Lisbon".into(),
-    })
-    .created
-    else {
-        panic!("a Page")
-    };
-    let Some(Created::Block { block, .. }) = apply(Mutation::AddTextBlock {
-        page: page.clone(),
-        after: None,
-        text: "Five days".into(),
-    })
-    .created
-    else {
-        panic!("a Block")
-    };
-    let typed = apply(Mutation::EditText {
-        page: page.clone(),
-        block: block.clone(),
-        at: 0,
-        delete: 0,
-        insert: "Our ".into(),
-    })
-    .action;
+    let (_, page) = new_page(&mut workspace);
+    let (block, _) = add_text(&mut workspace, &page, None, "Five days");
+    let typed = apply(&mut workspace, edit_text(&page, &block))
+        .unwrap()
+        .action;
 
     workspace.store.history_failing = true;
     let owner = Actor::Person(PersonId::new("benni"));
@@ -817,4 +598,244 @@ fn a_purge_that_fails_keeps_the_page_s_history() {
     workspace.store.history_failing = false;
     workspace.revert(&owner, &[typed]).unwrap();
     assert_eq!(workspace.text(&page, &block).unwrap().unwrap(), "Five days");
+}
+
+#[test]
+fn a_replica_without_its_index_builds_it_once_opened() {
+    let mut workspace = Workspace::create(PersonId::new("benni"), MemoryStore::default()).unwrap();
+    let (_, page) = new_page(&mut workspace);
+    add_text(&mut workspace, &page, None, "We fly on 12 November.");
+    let mut store = workspace.into_store();
+    store.drop_index();
+    let mut workspace = Workspace::open(store).unwrap();
+    assert_eq!(workspace.search("novem", Found::Text, 10).unwrap().len(), 1);
+    assert_eq!(workspace.search("lisb", Found::Page, 10).unwrap().len(), 1);
+    let long = "x".repeat(crate::MAX_FILTER_TEXT + 1);
+    assert_eq!(
+        workspace.search(&long, Found::Text, 10),
+        Err(Error::TooLong)
+    );
+}
+
+#[test]
+fn an_unreadable_page_neither_stops_the_open_nor_the_rest_of_the_index() {
+    let mut workspace = Workspace::create(PersonId::new("benni"), MemoryStore::default()).unwrap();
+    let (area, trip) = new_page(&mut workspace);
+    add_text(&mut workspace, &trip, None, "We fly on 12 November.");
+    let Created::Page(broken) = created(
+        &mut workspace,
+        Mutation::CreatePage {
+            area,
+            parent: None,
+            title: "Broken".into(),
+        },
+    ) else {
+        panic!("a Page")
+    };
+    add_text(&mut workspace, &broken, None, "Never read");
+    let mut store = workspace.into_store();
+    store.drop_index();
+    store.spoil(&Document::Page(broken));
+    let mut workspace = Workspace::open(store).unwrap();
+    assert_eq!(workspace.search("novem", Found::Text, 10).unwrap().len(), 1);
+    let mut store = workspace.into_store();
+    assert_eq!(
+        store.index_version().unwrap(),
+        0,
+        "the next open tries again"
+    );
+}
+
+#[test]
+fn an_unreadable_area_does_not_stop_the_open() {
+    let mut workspace = Workspace::create(PersonId::new("benni"), MemoryStore::default()).unwrap();
+    let (area, _) = new_page(&mut workspace);
+    let mut store = workspace.into_store();
+    store.drop_index();
+    store.spoil(&Document::Area(area));
+    let workspace = Workspace::open(store).unwrap();
+    let mut store = workspace.into_store();
+    assert_eq!(
+        store.index_version().unwrap(),
+        0,
+        "the next open tries again"
+    );
+}
+
+#[test]
+fn removing_a_table_view_whose_table_cannot_load_is_refused_whole() {
+    let mut workspace = Workspace::create(PersonId::new("benni"), Flaky::default()).unwrap();
+    let (_, page) = new_page(&mut workspace);
+    let Created::Block { block, view } = created(
+        &mut workspace,
+        Mutation::AddDatabaseBlock {
+            page: page.clone(),
+            after: None,
+            name: "Bills".into(),
+            layout: crate::Layout::Table,
+        },
+    ) else {
+        panic!("a Table")
+    };
+    let mut store = workspace.into_store();
+    store.unreadable = Some(Document::Table(block));
+    let mut workspace = Workspace::open(store).unwrap();
+    assert_eq!(
+        apply(&mut workspace, Mutation::RemoveView { page, view }).map(|_| ()),
+        Err(Error::Storage("unreadable".into()))
+    );
+}
+
+fn saved<S: Store>(workspace: &mut Workspace<S>, document: &Document) -> Vec<u8> {
+    workspace.docs.get_mut(document).unwrap().doc.save()
+}
+
+fn replica_of<S: Store>(workspace: &mut Workspace<S>, document: &Document, from: &[u8]) {
+    workspace.docs.get_mut(document).unwrap().doc =
+        crate::model::load(from, &automerge::ActorId::random()).unwrap();
+}
+
+fn merged(first: &[u8], second: &[u8]) -> AutoCommit {
+    let mut merged = crate::model::load(first, &automerge::ActorId::random()).unwrap();
+    let mut other = crate::model::load(second, &automerge::ActorId::random()).unwrap();
+    merged.merge(&mut other).unwrap();
+    merged
+}
+
+#[test]
+fn two_replicas_that_each_make_a_table_keep_both() {
+    use crate::model::{self, NAME, TABLES};
+
+    let mut workspace = Workspace::create(PersonId::new("benni"), MemoryStore::default()).unwrap();
+    let (area, _) = new_page(&mut workspace);
+    let base = saved(&mut workspace, &Document::Workspace);
+    let mut replicas = Vec::new();
+    for name in ["Bills", "Trips"] {
+        replica_of(&mut workspace, &Document::Workspace, &base);
+        workspace.write_create_table(&area, name, None).unwrap();
+        replicas.push(saved(&mut workspace, &Document::Workspace));
+    }
+    let both = merged(&replicas[0], &replicas[1]);
+    let names: Vec<_> = model::sorted(&both, TABLES)
+        .iter()
+        .map(|entry| entry.get(NAME).unwrap_or_default().to_string())
+        .collect();
+    assert_eq!(names.len(), 2, "{names:?}");
+}
+
+#[test]
+fn two_replicas_that_each_add_a_tab_to_a_duplicated_table_keep_both() {
+    let mut workspace = Workspace::create(PersonId::new("benni"), MemoryStore::default()).unwrap();
+    let (_, page) = new_page(&mut workspace);
+    let Created::Block { block, .. } = created(
+        &mut workspace,
+        Mutation::AddDatabaseBlock {
+            page: page.clone(),
+            after: None,
+            name: "Bills".into(),
+            layout: crate::Layout::Table,
+        },
+    ) else {
+        panic!("a Table")
+    };
+    let Created::Block { view, .. } = created(
+        &mut workspace,
+        Mutation::DuplicateTable {
+            page: page.clone(),
+            after: None,
+            table: block,
+            name: "Copy".into(),
+            tabs: Vec::new(),
+        },
+    ) else {
+        panic!("a Table")
+    };
+    let document = Document::Page(page.clone());
+    let base = saved(&mut workspace, &document);
+    let mut replicas = Vec::new();
+    for name in ["Porto", "Lisbon"] {
+        replica_of(&mut workspace, &document, &base);
+        let add = Mutation::AddTab {
+            page: page.clone(),
+            view: view.clone(),
+            after: None,
+            setup: Box::new(crate::TabSetup {
+                name: name.into(),
+                ..crate::TabSetup::of(crate::Layout::Table)
+            }),
+        };
+        apply(&mut workspace, add).unwrap();
+        replicas.push(saved(&mut workspace, &document));
+    }
+    let both = merged(&replicas[0], &replicas[1]);
+    let entry = crate::model::live(&both, crate::model::VIEWS, view.as_str()).unwrap();
+    let names: Vec<_> = crate::tab::read(&both, &entry, view.as_str())
+        .into_iter()
+        .map(|tab| tab.setup.name)
+        .collect();
+    assert_eq!(names.len(), 3, "{names:?}");
+}
+
+#[test]
+fn two_replicas_that_each_remove_a_different_tab_leave_the_view_one_tab() {
+    let mut workspace = Workspace::create(PersonId::new("benni"), MemoryStore::default()).unwrap();
+    let (_, page) = new_page(&mut workspace);
+    let Created::Block { view, .. } = created(
+        &mut workspace,
+        Mutation::AddDatabaseBlock {
+            page: page.clone(),
+            after: None,
+            name: "Bills".into(),
+            layout: crate::Layout::Table,
+        },
+    ) else {
+        panic!("a Table")
+    };
+    created(
+        &mut workspace,
+        Mutation::AddTab {
+            page: page.clone(),
+            view: view.clone(),
+            after: None,
+            setup: Box::new(crate::TabSetup::of(crate::Layout::Board)),
+        },
+    );
+    let document = Document::Page(page.clone());
+    let tabs: Vec<_> = workspace
+        .view(&page, &view)
+        .unwrap()
+        .unwrap()
+        .tabs
+        .into_iter()
+        .map(|tab| tab.id)
+        .collect();
+    let base = saved(&mut workspace, &document);
+    let mut replicas = Vec::new();
+    for tab in tabs {
+        replica_of(&mut workspace, &document, &base);
+        let remove = Mutation::RemoveTab {
+            page: page.clone(),
+            view: view.clone(),
+            tab,
+        };
+        apply(&mut workspace, remove).unwrap();
+        replicas.push(saved(&mut workspace, &document));
+    }
+    let mut both = merged(&replicas[0], &replicas[1]);
+    let entry = crate::model::live(&both, crate::model::VIEWS, view.as_str()).unwrap();
+    let read = crate::tab::read(&both, &entry, view.as_str());
+    assert_eq!(read.len(), 1, "{read:?}");
+    assert_eq!(read[0].id, crate::TabId::stored(view.as_str()));
+
+    let before = read[0].setup.clone();
+    let renamed = crate::TabSetup {
+        name: "All".into(),
+        ..before.clone()
+    };
+    crate::tab::keep(&mut both, &entry, view.as_str()).unwrap();
+    crate::tab::set(&mut both, &entry, &read[0].id, &before, &renamed).unwrap();
+    assert_eq!(
+        crate::tab::read(&both, &entry, view.as_str())[0].setup.name,
+        "All"
+    );
 }

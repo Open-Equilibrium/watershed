@@ -33,7 +33,7 @@ class WindowedList<T> extends ChangeNotifier {
     final chunk = index ~/ windowItems;
     final items = _chunks.remove(chunk);
     if (items == null) {
-      unawaited(_load(chunk));
+      if (!_disposed) unawaited(_load(chunk));
       return null;
     }
     _chunks[chunk] = items;
@@ -66,7 +66,7 @@ class WindowedList<T> extends ChangeNotifier {
       }
       await (_rereading ?? _load(chunk));
     }
-    return at(index);
+    return _chunks.containsKey(chunk) ? at(index) : null;
   }
 
   Future<void> _load(int chunk) =>

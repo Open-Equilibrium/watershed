@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../controls.dart';
 import '../rust/api/database.dart';
 import '../rust/api/workspace.dart';
 import '../theme/icons.dart';
@@ -304,15 +305,10 @@ class _SlashCommandsState extends State<SlashCommands> {
       );
     }
 
-    return Container(
+    return FloatingPanel(
       key: const Key('slash commands'),
       width: 300,
       padding: const EdgeInsets.all(WsMetrics.space2),
-      decoration: BoxDecoration(
-        color: ws.surface,
-        borderRadius: BorderRadius.circular(WsMetrics.radiusLg),
-        boxShadow: ws.shadow,
-      ),
       child: DefaultTextStyle.merge(
         style: const TextStyle(fontSize: WsMetrics.fsUi),
         child: Column(

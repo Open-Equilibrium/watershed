@@ -164,6 +164,7 @@ class MoveDialog extends StatelessWidget {
   );
 
   void _start() {
+    if (model.flow != null) return;
     final address = model.selected?.candidate.address;
     model.start().then(
       (session) => onMoved(session, address),

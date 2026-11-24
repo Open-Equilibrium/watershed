@@ -68,15 +68,8 @@ class ArrangeBar extends StatelessWidget {
             ),
           ),
           const SizedBox(width: WsMetrics.space3),
-          Flexible(
-            child: Text(
-              'Drag the top handle to move, the right edge to resize',
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(fontSize: WsMetrics.fsCompact, color: ws.accent),
-            ),
-          ),
-          const Spacer(),
+          const Flexible(flex: 2, child: _Hint()),
+          const SizedBox(width: WsMetrics.space3),
           Container(
             padding: const EdgeInsets.all(2),
             decoration: BoxDecoration(
@@ -97,6 +90,33 @@ class ArrangeBar extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+class _Hint extends StatelessWidget {
+  const _Hint();
+
+  static const _text = 'Drag the top handle to move, the right edge to resize';
+
+  @override
+  Widget build(BuildContext context) {
+    final style = DefaultTextStyle.of(context).style.merge(
+      TextStyle(fontSize: WsMetrics.fsCompact, color: context.ws.accent),
+    );
+    return LayoutBuilder(
+      builder: (context, room) {
+        final whole = TextPainter(
+          text: TextSpan(text: _text, style: style),
+          textDirection: Directionality.of(context),
+          textScaler: MediaQuery.textScalerOf(context),
+        )..layout();
+        final fits = whole.width <= room.maxWidth;
+        whole.dispose();
+        return fits
+            ? Text(_text, maxLines: 1, style: style)
+            : const SizedBox.shrink();
+      },
     );
   }
 }

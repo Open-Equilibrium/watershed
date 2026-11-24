@@ -1,15 +1,12 @@
 #![allow(clippy::unwrap_used)]
 
+mod common;
+
+use common::*;
 use liquid_core::{
-    Action, Actor, Applied, AreaId, BlockId, BlockKind, Code, Error, MemoryStore, Mutation,
+    Action, Actor, Applied, AreaId, BlockId, BlockKind, Changed, Code, Created, Error, Mutation,
     Operation, Origin, PageId, Permission, PersonId, Request, TextStyle, ViewId,
 };
-
-type Workspace = liquid_core::Workspace<MemoryStore>;
-
-fn workspace() -> Workspace {
-    Workspace::create(PersonId::new("benni"), MemoryStore::default()).unwrap()
-}
 
 fn history(workspace: &mut Workspace) -> Vec<Action> {
     let mut actions = workspace.history(None, usize::MAX).unwrap();
@@ -17,25 +14,13 @@ fn history(workspace: &mut Workspace) -> Vec<Action> {
     actions
 }
 
-fn owner() -> Actor {
-    Actor::Person(PersonId::new("benni"))
-}
-
-fn edit(workspace: &mut Workspace, mutation: Mutation) -> Result<Applied, Error> {
-    workspace.apply(Request {
-        actor: owner(),
-        origin: Origin::Ui,
-        mutation,
-    })
-}
-
 fn apply(workspace: &mut Workspace, mutation: Mutation) -> Applied {
-    edit(workspace, mutation).expect("the owner may apply it")
+    common::apply(workspace, mutation).expect("the owner may apply it")
 }
 
 fn area(workspace: &mut Workspace, name: &str) -> AreaId {
     match apply(workspace, Mutation::CreateArea { name: name.into() }).created {
-        Some(liquid_core::Created::Area(id)) => id,
+        Some(Created::Area(id)) => id,
         other => panic!("expected an area, got {other:?}"),
     }
 }
@@ -47,9 +32,14 @@ fn page(workspace: &mut Workspace, area: &AreaId, parent: Option<&PageId>, title
         title: title.into(),
     };
     match apply(workspace, mutation).created {
-        Some(liquid_core::Created::Page(id)) => id,
+        Some(Created::Page(id)) => id,
         other => panic!("expected a Page, got {other:?}"),
     }
+}
+
+fn lisbon_page(workspace: &mut Workspace) -> PageId {
+    let trips = area(workspace, "Trips");
+    page(workspace, &trips, None, "Lisbon")
 }
 
 fn text_block(
@@ -57,14 +47,14 @@ fn text_block(
     page: &PageId,
     after: Option<&ViewId>,
     text: &str,
-) -> (liquid_core::BlockId, ViewId) {
+) -> (BlockId, ViewId) {
     let mutation = Mutation::AddTextBlock {
         page: page.clone(),
         after: after.cloned(),
         text: text.into(),
     };
     match apply(workspace, mutation).created {
-        Some(liquid_core::Created::Block { block, view }) => (block, view),
+        Some(Created::Block { block, view }) => (block, view),
         other => panic!("expected a Block, got {other:?}"),
     }
 }
@@ -105,6 +95,11 @@ fn texts(workspace: &mut Workspace, page: &PageId) -> Vec<String> {
         .collect()
 }
 
+fn kinds(workspace: &mut Workspace, page: &PageId) -> Vec<BlockKind> {
+    let views = workspace.views(page, 0, usize::MAX).unwrap();
+    views.iter().map(|view| view.kind).collect()
+}
+
 #[test]
 fn the_explorer_lists_areas_and_nested_pages_in_creation_order() {
     let mut workspace = workspace();
@@ -141,7 +136,7 @@ fn the_explorer_lists_areas_and_nested_pages_in_creation_order() {
     assert_eq!(titles(&mut workspace, &trips)[0].0, "Lisbon in May");
 
     let recorded = history(&mut workspace).len();
-    let unchanged = edit(
+    let unchanged = common::apply(
         &mut workspace,
         Mutation::RenamePage {
             page: lisbon,
@@ -155,8 +150,7 @@ fn the_explorer_lists_areas_and_nested_pages_in_creation_order() {
 #[test]
 fn text_blocks_keep_their_order_and_edit_in_utf16_units() {
     let mut workspace = workspace();
-    let trips = area(&mut workspace, "Trips");
-    let lisbon = page(&mut workspace, &trips, None, "Lisbon");
+    let lisbon = lisbon_page(&mut workspace);
     let (plan, plan_view) = text_block(&mut workspace, &lisbon, None, "Five days");
     let (_, notes_view) = text_block(&mut workspace, &lisbon, Some(&plan_view), "Tram 28");
     text_block(&mut workspace, &lisbon, Some(&plan_view), "Sintra 🌄");
@@ -195,7 +189,7 @@ fn text_blocks_keep_their_order_and_edit_in_utf16_units() {
     );
 
     for (at, delete) in [(8, 0), (7, 1), (10, 1)] {
-        let refused = edit(
+        let refused = common::apply(
             &mut workspace,
             Mutation::EditText {
                 page: lisbon.clone(),
@@ -217,8 +211,7 @@ fn text_blocks_keep_their_order_and_edit_in_utf16_units() {
 #[test]
 fn removing_the_last_view_removes_its_block() {
     let mut workspace = workspace();
-    let trips = area(&mut workspace, "Trips");
-    let lisbon = page(&mut workspace, &trips, None, "Lisbon");
+    let lisbon = lisbon_page(&mut workspace);
     let (plan, plan_view) = text_block(&mut workspace, &lisbon, None, "Five days");
     text_block(&mut workspace, &lisbon, Some(&plan_view), "Tram 28");
 
@@ -251,7 +244,10 @@ fn removing_the_last_view_removes_its_block() {
             insert: "Our ".into(),
         },
     ] {
-        assert_eq!(edit(&mut workspace, mutation).unwrap_err(), Error::NotFound);
+        assert_eq!(
+            common::apply(&mut workspace, mutation).unwrap_err(),
+            Error::NotFound
+        );
     }
 }
 
@@ -274,7 +270,7 @@ fn a_refused_request_changes_nothing_and_records_no_action() {
     });
     assert_eq!(stranger.unwrap_err(), Error::NotAllowed);
 
-    let other_area_parent = edit(
+    let other_area_parent = common::apply(
         &mut workspace,
         Mutation::CreatePage {
             area: trips.clone(),
@@ -291,8 +287,7 @@ fn a_refused_request_changes_nothing_and_records_no_action() {
 #[test]
 fn every_action_names_its_actor_origin_and_permission() {
     let mut workspace = workspace();
-    let trips = area(&mut workspace, "Trips");
-    let lisbon = page(&mut workspace, &trips, None, "Lisbon");
+    let lisbon = lisbon_page(&mut workspace);
     let applied = workspace
         .apply(Request {
             actor: owner(),
@@ -323,8 +318,7 @@ fn every_action_names_its_actor_origin_and_permission() {
 #[test]
 fn a_page_reads_its_views_in_windows() {
     let mut workspace = workspace();
-    let trips = area(&mut workspace, "Trips");
-    let lisbon = page(&mut workspace, &trips, None, "Lisbon");
+    let lisbon = lisbon_page(&mut workspace);
     let mut after = None;
     for day in 1..=30 {
         let (_, view) = text_block(
@@ -373,8 +367,7 @@ fn identities_read_back_from_text_and_reject_anything_else() {
 #[test]
 fn enter_splits_a_text_block_and_backspace_joins_it_again() {
     let mut workspace = workspace();
-    let trips = area(&mut workspace, "Trips");
-    let lisbon = page(&mut workspace, &trips, None, "Lisbon");
+    let lisbon = lisbon_page(&mut workspace);
     let (plan, plan_view) = text_block(&mut workspace, &lisbon, None, "Five days in Lisbon 🌄");
     text_block(&mut workspace, &lisbon, Some(&plan_view), "Tram 28");
 
@@ -385,7 +378,7 @@ fn enter_splits_a_text_block_and_backspace_joins_it_again() {
         at: 9,
         style: TextStyle::Bullet,
     };
-    let Some(liquid_core::Created::Block {
+    let Some(Created::Block {
         block: rest,
         view: rest_view,
     }) = apply(&mut workspace, split).created
@@ -405,7 +398,7 @@ fn enter_splits_a_text_block_and_backspace_joins_it_again() {
         Some(TextStyle::Paragraph)
     );
 
-    let inside = edit(
+    let inside = common::apply(
         &mut workspace,
         Mutation::SplitTextBlock {
             page: lisbon.clone(),
@@ -429,7 +422,7 @@ fn enter_splits_a_text_block_and_backspace_joins_it_again() {
         ["Five days in Lisbon 🌄", "Tram 28"]
     );
     assert_eq!(workspace.text(&lisbon, &rest).unwrap(), None);
-    let first = edit(
+    let first = common::apply(
         &mut workspace,
         Mutation::JoinTextBlock {
             page: lisbon.clone(),
@@ -446,8 +439,7 @@ fn enter_splits_a_text_block_and_backspace_joins_it_again() {
 #[test]
 fn styles_and_section_boundaries_are_set_and_read_back() {
     let mut workspace = workspace();
-    let trips = area(&mut workspace, "Trips");
-    let lisbon = page(&mut workspace, &trips, None, "Lisbon");
+    let lisbon = lisbon_page(&mut workspace);
     let (plan, plan_view) = text_block(&mut workspace, &lisbon, None, "Plan");
     let (_, day_view) = text_block(&mut workspace, &lisbon, Some(&plan_view), "Day one");
 
@@ -466,7 +458,7 @@ fn styles_and_section_boundaries_are_set_and_read_back() {
         );
         assert_eq!(workspace.style(&lisbon, &plan).unwrap(), Some(style));
     }
-    let deep = edit(
+    let deep = common::apply(
         &mut workspace,
         Mutation::SetTextStyle {
             page: lisbon.clone(),
@@ -498,8 +490,7 @@ fn styles_and_section_boundaries_are_set_and_read_back() {
 #[test]
 fn enter_at_a_text_block_s_start_adds_an_empty_one_above() {
     let mut workspace = workspace();
-    let trips = area(&mut workspace, "Trips");
-    let lisbon = page(&mut workspace, &trips, None, "Lisbon");
+    let lisbon = lisbon_page(&mut workspace);
     let (plan, plan_view) = text_block(&mut workspace, &lisbon, None, "Plan");
     apply(
         &mut workspace,
@@ -509,15 +500,17 @@ fn enter_at_a_text_block_s_start_adds_an_empty_one_above() {
             style: TextStyle::Heading(1),
         },
     );
-    let split = Mutation::SplitTextBlock {
-        page: lisbon.clone(),
-        block: plan.clone(),
-        view: plan_view,
-        at: 0,
-        style: TextStyle::Paragraph,
-    };
-    let Some(liquid_core::Created::Block { block: empty, .. }) =
-        apply(&mut workspace, split).created
+    let Some(Created::Block { block: empty, .. }) = apply(
+        &mut workspace,
+        Mutation::SplitTextBlock {
+            page: lisbon.clone(),
+            block: plan.clone(),
+            view: plan_view,
+            at: 0,
+            style: TextStyle::Paragraph,
+        },
+    )
+    .created
     else {
         panic!("a Block")
     };
@@ -538,36 +531,9 @@ fn enter_at_a_text_block_s_start_adds_an_empty_one_above() {
 }
 
 #[test]
-fn backspace_never_joins_across_a_section_boundary() {
-    let mut workspace = workspace();
-    let trips = area(&mut workspace, "Trips");
-    let lisbon = page(&mut workspace, &trips, None, "Lisbon");
-    let (_, plan_view) = text_block(&mut workspace, &lisbon, None, "Plan");
-    let (_, day_view) = text_block(&mut workspace, &lisbon, Some(&plan_view), "Day one");
-    apply(
-        &mut workspace,
-        Mutation::SetSectionBoundary {
-            page: lisbon.clone(),
-            view: day_view.clone(),
-            boundary: true,
-        },
-    );
-    let join = Mutation::JoinTextBlock {
-        page: lisbon.clone(),
-        view: day_view,
-    };
-    assert_eq!(
-        edit(&mut workspace, join).unwrap_err(),
-        Error::SectionBoundary
-    );
-    assert_eq!(texts(&mut workspace, &lisbon), ["Plan", "Day one"]);
-}
-
-#[test]
 fn enter_at_a_section_s_start_keeps_the_new_text_block_in_that_section() {
     let mut workspace = workspace();
-    let trips = area(&mut workspace, "Trips");
-    let lisbon = page(&mut workspace, &trips, None, "Lisbon");
+    let lisbon = lisbon_page(&mut workspace);
     let (_, plan_view) = text_block(&mut workspace, &lisbon, None, "Plan");
     let (day, day_view) = text_block(&mut workspace, &lisbon, Some(&plan_view), "Day one");
     apply(
@@ -598,9 +564,29 @@ fn enter_at_a_section_s_start_keeps_the_new_text_block_in_that_section() {
     assert_eq!(boundaries, [false, true, false]);
 }
 
-fn kinds(workspace: &mut Workspace, page: &PageId) -> Vec<BlockKind> {
-    let views = workspace.views(page, 0, usize::MAX).unwrap();
-    views.iter().map(|view| view.kind).collect()
+#[test]
+fn backspace_never_joins_across_a_section_boundary() {
+    let mut workspace = workspace();
+    let lisbon = lisbon_page(&mut workspace);
+    let (_, plan_view) = text_block(&mut workspace, &lisbon, None, "Plan");
+    let (_, day_view) = text_block(&mut workspace, &lisbon, Some(&plan_view), "Day one");
+    apply(
+        &mut workspace,
+        Mutation::SetSectionBoundary {
+            page: lisbon.clone(),
+            view: day_view.clone(),
+            boundary: true,
+        },
+    );
+    let join = Mutation::JoinTextBlock {
+        page: lisbon.clone(),
+        view: day_view,
+    };
+    assert_eq!(
+        common::apply(&mut workspace, join).unwrap_err(),
+        Error::SectionBoundary
+    );
+    assert_eq!(texts(&mut workspace, &lisbon), ["Plan", "Day one"]);
 }
 
 #[test]
@@ -679,52 +665,6 @@ fn a_text_block_turns_into_code_and_back_keeping_its_view_and_text() {
 }
 
 #[test]
-fn a_text_block_turns_into_math_and_back_keeping_its_text() {
-    let mut workspace = workspace();
-    let notes = area(&mut workspace, "Notes");
-    let physics = page(&mut workspace, &notes, None, "Physics notes");
-    let (roots, _) = text_block(&mut workspace, &physics, None, "x = ");
-    apply(
-        &mut workspace,
-        Mutation::TurnIntoMath {
-            page: physics.clone(),
-            block: roots.clone(),
-        },
-    );
-    assert_eq!(kinds(&mut workspace, &physics), [BlockKind::Math]);
-    apply(
-        &mut workspace,
-        Mutation::EditText {
-            page: physics.clone(),
-            block: roots.clone(),
-            at: 4,
-            delete: 0,
-            insert: r"\frac{-b}{2a}".into(),
-        },
-    );
-    workspace.close_page(&physics);
-    assert_eq!(
-        workspace.math(&physics, &roots).unwrap().as_deref(),
-        Some(r"x = \frac{-b}{2a}")
-    );
-    assert_eq!(workspace.text(&physics, &roots).unwrap(), None);
-    assert_eq!(workspace.code(&physics, &roots).unwrap(), None);
-    apply(
-        &mut workspace,
-        Mutation::TurnIntoText {
-            page: physics.clone(),
-            block: roots.clone(),
-        },
-    );
-    assert_eq!(kinds(&mut workspace, &physics), [BlockKind::Text]);
-    assert_eq!(
-        workspace.text(&physics, &roots).unwrap().as_deref(),
-        Some(r"x = \frac{-b}{2a}")
-    );
-    assert_eq!(workspace.math(&physics, &roots).unwrap(), None);
-}
-
-#[test]
 fn a_code_block_neither_splits_joins_nor_takes_text_block_writes() {
     let mut workspace = workspace();
     let acme = area(&mut workspace, "Acme API");
@@ -778,7 +718,7 @@ fn a_code_block_neither_splits_joins_nor_takes_text_block_writes() {
     let before = history(&mut workspace).len();
     for mutation in refused {
         assert_eq!(
-            edit(&mut workspace, mutation.clone()).map(|_| ()),
+            common::apply(&mut workspace, mutation.clone()).map(|_| ()),
             Err(Error::NotFound),
             "{mutation:?}"
         );
@@ -803,7 +743,7 @@ fn a_workspace_keeps_its_name_and_icon() {
             name: "Home".into(),
         },
     );
-    assert_eq!(named.changed, [liquid_core::Changed::Workspace]);
+    assert_eq!(named.changed, [Changed::Workspace]);
     apply(
         &mut workspace,
         Mutation::SetWorkspaceIcon {
@@ -815,7 +755,7 @@ fn a_workspace_keeps_its_name_and_icon() {
         ("Home".to_string(), "🏡".to_string())
     );
     assert_eq!(
-        edit(
+        common::apply(
             &mut workspace,
             Mutation::SetWorkspaceIcon {
                 icon: "x".repeat(65),
@@ -823,4 +763,78 @@ fn a_workspace_keeps_its_name_and_icon() {
         ),
         Err(Error::TooLong)
     );
+}
+
+#[test]
+fn a_page_s_icon_is_set_listed_reverted_and_bounded() {
+    let mut workspace = workspace();
+    let private = area(&mut workspace, "Private");
+    let budget = page(&mut workspace, &private, None, "Household budget");
+    let set = apply(
+        &mut workspace,
+        Mutation::SetPageIcon {
+            page: budget.clone(),
+            icon: "💰".into(),
+        },
+    );
+    let icon = |workspace: &mut Workspace| workspace.pages(&private).unwrap()[0].icon.clone();
+    assert_eq!(icon(&mut workspace), "💰");
+    assert_eq!(
+        common::apply(
+            &mut workspace,
+            Mutation::SetPageIcon {
+                page: budget.clone(),
+                icon: "x".repeat(65),
+            },
+        )
+        .unwrap_err(),
+        Error::TooLong
+    );
+    workspace.revert(&owner(), &[set.action]).unwrap();
+    assert_eq!(icon(&mut workspace), "");
+}
+#[test]
+fn a_text_block_turns_into_math_and_back_keeping_its_text() {
+    let mut workspace = workspace();
+    let notes = area(&mut workspace, "Notes");
+    let physics = page(&mut workspace, &notes, None, "Physics notes");
+    let (roots, _) = text_block(&mut workspace, &physics, None, "x = ");
+    apply(
+        &mut workspace,
+        Mutation::TurnIntoMath {
+            page: physics.clone(),
+            block: roots.clone(),
+        },
+    );
+    assert_eq!(kinds(&mut workspace, &physics), [BlockKind::Math]);
+    apply(
+        &mut workspace,
+        Mutation::EditText {
+            page: physics.clone(),
+            block: roots.clone(),
+            at: 4,
+            delete: 0,
+            insert: r"\frac{-b}{2a}".into(),
+        },
+    );
+    workspace.close_page(&physics);
+    assert_eq!(
+        workspace.math(&physics, &roots).unwrap().as_deref(),
+        Some(r"x = \frac{-b}{2a}")
+    );
+    assert_eq!(workspace.text(&physics, &roots).unwrap(), None);
+    assert_eq!(workspace.code(&physics, &roots).unwrap(), None);
+    apply(
+        &mut workspace,
+        Mutation::TurnIntoText {
+            page: physics.clone(),
+            block: roots.clone(),
+        },
+    );
+    assert_eq!(kinds(&mut workspace, &physics), [BlockKind::Text]);
+    assert_eq!(
+        workspace.text(&physics, &roots).unwrap().as_deref(),
+        Some(r"x = \frac{-b}{2a}")
+    );
+    assert_eq!(workspace.math(&physics, &roots).unwrap(), None);
 }

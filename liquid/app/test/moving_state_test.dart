@@ -13,44 +13,40 @@ import 'fake_backend.dart';
 
 const studio = 'ws://studio.local:3774';
 const info = SessionInfo(project: 'acme-api');
+const releaseCall = 'move finish moving transfer-1 null';
+const sealCall = 'move finish moving transfer-1 studio';
 
-BridgeMoving movingTo(String targetAddress, {String targetName = 'studio'}) =>
-    BridgeMoving(
-      transfer: 'transfer-1',
-      phase: BridgeMovePhase.handed,
-      targetAddress: targetAddress,
-      targetName: targetName,
-      targetEnvironment: fakeEnvironment,
-      sinceMs: DateTime.now().millisecondsSinceEpoch,
-    );
-
-FakeProject movingSource({String targetAddress = studio}) =>
-    FakeProject(session: FakeSession(id: 'moving'))
-      ..moving = movingTo(targetAddress)
-      ..threadList = [
-        threadOf(
-          'moving',
-          title: 'Fix the flaky port test',
-          moving: movingTo(targetAddress),
-        ),
-      ];
+FakeProject movingSource({FakeProject? project}) {
+  final moving = BridgeMoving(
+    transfer: 'transfer-1',
+    phase: BridgeMovePhase.handed,
+    targetAddress: studio,
+    targetName: 'studio',
+    targetEnvironment: fakeEnvironment,
+    sinceMs: DateTime.now().millisecondsSinceEpoch,
+  );
+  return (project ?? FakeProject(session: FakeSession(id: 'moving')))
+    ..moving = moving
+    ..threadList = [
+      threadOf('moving', title: 'Fix the flaky port test', moving: moving),
+    ];
+}
 
 Future<SessionState> openMoving(
   WidgetTester tester,
   FakeProject source, {
-  bool targetAnswers = false,
+  FakeProject? answering,
   bool runningHere = false,
-  FakeProject? target,
 }) async {
   await tester.binding.setSurfaceSize(const Size(1400, 900));
   final state = SessionState(source);
-  final remote = target ?? FakeProject();
+  final remote = answering ?? FakeProject();
   state.openProject = (address, root) async {
-    if (address == studio && !targetAnswers) throw 'studio does not answer';
+    if (address == studio && answering == null) throw 'studio does not answer';
     return address == studio ? remote : source;
   };
   if (runningHere) state.runningMoves.add('transfer-1');
-  if (targetAnswers) await state.addHost(studio, remote);
+  if (answering != null) await state.addHost(studio, remote);
   await state.loadStart();
   await state.open('moving');
   await tester.pumpWidget(
@@ -58,6 +54,16 @@ Future<SessionState> openMoving(
   );
   await tester.pump();
   return state;
+}
+
+Future<void> tapAndSettle(WidgetTester tester, String text) async {
+  await tester.tap(find.text(text));
+  await tester.pumpAndSettle();
+}
+
+Future<void> cancelMove(WidgetTester tester) async {
+  await tapAndSettle(tester, 'Cancel move…');
+  await tapAndSettle(tester, 'Cancel move');
 }
 
 class HangingCheck extends FakeProject {
@@ -78,8 +84,7 @@ void main() {
       source.threadList = [
         threadOf('moving', title: 'Fix the flaky port test'),
       ];
-      await tester.tap(find.text('Try again'));
-      await tester.pumpAndSettle();
+      await tapAndSettle(tester, 'Try again');
 
       expect(find.byType(Composer), findsOneWidget);
       expect(find.text('Moving to studio.'), findsNothing);
@@ -114,19 +119,11 @@ void main() {
     (tester) async {
       final source = movingSource();
       final remote = FakeProject()..landedThread = 'moved-1';
-      final state = await openMoving(
-        tester,
-        source,
-        targetAnswers: true,
-        target: remote,
-      );
+      final state = await openMoving(tester, source, answering: remote);
 
-      await tester.tap(find.text('Cancel move…'));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('Cancel move'));
-      await tester.pumpAndSettle();
+      await cancelMove(tester);
 
-      expect(source.calls, contains('move finish moving transfer-1 studio'));
+      expect(source.calls, contains(sealCall));
       expect(
         state.notice.value?.text,
         'studio already had this session, so the move finished.',
@@ -143,26 +140,12 @@ void main() {
       final remote = FakeProject()
         ..landedThread = 'moved-1'
         ..undelivered = true;
-      final state = await openMoving(
-        tester,
-        source,
-        targetAnswers: true,
-        target: remote,
-      );
+      final state = await openMoving(tester, source, answering: remote);
 
-      await tester.tap(find.text('Cancel move…'));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('Cancel move'));
-      await tester.pumpAndSettle();
+      await cancelMove(tester);
 
-      expect(
-        source.calls,
-        isNot(contains('move finish moving transfer-1 null')),
-      );
-      expect(
-        source.calls,
-        isNot(contains('move finish moving transfer-1 studio')),
-      );
+      expect(source.calls, isNot(contains(releaseCall)));
+      expect(source.calls, isNot(contains(sealCall)));
       expect(
         state.notice.value?.text,
         'studio is still taking the session, so the move cannot be cancelled yet.',
@@ -177,7 +160,7 @@ void main() {
       final state = await openMoving(
         tester,
         movingSource(),
-        targetAnswers: true,
+        answering: FakeProject(),
         runningHere: true,
       );
 
@@ -194,8 +177,7 @@ void main() {
       final source = movingSource();
       final state = await openMoving(tester, source);
 
-      await tester.tap(find.text('Cancel move…'));
-      await tester.pumpAndSettle();
+      await tapAndSettle(tester, 'Cancel move…');
       expect(find.text('Cancel the move to studio?'), findsOneWidget);
       expect(
         find.text(
@@ -203,19 +185,12 @@ void main() {
         ),
         findsOneWidget,
       );
-      await tester.tap(find.text('Keep waiting'));
-      await tester.pumpAndSettle();
-      expect(
-        source.calls,
-        isNot(contains('move finish moving transfer-1 null')),
-      );
+      await tapAndSettle(tester, 'Keep waiting');
+      expect(source.calls, isNot(contains(releaseCall)));
       expect(find.text('Moving to studio.'), findsOneWidget);
 
-      await tester.tap(find.text('Cancel move…'));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('Cancel move'));
-      await tester.pumpAndSettle();
-      expect(source.calls, contains('move finish moving transfer-1 null'));
+      await cancelMove(tester);
+      expect(source.calls, contains(releaseCall));
       expect(find.byType(Composer), findsOneWidget);
       expect(find.text('Moving to studio.'), findsNothing);
       await state.dispose();
@@ -223,39 +198,14 @@ void main() {
   );
 
   testWidgets(
-    'a move another device made, whose target answers, waits without a spinner until it is five minutes old',
+    'while Liquid settles a move, the input area shows the spinner, not the waiting state',
     (tester) async {
       final state = await openMoving(
         tester,
-        movingSource(),
-        targetAnswers: true,
-      );
-
-      expect(find.byType(CircularProgressIndicator), findsNothing);
-      expect(find.text('Try again'), findsOneWidget);
-      expect(
-        find.text(
-          'Liquid waits five minutes after the move started before it finishes it.',
+        movingSource(
+          project: HangingCheck(session: FakeSession(id: 'moving')),
         ),
-        findsOneWidget,
       );
-      await state.dispose();
-    },
-  );
-
-  testWidgets(
-    'while Liquid settles a move, the input area shows the spinner, not the waiting state',
-    (tester) async {
-      final source = HangingCheck(session: FakeSession(id: 'moving'))
-        ..moving = movingTo(studio)
-        ..threadList = [
-          threadOf(
-            'moving',
-            title: 'Fix the flaky port test',
-            moving: movingTo(studio),
-          ),
-        ];
-      final state = await openMoving(tester, source);
 
       expect(find.byType(CircularProgressIndicator), findsOneWidget);
       expect(find.text('Try again'), findsNothing);

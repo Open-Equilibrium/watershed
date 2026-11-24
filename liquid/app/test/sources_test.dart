@@ -1,5 +1,8 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -7,6 +10,7 @@ import 'package:liquid/src/agent/sidebar.dart';
 import 'package:liquid/src/rust/api/chart.dart';
 import 'package:liquid/src/rust/api/source.dart';
 import 'package:liquid/src/rust/api/workspace.dart';
+import 'package:liquid/src/workspace/pdf_pages.dart';
 import 'package:liquid/src/workspace/source_page.dart';
 import 'package:liquid/src/workspace/workspace_state.dart';
 
@@ -39,6 +43,40 @@ BridgeSourceFile text(String name, String content) => BridgeSourceFile(
 BridgeFileEntry entry(String name, {bool folder = false}) =>
     BridgeFileEntry(name: name, folder: folder, size: BigInt.from(2048));
 
+final receiptPng = base64Decode(
+  'iVBORw0KGgoAAAANSUhEUgAAACgAAAAeCAIAAADRv8uKAAAAK0lEQVR4nO3NMQ0AAAgDsMlBNnKQ'
+  'hQw4mvRvputExGKxWCwWi8VisVj8N158a1NqSEcsCQAAAABJRU5ErkJggg==',
+);
+
+Future<ui.Image> pixel(WidgetTester tester) async => (await tester.runAsync(() {
+  final drawn = Completer<ui.Image>();
+  ui.decodeImageFromPixels(
+    Uint8List.fromList(List.filled(4 * 4, 255)),
+    2,
+    2,
+    ui.PixelFormat.rgba8888,
+    drawn.complete,
+  );
+  return drawn.future;
+}))!;
+
+BridgeSourceFile pdfFile(String path, Uint8List bytes) => BridgeSourceFile(
+  read: BridgeRead.read,
+  name: path.split('/').last,
+  path: path,
+  size: BigInt.from(bytes.length),
+  shown: BridgeFileView.pdf,
+  columns: const [],
+  rows: const [],
+  bytes: bytes,
+);
+
+PdfPages noPages() => PdfPages(
+  const [],
+  (index, width) async => throw UnimplementedError(),
+  () async {},
+);
+
 Finder inSidebar(String text) =>
     find.descendant(of: find.byType(Sidebar), matching: find.text(text));
 
@@ -60,6 +98,7 @@ Future<void> addFrom(WidgetTester tester, String key) async {
 void main() {
   late StreamController<void> changed;
 
+  final kit = PageKit();
   final watched = <String>[];
 
   setUp(() {
@@ -78,7 +117,6 @@ void main() {
 
   testWidgets('a CSV Source added from the area’s + opens as a table, '
       'follows its file and feeds a Chart on a Page', (tester) async {
-    final kit = PageKit();
     const path = '/Users/benni/Documents/bank-export.csv';
     SourcePlatform.pickFile = () async => path;
     await kit.show(tester, const [TextPart('October')]);
@@ -122,7 +160,6 @@ void main() {
 
   testWidgets('a folder Source unfolds in the Explorer, and its files open in '
       'the same view with the breadcrumb leading back', (tester) async {
-    final kit = PageKit();
     const path = '/Users/benni/docs';
     SourcePlatform.pickFolder = () async => path;
     await kit.show(tester, const [TextPart('October')]);
@@ -168,7 +205,6 @@ void main() {
 
   testWidgets('a missing file offers to choose another or to remove the '
       'Source, and any other file opens in its default app', (tester) async {
-    final kit = PageKit();
     const path = '/Users/benni/Documents/gone.csv';
     SourcePlatform.pickFile = () async => path;
     final opened = <List<String>>[];
@@ -210,9 +246,52 @@ void main() {
     expect(inSidebar('gone.csv'), findsNothing);
   });
 
+  testWidgets('an image Source shows the bytes Liquid read for it', (
+    tester,
+  ) async {
+    const path = '/Users/benni/Pictures/receipt.png';
+    SourcePlatform.pickFile = () async => path;
+    await kit.show(tester, const [TextPart('October')]);
+    kit.fake.sourceFiles[(path, '')] = BridgeSourceFile(
+      read: BridgeRead.read,
+      name: 'receipt.png',
+      path: path,
+      size: BigInt.from(receiptPng.length),
+      shown: BridgeFileView.image,
+      columns: const [],
+      rows: const [],
+      bytes: receiptPng,
+    );
+    await addFrom(tester, 'add source file');
+
+    final image = tester.widget<Image>(
+      inSource(find.byKey(const Key('source image'))),
+    );
+    expect(image.image, isA<MemoryImage>());
+    expect((image.image as MemoryImage).bytes, receiptPng);
+  });
+
+  testWidgets('a PDF Source opens the bytes Liquid read for it', (
+    tester,
+  ) async {
+    const path = '/Users/benni/Documents/offer.pdf';
+    SourcePlatform.pickFile = () async => path;
+    await kit.show(tester, const [TextPart('October')]);
+    final pdf = Uint8List.fromList('%PDF-1.4 offer'.codeUnits);
+    Uint8List? opened;
+    PdfPages.opener = (bytes) async {
+      opened = bytes;
+      return noPages();
+    };
+    kit.fake.sourceFiles[(path, '')] = pdfFile(path, pdf);
+    await addFrom(tester, 'add source file');
+
+    expect(opened, pdf);
+    expect(inSource(find.byKey(const Key('source pdf'))), findsOneWidget);
+  });
+
   testWidgets('a Chart offers CSV Sources as its data and their columns for '
       'Group by and Value', (tester) async {
-    final kit = PageKit();
     const path = '/Users/benni/Documents/bank-export.csv';
     SourcePlatform.pickFile = () async => path;
     await kit.show(tester, const [
@@ -242,5 +321,101 @@ void main() {
     await tester.tap(find.text('None').first);
     await settle(tester);
     expect(find.text('Date'), findsWidgets);
+  });
+
+  testWidgets('a folder with many entries builds only the rows on screen', (
+    tester,
+  ) async {
+    const path = '/Users/benni/archive';
+    SourcePlatform.pickFolder = () async => path;
+    await kit.show(tester, const [TextPart('October')]);
+    kit.fake.sourceFolders[(path, '')] = [
+      for (var n = 0; n < 2000; n++) entry('file-$n.txt'),
+    ];
+    await addFrom(tester, 'add source folder');
+    await settle(tester);
+
+    expect(
+      inSource(find.byKey(const ValueKey('source entry file-0.txt'))),
+      findsOneWidget,
+    );
+    expect(
+      inSource(find.byKey(const ValueKey('source entry file-1999.txt'))),
+      findsNothing,
+    );
+  });
+
+  testWidgets('a long PDF renders only the pages near the view', (
+    tester,
+  ) async {
+    const path = '/Users/benni/Documents/long.pdf';
+    SourcePlatform.pickFile = () async => path;
+    await kit.show(tester, const [TextPart('October')]);
+    final image = await pixel(tester);
+    final rendered = <int>[];
+    PdfPages.opener = (_) async =>
+        PdfPages(List.filled(100, const Size(595, 842)), (index, width) async {
+          rendered.add(index);
+          return image.clone();
+        }, () async {});
+    kit.fake.sourceFiles[(path, '')] = pdfFile(
+      path,
+      Uint8List.fromList('%PDF-1.4 long'.codeUnits),
+    );
+    await addFrom(tester, 'add source file');
+    await settle(tester);
+
+    expect(rendered, contains(0));
+    expect(rendered.length, lessThan(10));
+  });
+
+  testWidgets('Reload shows a PDF that changed on disk', (tester) async {
+    const path = '/Users/benni/Documents/offer.pdf';
+    SourcePlatform.pickFile = () async => path;
+    await kit.show(tester, const [TextPart('October')]);
+    final opened = <Uint8List>[];
+    PdfPages.opener = (bytes) async {
+      opened.add(bytes);
+      return noPages();
+    };
+    kit.fake.sourceFiles[(path, '')] = pdfFile(
+      path,
+      Uint8List.fromList('%PDF-1.4 first'.codeUnits),
+    );
+    await addFrom(tester, 'add source file');
+    final source = kit.fake.sourceList.values.single.single.id;
+    final second = Uint8List.fromList('%PDF-1.4 second'.codeUnits);
+    kit.fake.sourceFiles[(source, '')] = pdfFile(path, second);
+    await tester.tap(find.text('Reload'));
+    await settle(tester);
+
+    expect(opened.last, same(second));
+  });
+
+  testWidgets('a page rendered after its Source closed is released', (
+    tester,
+  ) async {
+    const path = '/Users/benni/Documents/offer.pdf';
+    SourcePlatform.pickFile = () async => path;
+    await kit.show(tester, const [TextPart('October')]);
+    final rendered = Completer<ui.Image>();
+    PdfPages.opener = (_) async => PdfPages(
+      const [Size(595, 842)],
+      (index, width) => rendered.future,
+      () async {},
+    );
+    kit.fake.sourceFiles[(path, '')] = pdfFile(
+      path,
+      Uint8List.fromList('%PDF-1.4 offer'.codeUnits),
+    );
+    await addFrom(tester, 'add source file');
+    kit.workspace.open.value = OpenPage(kit.fake.areas.single.id, kit.page);
+    await settle(tester);
+
+    final image = await pixel(tester);
+    rendered.complete(image);
+    await tester.pump();
+
+    expect(image.debugDisposed, isTrue);
   });
 }

@@ -165,6 +165,19 @@ class BoardPainter extends CustomPainter {
     textDirection: TextDirection.ltr,
   );
 
+  static double textHeight(String text, double width, int size, bool hand) {
+    final measure = TextPainter(
+      text: TextSpan(
+        text: text,
+        style: textStyle(size, const Color(0xFF000000), hand),
+      ),
+      textDirection: TextDirection.ltr,
+    )..layout(maxWidth: math.max(1, width));
+    final height = measure.height;
+    measure.dispose();
+    return height;
+  }
+
   static TextStyle textStyle(int size, Color color, bool hand) => TextStyle(
     fontSize: textSizes[size.clamp(0, 2)],
     height: 1.25,

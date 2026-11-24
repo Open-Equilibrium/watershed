@@ -129,6 +129,10 @@ pub enum Mutation {
         page: PageId,
         title: String,
     },
+    SetPageIcon {
+        page: PageId,
+        icon: String,
+    },
     AddSource {
         area: AreaId,
         parent: Option<PageId>,

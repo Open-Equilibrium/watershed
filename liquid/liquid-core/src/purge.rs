@@ -24,17 +24,39 @@ fn kind(operation: &Operation) -> String {
     }
 }
 
+#[derive(Clone, Copy)]
+enum Mention<'a> {
+    Anywhere(&'a str),
+    Page(&'a str),
+}
+
+fn mentions(operation: &Operation, mention: Mention) -> bool {
+    let Operation::Mutation(mutation) = operation else {
+        return false;
+    };
+    match mention {
+        Mention::Anywhere(id) => {
+            serde_json::to_string(mutation).is_ok_and(|text| text.contains(id))
+        }
+        Mention::Page(id) => serde_json::to_value(mutation).is_ok_and(|value| {
+            value
+                .as_object()
+                .and_then(|fields| fields.values().next())
+                .and_then(|fields| fields.get("page"))
+                .and_then(|page| page.as_str())
+                == Some(id)
+        }),
+    }
+}
+
 fn redacted(
     mut action: Action,
     gone: &Document,
-    mention: Option<&str>,
+    mention: Option<Mention>,
     created: bool,
 ) -> Option<Action> {
     let touches = action.changes.iter().any(|(document, _)| document == gone);
-    let names = mention.is_some_and(|id| {
-        matches!(action.operation, Operation::Mutation(_))
-            && serde_json::to_string(&action.operation).is_ok_and(|text| text.contains(id))
-    });
+    let names = mention.is_some_and(|mention| mentions(&action.operation, mention));
     if !touches && !names && !created {
         return None;
     }
@@ -194,12 +216,12 @@ impl<S: Store> Workspace<S> {
         let candidates = attachments(self.doc(&document)?, None);
         let mut recorded = Recorded::default();
         let (mention, scanned) = match target {
-            Purge::Table(table) if removed => (Some(table.to_string()), None),
+            Purge::Table(table) if removed => (Some(Mention::Anywhere(table.as_str())), None),
             Purge::Table(_) => (None, Some(vec![document.clone()])),
             Purge::Page(page) => {
                 let mut scanned = vec![document.clone()];
                 scanned.extend(self.area_of(page).ok().map(Document::Area));
-                (Some(page.to_string()), Some(scanned))
+                (Some(Mention::Page(page.as_str())), Some(scanned))
             }
         };
         let mut rebuilt = Vec::new();
@@ -257,7 +279,7 @@ impl<S: Store> Workspace<S> {
                     Purge::Page(page) => self.creates(&kept, page)?,
                     Purge::Table(_) => false,
                 };
-                redact.extend(redacted(kept, &document, mention.as_deref(), created));
+                redact.extend(redacted(kept, &document, mention, created));
             }
         }
         recorded.redact = redact;

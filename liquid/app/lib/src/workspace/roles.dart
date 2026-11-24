@@ -9,7 +9,7 @@ import '../rust/api/workspace.dart';
 import '../theme/icons.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
-import 'automation_editor.dart' show Token;
+import 'automation_tokens.dart' show Token;
 import 'explorer.dart' show untitled;
 import 'table_view_parts.dart' show MoreMenu;
 import 'workspace_state.dart';
@@ -62,6 +62,9 @@ class _RolesPaneState extends State<RolesPane> {
   String? _chosen;
   final _name = TextEditingController();
   String? _named;
+  bool _editing = false;
+  int _writes = 0;
+  ({String role, BridgeRoleSetup setup, List<BridgeRole> base})? _unsaved;
 
   WorkspaceState get _state => widget.state;
 
@@ -77,17 +80,44 @@ class _RolesPaneState extends State<RolesPane> {
     super.dispose();
   }
 
-  void _write(BridgeRole role, BridgeRoleSetup setup) => unawaited(
-    _state
-        .apply(
-          mutation(BridgeMutationKind.setRole, role: role.id, roleSetup: setup),
-        )
-        .then<void>((_) {}, onError: (Object _) {}),
-  );
+  BridgeRoleSetup _latest(BridgeRole role) {
+    final unsaved = _unsaved;
+    return unsaved != null && unsaved.role == role.id
+        ? unsaved.setup
+        : role.setup;
+  }
+
+  void _write(BridgeRole role, BridgeRoleSetup setup) {
+    _unsaved = (role: role.id, setup: setup, base: _state.roles.value);
+    _writes++;
+    if (mounted) setState(() {});
+    unawaited(
+      _state
+          .apply(
+            mutation(
+              BridgeMutationKind.setRole,
+              role: role.id,
+              roleSetup: setup,
+            ),
+          )
+          .then<void>(
+            (_) => _writes--,
+            onError: (Object _) {
+              _writes--;
+              if (mounted) {
+                setState(() {
+                  if (identical(_unsaved?.setup, setup)) _unsaved = null;
+                });
+              }
+            },
+          ),
+    );
+  }
 
   void _rename(BridgeRole role, String name) {
-    if (name == role.setup.name) return;
-    _write(role, BridgeRoleSetup(name: name, grants: role.setup.grants));
+    final latest = _latest(role);
+    if (name == latest.name) return;
+    _write(role, BridgeRoleSetup(name: name, grants: latest.grants));
   }
 
   Future<void> _create() async {
@@ -146,9 +176,18 @@ class _RolesPaneState extends State<RolesPane> {
   Widget _build(BuildContext context) {
     final ws = context.ws;
     final role = _role;
-    if (role != null && _named != role.id) {
-      _named = role.id;
-      writeText(_name, TextEditingValue(text: role.setup.name));
+    final unsaved = _unsaved;
+    if (unsaved != null &&
+        _writes == 0 &&
+        !identical(_state.roles.value, unsaved.base)) {
+      _unsaved = null;
+    }
+    if (role != null) {
+      final name = _latest(role).name;
+      if (_named != role.id || (!_editing && _name.text != name)) {
+        _named = role.id;
+        writeText(_name, TextEditingValue(text: name));
+      }
     }
     final automations = _state.automations.value;
     return Material(
@@ -213,7 +252,8 @@ class _RolesPaneState extends State<RolesPane> {
   ) {
     final ws = context.ws;
     final fixed = role.template == BridgeTemplate.canManage;
-    final grants = role.setup.grants;
+    final latest = _latest(role);
+    final grants = latest.grants;
     final assigned = [
       for (final automation in automations)
         if (automation.role == role.id) automation,
@@ -223,7 +263,7 @@ class _RolesPaneState extends State<RolesPane> {
         if (automation.role != role.id) automation,
     ];
     void setGrants(List<BridgeGrant> grants) =>
-        _write(role, BridgeRoleSetup(name: role.setup.name, grants: grants));
+        _write(role, BridgeRoleSetup(name: latest.name, grants: grants));
     final muted = TextStyle(color: ws.textMuted);
     Widget label(String text) =>
         SizedBox(width: 110, child: Text(text, style: muted));
@@ -237,6 +277,7 @@ class _RolesPaneState extends State<RolesPane> {
             Expanded(
               child: Focus(
                 onFocusChange: (focused) {
+                  _editing = focused;
                   if (!focused) _rename(role, _name.text);
                 },
                 child: TextField(
@@ -511,7 +552,11 @@ class _Grid extends StatelessWidget {
       children: [
         row([
           Text('Allowed on', style: head),
-          for (final capability in capabilities) Text(capability, style: head),
+          for (final capability in capabilities)
+            FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Text(capability, style: head),
+            ),
         ]),
         for (final (index, grant) in grants.indexed)
           row([

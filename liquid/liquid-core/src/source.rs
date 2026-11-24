@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::io::Read;
 use std::path::{Component, Path, PathBuf};
 use std::time::UNIX_EPOCH;
@@ -69,8 +70,8 @@ pub struct SourceTable {
 pub enum Shown {
     Table(SourceTable),
     Text(String),
-    Image,
-    Pdf,
+    Image(Vec<u8>),
+    Pdf(Vec<u8>),
     Other,
 }
 
@@ -107,6 +108,37 @@ pub(crate) fn column_id(name: &str) -> FieldId {
         .map(|byte| format!("{byte:02x}"))
         .collect();
     FieldId::stored(&hex)
+}
+
+fn column_ids(names: &[String]) -> Vec<FieldId> {
+    let mut seen = HashSet::new();
+    let firsts: Vec<bool> = names
+        .iter()
+        .map(|name| seen.insert(name.as_str()))
+        .collect();
+    let mut taken: HashSet<FieldId> = names
+        .iter()
+        .zip(&firsts)
+        .filter(|(_, first)| **first)
+        .map(|(name, _)| column_id(name))
+        .collect();
+    names
+        .iter()
+        .zip(firsts)
+        .map(|(name, first)| {
+            if first {
+                return column_id(name);
+            }
+            let mut copy = 1;
+            loop {
+                copy += 1;
+                let id = column_id(&format!("{name}#{copy}"));
+                if taken.insert(id.clone()) {
+                    return id;
+                }
+            }
+        })
+        .collect()
 }
 
 pub(crate) fn number(text: &str, comma: bool) -> Option<f64> {
@@ -178,9 +210,10 @@ fn parse_csv(text: &str, separator: char) -> Vec<Vec<String>> {
 
 pub(crate) fn table(text: &str, tab: bool) -> SourceTable {
     let first = text.lines().next().unwrap_or_default();
+    let header_width = |separator| parse_csv(first, separator).first().map_or(0, Vec::len);
     let separator = if tab {
         '\t'
-    } else if first.matches(';').count() > first.matches(',').count() {
+    } else if header_width(';') > header_width(',') {
         ';'
     } else {
         ','
@@ -196,13 +229,20 @@ pub(crate) fn table(text: &str, tab: bool) -> SourceTable {
     for row in &mut rows {
         row.resize(width, String::new());
     }
-    let columns = (0..width)
+    let names: Vec<String> = (0..width)
         .map(|at| {
-            let name = header
+            header
                 .get(at)
                 .filter(|name| !name.trim().is_empty())
                 .cloned()
-                .unwrap_or_else(|| format!("Column {}", at + 1));
+                .unwrap_or_else(|| format!("Column {}", at + 1))
+        })
+        .collect();
+    let columns = column_ids(&names)
+        .into_iter()
+        .zip(names)
+        .enumerate()
+        .map(|(at, (id, name))| {
             let mut filled = rows
                 .iter()
                 .map(|row| row[at].trim())
@@ -210,11 +250,7 @@ pub(crate) fn table(text: &str, tab: bool) -> SourceTable {
             let first = filled.next();
             let number = first.is_some_and(|cell| number(cell, comma).is_some())
                 && filled.all(|cell| number(cell, comma).is_some());
-            Column {
-                id: column_id(&name),
-                name,
-                number,
-            }
+            Column { id, name, number }
         })
         .collect();
     SourceTable {
@@ -257,9 +293,11 @@ fn shown(path: &Path, size: u64) -> Result<Shown, Error> {
     Ok(match extension.as_str() {
         "csv" | "tsv" => Shown::Table(table(&text(path)?, extension == "tsv")),
         "txt" | "md" | "markdown" => Shown::Text(text(path)?),
-        "png" | "jpg" | "jpeg" | "gif" | "webp" | "heic" if size <= MAX_SOURCE_FILE => Shown::Image,
-        "pdf" if size <= MAX_SOURCE_FILE => Shown::Pdf,
-        "png" | "jpg" | "jpeg" | "gif" | "webp" | "heic" | "pdf" => return Err(Error::TooLarge),
+        "png" | "jpg" | "jpeg" | "gif" | "webp" | "heic" | "pdf" if size > MAX_SOURCE_FILE => {
+            return Err(Error::TooLarge);
+        }
+        "png" | "jpg" | "jpeg" | "gif" | "webp" | "heic" => Shown::Image(read_capped(path)?),
+        "pdf" => Shown::Pdf(read_capped(path)?),
         _ => Shown::Other,
     })
 }

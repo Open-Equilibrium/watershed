@@ -7,6 +7,7 @@ import 'package:liquid/src/rust/api/workspace.dart';
 import 'package:liquid/src/workspace/chart_block.dart';
 import 'package:liquid/src/workspace/workspace_state.dart';
 
+import 'focus_kit.dart';
 import 'page_kit.dart';
 
 void main() {
@@ -15,11 +16,10 @@ void main() {
   Finder inPanel(Finder finder) => find.descendant(of: panel, matching: finder);
   Finder inChart(Finder finder) =>
       find.descendant(of: find.byType(ChartBlock), matching: finder);
-
-  Future<void> tap(WidgetTester tester, Finder finder) async {
-    await tester.tap(finder);
-    await tester.pumpAndSettle();
-  }
+  const barCount = BridgeChartSetup(
+    kind: BridgeChartKind.bar,
+    value: BridgeChartValue.count,
+  );
 
   Future<void> type(WidgetTester tester, String text) async {
     tester.testTextInput.updateEditingValue(
@@ -34,8 +34,7 @@ void main() {
   BridgeChartSetup lastSet() =>
       kit.applied(BridgeMutationKind.setChart).last.chart!;
 
-  testWidgets('/chart adds a Chart whose panel picks a Table, a group and a '
-      'value', (tester) async {
+  testWidgets('/chart adds a Chart; its panel picks the data', (tester) async {
     await kit.show(tester, [TablePart(expenses), const TextPart('')]);
     await tester.tap(block(0));
     await tester.pump();
@@ -67,22 +66,14 @@ void main() {
     );
   });
 
-  testWidgets('a Chart draws its points, and its chip changes the kind', (
-    tester,
-  ) async {
+  testWidgets('a Chart draws points; its chip changes kind', (tester) async {
     final semantics = tester.ensureSemantics();
     await kit.show(tester, [
       TablePart(expenses),
-      const ChartPart(
-        BridgeChartSetup(
-          kind: BridgeChartKind.bar,
-          value: BridgeChartValue.count,
-        ),
-        [
-          BridgeChartPoint(label: 'Home', value: 1046),
-          BridgeChartPoint(label: 'Food', value: 84),
-        ],
-      ),
+      const ChartPart(barCount, [
+        BridgeChartPoint(label: 'Home', value: 1046),
+        BridgeChartPoint(label: 'Food', value: 84),
+      ]),
     ]);
     final views = kit.fake.views[kit.page]!;
     await kit.workspace.apply(
@@ -108,24 +99,66 @@ void main() {
     semantics.dispose();
   });
 
-  testWidgets('a line drawn from one line of a Calculation asks for a second', (
-    tester,
-  ) async {
+  testWidgets('a Chart setting chosen while its chart cannot be read is '
+      'saved', (tester) async {
     await kit.show(tester, [
-      const CalculationPart([
+      TablePart(expenses),
+      const ChartPart(barCount, []),
+    ]);
+    await tap(tester, find.byKey(const Key('chart kind')));
+    kit.fake.refuseNextQuery = BridgeQueryKind.chart;
+    await tap(tester, find.text('Pie'));
+    expect(lastSet().kind, BridgeChartKind.pie);
+  });
+
+  testWidgets('a Chart setting chosen before the chart reloads keeps the '
+      'earlier one', (tester) async {
+    await kit.show(tester, [
+      TablePart(expenses),
+      const ChartPart(barCount, [BridgeChartPoint(label: 'Home', value: 1)]),
+    ]);
+    final views = kit.fake.views[kit.page]!;
+    await kit.workspace.apply(
+      mutation(
+        BridgeMutationKind.setChart,
+        page: kit.page,
+        block: views.last.block,
+        chart: BridgeChartSetup(
+          kind: BridgeChartKind.bar,
+          table: views.first.block,
+          value: BridgeChartValue.count,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tap(tester, find.byKey(const Key('chart data')));
+    kit.fake.deferredKinds = {BridgeQueryKind.chart};
+    kit.fake.deferred = [];
+    await tap(tester, find.byKey(const Key('chart Group by')));
+    await tap(tester, find.text('Category').last);
+    await tap(tester, find.byKey(const Key('chart kind')));
+    await tap(tester, find.text('Pie'));
+    kit.fake.deferredKinds = {};
+    for (final release in [...kit.fake.deferred!]) {
+      release.complete();
+    }
+    await tester.pumpAndSettle();
+    expect(
+      (lastSet().kind, lastSet().group),
+      (BridgeChartKind.pie, 'category'),
+    );
+  });
+
+  Future<void> lineChartOf(WidgetTester tester, String title) async {
+    await kit.show(tester, [
+      CalculationPart(const [
         BridgeLineSetup(
           label: 'Rent',
           formula: '900',
           style: BridgeLineStyle.plain,
         ),
-      ], title: 'Budget'),
-      const ChartPart(
-        BridgeChartSetup(
-          kind: BridgeChartKind.bar,
-          value: BridgeChartValue.count,
-        ),
-        [BridgeChartPoint(label: 'Rent', value: 900)],
-      ),
+      ], title: title),
+      const ChartPart(barCount, [BridgeChartPoint(label: 'Rent', value: 900)]),
     ]);
     final views = kit.fake.views[kit.page]!;
     await kit.workspace.apply(
@@ -142,6 +175,10 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
+  }
+
+  testWidgets('a line chart of one point asks for a second', (tester) async {
+    await lineChartOf(tester, 'Budget');
     expect(inChart(find.text('from Budget')), findsOneWidget);
     expect(inChart(find.text('A line needs two points')), findsOneWidget);
   });

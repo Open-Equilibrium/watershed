@@ -444,7 +444,7 @@ class _StatisticsPanelState extends State<StatisticsPanel> {
 
   Widget _totals(WsPalette ws, SessionStatistics statistics) {
     final usage = statistics.usage;
-    final prompt = usage.input + usage.cacheRead;
+    final prompt = promptTokens(usage);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       spacing: 8,

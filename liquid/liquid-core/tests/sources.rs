@@ -1,28 +1,21 @@
 #![allow(clippy::unwrap_used)]
 
+mod common;
+
 use std::path::{Path, PathBuf};
 
+use common::*;
 use liquid_core::{
-    Actor, Applied, AreaId, ChartKind, ChartPoint, ChartSetup, ChartSource, ChartValue, Created,
-    EntryQuery, Error, Found, MemoryStore, Mutation, Origin, PageId, PersonId, Request, Shown,
-    SourceId, SourceKind,
+    Applied, AreaId, BlockId, Chart, ChartKind, ChartPoint, ChartSetup, ChartSource, ChartValue,
+    Created, EntryQuery, Error, Found, Mutation, PageId, Shown, SourceId, SourceKind, SourceTable,
 };
-
-type Workspace = liquid_core::Workspace<MemoryStore>;
-
-fn owner() -> Actor {
-    Actor::Person(PersonId::new("benni"))
-}
 
 struct Folder(PathBuf);
 
 impl Folder {
     fn new(name: &str) -> Self {
-        let dir = std::env::temp_dir().join(format!(
-            "liquid-sources-{name}-{}-{:?}",
-            std::process::id(),
-            std::thread::current().id()
-        ));
+        let name = format!("liquid-sources-{name}-{}", std::process::id());
+        let dir = std::env::temp_dir().join(name);
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         Self(dir)
@@ -50,30 +43,7 @@ struct Private {
 
 impl Private {
     fn new() -> Self {
-        let mut workspace =
-            Workspace::create(PersonId::new("benni"), MemoryStore::default()).unwrap();
-        let mut edit = |mutation| {
-            workspace
-                .apply(Request {
-                    actor: owner(),
-                    origin: Origin::Ui,
-                    mutation,
-                })
-                .unwrap()
-                .created
-        };
-        let Some(Created::Area(area)) = edit(Mutation::CreateArea {
-            name: "Private".into(),
-        }) else {
-            panic!("an area")
-        };
-        let Some(Created::Page(page)) = edit(Mutation::CreatePage {
-            area: area.clone(),
-            parent: None,
-            title: "Household budget".into(),
-        }) else {
-            panic!("a Page")
-        };
+        let (workspace, area, page) = private_page("Household budget");
         Self {
             workspace,
             area,
@@ -82,11 +52,7 @@ impl Private {
     }
 
     fn edit(&mut self, mutation: Mutation) -> Result<Applied, Error> {
-        self.workspace.apply(Request {
-            actor: owner(),
-            origin: Origin::Ui,
-            mutation,
-        })
+        apply(&mut self.workspace, mutation)
     }
 
     fn add(&mut self, path: &Path) -> SourceId {
@@ -94,10 +60,44 @@ impl Private {
             .workspace
             .add_source(&owner(), &self.area, None, path.to_str().unwrap())
             .unwrap();
-        match applied.created {
-            Some(Created::Source(source)) => source,
-            other => panic!("a Source, got {other:?}"),
-        }
+        let Some(Created::Source(source)) = applied.created else {
+            panic!("a Source")
+        };
+        source
+    }
+
+    fn file(&mut self, source: &SourceId, path: &str) -> Shown {
+        self.workspace.source_file(source, path).unwrap().shown
+    }
+
+    fn table(&mut self, source: &SourceId) -> SourceTable {
+        let Shown::Table(table) = self.file(source, "") else {
+            panic!("a table")
+        };
+        table
+    }
+
+    fn new_chart(&mut self) -> BlockId {
+        block(
+            &mut self.workspace,
+            Mutation::AddChartBlock {
+                page: self.page.clone(),
+                after: None,
+            },
+        )
+        .0
+    }
+
+    fn set_chart(&mut self, block: &BlockId, setup: ChartSetup) -> Result<Applied, Error> {
+        self.edit(Mutation::SetChart {
+            page: self.page.clone(),
+            block: block.clone(),
+            setup,
+        })
+    }
+
+    fn chart(&mut self, block: &BlockId) -> Chart {
+        self.workspace.chart(&self.page, block).unwrap().unwrap()
     }
 }
 
@@ -106,6 +106,14 @@ const BANK: &str = "Date,Text,Amount\n\
 2026-10-30,STADTWERKE,-96.00\n\
 2026-10-24,GEHALT,\"+3,200.00\"\n\
 2026-10-30,KINO,-11.80\n";
+
+fn assert_points(got: &[ChartPoint], want: &[(&str, f64)]) {
+    assert_eq!(got.len(), want.len(), "{got:?}");
+    for (point, (label, value)) in got.iter().zip(want) {
+        assert_eq!(point.label, *label);
+        assert!((point.value - value).abs() < 1e-9, "{point:?}");
+    }
+}
 
 #[test]
 fn a_file_source_lists_beside_the_pages_and_keeps_its_path_on_this_device() {
@@ -127,23 +135,15 @@ fn a_file_source_lists_beside_the_pages_and_keeps_its_path_on_this_device() {
     let records = serde_json::to_string(&private.workspace.history(None, 100).unwrap()).unwrap();
     assert!(!records.contains(folder.0.to_str().unwrap()));
 
-    let file = private.workspace.source_file(&source, "").unwrap();
-    let Shown::Table(table) = file.shown else {
-        panic!("a table")
-    };
-    let names: Vec<&str> = table
+    let table = private.table(&source);
+    let columns: Vec<_> = table
         .columns
         .iter()
-        .map(|column| column.name.as_str())
+        .map(|column| (column.name.as_str(), column.number))
         .collect();
-    assert_eq!(names, ["Date", "Text", "Amount"]);
     assert_eq!(
-        table
-            .columns
-            .iter()
-            .map(|column| column.number)
-            .collect::<Vec<_>>(),
-        [false, false, true]
+        columns,
+        [("Date", false), ("Text", false), ("Amount", true)]
     );
     assert_eq!(table.rows[2], ["2026-10-24", "GEHALT", "+3,200.00"]);
 
@@ -228,22 +228,11 @@ fn a_folder_source_shows_its_files_and_nothing_outside_it() {
     let inner = private.workspace.source_entries(&source, "drafts").unwrap();
     assert_eq!(inner[0].name, "idea.txt");
 
-    let markdown = private
-        .workspace
-        .source_file(&source, "packing-list.md")
-        .unwrap();
     assert_eq!(
-        markdown.shown,
+        private.file(&source, "packing-list.md"),
         Shown::Text("# Packing list\n\n- Passport\n".into())
     );
-    assert_eq!(
-        private
-            .workspace
-            .source_file(&source, "schema.sql")
-            .unwrap()
-            .shown,
-        Shown::Other
-    );
+    assert_eq!(private.file(&source, "schema.sql"), Shown::Other);
     for outside in ["../secret.txt", "drafts/../../secret.txt", "/etc/hosts"] {
         assert_eq!(
             private.workspace.source_file(&source, outside).unwrap_err(),
@@ -263,6 +252,37 @@ fn a_folder_source_shows_its_files_and_nothing_outside_it() {
             Error::NotFound
         );
     }
+}
+
+#[test]
+fn an_image_or_pdf_source_comes_with_the_bytes_read_for_it() {
+    let folder = Folder::new("media");
+    folder.write("docs/receipt.png", "png bytes");
+    folder.write("docs/offer.pdf", "pdf bytes");
+    let mut private = Private::new();
+    let source = private.add(&folder.0.join("docs"));
+    assert_eq!(
+        private.file(&source, "receipt.png"),
+        Shown::Image(b"png bytes".to_vec())
+    );
+    assert_eq!(
+        private.file(&source, "offer.pdf"),
+        Shown::Pdf(b"pdf bytes".to_vec())
+    );
+    let huge = folder.write("docs/huge.pdf", "");
+    std::fs::File::options()
+        .write(true)
+        .open(&huge)
+        .unwrap()
+        .set_len(liquid_core::MAX_SOURCE_FILE + 1)
+        .unwrap();
+    assert_eq!(
+        private
+            .workspace
+            .source_file(&source, "huge.pdf")
+            .unwrap_err(),
+        Error::TooLarge
+    );
 }
 
 #[test]
@@ -292,10 +312,7 @@ fn a_file_past_50_mib_is_refused_and_a_moved_file_is_located_again() {
         .workspace
         .locate_source(&owner(), &source, moved.to_str().unwrap())
         .unwrap();
-    assert_eq!(
-        private.workspace.source_file(&source, "").unwrap().shown,
-        Shown::Text("here".into())
-    );
+    assert_eq!(private.file(&source, ""), Shown::Text("here".into()));
 }
 
 #[test]
@@ -304,81 +321,48 @@ fn a_chart_draws_a_csv_source_and_follows_its_file() {
     let path = folder.write("bank-export.csv", BANK);
     let mut private = Private::new();
     let source = private.add(&path);
-    let Shown::Table(table) = private.workspace.source_file(&source, "").unwrap().shown else {
-        panic!("a table")
-    };
+    let table = private.table(&source);
     let (date, amount) = (table.columns[0].id.clone(), table.columns[2].id.clone());
-    let page = private.page.clone();
-    let Some(Created::Block { block, .. }) = private
-        .edit(Mutation::AddChartBlock {
-            page: page.clone(),
-            after: None,
-        })
-        .unwrap()
-        .created
-    else {
-        panic!("a Chart")
-    };
+    let block = private.new_chart();
     private
-        .edit(Mutation::SetChart {
-            page: page.clone(),
-            block: block.clone(),
-            setup: ChartSetup {
+        .set_chart(
+            &block,
+            ChartSetup {
                 kind: ChartKind::Line,
                 source: Some(ChartSource::Source(source.clone())),
                 group: Some(date),
-                value: ChartValue::Sum(amount.clone()),
+                value: ChartValue::Sum(amount),
             },
-        })
+        )
         .unwrap();
-    let chart = private.workspace.chart(&page, &block).unwrap().unwrap();
+    let chart = private.chart(&block);
     assert_eq!(chart.source_name.as_deref(), Some("bank-export.csv"));
-    let point = |label: &str, value: f64| ChartPoint {
-        label: label.into(),
-        value,
-    };
-    let close = |points: &[ChartPoint], expected: &[ChartPoint]| {
-        assert_eq!(points.len(), expected.len(), "{points:?}");
-        for (got, want) in points.iter().zip(expected) {
-            assert_eq!(got.label, want.label);
-            assert!((got.value - want.value).abs() < 1e-9, "{got:?} {want:?}");
-        }
-    };
-    close(
+    assert_points(
         &chart.points,
         &[
-            point("2026-10-24", 3200.0),
-            point("2026-10-30", -107.8),
-            point("2026-11-01", -84.2),
+            ("2026-10-24", 3200.0),
+            ("2026-10-30", -107.8),
+            ("2026-11-01", -84.2),
         ],
     );
     let users = private.workspace.source_users(&source).unwrap();
     assert_eq!(users.len(), 1);
-    assert_eq!((&users[0].page, &users[0].block), (&page, &block));
+    assert_eq!((&users[0].page, &users[0].block), (&private.page, &block));
 
     std::fs::write(&path, "Date,Text,Amount\n2026-11-02,MIETE,-950\n").unwrap();
-    let chart = private.workspace.chart(&page, &block).unwrap().unwrap();
-    close(&chart.points, &[point("2026-11-02", -950.0)]);
+    assert_points(&private.chart(&block).points, &[("2026-11-02", -950.0)]);
 
+    let bar = ChartSetup {
+        kind: ChartKind::Bar,
+        source: Some(ChartSource::Source(source.clone())),
+        group: None,
+        value: ChartValue::Sum(table.columns[1].id.clone()),
+    };
     assert_eq!(
-        private
-            .edit(Mutation::SetChart {
-                page: page.clone(),
-                block: block.clone(),
-                setup: ChartSetup {
-                    kind: ChartKind::Bar,
-                    source: Some(ChartSource::Source(source.clone())),
-                    group: None,
-                    value: ChartValue::Sum(table.columns[1].id.clone()),
-                },
-            })
-            .unwrap_err(),
+        private.set_chart(&block, bar).unwrap_err(),
         Error::WrongKind
     );
-    assert!(matches!(
-        private.workspace.source_file(&source, "").unwrap().shown,
-        Shown::Table(_)
-    ));
+    assert!(matches!(private.file(&source, ""), Shown::Table(_)));
 }
 
 #[test]
@@ -390,37 +374,68 @@ fn a_semicolon_csv_reads_commas_as_decimal_marks() {
     );
     let mut private = Private::new();
     let source = private.add(&path);
-    let Shown::Table(table) = private.workspace.source_file(&source, "").unwrap().shown else {
-        panic!("a table")
-    };
+    let table = private.table(&source);
     assert!(table.columns[2].number);
-    let page = private.page.clone();
-    let Some(Created::Block { block, .. }) = private
-        .edit(Mutation::AddChartBlock {
-            page: page.clone(),
-            after: None,
-        })
-        .unwrap()
-        .created
-    else {
-        panic!("a Chart")
-    };
+    let block = private.new_chart();
     private
-        .edit(Mutation::SetChart {
-            page: page.clone(),
-            block: block.clone(),
-            setup: ChartSetup {
+        .set_chart(
+            &block,
+            ChartSetup {
                 kind: ChartKind::Bar,
                 source: Some(ChartSource::Source(source)),
                 group: None,
                 value: ChartValue::Sum(table.columns[2].id.clone()),
             },
-        })
+        )
         .unwrap();
-    let chart = private.workspace.chart(&page, &block).unwrap().unwrap();
+    let chart = private.chart(&block);
     assert!(
         (chart.points[0].value - 3115.8).abs() < 1e-9,
         "{:?}",
         chart.points
     );
+}
+
+#[test]
+fn a_semicolon_csv_with_commas_inside_a_quoted_header_keeps_its_columns() {
+    let folder = Folder::new("quoted-separator");
+    let path = folder.write(
+        "names.csv",
+        "\"Last, First, Middle\";Amount\n\"Smith, John, A\";10\n",
+    );
+    let mut private = Private::new();
+    let source = private.add(&path);
+    let table = private.table(&source);
+    assert_eq!(
+        table
+            .columns
+            .iter()
+            .map(|column| column.name.as_str())
+            .collect::<Vec<_>>(),
+        ["Last, First, Middle", "Amount"]
+    );
+    assert_eq!(table.rows, [["Smith, John, A", "10"]]);
+}
+
+#[test]
+fn a_chart_picks_the_second_of_two_columns_with_the_same_header() {
+    let folder = Folder::new("duplicate-headers");
+    let path = folder.write("double.csv", "Amount,Amount\n1,2\n3,4\n");
+    let mut private = Private::new();
+    let source = private.add(&path);
+    let table = private.table(&source);
+    assert_ne!(table.columns[0].id, table.columns[1].id);
+    let block = private.new_chart();
+    private
+        .set_chart(
+            &block,
+            ChartSetup {
+                kind: ChartKind::Bar,
+                source: Some(ChartSource::Source(source)),
+                group: None,
+                value: ChartValue::Sum(table.columns[1].id.clone()),
+            },
+        )
+        .unwrap();
+    assert_eq!(private.chart(&block).points[0].value, 6.0);
 }

@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../controls.dart';
 import '../rust/api/workspace.dart';
 import '../theme/icons.dart';
 import '../theme/theme.dart';
@@ -14,7 +15,8 @@ import 'page_views.dart';
 import 'slash_commands.dart';
 import 'table_pickers.dart';
 import '../rust/api/source.dart';
-import 'source_page.dart' show sourceIcon;
+import 'page_icon.dart';
+import 'source_kind.dart' show sourceIcon;
 import 'workspace_state.dart';
 
 const _width = 560.0;
@@ -22,7 +24,7 @@ const _shown = 8;
 
 typedef _Item = ({
   String group,
-  IconData icon,
+  Object icon,
   String label,
   String? detail,
   String? keys,
@@ -340,7 +342,7 @@ class _PowerBarState extends State<PowerBar> {
           switch (hit.found) {
             BridgeFound.page => (
               group: 'Pages',
-              icon: LucideIcons.file,
+              icon: _state.iconOf(hit.id),
               label: hit.text.isEmpty ? untitled : hit.text,
               detail: _nameOf(_areaOf(hit.id)),
               keys: null,
@@ -393,7 +395,7 @@ class _PowerBarState extends State<PowerBar> {
           in _state.recent.value.where((page) => _areaOf(page) != null).take(3))
         (
           group: 'Recent',
-          icon: LucideIcons.file,
+          icon: _state.iconOf(page),
           label: _titleOf(page),
           detail: _nameOf(_areaOf(page)),
           keys: null,
@@ -409,7 +411,9 @@ class _PowerBarState extends State<PowerBar> {
   }
 
   KeyEventResult _key(FocusNode _, KeyEvent event, List<_Item> items) {
-    if (event is KeyUpEvent) return KeyEventResult.ignored;
+    if (event is KeyUpEvent || !_text.value.composing.isCollapsed) {
+      return KeyEventResult.ignored;
+    }
     switch (event.logicalKey) {
       case LogicalKeyboardKey.escape:
         widget.onClose();
@@ -478,7 +482,19 @@ class _PowerBarState extends State<PowerBar> {
             ),
             child: Row(
               children: [
-                Icon(item.icon, size: 15, color: ws.textMuted),
+                switch (item.icon) {
+                  final IconData icon => Icon(
+                    icon,
+                    size: 15,
+                    color: ws.textMuted,
+                  ),
+                  final icon => SizedBox(
+                    width: 15,
+                    child: Center(
+                      child: PageIcon('$icon', size: 15, color: ws.textMuted),
+                    ),
+                  ),
+                },
                 const SizedBox(width: WsMetrics.space3),
                 Expanded(
                   child: Row(
@@ -539,15 +555,10 @@ class _PowerBarState extends State<PowerBar> {
             padding: const EdgeInsets.only(top: 96),
             child: Focus(
               onKeyEvent: (node, event) => _key(node, event, items),
-              child: Container(
+              child: FloatingPanel(
                 key: const Key('power bar'),
                 width: _width,
                 constraints: const BoxConstraints(maxHeight: 520),
-                decoration: BoxDecoration(
-                  color: ws.surface,
-                  borderRadius: BorderRadius.circular(WsMetrics.radiusLg),
-                  boxShadow: ws.shadow,
-                ),
                 child: Material(
                   type: MaterialType.transparency,
                   child: Column(

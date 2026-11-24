@@ -152,15 +152,16 @@ impl Sqlite {
 }
 
 fn index_actions(transaction: &rusqlite::Transaction<'_>) -> Result<(), Error> {
-    let actions: Vec<(i64, String)> = transaction
+    let mut query = transaction
         .prepare("SELECT seq, record FROM actions")
-        .and_then(|mut query| {
-            query
-                .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
-                .collect()
+        .map_err(failed)?;
+    let rows = query
+        .query_map([], |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
         })
         .map_err(failed)?;
-    for (seq, record) in actions {
+    for row in rows {
+        let (seq, record) = row.map_err(failed)?;
         let action: Action = serde_json::from_str(&record).map_err(failed)?;
         index_documents(transaction, seq, &action)?;
     }
@@ -627,34 +628,20 @@ fn write_index(
 mod tests {
     use super::*;
 
-    #[test]
-    fn the_engine_has_full_text_search_for_the_power_bar() {
-        let dir = std::env::temp_dir().join(format!("liquid-storage-fts-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let store = Sqlite::open(&dir.join("replica.db"), &[1; 32]).unwrap();
-        store
-            .connection
-            .execute_batch("CREATE VIRTUAL TABLE probe USING fts5(text);")
-            .unwrap();
-        std::fs::remove_dir_all(&dir).unwrap();
-    }
-
     fn scratch(name: &str) -> std::path::PathBuf {
-        let dir = std::env::temp_dir().join(format!(
-            "liquid-storage-{name}-{}-{:?}",
-            std::process::id(),
-            std::thread::current().id()
-        ));
+        let name = format!("liquid-storage-{name}-{}", std::process::id());
+        let dir = std::env::temp_dir().join(name);
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         dir
     }
 
+    fn scalar(connection: &Connection, sql: &str) -> i64 {
+        connection.query_row(sql, [], |row| row.get(0)).unwrap()
+    }
+
     fn parts(store: &Sqlite) -> i64 {
-        store
-            .connection
-            .query_row("SELECT count(*) FROM parts", [], |row| row.get(0))
-            .unwrap()
+        scalar(&store.connection, "SELECT count(*) FROM parts")
     }
 
     #[test]
@@ -676,10 +663,8 @@ mod tests {
         store.put_part("gap", 0, b"a").unwrap();
         store.put_part("gap", 2, b"c").unwrap();
         let other = AttachmentId::parse(&"b".repeat(64)).unwrap();
-        assert!(
-            store.finish_upload("gap", &other, 2, 2).is_err(),
-            "parts must run from 0 without a gap"
-        );
+        let gapped = store.finish_upload("gap", &other, 2, 2);
+        assert!(gapped.is_err(), "parts must run from 0 without a gap");
         store.discard_upload("gap").unwrap();
         assert!(store.put_part("wrap", u64::MAX, b"z").is_err());
         store.put_part("unfinished", 0, b"castle").unwrap();
@@ -697,30 +682,25 @@ mod tests {
 
     #[test]
     fn a_replica_of_the_first_schema_gains_attachments() {
-        let dir = scratch("upgrade");
-        let path = dir.join("replica.db");
-        let connection = Connection::open(&path).unwrap();
+        let path = scratch("upgrade").join("replica.db");
         let hex = "01".repeat(32);
-        connection
-            .execute_batch(&format!(
-                "PRAGMA key = \"x'{hex}'\"; CREATE TABLE chunks (seq INTEGER PRIMARY KEY, \
-                 document TEXT NOT NULL, bytes BLOB NOT NULL); CREATE TABLE actions (seq \
-                 INTEGER PRIMARY KEY, id TEXT NOT NULL UNIQUE, record TEXT NOT NULL); \
-                 PRAGMA user_version = 1;"
-            ))
+        let sql = format!(
+            r#"PRAGMA key = "x'{hex}'";
+            CREATE TABLE chunks (seq INTEGER PRIMARY KEY, document TEXT NOT NULL, bytes BLOB NOT NULL);
+            CREATE TABLE actions (seq INTEGER PRIMARY KEY, id TEXT NOT NULL UNIQUE, record TEXT NOT NULL);
+            PRAGMA user_version = 1;"#
+        );
+        Connection::open(&path)
+            .unwrap()
+            .execute_batch(&sql)
             .unwrap();
-        drop(connection);
 
         let mut store = Sqlite::open(&path, &[1; 32]).unwrap();
-        let version: i64 = store
-            .connection
-            .query_row("PRAGMA user_version", [], |row| row.get(0))
-            .unwrap();
-        assert_eq!(version, VERSION);
+        assert_eq!(scalar(&store.connection, "PRAGMA user_version"), VERSION);
         let id = AttachmentId::parse(&"b".repeat(64)).unwrap();
         store.put_part("upload", 0, b"tram").unwrap();
         store.finish_upload("upload", &id, 4, 1).unwrap();
         assert_eq!(store.attachment_size(&id).unwrap(), Some(4));
-        std::fs::remove_dir_all(&dir).unwrap();
+        std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
     }
 }

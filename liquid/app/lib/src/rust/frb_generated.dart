@@ -8316,12 +8316,13 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   BridgePage dco_decode_bridge_page(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 3)
-      throw Exception('unexpected arr length: expect 3 but see ${arr.length}');
+    if (arr.length != 4)
+      throw Exception('unexpected arr length: expect 4 but see ${arr.length}');
     return BridgePage(
       id: dco_decode_String(arr[0]),
       parent: dco_decode_opt_String(arr[1]),
       title: dco_decode_String(arr[2]),
+      icon: dco_decode_String(arr[3]),
     );
   }
 
@@ -8724,8 +8725,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   BridgeSourceFile dco_decode_bridge_source_file(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 9)
-      throw Exception('unexpected arr length: expect 9 but see ${arr.length}');
+    if (arr.length != 10)
+      throw Exception('unexpected arr length: expect 10 but see ${arr.length}');
     return BridgeSourceFile(
       read: dco_decode_bridge_read(arr[0]),
       name: dco_decode_String(arr[1]),
@@ -8736,6 +8737,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       columns: dco_decode_list_bridge_column(arr[6]),
       rows: dco_decode_list_list_String(arr[7]),
       text: dco_decode_opt_String(arr[8]),
+      bytes: dco_decode_opt_list_prim_u_8_strict(arr[9]),
     );
   }
 
@@ -9820,6 +9822,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   List<String>? dco_decode_opt_list_String(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return raw == null ? null : dco_decode_list_String(raw);
+  }
+
+  @protected
+  Uint8List? dco_decode_opt_list_prim_u_8_strict(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return raw == null ? null : dco_decode_list_prim_u_8_strict(raw);
   }
 
   @protected
@@ -12021,7 +12029,13 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_id = sse_decode_String(deserializer);
     var var_parent = sse_decode_opt_String(deserializer);
     var var_title = sse_decode_String(deserializer);
-    return BridgePage(id: var_id, parent: var_parent, title: var_title);
+    var var_icon = sse_decode_String(deserializer);
+    return BridgePage(
+      id: var_id,
+      parent: var_parent,
+      title: var_title,
+      icon: var_icon,
+    );
   }
 
   @protected
@@ -12468,6 +12482,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_columns = sse_decode_list_bridge_column(deserializer);
     var var_rows = sse_decode_list_list_String(deserializer);
     var var_text = sse_decode_opt_String(deserializer);
+    var var_bytes = sse_decode_opt_list_prim_u_8_strict(deserializer);
     return BridgeSourceFile(
       read: var_read,
       name: var_name,
@@ -12478,6 +12493,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       columns: var_columns,
       rows: var_rows,
       text: var_text,
+      bytes: var_bytes,
     );
   }
 
@@ -14287,6 +14303,17 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
 
     if (sse_decode_bool(deserializer)) {
       return (sse_decode_list_String(deserializer));
+    } else {
+      return null;
+    }
+  }
+
+  @protected
+  Uint8List? sse_decode_opt_list_prim_u_8_strict(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    if (sse_decode_bool(deserializer)) {
+      return (sse_decode_list_prim_u_8_strict(deserializer));
     } else {
       return null;
     }
@@ -16259,6 +16286,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_String(self.id, serializer);
     sse_encode_opt_String(self.parent, serializer);
     sse_encode_String(self.title, serializer);
+    sse_encode_String(self.icon, serializer);
   }
 
   @protected
@@ -16605,6 +16633,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_list_bridge_column(self.columns, serializer);
     sse_encode_list_list_String(self.rows, serializer);
     sse_encode_opt_String(self.text, serializer);
+    sse_encode_opt_list_prim_u_8_strict(self.bytes, serializer);
   }
 
   @protected
@@ -18260,6 +18289,19 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_bool(self != null, serializer);
     if (self != null) {
       sse_encode_list_String(self, serializer);
+    }
+  }
+
+  @protected
+  void sse_encode_opt_list_prim_u_8_strict(
+    Uint8List? self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    sse_encode_bool(self != null, serializer);
+    if (self != null) {
+      sse_encode_list_prim_u_8_strict(self, serializer);
     }
   }
 

@@ -1,8 +1,10 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../controls.dart';
 import '../rust/api/database.dart';
 import '../theme/icons.dart';
 import '../theme/theme.dart';
@@ -32,6 +34,19 @@ IconData fieldKindIcon(BridgeFieldKind kind) => switch (kind) {
 
 class FieldPanel extends StatefulWidget {
   const FieldPanel({super.key, required this.onAdd, required this.onClose});
+
+  static const _rowHeight = 30.0;
+  static const _labelHeight = 22.0;
+
+  static double get height =>
+      2 * WsMetrics.space2 +
+      2 +
+      _rowHeight +
+      WsMetrics.space1 +
+      WsMetrics.space2 +
+      _labelHeight +
+      2 +
+      BridgeFieldKind.values.length * _rowHeight;
 
   final Future<void> Function(String name, BridgeFieldKind kind) onAdd;
   final VoidCallback onClose;
@@ -103,20 +118,14 @@ class _FieldPanelState extends State<FieldPanel> {
   @override
   Widget build(BuildContext context) {
     final ws = context.ws;
-    return Container(
+    return FloatingPanel(
       key: const Key('field panel'),
       width: 250,
       padding: const EdgeInsets.all(WsMetrics.space2),
-      decoration: BoxDecoration(
-        color: ws.surface,
-        borderRadius: BorderRadius.circular(WsMetrics.radiusLg),
-        boxShadow: ws.shadow,
-      ),
       child: DefaultTextStyle.merge(
         style: TextStyle(fontSize: WsMetrics.fsUi, color: ws.text),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
+        child: ListView(
+          shrinkWrap: true,
           children: [
             Container(
               height: 30,
@@ -198,37 +207,53 @@ class FieldPanelPortal extends StatelessWidget {
     super.key,
     required this.panel,
     required this.plus,
+    required this.anchor,
     required this.onAdd,
     required this.child,
   });
 
   final OverlayPortalController panel;
   final LayerLink plus;
+  final Rect? anchor;
 
   final Future<void> Function(String name, BridgeFieldKind kind) onAdd;
 
   final Widget child;
 
   @override
-  Widget build(BuildContext context) => OverlayPortal(
+  Widget build(BuildContext context) => OverlayPortal.overlayChildLayoutBuilder(
     controller: panel,
-    overlayChildBuilder: (context) => Align(
-      alignment: Alignment.topLeft,
-      child: CompositedTransformFollower(
-        link: plus,
-        showWhenUnlinked: false,
-        targetAnchor: Alignment.bottomRight,
-        followerAnchor: Alignment.topRight,
-        offset: const Offset(0, WsMetrics.space1),
-        child: TapRegion(
-          groupId: panel,
-          onTapOutside: (_) => panel.hide(),
-          child: TextFieldTapRegion(
-            child: FieldPanel(onAdd: onAdd, onClose: panel.hide),
+    overlayChildBuilder: (context, info) {
+      final at = anchor;
+      if (at == null) return const SizedBox.shrink();
+      const gap = WsMetrics.space1;
+      final window = info.overlaySize;
+      final below = window.height - at.bottom - gap - WsMetrics.space1;
+      final above = at.top - gap - WsMetrics.space1;
+      final up = FieldPanel.height > below && above > below;
+      return Align(
+        alignment: Alignment.topLeft,
+        child: CompositedTransformFollower(
+          link: plus,
+          showWhenUnlinked: false,
+          targetAnchor: up ? Alignment.topRight : Alignment.bottomRight,
+          followerAnchor: up ? Alignment.bottomRight : Alignment.topRight,
+          offset: Offset(0, up ? -gap : gap),
+          child: ConstrainedBox(
+            constraints: BoxConstraints(
+              maxHeight: math.max(0, up ? above : below),
+            ),
+            child: TapRegion(
+              groupId: panel,
+              onTapOutside: (_) => panel.hide(),
+              child: TextFieldTapRegion(
+                child: FieldPanel(onAdd: onAdd, onClose: panel.hide),
+              ),
+            ),
           ),
         ),
-      ),
-    ),
+      );
+    },
     child: child,
   );
 }

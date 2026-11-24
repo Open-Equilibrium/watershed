@@ -10,6 +10,8 @@ import '../theme/icons.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
 import 'automations.dart' show DialogHeader;
+import 'explorer.dart' show untitled;
+import 'page_icon.dart';
 import 'workspace_state.dart';
 
 const historyWidth = 1060.0;
@@ -268,7 +270,7 @@ class _HistoryDialogState extends State<HistoryDialog> {
     Widget filter(
       String name,
       String label,
-      List<(String, VoidCallback)> choices,
+      List<(Widget, VoidCallback)> choices,
     ) => PopupMenuButton<VoidCallback>(
       key: Key('filter $name'),
       tooltip: '',
@@ -277,8 +279,8 @@ class _HistoryDialogState extends State<HistoryDialog> {
         unawaited(_read(fresh: true));
       },
       itemBuilder: (_) => [
-        for (final (label, choose) in choices)
-          PopupMenuItem(value: choose, height: 32, child: Text(label)),
+        for (final (child, choose) in choices)
+          PopupMenuItem(value: choose, height: 32, child: child),
       ],
       child: Padding(
         padding: const EdgeInsets.symmetric(
@@ -295,7 +297,7 @@ class _HistoryDialogState extends State<HistoryDialog> {
         ),
       ),
     );
-    String titled(String title) => title.isEmpty ? 'Untitled' : title;
+    String titled(String title) => title.isEmpty ? untitled : title;
     return Wrap(
       spacing: WsMetrics.space2,
       children: [
@@ -306,9 +308,15 @@ class _HistoryDialogState extends State<HistoryDialog> {
             null => 'All Pages',
           },
           [
-            ('All Pages', () => _page = null),
+            (const Text('All Pages'), () => _page = null),
             for (final page in pages)
-              (titled(page.title), () => _page = page.id),
+              (
+                Row(
+                  spacing: WsMetrics.space2,
+                  children: [PageIcon(page.icon), Text(titled(page.title))],
+                ),
+                () => _page = page.id,
+              ),
           ],
         ),
         filter(
@@ -320,18 +328,18 @@ class _HistoryDialogState extends State<HistoryDialog> {
             null => 'Anyone',
           },
           [
-            ('Anyone', () => _automation = null),
+            (const Text('Anyone'), () => _automation = null),
             for (final automation in _state.automations.value)
-              (automation.setup.name, () => _automation = automation.id),
+              (Text(automation.setup.name), () => _automation = automation.id),
           ],
         ),
         filter(
           'origin',
           _origin == null ? 'Any origin' : originName(_origin!),
           [
-            ('Any origin', () => _origin = null),
+            (const Text('Any origin'), () => _origin = null),
             for (final origin in BridgeOrigin.values)
-              (originName(origin), () => _origin = origin),
+              (Text(originName(origin)), () => _origin = origin),
           ],
         ),
       ],
@@ -434,7 +442,7 @@ class _HistoryDialogState extends State<HistoryDialog> {
         '${dayOf(at, DateTime.now())} ${DateFormat.Hm('en_US').format(at)}',
       ),
       ('Allowed by', entry.allowedBy),
-      if (pageTitle != null) ('On', pageTitle.isEmpty ? 'Untitled' : pageTitle),
+      if (pageTitle != null) ('On', pageTitle.isEmpty ? untitled : pageTitle),
     ];
     return ListView(
       padding: const EdgeInsets.all(WsMetrics.space6),
@@ -603,12 +611,14 @@ class LiveFocusNode extends FocusNode {
 }
 
 class _HistoryAction<T extends Intent> extends Action<T> {
-  _HistoryAction(this.run);
+  _HistoryAction(this.run, this.active);
 
   final Future<void> Function() run;
+  final bool Function() active;
 
   @override
   bool isEnabled(T intent) {
+    if (!active()) return false;
     final focus = primaryFocus;
     final typing =
         focus?.context?.findAncestorWidgetOfExactType<EditableText>() != null;
@@ -623,24 +633,35 @@ class _HistoryAction<T extends Intent> extends Action<T> {
 }
 
 class UndoScope extends StatelessWidget {
-  const UndoScope({super.key, required this.state, required this.child});
+  const UndoScope({
+    super.key,
+    required this.state,
+    required this.active,
+    required this.child,
+  });
 
-  final WorkspaceState state;
+  final WorkspaceState? state;
+  final bool Function() active;
   final Widget child;
 
   @override
-  Widget build(BuildContext context) => Shortcuts(
-    shortcuts: const {
-      SingleActivator(LogicalKeyboardKey.keyZ, meta: true): UndoIntent(),
-      SingleActivator(LogicalKeyboardKey.keyZ, meta: true, shift: true):
-          RedoIntent(),
-    },
-    child: Actions(
-      actions: {
-        UndoIntent: _HistoryAction<UndoIntent>(state.undo),
-        RedoIntent: _HistoryAction<RedoIntent>(state.redo),
+  Widget build(BuildContext context) {
+    final state = this.state;
+    if (state == null) return child;
+    bool paged() => active() && state.open.value != null;
+    return Shortcuts(
+      shortcuts: const {
+        SingleActivator(LogicalKeyboardKey.keyZ, meta: true): UndoIntent(),
+        SingleActivator(LogicalKeyboardKey.keyZ, meta: true, shift: true):
+            RedoIntent(),
       },
-      child: child,
-    ),
-  );
+      child: Actions(
+        actions: {
+          UndoIntent: _HistoryAction<UndoIntent>(state.undo, paged),
+          RedoIntent: _HistoryAction<RedoIntent>(state.redo, paged),
+        },
+        child: child,
+      ),
+    );
+  }
 }

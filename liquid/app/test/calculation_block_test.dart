@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -7,6 +9,7 @@ import 'package:liquid/src/rust/api/workspace.dart';
 import 'package:liquid/src/workspace/calculation_block.dart';
 import 'package:liquid/src/workspace/workspace_state.dart';
 
+import 'focus_kit.dart';
 import 'page_kit.dart';
 
 const amount = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
@@ -30,6 +33,9 @@ void main() {
       (widget) => widget is TextField && widget.decoration?.hintText == hint,
     ),
   );
+  Finder value() => field('A value, or = and a formula');
+  String valueText(WidgetTester tester) =>
+      tester.widget<TextField>(value()).controller!.text;
 
   Future<void> type(WidgetTester tester, String text) async {
     tester.testTextInput.updateEditingValue(
@@ -48,7 +54,7 @@ void main() {
     await tester.pump();
     await type(tester, '/');
     await type(tester, '/calc');
-    expect(find.byKey(const ValueKey('choice Calculation')), findsOneWidget);
+    expectOne(find.byKey(const ValueKey('choice Calculation')));
     await key(tester, LogicalKeyboardKey.enter);
 
     expect(kit.fake.views[kit.page]!.map((view) => view.kind), [
@@ -62,16 +68,15 @@ void main() {
     await tester.testTextInput.receiveAction(TextInputAction.done);
     await tester.pumpAndSettle();
     expect(linesOf(1).single.label, 'Flights');
-    expect(field('A value, or = and a formula'), findsOneWidget);
+    expectOne(value());
     await type(tester, '420');
     await key(tester, LogicalKeyboardKey.enter);
 
     expect(linesOf(1).single.formula, '420');
-    expect(inBlock(find.text('420')), findsOneWidget);
-    expect(field('A value, or = and a formula'), findsNothing);
+    expectOne(inBlock(find.text('420')));
+    expectNone(value());
 
-    await tester.tap(inBlock(find.text('Add a line')));
-    await tester.pumpAndSettle();
+    await tap(tester, inBlock(find.text('Add a line')));
     expect(linesOf(1).length, 2);
     final label = tester.widget<TextField>(field('Label').last);
     expect(label.focusNode!.hasFocus, isTrue, reason: 'the new line is ready');
@@ -97,30 +102,18 @@ void main() {
     final table = blockOf(0);
     final column = '{$table.$amount}';
     kit.fake.referenceNames[column] = 'Expenses.Amount';
-    await tester.tap(find.byKey(const ValueKey('value line 1')));
-    await tester.pumpAndSettle();
+    await tap(tester, find.byKey(const ValueKey('value line 1')));
     await type(tester, '=Bud');
-    expect(inBlock(find.text('Line')), findsOneWidget);
+    expectOne(inBlock(find.text('Line')));
     await key(tester, LogicalKeyboardKey.tab);
-    await type(
-      tester,
-      '${tester.widget<TextField>(field('A value, or = and a formula')).controller!.text} − SU',
-    );
-    expect(inBlock(find.text('SUMIF')), findsOneWidget);
+    await type(tester, '${valueText(tester)} − SU');
+    expectOne(inBlock(find.text('SUMIF')));
     await key(tester, LogicalKeyboardKey.enter);
-    final typed = tester
-        .widget<TextField>(field('A value, or = and a formula'))
-        .controller!
-        .text;
+    final typed = valueText(tester);
     expect(typed, '=￼ − SUM(');
     await type(tester, '${typed}Expenses.Am');
-    await tester.tap(inBlock(find.text('Expenses.Amount')));
-    await tester.pumpAndSettle();
-    final chipped = tester
-        .widget<TextField>(field('A value, or = and a formula'))
-        .controller!
-        .text;
-    await type(tester, '$chipped)');
+    await tap(tester, inBlock(find.text('Expenses.Amount')));
+    await type(tester, '${valueText(tester)})');
     await key(tester, LogicalKeyboardKey.enter);
 
     final budget = linesOf(1).first.id;
@@ -144,33 +137,28 @@ void main() {
         ], title: 'October budget'),
       ],
     );
-    expect(inBlock(find.text('3650')), findsOneWidget);
-    expect(find.text('October budget'), findsOneWidget);
+    expectOne(inBlock(find.text('3650')));
+    expectOne(find.text('October budget'));
 
-    await tester.tap(find.byKey(const ValueKey('value line 2')));
-    await tester.pumpAndSettle();
+    await tap(tester, find.byKey(const ValueKey('value line 2')));
     await type(tester, '=1 +');
     await key(tester, LogicalKeyboardKey.enter);
-    expect(field('A value, or = and a formula'), findsOneWidget);
+    expectOne(value());
     expect(linesOf(0)[2].formula, '450');
     await key(tester, LogicalKeyboardKey.escape);
-    expect(field('A value, or = and a formula'), findsNothing);
+    expectNone(value());
 
     final actions = find.descendant(
       of: find.byKey(const ValueKey('line 3')),
       matching: find.byKey(const Key('Line actions')),
     );
-    await tester.tap(actions);
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Subtotal'));
-    await tester.pumpAndSettle();
+    await tap(tester, actions);
+    await tap(tester, find.text('Subtotal'));
     expect(linesOf(0)[3].style, BridgeLineStyle.subtotal);
     expect(linesOf(0)[3].formula, 'SUM(ABOVE)');
 
-    await tester.tap(actions);
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Remove line'));
-    await tester.pumpAndSettle();
+    await tap(tester, actions);
+    await tap(tester, find.text('Remove line'));
     expect(linesOf(0).map((line) => line.label), [
       'Income',
       'Salary',
@@ -197,7 +185,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    expect(inBlock(find.text('180.2')), findsOneWidget);
+    expectOne(inBlock(find.text('180.2')));
 
     kit.fake.computed[formula] = '200.2';
     await kit.workspace.apply(
@@ -210,6 +198,106 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    expect(inBlock(find.text('200.2')), findsOneWidget);
+    expectOne(inBlock(find.text('200.2')));
+  });
+
+  testWidgets('leaving an unchanged literal line keeps it as written', (
+    tester,
+  ) async {
+    await kit.show(tester, [
+      CalculationPart([setup('Note', '"=1+2"')]),
+    ]);
+    await tap(tester, find.byKey(const ValueKey('value line 0')));
+    expect(valueText(tester), '=1+2');
+    FocusManager.instance.primaryFocus?.unfocus();
+    await tester.pumpAndSettle();
+    expect(linesOf(0).single.formula, '"=1+2"');
+  });
+
+  testWidgets('a label and a restyle made before the lines reload both '
+      'persist', (tester) async {
+    await kit.show(tester, [
+      CalculationPart([setup('Old', '')]),
+    ]);
+    final line = find.byKey(const ValueKey('line 0'));
+    final label = find.descendant(of: line, matching: find.byType(TextField));
+    kit.fake.deferredKinds = {BridgeQueryKind.calculation};
+    kit.fake.deferred = [];
+    await tap(tester, label);
+    await type(tester, 'New');
+    FocusManager.instance.primaryFocus?.unfocus();
+    await tester.pumpAndSettle();
+    await tap(
+      tester,
+      find.descendant(
+        of: line,
+        matching: find.byKey(const Key('Line actions')),
+      ),
+    );
+    await tap(tester, find.text('Total'));
+    kit.fake.deferredKinds = {};
+    for (final release in [...kit.fake.deferred!]) {
+      release.complete();
+    }
+    await tester.pumpAndSettle();
+    expect(linesOf(0).single.label, 'New');
+    expect(linesOf(0).single.style, BridgeLineStyle.total);
+  });
+
+  testWidgets('a label saved while its lines cannot be read still saves', (
+    tester,
+  ) async {
+    await kit.show(tester, [
+      CalculationPart([setup('Old', '')]),
+    ]);
+    await tap(
+      tester,
+      find.descendant(
+        of: find.byKey(const ValueKey('line 0')),
+        matching: find.byType(TextField),
+      ),
+    );
+    await type(tester, 'New');
+    kit.fake.refuseNextQuery = BridgeQueryKind.calculation;
+    FocusManager.instance.primaryFocus?.unfocus();
+    await tester.pumpAndSettle();
+    expect(linesOf(0).single.label, 'New');
+  });
+
+  testWidgets('a label typed and not submitted is saved when its block is '
+      'left', (tester) async {
+    await kit.show(tester, [
+      CalculationPart([setup('Old', '')]),
+    ]);
+    final block = blockOf(0);
+    await tap(
+      tester,
+      find.descendant(
+        of: find.byKey(const ValueKey('line 0')),
+        matching: find.byType(TextField),
+      ),
+    );
+    await type(tester, 'New');
+    kit.workspace.open.value = null;
+    await tester.pumpAndSettle();
+    expect(kit.fake.calculations[block]!.single.label, 'New');
+  });
+
+  testWidgets('enter then leaving a changed line saves it once', (
+    tester,
+  ) async {
+    await kit.show(tester, [
+      CalculationPart([setup('Note', '')]),
+    ]);
+    kit.fake.gate = Completer<void>();
+    kit.fake.gatedKinds = {BridgeMutationKind.setLine};
+    await tap(tester, find.byKey(const ValueKey('value line 0')));
+    await type(tester, '420');
+    await key(tester, LogicalKeyboardKey.enter);
+    FocusManager.instance.primaryFocus?.unfocus();
+    await tester.pumpAndSettle();
+    kit.fake.gate!.complete();
+    await tester.pumpAndSettle();
+    expect(kit.applied(BridgeMutationKind.setLine), hasLength(1));
   });
 }

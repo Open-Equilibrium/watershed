@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../controls.dart';
 import '../theme/icons.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
@@ -173,15 +174,10 @@ class _RowMenuState extends State<RowMenu> {
         );
     return Focus(
       focusNode: _focus,
-      child: Container(
+      child: FloatingPanel(
         key: const Key('row menu'),
         width: 200,
         padding: const EdgeInsets.all(WsMetrics.space2),
-        decoration: BoxDecoration(
-          color: ws.surface,
-          borderRadius: BorderRadius.circular(WsMetrics.radiusLg),
-          boxShadow: ws.shadow,
-        ),
         child: DefaultTextStyle.merge(
           style: TextStyle(fontSize: WsMetrics.fsUi, color: ws.text),
           child: Column(

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -18,10 +20,12 @@ import 'arrange_layout.dart' show arrangedWidth;
 import 'arranged_page.dart';
 import 'page_views.dart';
 import 'page_editor.dart';
+import 'paste.dart';
 import 'stored_name.dart';
 import 'table_block.dart';
 import 'text_block.dart';
 import 'whiteboard_block.dart';
+import 'page_icon.dart';
 import 'workspace_state.dart';
 
 class WorkspacePage extends StatefulWidget {
@@ -64,16 +68,46 @@ class _WorkspacePageState extends State<WorkspacePage> implements EditorSource {
   late final _views = PageViews(widget.state, widget.open.page)..start();
 
   final _first = TextEditingController();
+  final _scroll = ScrollController();
   late final _firstFocus = FocusNode(
     debugLabel: 'First line',
-    onKeyEvent: (_, event) =>
-        event is KeyUpEvent ||
-            !_first.value.composing.isCollapsed ||
-            !_plain ||
-            !_views.editor.isSource(this)
-        ? KeyEventResult.ignored
-        : _views.editor.queue(this, event),
+    onKeyEvent: (_, event) {
+      final copied = widget.state.copiedView;
+      if (event is! KeyUpEvent &&
+          isPaste(event) &&
+          copied != null &&
+          _views.ready.value &&
+          !_views.editor.isSource(this)) {
+        widget.state.track(_pasteFirst(copied));
+        return KeyEventResult.handled;
+      }
+      return event is KeyUpEvent ||
+              !_first.value.composing.isCollapsed ||
+              !_plain ||
+              !_views.editor.isSource(this)
+          ? KeyEventResult.ignored
+          : _views.editor.queue(this, event);
+    },
   );
+
+  Future<void> _pasteFirst(CopiedView copied) async {
+    final Pasted pasted;
+    try {
+      pasted = await readClipboard();
+    } on Object catch (error) {
+      widget.state.report('Liquid could not read the clipboard: $error');
+      return;
+    }
+    if (!mounted) return;
+    if (copied.text == pasted.text && copied.change == pasted.change) {
+      if (await _views.pasteCopy(copied, null) || !mounted) return;
+      widget.state.copiedView = null;
+    }
+    final text = pasted.text;
+    final selection = _first.selection;
+    if (text == null || text.isEmpty || !selection.isValid) return;
+    writeText(_first, _first.value.replaced(selection, text));
+  }
 
   static bool get _plain {
     final keys = HardwareKeyboard.instance;
@@ -99,6 +133,7 @@ class _WorkspacePageState extends State<WorkspacePage> implements EditorSource {
     _tree.addListener(_titleChanged);
     _first.addListener(_typedFirst);
     _views.ready.addListener(_readied);
+    _views.caret.addListener(_seek);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) widget.state.currentPage.value = _views;
     });
@@ -126,10 +161,26 @@ class _WorkspacePageState extends State<WorkspacePage> implements EditorSource {
     _tree.removeListener(_titleChanged);
     _title.dispose();
     _titleFocus.dispose();
+    _views.caret.removeListener(_seek);
+    _scroll.dispose();
     _views.dispose();
     _first.dispose();
     _firstFocus.dispose();
     super.dispose();
+  }
+
+  Future<void> _seek() async {
+    final view = _views.caret.value?.view;
+    final count = _views.count ?? 0;
+    for (var tries = 0; tries < 50; tries++) {
+      if (view == null || !mounted || !_scroll.hasClients || count == 0) return;
+      if (_views.keyFor(view).currentContext != null) return;
+      final index = _views.indexOf(view);
+      if (index == null) return;
+      final position = _scroll.position;
+      _scroll.jumpTo(position.maxScrollExtent * index / count);
+      await WidgetsBinding.instance.endOfFrame;
+    }
   }
 
   void _titleChanged() {
@@ -307,6 +358,55 @@ class _WorkspacePageState extends State<WorkspacePage> implements EditorSource {
     );
   }
 
+  var _titleHovered = false;
+
+  Widget _titled(BuildContext context, Widget title) => MouseRegion(
+    onEnter: (_) => setState(() => _titleHovered = true),
+    onExit: (_) => setState(() => _titleHovered = false),
+    child: ListenableBuilder(
+      listenable: widget.state.pages(widget.open.area),
+      builder: (context, _) {
+        final icon = widget.state.iconOf(widget.open.page);
+        if (icon.isEmpty) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              if (!widget.version)
+                PageIconButton(
+                  state: widget.state,
+                  page: widget.open.page,
+                  icon: icon,
+                  shown: _titleHovered || _title.controller.text.isEmpty,
+                ),
+              title,
+            ],
+          );
+        }
+        return Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.only(right: WsMetrics.space2),
+              child: widget.version
+                  ? PageIcon(
+                      icon,
+                      size: WsMetrics.fsDisplay,
+                      color: context.ws.text,
+                    )
+                  : PageIconButton(
+                      state: widget.state,
+                      page: widget.open.page,
+                      icon: icon,
+                      shown: true,
+                    ),
+            ),
+            Expanded(child: title),
+          ],
+        );
+      },
+    ),
+  );
+
   @override
   Widget build(BuildContext context) {
     final ws = context.ws;
@@ -364,6 +464,7 @@ class _WorkspacePageState extends State<WorkspacePage> implements EditorSource {
                 _views.arranging,
               ]),
               builder: (context, _) => CustomScrollView(
+                controller: _scroll,
                 slivers: [
                   SliverPadding(
                     padding: const EdgeInsets.fromLTRB(
@@ -377,27 +478,30 @@ class _WorkspacePageState extends State<WorkspacePage> implements EditorSource {
                         maxWidth: _views.arranged || _views.arranging.value
                             ? arrangedWidth
                             : readingWidth,
-                        TextField(
-                          key: const Key('page-title'),
-                          controller: _title.take(),
-                          focusNode: _titleFocus,
-                          maxLines: null,
-                          keyboardType: TextInputType.text,
-                          inputFormatters: [
-                            FilteringTextInputFormatter.deny(
-                              RegExp(r'[\n\r]'),
-                              replacementString: ' ',
+                        _titled(
+                          context,
+                          TextField(
+                            key: const Key('page-title'),
+                            controller: _title.take(),
+                            focusNode: _titleFocus,
+                            maxLines: null,
+                            keyboardType: TextInputType.text,
+                            inputFormatters: [
+                              FilteringTextInputFormatter.deny(
+                                RegExp(r'[\n\r]'),
+                                replacementString: ' ',
+                              ),
+                            ],
+                            style: TextStyle(
+                              fontSize: WsMetrics.fsDisplay,
+                              height: WsMetrics.lhDisplay / WsMetrics.fsDisplay,
+                              fontWeight: WsMetrics.fwBold,
+                              color: ws.text,
                             ),
-                          ],
-                          style: TextStyle(
-                            fontSize: WsMetrics.fsDisplay,
-                            height: WsMetrics.lhDisplay / WsMetrics.fsDisplay,
-                            fontWeight: WsMetrics.fwBold,
-                            color: ws.text,
-                          ),
-                          decoration: InputDecoration.collapsed(
-                            hintText: untitled,
-                            hintStyle: TextStyle(color: ws.textFaint),
+                            decoration: InputDecoration.collapsed(
+                              hintText: untitled,
+                              hintStyle: TextStyle(color: ws.textFaint),
+                            ),
                           ),
                         ),
                       ),
@@ -547,6 +651,8 @@ class _Breadcrumb extends StatelessWidget {
                 ),
                 child: Text('›', style: TextStyle(color: ws.textMuted)),
               ),
+              PageIcon(state.iconOf(open.page), size: 14),
+              const SizedBox(width: WsMetrics.space2),
               Flexible(
                 child: Text(
                   title == null || title.isEmpty ? untitled : title,

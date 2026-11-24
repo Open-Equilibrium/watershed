@@ -3,11 +3,15 @@ import Carbon.HIToolbox
 import IOKit
 import IOKit.hidsystem
 
-if CommandLine.arguments.dropFirst().first == "--remove" {
-    if Mapping.apply(on: false) { exit(0) }
+func failRemoval() -> Never {
     FileHandle.standardError.write(
         Data("a keyboard may keep Caps Lock as the Liquid key\n".utf8))
     exit(1)
+}
+
+if CommandLine.arguments.dropFirst().first == "--remove" {
+    if Mapping.apply(on: false) { exit(0) }
+    failRemoval()
 }
 
 let liquid = Bundle.main.bundleURL
@@ -51,12 +55,13 @@ func stopRecheck() {
     recheck = nil
 }
 
-func unmap() {
+@discardableResult
+func unmap() -> Bool {
     stopRecheck()
-    if Mapping.givesBack(mapped: mapped, active: sessionActive) {
-        Mapping.apply(on: false)
-        mapped = false
-    }
+    guard Mapping.givesBack(mapped: mapped, active: sessionActive) else { return true }
+    let released = Mapping.apply(on: false)
+    mapped = !released
+    return released
 }
 
 func register(_ modifiers: Int, _ id: EventHotKeyID, _ key: inout EventHotKeyRef?) {
@@ -154,8 +159,8 @@ let terminate = DispatchSource.makeSignalSource(
     signal: SIGTERM, queue: DispatchQueue(label: "terminate"))
 terminate.setEventHandler {
     DispatchQueue.main.async {
-        unmap()
-        exit(0)
+        if unmap() { exit(0) }
+        failRemoval()
     }
 }
 let registered = DispatchSemaphore(value: 0)
