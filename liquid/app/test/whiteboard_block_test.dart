@@ -548,6 +548,26 @@ void main() {
     expect(frameOf(stored().single).top, 140);
   });
 
+  testWidgets(
+    'a highlighter\'s whole band erases, not only its pen-size core',
+    (tester) async {
+      await showFocused(tester, [
+        copyElement(
+          stroke(
+            across(100),
+            color: BridgeInkColor.yellow,
+            pen: BridgePen.highlighter,
+          ),
+          width: 2,
+        ),
+      ]);
+      await key(tester, LogicalKeyboardKey.keyE);
+      boardTools.wholeEraser = true;
+      await draw(tester, [const Offset(200, 120), const Offset(200, 121)]);
+      expect(lastEdit().remove, ['element 0']);
+    },
+  );
+
   testWidgets('⋯ › Delete removes the Whiteboard', (tester) async {
     await kit.show(tester, [
       const TextPart('Intro'),

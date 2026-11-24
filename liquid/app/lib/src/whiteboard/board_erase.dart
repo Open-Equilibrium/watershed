@@ -35,7 +35,7 @@ extension _BoardErase on BoardSurfaceState {
         source.top + (local.dy - element.y) / sy,
       );
       final scale = math.max(sx.abs(), sy.abs());
-      final half = penSizes[element.width.clamp(0, 2)] / 2;
+      final half = inkWidth(element.pen, element.width) / 2;
       final pieces = eraseInside(
         board.cache.points(element),
         drawn,

@@ -50,11 +50,13 @@ bool isHighlight(BridgeElement element) =>
 
 const highlighterSizes = [12.0, 18.0, 26.0];
 
+double inkWidth(BridgePen pen, int width) => (pen == BridgePen.highlighter
+    ? highlighterSizes
+    : penSizes)[width.clamp(0, 2)];
+
 StrokeOptions penOptions(BridgePen pen, int width, {bool complete = true}) =>
     StrokeOptions(
-      size: (pen == BridgePen.highlighter
-          ? highlighterSizes
-          : penSizes)[width.clamp(0, 2)],
+      size: inkWidth(pen, width),
       thinning: switch (pen) {
         BridgePen.ball || BridgePen.highlighter => 0,
         BridgePen.fountain => 0.5,
@@ -148,7 +150,11 @@ Rect boundsOf(BridgeElement element) {
       Rect.fromCenter(center: point, width: 0, height: 0),
     );
   }
-  return bounds.inflate(penSizes.last);
+  return bounds.inflate(
+    element.kind == BridgeElementKind.stroke
+        ? inkWidth(element.pen, element.width)
+        : penSizes.last,
+  );
 }
 
 class BoardCache {
@@ -322,7 +328,7 @@ bool touches(BridgeElement element, BoardCache cache, Offset at, double slop) {
   switch (element.kind) {
     case BridgeElementKind.stroke:
       final points = cache.points(element);
-      final half = penSizes[element.width.clamp(0, 2)] / 2 + slop;
+      final half = inkWidth(element.pen, element.width) / 2 + slop;
       for (var i = 0; i < points.length; i++) {
         final a = strokePoint(element, cache, points[i].offset);
         final b = i + 1 < points.length
