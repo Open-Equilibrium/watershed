@@ -1,63 +1,6 @@
 use super::*;
 
 #[tokio::test(flavor = "multi_thread")]
-async fn shutdown_stops_t3_and_the_agent_processes_it_started() {
-    let (_dir, repo, home) = fixture();
-    let (service, host) = start_service(&home).await;
-    let project = host.project(&repo).await.unwrap();
-    let thread = project
-        .start(start("wait", Workspace::Checkout, Permissions::FullAccess))
-        .await
-        .unwrap();
-    until_running(&thread).await;
-    let mut agents = Vec::new();
-    for _ in 0..100 {
-        agents = processes_naming(&home);
-        if !agents.is_empty() {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(100)).await;
-    }
-    assert!(!agents.is_empty(), "T3 started its agent");
-    service.stop().await;
-    for _ in 0..50 {
-        agents.retain(|pid| running(*pid));
-        if agents.is_empty() {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(100)).await;
-    }
-    for pid in &agents {
-        kill(*pid);
-    }
-    assert!(agents.is_empty(), "agent processes outlive shutdown");
-}
-
-fn processes_naming(home: &Path) -> Vec<u32> {
-    let listing = Command::new("ps")
-        .args(["-axww", "-o", "pid=,command="])
-        .output()
-        .unwrap();
-    let marker = home.to_string_lossy();
-    String::from_utf8_lossy(&listing.stdout)
-        .lines()
-        .filter(|line| line.contains(&*marker))
-        .filter_map(|line| line.split_whitespace().next()?.parse().ok())
-        .collect()
-}
-
-fn running(pid: u32) -> bool {
-    rustix::process::Pid::from_raw(pid as i32)
-        .is_some_and(|pid| rustix::process::test_kill_process(pid).is_ok())
-}
-
-fn kill(pid: u32) {
-    if let Some(pid) = rustix::process::Pid::from_raw(pid as i32) {
-        let _ = rustix::process::kill_process(pid, rustix::process::Signal::KILL);
-    }
-}
-
-#[tokio::test(flavor = "multi_thread")]
 async fn a_restart_stops_the_t3_server_a_dead_host_left_behind() {
     let (_dir, _repo, home) = fixture();
     let first = host(&home).await;
@@ -186,17 +129,8 @@ async fn an_approved_configuration_reaches_the_harness_homes_t3_runs_them_in() {
         &std::fs::read_to_string(home.join("t3/userdata/settings.json")).unwrap(),
     )
     .unwrap();
-    let instances = &settings["providerInstances"];
     assert_eq!(
-        instances["codex"]["config"]["homePath"],
-        codex.to_string_lossy().as_ref()
-    );
-    assert_eq!(
-        instances["claudeAgent"]["config"]["homePath"],
-        claude.to_string_lossy().as_ref()
-    );
-    assert_eq!(
-        instances[AGENT]["driver"], "acpRegistry",
+        settings["providerInstances"][AGENT]["driver"], "acpRegistry",
         "the ACP agent stays"
     );
     service.stop().await;

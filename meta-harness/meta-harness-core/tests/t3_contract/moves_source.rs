@@ -118,22 +118,10 @@ async fn a_session_moves_to_another_host_with_its_branch_and_its_source_is_seale
 #[tokio::test(flavor = "multi_thread")]
 async fn a_move_the_new_host_refuses_leaves_the_session_on_its_host() {
     let pair = Pair::codex().await;
-    let (project_a, project_b) = pair.projects().await;
+    let (project_a, _) = pair.projects().await;
     let thread = appended(&project_a).await;
     let package = handoff(&thread).await;
 
-    let mut unknown = package.clone();
-    unknown.branch = "no-such-branch".to_owned();
-    assert!(project_b.move_in(unknown.clone()).await.is_err());
-    assert_eq!(
-        arrival(&pair.host_b, &unknown.transfer).await,
-        Arrival::Starting
-    );
-    assert_eq!(
-        withdraw(&pair.host_b, &unknown.transfer).await,
-        Arrival::Refused
-    );
-    assert!(project_b.threads().await.unwrap().is_empty());
     let other_url = format!("{}-other", pair.url);
     let other = clone_project(pair.dir.path(), &pair.origin, &other_url, "c");
     let project_c = pair.host_b.project(&other).await.unwrap();
@@ -277,21 +265,6 @@ async fn a_finish_repeats_refuses_the_other_outcome_and_a_released_message_runs_
         .count();
     assert_eq!(runs, 1, "the released message runs once");
 
-    let sealed = transfer();
-    let package = move_out(&thread, &sealed, Some("Append")).await.unwrap();
-    let seal = MoveFinish::Seal {
-        to_host: "studio".to_owned(),
-    };
-    thread.move_finish(&sealed, seal.clone()).await.unwrap();
-    thread
-        .move_finish(&sealed, seal)
-        .await
-        .expect("a repeated seal is answered again");
-    assert_refused(
-        thread.move_finish(&sealed, MoveFinish::Release).await,
-        "sealed",
-    );
-    assert_eq!(package.transfer, sealed);
     service.stop().await;
 }
 

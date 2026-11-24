@@ -123,21 +123,6 @@ async fn a_host_links_another_hosts_t3_through_a_tunnel_behind_the_switch_and_re
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn a_link_without_an_access_level_takes_the_level_its_host_invited() {
-    let (dir, _repo, _home) = fixture();
-    let ((_a, a), (_b, b), url_b) = two_hosts(dir.path()).await;
-    let code = b
-        .invite(ClientKind::Host, Access::FullAccess)
-        .await
-        .unwrap();
-    let (_, access) = a.host_add(&url_b, &code, None).await.unwrap();
-    assert_eq!(access, Access::FullAccess);
-    let listed = a.hosts().await.unwrap();
-    assert_eq!(listed.hosts[0].access, Access::FullAccess);
-    assert!(listed.hosts[0].reachable, "a full-access link answers");
-}
-
-#[tokio::test(flavor = "multi_thread")]
 async fn a_link_takes_or_refuses_an_access_level_by_its_invite_and_names_the_pairing_it_made() {
     let (dir, _repo, _home) = fixture();
     let ((_a, a), (_b, b), url_b) = two_hosts(dir.path()).await;
@@ -150,15 +135,7 @@ async fn a_link_takes_or_refuses_an_access_level_by_its_invite_and_names_the_pai
         .await
         .unwrap_err();
     let me = a.environment_name().await.unwrap().to_lowercase();
-    let pairing = b
-        .hosts()
-        .await
-        .unwrap()
-        .clients
-        .into_iter()
-        .find(|client| client.kind == ClientKind::Host)
-        .expect("b paired with a")
-        .name;
+    let pairing = host_client_names(&b).await.remove(0);
     let (host, tag) = pairing.rsplit_once('-').expect("the host name, then a tag");
     assert!(!host.is_empty() && me.trim().starts_with(host), "{pairing}");
     assert!(
@@ -247,12 +224,19 @@ async fn a_link_made_is_reported_made_even_when_its_time_cannot_be_stored() {
     let home_a = dir.path().join("a");
     let ((_a, a), (_b, b), url_b) = two_hosts(dir.path()).await;
     refuse(&home_a, "refuse_link_time", "BEFORE UPDATE ON peer");
-    let code = invite(&b, ClientKind::Host, Access::Auto).await;
-    let (name, _) = a
+    let code = invite(&b, ClientKind::Host, Access::FullAccess).await;
+    let (name, access) = a
         .host_add(&url_b, &code, None)
         .await
         .expect("the link is made, so the add reports it");
-    assert!(a.hosts().await.unwrap().hosts[0].reachable, "{name}");
+    assert_eq!(
+        access,
+        Access::FullAccess,
+        "a link without a level takes the invited one"
+    );
+    let listed = a.hosts().await.unwrap().hosts;
+    assert!(listed[0].reachable, "{name}");
+    assert_eq!(listed[0].access, Access::FullAccess);
 }
 
 #[tokio::test(flavor = "multi_thread")]

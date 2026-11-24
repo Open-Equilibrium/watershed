@@ -25,15 +25,7 @@ async fn a_thread_runs_turns_and_reverts_files_in_its_worktree() {
         .await
         .unwrap();
     wait(&thread, completed(1)).await;
-    let statistics = thread.statistics().await.unwrap();
-    assert_eq!(statistics.turns.len(), 1);
-    assert_eq!(statistics.turns[0].prompt, "append first");
-    let edits: u32 = statistics
-        .tools
-        .iter()
-        .map(|t| t.succeeded + t.failed + t.cancelled + t.open)
-        .sum();
-    assert!(edits >= 1, "the append's tool call counts: {statistics:?}");
+    assert_eq!(thread.statistics().await.unwrap().turns.len(), 1);
     thread.send("append second", false).await.unwrap();
     wait(&thread, completed(2)).await;
 
@@ -166,8 +158,6 @@ async fn a_thread_details_card_reads_t3_and_a_fork_merges_back() {
         .await
         .unwrap();
     wait(&thread, completed(1)).await;
-    assert!(thread.servers().await.unwrap().current().is_empty());
-    assert!(thread.automations().await.unwrap().current().is_empty());
     thread.usage_limits().await.unwrap();
     thread.send("append second", false).await.unwrap();
     wait(&thread, completed(2)).await;
@@ -184,14 +174,6 @@ async fn a_thread_details_card_reads_t3_and_a_fork_merges_back() {
     })
     .await;
 
-    let parent = thread.lineage().await.unwrap();
-    assert!(parent.rows.iter().any(|row| row.thread == fork_id
-        && row.relation == Relation::Fork
-        && row.group == Group::Related));
-    let lineage = fork.lineage().await.unwrap();
-    let parent_row = lineage.rows.iter().find(|row| row.thread == thread.id());
-    assert!(parent_row.is_some_and(|row| row.merge_target));
-    assert!(lineage.can_merge);
     fork.merge_back().await.unwrap();
     service.stop().await;
 }

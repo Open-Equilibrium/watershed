@@ -4,10 +4,10 @@
 use futures_util::FutureExt;
 use meta_harness_core::{
     Access, AcpAgent, AgentChange, AgentChangeKind, AgentEvent, Arrival, CONNECTION_FILE, Change,
-    ChatItem, ClientKind, GitAction, GitActionRequest, GitProgress, Group, Harness, Host,
-    HostConfig, ItemDetail, Landing, LineCount, ModelChoice, MoveFinish, MovePackage, MovePhase,
-    NewAgent, NewRoutine, Permissions, Relation, Request, Schedule, ScheduleKind, Service,
-    ServiceConfig, Snapshot, StartThread, TurnStatus, Workspace, remote, t3_version,
+    ChatItem, ClientKind, GitAction, GitActionRequest, GitProgress, Harness, Host, HostConfig,
+    ItemDetail, Landing, LineCount, ModelChoice, MoveFinish, MovePackage, MovePhase, NewAgent,
+    NewRoutine, Permissions, Request, Schedule, ScheduleKind, Service, ServiceConfig, Snapshot,
+    StartThread, TurnStatus, Workspace, remote, t3_version,
 };
 use std::path::{Path, PathBuf};
 use std::process::Command;
