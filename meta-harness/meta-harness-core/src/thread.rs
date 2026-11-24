@@ -339,7 +339,7 @@ impl Thread {
             .find(|run| run["userMessageId"] == message)?;
         let ended = matches!(
             run["status"].as_str(),
-            Some("completed" | "failed" | "cancelled" | "interrupted")
+            Some("completed" | "failed" | "cancelled" | "interrupted" | "rolled_back")
         );
         let text = projection
             .turn_items
