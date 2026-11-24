@@ -58,7 +58,12 @@ fn new_agent(name: &str, mut args: &[&str]) -> Result<NewAgent, String> {
                 if !path.is_dir() {
                     return Err(format!("The project {value} is not a folder."));
                 }
-                root = Some(path.to_string_lossy().into_owned());
+                root = Some(path.into_os_string().into_string().map_err(|_| {
+                    format!(
+                        "The project {value} resolves to a path that is not valid UTF-8; use a \
+                         folder whose real path is UTF-8."
+                    )
+                })?);
             }
             "--model" => {
                 let (instance, model_id) = value.split_once('/').ok_or_else(|| {
@@ -326,6 +331,31 @@ mod tests {
         )
         .unwrap();
         assert_eq!(full.permissions, Permissions::FullAccess);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_project_whose_real_path_is_not_utf8_is_refused() {
+        use std::os::unix::ffi::OsStrExt;
+        let dir = std::env::temp_dir().join(format!("agent-project-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let real = dir.join(std::ffi::OsStr::from_bytes(b"odd-\xff"));
+        std::fs::create_dir_all(&real).unwrap();
+        let link = dir.join("link");
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+        let error = new_agent(
+            "bot",
+            &[
+                "--project",
+                link.to_str().unwrap(),
+                "--model",
+                "codex/gpt-6.1",
+            ],
+        )
+        .err()
+        .expect("a path that is not UTF-8 is refused");
+        assert!(error.contains("UTF-8"), "{error}");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
