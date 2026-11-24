@@ -103,6 +103,18 @@ void main() {
     expectNone(find.byKey(const Key('arrange bar')));
   });
 
+  testWidgets('the Arrange hint shows in full when the bar has room for it '
+      'and is hidden rather than cut at the minimum width', (tester) async {
+    const hint = 'Drag the top handle to move, the right edge to resize';
+    await trip(tester);
+    await tester.binding.setSurfaceSize(const Size(1050, 640));
+    await arrange(tester);
+    expectNone(find.text(hint));
+    await tester.binding.setSurfaceSize(const Size(1800, 640));
+    await tester.pumpAndSettle();
+    expectOne(find.text(hint));
+  });
+
   testWidgets('arrow keys move the selected tile, ⌥ and arrows resize '
       'it', (tester) async {
     await trip(tester);
