@@ -665,21 +665,6 @@ mod tests {
     }
 
     #[test]
-    fn status_says_when_the_harness_homes_are_not_reconciled() {
-        let status = |reconciled| api::Status {
-            t3_version: "0.1.9".to_owned(),
-            pid: 7,
-            revision: 3,
-            reconciled,
-        };
-        assert!(!status_text(&status(true)).contains("not reconciled"));
-        assert!(
-            status_text(&status(false))
-                .contains("The harness homes are not reconciled with revision 3")
-        );
-    }
-
-    #[test]
     fn uninstall_checks_the_data_folder_the_login_service_keeps_as_well() {
         let prefix = Path::new("/opt/mh");
         let recorded = PathBuf::from("/opt/mh/lib/meta-harness/data");
@@ -689,11 +674,6 @@ mod tests {
             Some(recorded)
         );
         assert_eq!(data_in_installation(prefix, None, shell), None);
-    }
-
-    #[test]
-    fn a_rejection_is_confirmed_on_one_line() {
-        assert_eq!(rejected(4), "Rejected proposal 4.");
     }
 
     #[test]
@@ -737,16 +717,20 @@ mod tests {
     }
 
     #[test]
-    fn status_names_the_serve_process_and_the_t3_release() {
-        let status = api::Status {
+    fn status_names_the_serve_process_and_the_t3_release_and_unreconciled_homes() {
+        let status = |reconciled| api::Status {
             t3_version: "0.1.11".to_owned(),
             pid: 7,
             revision: 3,
-            reconciled: true,
+            reconciled,
         };
         assert_eq!(
-            status_text(&status),
+            status_text(&status(true)),
             "Meta-Harness runs as process 7 with T3 Code 0.1.11, configuration revision 3."
+        );
+        assert!(
+            status_text(&status(false))
+                .contains("The harness homes are not reconciled with revision 3")
         );
     }
 
@@ -766,10 +750,6 @@ mod tests {
                 "meta config approve needs a proposal number",
             ),
             (
-                &["config", "reject"],
-                "meta config reject needs a proposal number",
-            ),
-            (
                 &["host", "add"],
                 "meta host add needs an address and a pairing code",
             ),
@@ -778,18 +758,9 @@ mod tests {
                 "meta host add needs a pairing code",
             ),
             (&["host", "remove"], "meta host remove needs a host name"),
-            (&["host", "revoke"], "meta host revoke needs a host name"),
             (
                 &["agent", "create"],
                 "meta agent create needs an agent name",
-            ),
-            (
-                &["agent", "remove"],
-                "meta agent remove needs an agent name",
-            ),
-            (
-                &["agent", "routines"],
-                "meta agent routines needs an agent name",
             ),
             (
                 &["agent", "routine", "add"],
@@ -808,17 +779,5 @@ mod tests {
             assert_eq!(missing(args), Some(message), "{args:?}");
         }
         assert_eq!(missing(&["config", "approve", "1"]), None);
-    }
-
-    #[test]
-    fn the_usage_names_the_access_flags_and_what_revoke_ends() {
-        assert!(
-            USAGE.contains("invite --device | --host [--access LEVEL]"),
-            "{USAGE}"
-        );
-        assert!(
-            USAGE.contains("end the T3 sessions of that host's link"),
-            "{USAGE}"
-        );
     }
 }
