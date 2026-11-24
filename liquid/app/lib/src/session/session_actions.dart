@@ -1,21 +1,18 @@
 part of 'session_state.dart';
 
 extension SessionActions on SessionState {
-  Future<void> send(String text, {bool steer = false}) async {
+  Future<bool> send(String text, {bool steer = false}) async {
     final session = _session;
     try {
       if (session != null) {
         if (!await agents.mention(text)) await session.send(text, steer: steer);
-        return;
+        return true;
       }
-      if (agents.composing.value) {
-        await agents.start(text);
-        return;
-      }
+      if (agents.composing.value) return await agents.start(text);
       final chosen = model.value;
       if (chosen == null) {
         notify(NoticeLevel.error, 'No model is available.');
-        return;
+        return false;
       }
       final start = _startAddress;
       final switchRequest = ++_switchRequests;
@@ -31,8 +28,10 @@ extension SessionActions on SessionState {
         start,
       );
       unawaited(loadStart());
+      return true;
     } on Object catch (error) {
       notify(NoticeLevel.error, 'Could not send the message: $error');
+      return false;
     }
   }
 

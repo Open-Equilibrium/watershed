@@ -276,14 +276,33 @@ class _ComposerState extends State<Composer> {
   void _send({required bool steer}) {
     final text = widget.controller.text.trim();
     if (text.isEmpty) return;
+    final draft = widget.controller.value;
     widget.onSent();
     final editing = _editing;
     if (editing != null) {
       setState(() => _editing = null);
       unawaited(widget.state.editQueued(editing, text));
     } else {
-      unawaited(widget.state.send(text, steer: steer));
+      unawaited(_deliver(text, steer: steer, draft: draft));
     }
+  }
+
+  Future<void> _deliver(
+    String text, {
+    required bool steer,
+    required TextEditingValue draft,
+  }) async {
+    final sent = await widget.state.send(text, steer: steer);
+    if (sent || !mounted) return;
+    final typed = widget.controller.text;
+    final kept = typed.trim().isEmpty ? draft.text : '${draft.text}\n\n$typed';
+    writeText(
+      widget.controller,
+      TextEditingValue(
+        text: kept,
+        selection: TextSelection.collapsed(offset: kept.length),
+      ),
+    );
   }
 
   void _edit(BridgeTurn turn) {

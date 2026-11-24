@@ -228,6 +228,18 @@ void main() {
     expect(actions(), isEmpty);
   });
 
+  testWidgets('a send that fails keeps the typed prompt in the composer', (
+    tester,
+  ) async {
+    await show(tester);
+    await chord(tester, LogicalKeyboardKey.keyN);
+    state.model.value = null;
+    await typeInComposer(tester, 'Hello agent');
+    await tap(tester, find.text('Submit message'));
+    expectOne(find.text('No model is available.'));
+    expect(composerText(tester), 'Hello agent');
+  });
+
   testWidgets('while the agent runs, Enter steers it, ⌥⏎ queues a follow-up, '
       'and Stop generation stops it', (tester) async {
     await show(tester, turns: [running(1)]);
