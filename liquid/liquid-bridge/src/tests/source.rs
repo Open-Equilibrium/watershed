@@ -203,3 +203,35 @@ fn a_source_crosses_the_bridge_and_feeds_a_chart() {
         .collect();
     assert_eq!(left, ["files"]);
 }
+
+#[test]
+fn a_source_file_refused_for_its_size_or_kind_still_names_its_path() {
+    let (folder, workspace) = open("source-refused");
+    let (area, ..) = lisbon(&workspace);
+    let files = folder.0.join("files");
+    std::fs::create_dir_all(&files).unwrap();
+    let text = files.join("notes.txt");
+    std::fs::write(&text, [0xff, 0xfe, 0x00]).unwrap();
+    let big = files.join("scan.png");
+    std::fs::File::create(&big)
+        .unwrap()
+        .set_len(liquid_core::MAX_SOURCE_FILE + 1)
+        .unwrap();
+    for (path, read) in [
+        (&text, BridgeRead::Unreadable),
+        (&big, BridgeRead::TooLarge),
+    ] {
+        let source = workspace
+            .add_source(area.clone(), None, path.to_str().unwrap().into())
+            .unwrap();
+        let answer = workspace.source_file(source, String::new()).unwrap();
+        assert_eq!(
+            (answer.read, answer.name.as_str(), answer.path.as_str()),
+            (
+                read,
+                path.file_name().unwrap().to_str().unwrap(),
+                path.to_str().unwrap()
+            )
+        );
+    }
+}

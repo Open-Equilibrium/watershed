@@ -214,6 +214,13 @@ impl LiquidWorkspace {
     ) -> Result<BridgeSourceFile, String> {
         let source = source(source_id)?;
         let root = self.state()?.workspace.source_root(&source);
+        let path = root.as_ref().ok().map(|root| {
+            if inside.is_empty() {
+                root.clone()
+            } else {
+                root.join(&inside)
+            }
+        });
         let mut answer = BridgeSourceFile {
             read: BridgeRead::Read,
             name: String::new(),
@@ -230,6 +237,15 @@ impl LiquidWorkspace {
             Ok(file) => file,
             Err(error) => {
                 answer.read = read_of(&error).ok_or_else(|| message(error))?;
+                if matches!(answer.read, BridgeRead::TooLarge | BridgeRead::Unreadable)
+                    && let Some(path) = path
+                {
+                    answer.name = path
+                        .file_name()
+                        .map(|name| name.to_string_lossy().into_owned())
+                        .unwrap_or_default();
+                    answer.path = path.to_string_lossy().into_owned();
+                }
                 return Ok(answer);
             }
         };
