@@ -135,6 +135,7 @@ class InstallerTest(unittest.TestCase):
             "relative prefix": (good, ["--prefix", "relative/prefix"]),
             "newline in prefix": (good, ["--prefix", absolute + "\nx"]),
             "other platform": (other, ["--prefix", absolute]),
+            "data folder is the prefix": (good, ["--prefix", str(self.home / ".meta-harness")]),
         }
         for name, (bundle, args) in cases.items():
             with self.subTest(case=name):

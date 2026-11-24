@@ -84,6 +84,12 @@ done
 lib=$prefix/lib/meta-harness
 bin=$prefix/bin
 share=$prefix/share/meta-harness
+data=${META_HARNESS_HOME:-${HOME-}/.meta-harness}
+case "$data/" in
+    "$prefix/" | "$lib/"* | "$share/"*)
+        fail "the data folder $data lies in the installation, so nothing was installed"
+        ;;
+esac
 t3_stage=$lib/.$t3_name.install.$$
 meta_stage=$bin/.meta.install.$$
 cleanup() {
