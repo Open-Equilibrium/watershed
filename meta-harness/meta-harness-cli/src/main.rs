@@ -278,11 +278,13 @@ fn prefix() -> Result<PathBuf, String> {
 #[cfg(unix)]
 fn answers_as_flow_agent(flow: &Path) -> bool {
     use std::io::Read;
+    use std::os::unix::process::CommandExt;
     use std::process::{Command, Stdio};
     use std::time::{Duration, Instant};
     const PROBE_OUTPUT_BYTES: u64 = 64 * 1024;
     let Ok(mut child) = Command::new(flow)
         .args(["acp", "--help"])
+        .process_group(0)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
@@ -290,6 +292,9 @@ fn answers_as_flow_agent(flow: &Path) -> bool {
     else {
         return false;
     };
+    let group = i32::try_from(child.id())
+        .ok()
+        .and_then(rustix::process::Pid::from_raw);
     let deadline = Instant::now() + Duration::from_secs(5);
     let stdout = child.stdout.take();
     let (sender, usage) = std::sync::mpsc::channel();
@@ -307,21 +312,22 @@ fn answers_as_flow_agent(flow: &Path) -> bool {
         .recv_timeout(deadline.saturating_duration_since(Instant::now()))
         .ok()
         .flatten();
-    loop {
+    let answered = loop {
         match child.try_wait() {
             Ok(Some(status)) => {
-                return status.success()
+                break status.success()
                     && usage
                         .is_some_and(|usage| String::from_utf8_lossy(&usage).contains("flow acp"));
             }
             Ok(None) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(20)),
-            _ => {
-                let _ = child.kill();
-                let _ = child.wait();
-                return false;
-            }
+            _ => break false,
         }
+    };
+    if let Some(group) = group {
+        let _ = rustix::process::kill_process_group(group, rustix::process::Signal::KILL);
     }
+    let _ = child.wait();
+    answered
 }
 
 #[cfg(not(unix))]
@@ -605,7 +611,14 @@ mod tests {
         let hanging = dir.join("hanging");
         executable(&hanging, "#!/bin/sh\nexec sleep 60\n");
         let holding = dir.join("holding");
-        executable(&holding, "#!/bin/sh\nsleep 60 &\necho '  flow acp'\n");
+        let descendant = dir.join("descendant.pid");
+        executable(
+            &holding,
+            &format!(
+                "#!/bin/sh\nsleep 60 &\necho $! > '{}'\necho '  flow acp'\n",
+                descendant.display()
+            ),
+        );
         let bin = dir.join("bin");
         let flow = executable(&bin, "#!/bin/sh\necho '  flow acp'\n");
 
@@ -616,6 +629,20 @@ mod tests {
         let started = std::time::Instant::now();
         let agent = flow_agent(Some(path)).expect("flow on the PATH is found");
         assert!(started.elapsed() < std::time::Duration::from_secs(15));
+        let pid: i32 = std::fs::read_to_string(&descendant)
+            .unwrap()
+            .trim()
+            .parse()
+            .unwrap();
+        let pid = rustix::process::Pid::from_raw(pid).unwrap();
+        let gone = (0..100).any(|_| {
+            std::thread::sleep(std::time::Duration::from_millis(20));
+            rustix::process::test_kill_process(pid).is_err()
+        });
+        assert!(
+            gone,
+            "the descendant that held the probe's output still runs"
+        );
         assert_eq!(agent.id, "flow-agent");
         assert_eq!(agent.command, flow);
         assert_eq!(agent.args, ["acp"]);
