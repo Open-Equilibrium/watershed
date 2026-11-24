@@ -34,20 +34,7 @@ async fn a_persistent_agent_moves_to_a_fresh_thread_with_its_routines_when_its_c
     let first = project.open(&created.thread).await.unwrap();
     wait(&first, completed(1)).await;
     let routine = host
-        .agent_routine_add(
-            "news-bot",
-            NewRoutine {
-                title: "Morning".to_owned(),
-                prompt: "Check the feeds.".to_owned(),
-                schedule: Schedule {
-                    kind: ScheduleKind::FixedTime,
-                    every_ms: None,
-                    time_of_day: Some("07:30".to_owned()),
-                    weekdays: Vec::new(),
-                    run_at: None,
-                },
-            },
-        )
+        .agent_routine_add("news-bot", every_hour("Morning", "Check the feeds."))
         .await
         .unwrap();
 

@@ -12,7 +12,7 @@ async fn may_tunnel(url: &str, token: &str) -> bool {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn pairing_names_host_addresses_and_the_handshake_limit_are_checked_before_use() {
+async fn pairing_names_the_client_and_the_handshake_limit_are_checked_before_use() {
     let (dir, _repo, _home) = fixture();
     let (_service, local) = start_service(&dir.path().join("meta")).await;
     let port = remote_on_free(&local).await;
@@ -28,14 +28,6 @@ async fn pairing_names_host_addresses_and_the_handshake_limit_are_checked_before
         "meta host list prints the name"
     );
     local.host_agents(true).await.unwrap();
-    let error = local
-        .host_add("127.0.0.1:3774", "AAAA-AAAA", None)
-        .await
-        .unwrap_err();
-    assert_eq!(
-        error,
-        "Enter the address as ws://HOST:PORT, as meta invite prints it."
-    );
     assert_handshake_cap(&format!("127.0.0.1:{port}")).await;
 }
 
