@@ -6,6 +6,9 @@ fn keeps_windows_line_ends_and_writes_out_other_carriage_returns() {
         visible_lines("one\r\ntwo\rthree\r\nfour\u{202E}\n"),
         "one\r\ntwo<U+000D>three\r\nfour<U+202E>\n"
     );
+    assert_eq!(visible_lines("abc\r"), "abc<U+000D>");
+    assert_eq!(visible_lines("abc\r\n"), "abc\r\n");
+    assert_eq!(visible_lines("abc\r\r\n"), "abc<U+000D>\r\n");
 }
 
 #[test]
