@@ -73,11 +73,11 @@ impl Host {
 
     pub async fn project(&self, root: &Path) -> Result<Project, String> {
         let root = root.to_string_lossy().into_owned();
-        let mut shell = self
+        let snapshot = self
             .client
-            .stream("orchestration.subscribeShell", json!({}))
-            .await?;
-        let snapshot = shell.recv().await.ok_or("T3 sent no projects")?;
+            .first("orchestration.subscribeShell")
+            .await?
+            .ok_or("T3 sent no projects")?;
         let existing = snapshot["snapshot"]["projects"]
             .as_array()
             .into_iter()
@@ -170,14 +170,8 @@ impl Host {
     }
 
     pub(crate) async fn scheduled_tasks(&self) -> Result<Value, String> {
-        let mut stream = self
-            .client
-            .stream("scheduledTasks.subscribe", json!({}))
-            .await?;
-        stream
-            .recv()
-            .await
-            .ok_or_else(|| "T3 sent no routines".to_owned())
+        let list = self.client.first("scheduledTasks.subscribe").await?;
+        list.ok_or_else(|| "T3 sent no routines".to_owned())
     }
 
     pub async fn environment_id(&self) -> Result<String, String> {
@@ -410,11 +404,11 @@ impl Project {
     }
 
     pub async fn threads(&self) -> Result<Vec<ThreadSummary>, String> {
-        let mut shell = self
+        let snapshot = self
             .client
-            .stream("orchestration.subscribeShell", json!({}))
-            .await?;
-        let snapshot = shell.recv().await.ok_or("T3 sent no threads")?;
+            .first("orchestration.subscribeShell")
+            .await?
+            .ok_or("T3 sent no threads")?;
         let mut threads: Vec<ThreadSummary> = snapshot["snapshot"]["threads"]
             .as_array()
             .into_iter()
@@ -457,7 +451,8 @@ impl Project {
     }
 
     pub async fn delete(&self, thread: &ThreadSummary, worktree: bool) -> Result<(), String> {
-        self.dispatch(json!({"type": "thread.delete", "threadId": thread.id}))
+        self.client
+            .dispatch(json!({"type": "thread.delete", "threadId": thread.id}))
             .await?;
         match (worktree, &thread.worktree) {
             (true, Some(path)) => self.remove_worktree(path).await,
@@ -481,15 +476,9 @@ impl Project {
         } else {
             "thread.unarchive"
         };
-        self.dispatch(json!({"type": kind, "threadId": thread}))
-            .await
-    }
-
-    async fn dispatch(&self, command: Value) -> Result<(), String> {
         self.client
-            .command("orchestration.dispatchCommand", command)
+            .dispatch(json!({"type": kind, "threadId": thread}))
             .await
-            .map(|_| ())
     }
 
     pub async fn open(&self, id: &str) -> Result<Thread, String> {

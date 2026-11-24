@@ -23,6 +23,8 @@ const RETRY_DELAYS: [Duration; 3] = [
     Duration::from_secs(1),
 ];
 
+const FIRST_WAIT: Duration = Duration::from_secs(10);
+
 const LOST_CALL: &str = "T3 closed the connection before it answered; the call was not sent again";
 
 type Socket = WebSocketStream<MaybeTlsStream<TcpStream>>;
@@ -165,6 +167,20 @@ impl Client {
 
     pub async fn stream(&self, tag: &str, payload: Value) -> Result<Subscription, String> {
         self.open_stream(tag, payload, true)
+    }
+
+    pub async fn first(&self, tag: &str) -> Result<Option<Value>, String> {
+        let mut stream = self.stream(tag, json!({})).await?;
+        Ok(tokio::time::timeout(FIRST_WAIT, stream.recv())
+            .await
+            .ok()
+            .flatten())
+    }
+
+    pub async fn dispatch(&self, command: Value) -> Result<(), String> {
+        self.command("orchestration.dispatchCommand", command)
+            .await
+            .map(|_| ())
     }
 
     pub async fn action(&self, tag: &str, payload: Value) -> Result<Subscription, String> {

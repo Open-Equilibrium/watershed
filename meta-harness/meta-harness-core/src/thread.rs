@@ -568,9 +568,6 @@ impl Thread {
 
     async fn dispatch(&self, mut command: Value) -> Result<(), String> {
         command["threadId"] = json!(self.id);
-        self.client
-            .command("orchestration.dispatchCommand", command)
-            .await
-            .map(|_| ())
+        self.client.dispatch(command).await
     }
 }

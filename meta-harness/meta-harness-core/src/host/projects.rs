@@ -19,7 +19,6 @@ pub struct HostProject {
 }
 
 const REMOTE_WAIT: Duration = Duration::from_secs(2);
-const SHELL_WAIT: Duration = Duration::from_secs(10);
 const CLONE_WAIT: Duration = Duration::from_secs(30 * 60);
 const WORKTREE_WAIT: Duration = Duration::from_secs(60);
 const POLL: Duration = Duration::from_millis(100);
@@ -241,7 +240,8 @@ impl Project {
     }
 
     pub(crate) async fn discard_id(&self, thread: &str) -> Result<(), String> {
-        self.dispatch(json!({"type": "thread.delete", "threadId": thread}))
+        self.client
+            .dispatch(json!({"type": "thread.delete", "threadId": thread}))
             .await
     }
 }
@@ -316,14 +316,10 @@ async fn listed(client: &Client, root: &str) -> Result<Option<HostProject>, Stri
 }
 
 async fn read_projects(client: &Client) -> Result<Vec<HostProject>, String> {
-    let snapshot = tokio::time::timeout(SHELL_WAIT, async {
-        let mut shell = client
-            .stream("orchestration.subscribeShell", json!({}))
-            .await?;
-        shell.recv().await.ok_or("T3 sent no projects".to_owned())
-    })
-    .await
-    .unwrap_or_else(|_| Err("T3 sent no projects in time.".to_owned()))?;
+    let snapshot = client
+        .first("orchestration.subscribeShell")
+        .await?
+        .ok_or("T3 sent no projects")?;
     Ok(snapshot["snapshot"]["projects"]
         .as_array()
         .into_iter()

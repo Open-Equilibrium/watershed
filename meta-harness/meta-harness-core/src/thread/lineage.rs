@@ -666,15 +666,16 @@ impl Thread {
                 .ok_or_else(|| "Complete a run in this fork before merging it back.".to_owned())?;
             (target, run["id"].clone())
         };
-        self.send_command(json!({
-            "type": "thread.merge_back",
-            "createdBy": "user",
-            "creationSource": "web",
-            "sourceThreadId": self.id,
-            "targetThreadId": target,
-            "sourcePoint": {"type": "run", "runId": run},
-        }))
-        .await
+        self.client
+            .dispatch(json!({
+                "type": "thread.merge_back",
+                "createdBy": "user",
+                "creationSource": "web",
+                "sourceThreadId": self.id,
+                "targetThreadId": target,
+                "sourcePoint": {"type": "run", "runId": run},
+            }))
+            .await
     }
 
     pub async fn disconnect(&self) -> Result<(), String> {
@@ -686,13 +687,14 @@ impl Thread {
             .filter_map(|session| str_of(&session["id"]))
             .collect();
         for session in sessions {
-            self.send_command(json!({
-                "type": "provider-session.detach",
-                "threadId": self.id,
-                "providerSessionId": session,
-                "reason": "client-requested",
-            }))
-            .await?;
+            self.client
+                .dispatch(json!({
+                    "type": "provider-session.detach",
+                    "threadId": self.id,
+                    "providerSessionId": session,
+                    "reason": "client-requested",
+                }))
+                .await?;
         }
         Ok(())
     }
@@ -720,20 +722,14 @@ impl Thread {
         ) {
             (Some("app_owned"), Some(child)) => {
                 if !record["runId"].is_null() {
-                    let _ = self.send_command(stop(&record["runId"])).await;
+                    let _ = self.client.dispatch(stop(&record["runId"])).await;
                 }
-                self.send_command(json!({"type": "thread.stop", "threadId": child}))
+                self.client
+                    .dispatch(json!({"type": "thread.stop", "threadId": child}))
                     .await
             }
             _ if record["runId"].is_null() => Ok(()),
-            _ => self.send_command(stop(&record["runId"])).await,
+            _ => self.client.dispatch(stop(&record["runId"])).await,
         }
-    }
-
-    async fn send_command(&self, command: Value) -> Result<(), String> {
-        self.client
-            .command("orchestration.dispatchCommand", command)
-            .await
-            .map(|_| ())
     }
 }

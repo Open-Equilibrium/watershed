@@ -315,11 +315,11 @@ impl Thread {
     }
 
     pub(crate) async fn routine_tasks(&self) -> Result<Vec<Value>, String> {
-        let mut stream = self
+        let list = self
             .client
-            .stream("scheduledTasks.subscribe", json!({}))
-            .await?;
-        let list = stream.recv().await.ok_or("T3 sent no routines")?;
+            .first("scheduledTasks.subscribe")
+            .await?
+            .ok_or("T3 sent no routines")?;
         Ok(bound(&list, &self.id)
             .map(crate::agents::routine_copy)
             .collect())
