@@ -361,8 +361,17 @@ extension _FakeQueries on FakeWorkspace {
               (cell == null &&
                   value!.kind == BridgeCellKind.checkbox &&
                   !value.checked),
-        BridgeMatch.isNot || BridgeMatch.above || BridgeMatch.below =>
-          throw UnimplementedError('Automation conditions filter no View'),
+        BridgeMatch.isNot => !passes(
+          row,
+          BridgeFilter(
+            field: filter.field,
+            matches: BridgeMatch.is_,
+            value: value,
+          ),
+        ),
+        BridgeMatch.above || BridgeMatch.below => throw UnimplementedError(
+          'Automation conditions filter no View',
+        ),
       };
     }
 

@@ -34,8 +34,10 @@ extension _TableBlockEdits on _TableBlockState {
   }
 
   Future<void> _takeFilterValue(String? row) async {
-    if (_liveFilter case BridgeFilter(:final field, value: final value?)
-        when value.kind != BridgeCellKind.checkbox || value.checked) {
+    if (_liveFilter
+        case BridgeFilter(:final field, :final matches, value: final value?)
+        when (matches == BridgeMatch.is_ || matches == BridgeMatch.contains) &&
+            (value.kind != BridgeCellKind.checkbox || value.checked)) {
       await widget.views.write(
         mutation(
           BridgeMutationKind.setCell,

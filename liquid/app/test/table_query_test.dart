@@ -185,6 +185,29 @@ void main() {
     expect(find.text('3 of 4 rows'), findsOneWidget);
   });
 
+  testWidgets('a new row is not given the value a not-is filter excludes', (
+    tester,
+  ) async {
+    await kit.show(tester, [TablePart(rows)]);
+    await kit.workspace.apply(
+      mutation(
+        BridgeMutationKind.setTabFilter,
+        page: kit.page,
+        view: view().id,
+        tab: view().tabs.first.id,
+        filter: BridgeFilter(
+          field: 'category',
+          matches: BridgeMatch.isNot,
+          value: cell(BridgeCellKind.select, text: 'home'),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tap(tester, find.text('New'));
+    expect(find.text('2 of 4 rows'), findsOneWidget);
+    expect(kit.applied(BridgeMutationKind.setCell), isEmpty);
+  });
+
   testWidgets('a filtered Table keeps its place when the Page changes', (
     tester,
   ) async {
