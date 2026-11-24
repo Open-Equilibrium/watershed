@@ -128,6 +128,18 @@ void main() {
     expect(find.text('Name contains ren'), findsOneWidget);
   });
 
+  testWidgets('esc closes a filter menu after its value is written on ⏎', (
+    tester,
+  ) async {
+    await kit.show(tester, [TablePart(rows)]);
+    await tap(tester, filterButton);
+    await typeValue(tester, 'ren');
+    expect(names(tester), ['Rent']);
+    await key(tester, LogicalKeyboardKey.escape);
+    expect(find.byKey(const Key('table query menu')), findsNothing);
+    expect(names(tester), ['Rent']);
+  });
+
   testWidgets('a number that is none is not written', (tester) async {
     await kit.show(tester, [TablePart(rows)]);
     await tap(tester, filterButton);

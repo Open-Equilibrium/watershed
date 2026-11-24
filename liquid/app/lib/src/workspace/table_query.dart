@@ -681,6 +681,7 @@ class _FilterMenuState extends State<FilterMenu> {
     final typed = _typed.text.trim().isNotEmpty;
     setState(() => _refused = typed && _built() == null);
     _writeTyped();
+    _typing.requestFocus();
   }
 
   Widget _dropdown(Key key, String label, _Choosing choosing) {
