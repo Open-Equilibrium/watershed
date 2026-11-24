@@ -42,7 +42,7 @@ impl Plan {
             ("META_HARNESS_HOME", utf8(&home)?),
         ];
         for name in PASSED {
-            if let Some(value) = var(name).filter(|v| v.starts_with('/')) {
+            if let Some(value) = var(name).filter(|v| Path::new(v).is_absolute()) {
                 environment.push((name, value));
             }
         }
@@ -68,6 +68,29 @@ impl Plan {
     }
 }
 
+pub fn split_environment<'a>(args: &[&'a str]) -> (Vec<(&'a str, &'a str)>, Vec<&'a str>) {
+    let mut environment = Vec::new();
+    let mut rest = Vec::new();
+    let mut index = 0;
+    while index < args.len() {
+        let pair = args
+            .get(index + 1)
+            .copied()
+            .and_then(|pair| pair.split_once('='));
+        match pair {
+            Some((name, value)) if args[index] == "--env" && PASSED.contains(&name) => {
+                environment.push((name, value));
+                index += 2;
+            }
+            _ => {
+                rest.push(args[index]);
+                index += 1;
+            }
+        }
+    }
+    (environment, rest)
+}
+
 #[derive(Debug, PartialEq, Eq)]
 pub struct Step {
     pub program: &'static str,
@@ -90,6 +113,7 @@ pub struct Manager {
     home_of: fn(&str) -> Option<String>,
     start: Vec<Step>,
     stop: Vec<Step>,
+    stop_without_file: Vec<Step>,
     restore: Vec<Step>,
     restart: Vec<Step>,
 }
@@ -112,6 +136,7 @@ impl Manager {
                 step("launchctl", &["bootstrap", &domain, &plist], true),
             ],
             stop: vec![step("launchctl", &["bootout", &target], false)],
+            stop_without_file: vec![step("launchctl", &["bootout", &target], false)],
             restore: Vec::new(),
             restart: vec![step("launchctl", &["bootstrap", &domain, &plist], true)],
             file,
@@ -134,6 +159,7 @@ impl Manager {
                 &["--user", "disable", "--now", UNIT],
                 false,
             )],
+            stop_without_file: vec![step("systemctl", &["--user", "stop", UNIT], false)],
             restore: vec![step("systemctl", &["--user", "daemon-reload"], false)],
             restart: vec![step("systemctl", &["--user", "restart", UNIT], true)],
         }
@@ -154,6 +180,10 @@ impl Manager {
             home_of: task_home,
             start: vec![step("schtasks", &["/End", "/TN", TASK], false), create, run],
             stop: vec![
+                step("schtasks", &["/End", "/TN", TASK], false),
+                step("schtasks", &["/Delete", "/TN", TASK, "/F"], false),
+            ],
+            stop_without_file: vec![
                 step("schtasks", &["/End", "/TN", TASK], false),
                 step("schtasks", &["/Delete", "/TN", TASK, "/F"], false),
             ],
@@ -290,11 +320,21 @@ impl Manager {
         &self,
         mut run: impl FnMut(&Step) -> Result<(), String>,
     ) -> Result<Vec<String>, String> {
-        let failures = run_all(&self.stop, &mut run)?;
-        if let Some(failure) = failures.iter().find(|failure| !not_loaded(failure)) {
-            return Err(format!(
-                "The login service could not be stopped ({failure}), so nothing was removed. Stop it, then run uninstall again."
-            ));
+        let stop = if self.file.exists() {
+            &self.stop
+        } else {
+            &self.stop_without_file
+        };
+        let mut failures = Vec::new();
+        for step in stop {
+            if let Err(failure) = run(step) {
+                if !not_loaded(&failure) {
+                    return Err(format!(
+                        "The login service could not be stopped ({failure}), so nothing was removed. Stop it, then run uninstall again."
+                    ));
+                }
+                failures.push(failure);
+            }
         }
         ignore_missing(std::fs::remove_file(&self.file))
             .map_err(|e| format!("Could not remove {}: {e}", self.file.display()))?;
@@ -436,6 +476,12 @@ fn task_of(plan: &Plan) -> String {
     let program = xml(&argument(&plan.program.to_string_lossy()));
     let home = xml(&argument(&plan.home.to_string_lossy()));
     let log = xml(&argument(&plan.log().to_string_lossy()));
+    let environment: String = plan
+        .environment
+        .iter()
+        .filter(|(name, _)| PASSED.contains(name))
+        .map(|(name, value)| format!(" --env {}", xml(&argument(&format!("{name}={value}")))))
+        .collect();
     let user = xml(&task_user());
     format!(
         r#"<?xml version="1.0" encoding="UTF-16"?>
@@ -471,7 +517,7 @@ fn task_of(plan: &Plan) -> String {
   <Actions Context="Author">
     <Exec>
       <Command>conhost.exe</Command>
-      <Arguments>--headless {program} serve --home {home} --log {log}</Arguments>
+      <Arguments>--headless {program} serve --home {home} --log {log}{environment}</Arguments>
     </Exec>
   </Actions>
 </Task>

@@ -68,6 +68,10 @@ const CLIENT: &str = "meta";
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let args: Vec<&str> = args.iter().map(String::as_str).collect();
+    let (environment, args) = login::split_environment(&args);
+    for (name, value) in environment {
+        unsafe { std::env::set_var(name, value) }
+    }
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
@@ -274,11 +278,13 @@ fn prefix() -> Result<PathBuf, String> {
 #[cfg(unix)]
 fn answers_as_flow_agent(flow: &Path) -> bool {
     use std::io::Read;
+    use std::os::unix::process::CommandExt;
     use std::process::{Command, Stdio};
     use std::time::{Duration, Instant};
     const PROBE_OUTPUT_BYTES: u64 = 64 * 1024;
     let Ok(mut child) = Command::new(flow)
         .args(["acp", "--help"])
+        .process_group(0)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
@@ -286,6 +292,9 @@ fn answers_as_flow_agent(flow: &Path) -> bool {
     else {
         return false;
     };
+    let group = i32::try_from(child.id())
+        .ok()
+        .and_then(rustix::process::Pid::from_raw);
     let deadline = Instant::now() + Duration::from_secs(5);
     let stdout = child.stdout.take();
     let (sender, usage) = std::sync::mpsc::channel();
@@ -303,21 +312,22 @@ fn answers_as_flow_agent(flow: &Path) -> bool {
         .recv_timeout(deadline.saturating_duration_since(Instant::now()))
         .ok()
         .flatten();
-    loop {
+    let answered = loop {
         match child.try_wait() {
             Ok(Some(status)) => {
-                return status.success()
+                break status.success()
                     && usage
                         .is_some_and(|usage| String::from_utf8_lossy(&usage).contains("flow acp"));
             }
             Ok(None) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(20)),
-            _ => {
-                let _ = child.kill();
-                let _ = child.wait();
-                return false;
-            }
+            _ => break false,
         }
+    };
+    if let Some(group) = group {
+        let _ = rustix::process::kill_process_group(group, rustix::process::Signal::KILL);
     }
+    let _ = child.wait();
+    answered
 }
 
 #[cfg(not(unix))]
@@ -420,8 +430,11 @@ fn install_download(args: &[&str]) -> Result<(), String> {
             .output()
             .is_ok_and(|output| output.status.success())
     };
+    let homes: Vec<PathBuf> = std::iter::once(default_home()?)
+        .chain(login::Manager::current()?.recorded_home()?)
+        .collect();
     let ended = task("/End");
-    let installed = install::install_files(&bundle, &prefix, "win32-x64");
+    let installed = install::install_files(&bundle, &prefix, "win32-x64", &homes);
     if ended && (installed.is_err() || !service) {
         task("/Run");
     }
@@ -489,20 +502,24 @@ fn removes_data(prefix: &Path, home: &Path) -> bool {
             .any(|folder| home.starts_with(resolved(prefix.join(folder))))
 }
 
-fn data_in_installation(prefix: &Path, recorded: Option<PathBuf>, home: &Path) -> Option<PathBuf> {
-    std::iter::once(home.to_path_buf())
-        .chain(recorded)
+fn data_in_installation(prefix: &Path, homes: &[PathBuf]) -> Option<PathBuf> {
+    homes
+        .iter()
         .find(|home| {
-            let target = home.canonicalize().unwrap_or_else(|_| home.clone());
+            let target = home.canonicalize().unwrap_or_else(|_| home.to_path_buf());
             removes_data(prefix, &target)
         })
+        .cloned()
 }
 
 fn uninstall() -> Result<(), String> {
     let prefix = prefix()?;
     let home = default_home()?;
     let manager = login::Manager::current()?;
-    if let Some(data) = data_in_installation(&prefix, manager.recorded_home()?, &home) {
+    let homes: Vec<PathBuf> = std::iter::once(home.clone())
+        .chain(manager.recorded_home()?)
+        .collect();
+    if let Some(data) = data_in_installation(&prefix, &homes) {
         return Err(format!(
             "The data folder {} lies in the installation that uninstall removes, so nothing was \
              removed. Move it outside {}, set META_HARNESS_HOME to its new place, run `meta \
@@ -601,7 +618,14 @@ mod tests {
         let hanging = dir.join("hanging");
         executable(&hanging, "#!/bin/sh\nexec sleep 60\n");
         let holding = dir.join("holding");
-        executable(&holding, "#!/bin/sh\nsleep 60 &\necho '  flow acp'\n");
+        let descendant = dir.join("descendant.pid");
+        executable(
+            &holding,
+            &format!(
+                "#!/bin/sh\nsleep 60 &\necho $! > '{}'\necho '  flow acp'\n",
+                descendant.display()
+            ),
+        );
         let bin = dir.join("bin");
         let flow = executable(&bin, "#!/bin/sh\necho '  flow acp'\n");
 
@@ -612,6 +636,20 @@ mod tests {
         let started = std::time::Instant::now();
         let agent = flow_agent(Some(path)).expect("flow on the PATH is found");
         assert!(started.elapsed() < std::time::Duration::from_secs(15));
+        let pid: i32 = std::fs::read_to_string(&descendant)
+            .unwrap()
+            .trim()
+            .parse()
+            .unwrap();
+        let pid = rustix::process::Pid::from_raw(pid).unwrap();
+        let gone = (0..100).any(|_| {
+            std::thread::sleep(std::time::Duration::from_millis(20));
+            rustix::process::test_kill_process(pid).is_err()
+        });
+        assert!(
+            gone,
+            "the descendant that held the probe's output still runs"
+        );
         assert_eq!(agent.id, "flow-agent");
         assert_eq!(agent.command, flow);
         assert_eq!(agent.args, ["acp"]);
@@ -670,10 +708,10 @@ mod tests {
         let recorded = PathBuf::from("/opt/mh/lib/meta-harness/data");
         let shell = Path::new("/home/p/.meta-harness");
         assert_eq!(
-            data_in_installation(prefix, Some(recorded.clone()), shell),
+            data_in_installation(prefix, &[shell.to_path_buf(), recorded.clone()]),
             Some(recorded)
         );
-        assert_eq!(data_in_installation(prefix, None, shell), None);
+        assert_eq!(data_in_installation(prefix, &[shell.to_path_buf()]), None);
     }
 
     #[test]

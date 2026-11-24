@@ -270,7 +270,11 @@ fn unix_seconds(text: &str) -> Option<i64> {
         _ => {
             let (sign, hours_minutes) = zone.split_at_checked(1)?;
             let (hours, minutes) = hours_minutes.split_once(':')?;
-            let seconds = field(hours, 2)? * 3600 + field(minutes, 2)? * 60;
+            let (hours, minutes) = (field(hours, 2)?, field(minutes, 2)?);
+            if hours > 23 || minutes > 59 {
+                return None;
+            }
+            let seconds = hours * 3600 + minutes * 60;
             match sign {
                 "+" => seconds,
                 "-" => -seconds,
@@ -434,6 +438,10 @@ mod tests {
             "2999-04-31T07:30:00Z",
             "2999-12-01T24:00:00Z",
             "2999-12-01 07:30:00Z",
+            "2999-12-01T07:30:00+00:60",
+            "2999-12-01T07:30:00-01:99",
+            "2999-12-01T07:30:00+24:00",
+            "2999-12-01T07:30:00+99:99",
         ] {
             assert!(
                 routine(&["--once", wrong, "--prompt", "Once."]).is_err(),

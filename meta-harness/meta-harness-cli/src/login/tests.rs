@@ -52,9 +52,10 @@ fn installed(manager: &Manager, plan: &Plan) -> (String, Vec<String>) {
 #[test]
 fn the_service_gets_absolute_folders_and_the_person_s_harness_logins() {
     let dir = Dir::new();
+    let codex = dir.0.join("codex-work");
     let variables = |name: &str| match name {
         "PATH" => Some("/usr/bin:.::bin:/opt/homebrew/bin".to_owned()),
-        "CODEX_HOME" => Some("/Users/p/.codex-work".to_owned()),
+        "CODEX_HOME" => Some(codex.to_string_lossy().into_owned()),
         "CLAUDE_CONFIG_DIR" => Some("relative".to_owned()),
         _ => None,
     };
@@ -69,7 +70,7 @@ fn the_service_gets_absolute_folders_and_the_person_s_harness_logins() {
         [
             "PATH=/usr/bin:/opt/homebrew/bin".to_owned(),
             format!("META_HARNESS_HOME={}", dir.0.join("data").display()),
-            "CODEX_HOME=/Users/p/.codex-work".to_owned(),
+            format!("CODEX_HOME={}", codex.display()),
         ]
     );
     let broken = Plan::new(dir.0.join("meta"), dir.0.join("da\nta"), |_| None);
@@ -325,6 +326,24 @@ fn a_windows_logon_task_runs_meta_serve_hidden_and_logs_to_the_data_folder() {
 }
 
 #[test]
+fn a_windows_logon_task_passes_the_harness_logins_on_to_meta_serve() {
+    let dir = Dir::new();
+    let codex = dir.0.join("codex");
+    let plan = Plan::new(dir.0.join("bin/meta"), dir.0.join("data"), |name| {
+        (name == "CODEX_HOME").then(|| codex.to_string_lossy().into_owned())
+    })
+    .unwrap();
+    assert!(task_of(&plan).contains(&format!("--env \"CODEX_HOME={}\"", codex.display())));
+    assert_eq!(
+        split_environment(&["serve", "--env", "CODEX_HOME=/a", "--env", "PATH=/x"]),
+        (
+            vec![("CODEX_HOME", "/a")],
+            vec!["serve", "--env", "PATH=/x"]
+        )
+    );
+}
+
+#[test]
 fn a_failed_first_windows_task_install_deletes_the_task_it_created() {
     let dir = Dir::new();
     let manager = Manager::task_scheduler(&dir.0);
@@ -366,6 +385,21 @@ fn a_stop_that_fails_for_another_reason_keeps_the_service_file() {
     let result = manager.uninstall(|_| Err("Operation not permitted".to_owned()));
     assert!(result.is_err(), "{result:?}");
     assert!(manager.file.exists());
+
+    let task = Manager::task_scheduler(&dir.0);
+    task.install(&plan(&dir.0), |_| Ok(())).unwrap();
+    let mut ran = Vec::new();
+    let result = task.uninstall(|step| {
+        ran.push(step.args[0].clone());
+        Err("Operation not permitted".to_owned())
+    });
+    assert!(result.is_err(), "{result:?}");
+    assert_eq!(
+        ran,
+        ["/End"],
+        "the task is deleted only after its stop succeeds"
+    );
+    assert!(task.file.exists());
 }
 
 #[test]
@@ -388,6 +422,23 @@ fn a_failed_replacement_bootstraps_the_previous_agent_again() {
     let message = result.unwrap_err();
     assert!(message.contains("previous bootstrap failed"), "{message}");
     assert_eq!(bootstraps.len(), 2, "{bootstraps:?}");
+}
+
+#[cfg(unix)]
+#[test]
+fn a_systemd_unit_whose_file_is_gone_is_stopped_by_name() {
+    let dir = Dir::new();
+    let manager = Manager::systemd(&dir.0.join("config"));
+    let mut ran = Vec::new();
+    let result = manager.uninstall(|step| {
+        ran.push(step.args.join(" "));
+        Err("Unit meta-harness.service not loaded.".to_owned())
+    });
+    assert!(result.is_ok(), "{result:?}");
+    assert_eq!(ran, ["--user stop meta-harness.service"]);
+    let result = manager
+        .uninstall(|_| Err("Failed to stop meta-harness.service: Access denied.".to_owned()));
+    assert!(result.is_err(), "{result:?}");
 }
 
 #[cfg(unix)]
