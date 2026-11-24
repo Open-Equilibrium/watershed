@@ -446,6 +446,8 @@ mod tests {
         Access, LinkedHost, Links, RELINK_AFTER_MS, insert_linked_host, is_due, linked_named,
     };
     use crate::store::Store;
+    #[cfg(unix)]
+    use crate::tests::{Dir, executable};
     use crate::util::until;
 
     #[test]
@@ -459,19 +461,14 @@ mod tests {
     #[cfg(unix)]
     #[tokio::test]
     async fn a_pairing_code_is_made_one_at_a_time_and_a_second_request_is_refused_meanwhile() {
-        use std::os::unix::fs::PermissionsExt;
         use std::time::Duration;
-        let dir = std::env::temp_dir().join(format!("links-pairing-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
+        let dir = Dir::new();
         let binary = dir.join("t3");
-        std::fs::write(
+        executable(
             &binary,
             "#!/bin/sh\n: > \"$T3CODE_HOME/started\"\nsleep 1\nprintf '{\"credential\":\"CODE\"}'\n",
-        )
-        .unwrap();
-        std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o755)).unwrap();
-        let links = Arc::new(Links::new("host".to_owned(), binary, dir.clone()));
+        );
+        let links = Arc::new(Links::new("host".to_owned(), binary, dir.to_path_buf()));
         let first = tokio::spawn({
             let links = links.clone();
             async move { links.pairing_code(Access::ReadOnly).await }
@@ -486,28 +483,21 @@ mod tests {
         let refused = links.pairing_code(Access::ReadOnly).await;
         assert!(refused.is_err(), "{refused:?}");
         assert_eq!(first.await.unwrap(), Ok("CODE".to_owned()));
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[cfg(unix)]
     #[tokio::test]
     async fn a_host_is_linked_only_once_its_tunnel_listens_again() {
-        use std::os::unix::fs::PermissionsExt;
-
         use futures_util::{SinkExt, StreamExt};
         use serde_json::json;
         use tokio_tungstenite::tungstenite::Message;
 
-        let dir = std::env::temp_dir().join(format!("links-tunnel-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
+        let dir = Dir::new();
         let script = dir.join("t3");
-        std::fs::write(
+        executable(
             &script,
             "#!/bin/sh\nif [ \"$2\" = list ]; then\n[ -e \"$T3CODE_HOME/down\" ] && exit 1\necho '[]'\nelse\necho \"$3\" > \"$T3CODE_HOME/linked\"\nfi\n",
-        )
-        .unwrap();
-        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        );
         let peer = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = format!("ws://{}", peer.local_addr().unwrap());
         tokio::spawn(async move {
@@ -535,7 +525,7 @@ mod tests {
             client: "host-1a2b".to_owned(),
         };
         insert_linked_host(&store.db(), &host).unwrap();
-        let links = Links::new("host".to_owned(), script, dir.clone());
+        let links = Links::new("host".to_owned(), script, dir.to_path_buf());
         std::fs::write(dir.join("down"), "").unwrap();
         links.start_tunnels(&store).await.unwrap();
         links.relink_due(&store).await;
@@ -552,6 +542,5 @@ mod tests {
         assert_ne!(moved, port, "the tunnel moved off the occupied port");
         let linked = std::fs::read_to_string(dir.join("linked")).unwrap();
         assert_eq!(linked.trim(), format!("http://127.0.0.1:{moved}"));
-        let _ = std::fs::remove_dir_all(&dir);
     }
 }
