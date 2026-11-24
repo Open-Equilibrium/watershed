@@ -261,8 +261,14 @@ fn carried_memory_files_that_share_one_destination_file_are_refused_whole() {
     );
     assert_eq!(outcome.is_err(), case_insensitive, "{outcome:?}");
     if !case_insensitive {
-        assert_eq!(std::fs::read_to_string(folder.join("notes.md")).unwrap(), "first");
-        assert_eq!(std::fs::read_to_string(folder.join("NOTES.md")).unwrap(), "second");
+        assert_eq!(
+            std::fs::read_to_string(folder.join("notes.md")).unwrap(),
+            "first"
+        );
+        assert_eq!(
+            std::fs::read_to_string(folder.join("NOTES.md")).unwrap(),
+            "second"
+        );
     }
 }
 

@@ -412,7 +412,11 @@ async fn start_held(thread: &Thread, message: &str) -> Result<(), String> {
         return Ok(());
     }
     thread.send_queued_now(turn).await?;
-    if until(DELIVERY_WAIT, POLL, || thread.queued_turn(message).is_none()).await {
+    if until(DELIVERY_WAIT, POLL, || {
+        thread.queued_turn(message).is_none()
+    })
+    .await
+    {
         Ok(())
     } else {
         Err(

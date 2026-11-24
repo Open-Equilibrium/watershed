@@ -205,7 +205,14 @@ async fn an_edit_made_while_the_branch_is_pushed_refuses_a_move_that_commits() {
     let (_fake, thread) = live_thread(json!({}), move |tag, _, id, _| match tag {
         "vcs.refreshStatus" => {
             let after_push = statuses.fetch_add(1, Ordering::SeqCst) > 0;
-            vec![ok(id, if after_push { edited("feature/x") } else { status("feature/x") })]
+            vec![ok(
+                id,
+                if after_push {
+                    edited("feature/x")
+                } else {
+                    status("feature/x")
+                },
+            )]
         }
         "git.runStackedAction" => vec![
             chunk(
