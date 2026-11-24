@@ -104,6 +104,18 @@ void main() {
     semantics.dispose();
   });
 
+  testWidgets('a Chart setting chosen while its chart cannot be read is '
+      'saved', (tester) async {
+    await kit.show(tester, [
+      TablePart(expenses),
+      const ChartPart(barCount, []),
+    ]);
+    await tap(tester, find.byKey(const Key('chart kind')));
+    kit.fake.refuseNextQuery = BridgeQueryKind.chart;
+    await tap(tester, find.text('Pie'));
+    expect(lastSet().kind, BridgeChartKind.pie);
+  });
+
   testWidgets('a Chart setting chosen before the chart reloads keeps the '
       'earlier one', (tester) async {
     await kit.show(tester, [

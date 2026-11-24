@@ -142,11 +142,14 @@ class _CalculationBlockState extends State<CalculationBlock> {
     BridgeLineStyle? style,
   }) {
     final run = _writes.then((_) async {
-      final stored = await _state.read(
-        query(BridgeQueryKind.calculation, page: _page, block: _block),
-      );
-      final current =
-          stored.lines.where((kept) => kept.id == line.id).firstOrNull ?? line;
+      final current = await _state
+          .read(query(BridgeQueryKind.calculation, page: _page, block: _block))
+          .then(
+            (stored) =>
+                stored.lines.where((kept) => kept.id == line.id).firstOrNull ??
+                line,
+            onError: (Object _) => line,
+          );
       await _write(
         mutation(
           BridgeMutationKind.setLine,

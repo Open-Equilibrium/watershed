@@ -251,6 +251,26 @@ void main() {
     expect(linesOf(0).single.style, BridgeLineStyle.total);
   });
 
+  testWidgets('a label saved while its lines cannot be read still saves', (
+    tester,
+  ) async {
+    await kit.show(tester, [
+      CalculationPart([setup('Old', '')]),
+    ]);
+    await tap(
+      tester,
+      find.descendant(
+        of: find.byKey(const ValueKey('line 0')),
+        matching: find.byType(TextField),
+      ),
+    );
+    await type(tester, 'New');
+    kit.fake.refuseNextQuery = BridgeQueryKind.calculation;
+    FocusManager.instance.primaryFocus?.unfocus();
+    await tester.pumpAndSettle();
+    expect(linesOf(0).single.label, 'New');
+  });
+
   testWidgets('a label typed and not submitted is saved when its block is '
       'left', (tester) async {
     await kit.show(tester, [

@@ -227,15 +227,15 @@ class _ChartBlockState extends State<ChartBlock> {
 
   void _set(BridgeChartSetup Function(BridgeChartSetup stored) edit) {
     final run = _writes.then((_) async {
-      final stored = await _state.read(
-        query(BridgeQueryKind.chart, page: _page, block: _block),
-      );
+      final stored = await _state
+          .read(query(BridgeQueryKind.chart, page: _page, block: _block))
+          .then((read) => read.chart, onError: (Object _) => _chart);
       await widget.views.write(
         mutation(
           BridgeMutationKind.setChart,
           page: _page,
           block: _block,
-          chart: edit(stored.chart?.setup ?? _defaultSetup),
+          chart: edit(stored?.setup ?? _defaultSetup),
         ),
         [_block],
       );
