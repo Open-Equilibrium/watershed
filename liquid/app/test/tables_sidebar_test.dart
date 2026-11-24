@@ -49,6 +49,25 @@ void main() {
     expect(onTablePage(find.text('3 rows')), findsOneWidget);
   });
 
+  testWidgets('on a Table\'s page, sorting and search change nothing saved', (
+    tester,
+  ) async {
+    await kit.show(tester, [TablePart(rows)]);
+    await tap(tester, inSidebar(find.text('Expenses')));
+    final written = kit.fake.applied.length;
+    await tap(tester, onTablePage(find.text('Amount')));
+    expect(
+      tester.getTopLeft(onTablePage(find.text('Groceries'))).dy,
+      lessThan(tester.getTopLeft(onTablePage(find.text('Rent'))).dy),
+    );
+    await tester.enterText(find.byKey(const Key('table search field')), 'rent');
+    await tester.pump(const Duration(milliseconds: 200));
+    await tester.pumpAndSettle();
+    expect(onTablePage(find.text('Groceries')), findsNothing);
+    expect(onTablePage(find.text('1 of 3 rows')), findsOneWidget);
+    expect(kit.fake.applied.length, written);
+  });
+
   testWidgets('a Table is renamed on its page, for all its Views', (
     tester,
   ) async {

@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:liquid/src/rust/api/workspace.dart';
+import 'package:liquid/src/workspace/workspace_state.dart';
 
 import 'focus_kit.dart';
 import 'page_kit.dart';
@@ -60,6 +61,19 @@ void main() {
       row.id,
   ];
 
+  Future<void> elsewhere(
+    WidgetTester tester,
+    BridgeMutationKind kind, {
+    String? row,
+    String? after,
+  }) async {
+    final table = kit.fake.views[kit.page]!.single.block;
+    await kit.workspace.apply(
+      mutation(kind, page: kit.page, block: table, row: row, after: after),
+    );
+    await tester.pumpAndSettle();
+  }
+
   testWidgets('+ inserts a row below, ⌥ and + one above', (tester) async {
     await show(tester);
     await hover(tester, tester.getCenter(cell('r1', 'name')));
@@ -76,6 +90,17 @@ void main() {
     expect(order()[1], 'r1');
   });
 
+  testWidgets('Insert above and below go next to the row', (tester) async {
+    await show(tester);
+    await openMenu(tester, 'r2');
+    await tap(tester, inMenu('Insert above'));
+    expect(menu, findsNothing);
+    await openMenu(tester, 'r2');
+    await tap(tester, inMenu('Insert below'));
+    expect(added(), ['r1', 'r2']);
+    expect(order().length, 4);
+  });
+
   testWidgets('Delete row deletes it without asking', (tester) async {
     await show(tester);
     await openMenu(tester, 'r1');
@@ -85,5 +110,17 @@ void main() {
     expect(kit.applied(BridgeMutationKind.removeRow).single.row, 'r1');
     expect(cell('r1', 'name'), findsNothing);
     expect(kit.inTable(find.text('1 row')), findsOneWidget);
+  });
+
+  testWidgets('a row removed or added elsewhere closes its menu', (
+    tester,
+  ) async {
+    await show(tester);
+    await openMenu(tester, 'r1');
+    await elsewhere(tester, BridgeMutationKind.removeRow, row: 'r1');
+    expect(menu, findsNothing);
+    await openMenu(tester, 'r2');
+    await elsewhere(tester, BridgeMutationKind.addRow);
+    expect(menu, findsNothing);
   });
 }

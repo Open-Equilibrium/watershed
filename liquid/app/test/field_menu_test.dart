@@ -104,6 +104,31 @@ void main() {
     expect(header('Category'), findsNothing);
   });
 
+  testWidgets('esc in the question keeps the field', (tester) async {
+    await kit.show(tester, [TablePart(expenses)]);
+    await open(tester, 'Category');
+    await tap(tester, inMenu(find.text('Delete field')));
+    await key(tester, LogicalKeyboardKey.escape);
+    expect(dialog, findsNothing);
+    expect(kit.applied(BridgeMutationKind.removeField), isEmpty);
+    expect(header('Category'), findsOneWidget);
+  });
+
+  testWidgets('⏎ renames, even with the pointer on Delete', (tester) async {
+    await kit.show(tester, [TablePart(expenses)]);
+    await open(tester, 'Category');
+    final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    await mouse.addPointer(
+      location: tester.getCenter(inMenu(find.text('Delete field'))),
+    );
+    addTearDown(mouse.removePointer);
+    await tester.pumpAndSettle();
+    await type(tester, 'Kind');
+    await key(tester, LogicalKeyboardKey.enter);
+    expect(dialog, findsNothing);
+    expect(renamed(), [('category', 'Kind')]);
+  });
+
   testWidgets('a field removed elsewhere closes its menu', (tester) async {
     await kit.show(tester, [TablePart(expenses)]);
     final table = kit.fake.views[kit.page]!.single.block;

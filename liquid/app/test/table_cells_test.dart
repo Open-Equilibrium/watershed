@@ -1,3 +1,4 @@
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -267,6 +268,51 @@ void main() {
     tester.testTextInput.enterText('Second');
     await key(tester, LogicalKeyboardKey.enter);
     expect(written(), [('r2', 'name', text('Second'))]);
+  });
+
+  testWidgets('an edit of the last row ends when removed', (tester) async {
+    await kit.show(tester, [TablePart(expenses)]);
+    final table = kit.fake.views[kit.page]!.single.block;
+    await startEdit(tester, 'r2', 'name');
+    await tester.enterText(editor(), 'Power');
+    kit.fake.putRows(kit.page, table, [kit.fake.rows[table]!.first]);
+    await tester.pumpAndSettle();
+    expect(editor(), findsNothing);
+    await tester.tap(kit.inTable(find.text('New')));
+    await tester.pumpAndSettle();
+    await key(tester, LogicalKeyboardKey.backspace);
+    expect(
+      written().where((write) => write.$1 != 'r2'),
+      isEmpty,
+      reason: 'the new row comes up unselected',
+    );
+  });
+
+  testWidgets(
+    'a click in the edited cell keeps the edit',
+    variant: TargetPlatformVariant.only(TargetPlatform.macOS),
+    (tester) async {
+      await kit.show(tester, [TablePart(expenses)]);
+      await startEdit(tester, 'r1', 'name');
+      await tester.enterText(editor(), 'Market');
+      await tester.tapAt(
+        tester.getRect(cellOf('r1', 'name')).bottomRight - const Offset(4, 4),
+        kind: PointerDeviceKind.mouse,
+      );
+      await tester.pumpAndSettle();
+      expect(tester.widget<TextField>(editor()).controller!.text, 'Market');
+      expect(written(), isEmpty);
+    },
+  );
+
+  testWidgets('a number that is none says so on leaving', (tester) async {
+    await kit.show(tester, [TablePart(expenses)]);
+    await startEdit(tester, 'r1', 'amount');
+    await tester.enterText(editor(), '12x');
+    await kit.workspace.newPage(kit.workspace.open.value!.area);
+    await tester.pumpAndSettle();
+    expect(written(), isEmpty);
+    expect(kit.workspace.problem.value, contains('“12x” is no number'));
   });
 
   testWidgets('a refused tick leaves the next click ticking', (tester) async {

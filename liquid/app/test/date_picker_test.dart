@@ -65,6 +65,22 @@ void main() {
     });
   }
 
+  for (final (name, finish) in [
+    ('⏎', LogicalKeyboardKey.enter),
+    ('⇥', LogicalKeyboardKey.tab),
+  ]) {
+    testWidgets('$name on a non-day text stays, saying so', (tester) async {
+      await kit.show(tester, [TablePart(expenses)]);
+      await open(tester, 'r1');
+      await type(tester, 'soon');
+      await key(tester, finish);
+      expect(picker, findsOneWidget);
+      expect(typed(tester), 'soon');
+      expect(kit.inTable(find.text('“soon” is no date.')), findsOneWidget);
+      expect(written(), isEmpty);
+    });
+  }
+
   testWidgets('typing and esc write nothing; Clear empties', (tester) async {
     await kit.show(tester, [TablePart(expenses)]);
     await open(tester, 'r1');

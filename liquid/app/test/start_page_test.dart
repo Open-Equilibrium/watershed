@@ -198,6 +198,14 @@ void main() {
     },
   );
 
+  testWidgets('cancelling a delete deletes nothing', (tester) async {
+    await show(tester, threads: fixLogin());
+    await deleteFixLogin(tester);
+    expect(find.text('Delete thread "Fix login"?'), findsOneWidget);
+    await tap(tester, find.text('Cancel'));
+    expect(project.calls.where((call) => call.startsWith('delete')), isEmpty);
+  });
+
   testWidgets('confirming deletes the worktree with its only thread', (
     tester,
   ) async {

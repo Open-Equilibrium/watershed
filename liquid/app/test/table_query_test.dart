@@ -1,3 +1,4 @@
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -251,6 +252,20 @@ void main() {
     expect(view().tabs.first.filter, isNotNull);
     await typeValue(tester, '');
     expect(view().tabs.first.filter, isNull);
+  });
+
+  testWidgets('deleting a field counts every row, not those shown', (
+    tester,
+  ) async {
+    await kit.show(tester, [TablePart(rows)]);
+    await filterHome(tester);
+    await tester.tap(
+      kit.inTable(find.text('Amount')),
+      buttons: kSecondaryButton,
+    );
+    await tester.pumpAndSettle();
+    await tap(tester, find.text('Delete field'));
+    expect(find.textContaining('all 3 rows'), findsOneWidget);
   });
 
   testWidgets('leaving a change unfinished keeps the filter', (tester) async {
