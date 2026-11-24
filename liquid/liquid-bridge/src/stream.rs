@@ -69,7 +69,7 @@ impl Credit {
 
     pub(crate) fn end_snapshot(&self, sequence: Option<i64>) {
         if let Some(sequence) = sequence {
-            self.snapshot_sequence.store(sequence, Ordering::Release);
+            self.snapshot_sequence.fetch_max(sequence, Ordering::AcqRel);
         }
         self.snapshots_taken.fetch_sub(1, Ordering::AcqRel);
     }

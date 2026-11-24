@@ -271,6 +271,20 @@ fn deltas_taken_while_a_recovery_snapshot_is_taken_stay_apart() {
 }
 
 #[test]
+fn overlapping_recovery_snapshots_keep_the_latest_boundary() {
+    let credit = Credit::default();
+    let mut outbox = Outbox::default();
+    outbox.admit(delta_at(1, "A"), &credit);
+    credit.begin_snapshot();
+    outbox.admit(delta_at(2, "B"), &credit);
+    credit.begin_snapshot();
+    credit.end_snapshot(Some(2));
+    credit.end_snapshot(Some(1));
+    outbox.admit(delta_at(3, "C"), &credit);
+    assert_eq!(pending_text(&outbox), ["A", "B", "C"]);
+}
+
+#[test]
 fn closing_the_credit_releases_every_forwarder_that_shares_it() {
     paused_runtime().block_on(async {
         let credit = Arc::new(Credit::default());
