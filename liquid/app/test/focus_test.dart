@@ -12,6 +12,7 @@ import 'package:liquid/src/rust/api/workspace.dart';
 import 'package:liquid/src/session/session_state.dart';
 import 'package:liquid/src/settings_page.dart';
 import 'package:liquid/src/theme/theme.dart';
+import 'package:liquid/src/workspace/code_block.dart';
 import 'package:liquid/src/workspace/workspace_state.dart';
 
 import 'fake_backend.dart';
@@ -123,6 +124,28 @@ void main() {
     await undo(tester);
     expect(kit.fake.undos, 1);
   }, variant: TargetPlatformVariant.only(TargetPlatform.macOS));
+
+  testWidgets('esc leaves a Code Block and the shortcuts still work', (
+    tester,
+  ) async {
+    final kit = PageKit();
+    await kit.show(tester, const [CodePart('print(1)')]);
+    await tester.tap(
+      find.descendant(
+        of: find.byType(CodeBlock),
+        matching: find.byKey(const Key('code')),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pumpAndSettle();
+
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyK);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('power bar')), findsOneWidget);
+  });
 
   testWidgets('Settings over a Page keep ⌘Z away from it; esc closes them', (
     tester,
