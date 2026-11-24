@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../controls.dart';
 import '../rust/api/workspace.dart';
 import '../theme/icons.dart';
 import '../theme/theme.dart';
@@ -206,7 +207,12 @@ class _DrawingFrameState extends State<DrawingFrame> {
                   ),
                 ],
                 if (widget.bar && (_hovered || _more.isShowing))
-                  Positioned(top: 8, right: 8, child: _bar(context)),
+                  Positioned(
+                    key: ValueKey('$name bar'),
+                    top: 8,
+                    right: 8,
+                    child: _bar(context),
+                  ),
               ],
             ),
           ),
@@ -237,13 +243,8 @@ class _DrawingFrameState extends State<DrawingFrame> {
   Widget _bar(BuildContext context) {
     final ws = context.ws;
     final name = widget.name;
-    return Container(
+    return FloatingPanel(
       padding: const EdgeInsets.all(2),
-      decoration: BoxDecoration(
-        color: ws.surface,
-        borderRadius: BorderRadius.circular(WsMetrics.radiusLg),
-        boxShadow: ws.shadow,
-      ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -257,14 +258,9 @@ class _DrawingFrameState extends State<DrawingFrame> {
           AnchoredMenu(
             controller: _more,
             onTapOutside: (_) => setState(_more.hide),
-            menu: (context) => Container(
+            menu: (context) => FloatingPanel(
               width: 150,
               padding: const EdgeInsets.all(WsMetrics.space1 + 2),
-              decoration: BoxDecoration(
-                color: ws.surface,
-                borderRadius: BorderRadius.circular(WsMetrics.radiusLg),
-                boxShadow: ws.shadow,
-              ),
               child: GestureDetector(
                 key: ValueKey('$name Delete'),
                 onTap: _delete,

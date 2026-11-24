@@ -65,6 +65,7 @@ pub struct PageEntry {
     pub id: PageId,
     pub parent: Option<PageId>,
     pub title: String,
+    pub icon: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -298,6 +299,7 @@ pub(crate) fn pages(doc: &AutoCommit) -> Vec<PageEntry> {
             id: PageId::stored(&entry.id),
             parent: parent.as_deref().map(PageId::stored),
             title: entry.get(TITLE).unwrap_or_default().to_string(),
+            icon: entry.get(ICON).unwrap_or_default().to_string(),
         });
     }
     let mut tree = Vec::new();

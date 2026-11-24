@@ -111,4 +111,32 @@ void main() {
       expect(windows.count, 11);
     },
   );
+
+  test('a window still loading at dispose is not asked for again', () async {
+    final held = <Completer<void>>[];
+    var asks = 0;
+    final windows = WindowedList<int>((start, limit) async {
+      asks++;
+      final release = Completer<void>();
+      held.add(release);
+      await release.future;
+      return (1000, [for (var at = start; at < start + limit; at++) at]);
+    }, (error) => fail('$error'));
+    final pending = windows.load(0);
+    windows.dispose();
+    held.removeAt(0).complete();
+    expect(await pending, isNull);
+    expect(asks, 1);
+  });
+
+  test('a window whose query fails is asked once, not retried', () async {
+    var asks = 0;
+    final windows = WindowedList<int>((start, limit) async {
+      asks++;
+      throw StateError('down');
+    }, (error) {});
+    addTearDown(windows.dispose);
+    expect(await windows.load(0), isNull);
+    expect(asks, 1);
+  });
 }

@@ -13,6 +13,7 @@ import 'package:liquid/src/rust/api/workspace.dart';
 import 'package:liquid/src/rust/frb_generated.dart';
 import 'package:liquid/src/theme/theme.dart';
 import 'package:liquid/src/workspace/page_view.dart';
+import 'package:liquid/src/workspace/text_block.dart';
 import 'package:liquid/src/workspace/workspace_state.dart';
 
 const blocks = 1000;
@@ -58,10 +59,14 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    final field = find.byType(EditableText).first;
+    final field = find.descendant(
+      of: find.byType(TextBlock).first,
+      matching: find.byType(EditableText),
+    );
     await tester.tap(field);
     await tester.pumpAndSettle();
     var typed = tester.widget<EditableText>(field).controller.text;
+    expect(typed, startsWith('Paragraph 0 '));
 
     final timings = <FrameTiming>[];
     SchedulerBinding.instance.addTimingsCallback(timings.addAll);
@@ -75,6 +80,14 @@ void main() {
       await Future<void>.delayed(const Duration(milliseconds: 30));
     }
     await Future<void>.delayed(const Duration(seconds: 2));
+    expect(tester.widget<EditableText>(field).controller.text, typed);
+    expect(
+      tester
+          .widget<TextField>(find.byKey(const Key('page-title')))
+          .controller!
+          .text,
+      isEmpty,
+    );
     final raster = [
       for (final timing in timings) timing.rasterDuration.inMicroseconds / 1000,
     ]..sort();

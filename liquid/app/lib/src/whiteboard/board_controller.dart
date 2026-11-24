@@ -305,53 +305,24 @@ class BoardController extends ChangeNotifier {
     );
   }
 
-  static BridgeElement _fresh(BridgeElement element) => BridgeElement(
-    kind: element.kind,
-    x: element.x,
-    y: element.y,
-    w: element.w,
-    h: element.h,
-    rotation: element.rotation,
-    color: element.color,
-    width: element.width,
-    docPage: element.docPage,
-    pen: element.pen,
-    points: element.points,
-    shape: element.shape,
-    seed: element.seed,
-    arrowhead: element.arrowhead,
-    corners: element.corners,
-    text: element.text,
-  );
+  static BridgeElement _fresh(BridgeElement element) => copyElement(element);
 
   static BridgeElement _moved(BridgeElement element, Offset by, int page) =>
-      BridgeElement(
+      copyElement(
+        element,
         id: element.id,
-        kind: element.kind,
         x: element.x + by.dx,
         y: element.y + by.dy,
-        w: element.w,
-        h: element.h,
-        rotation: element.rotation,
-        color: element.color,
-        width: element.width,
         docPage: page,
-        pen: element.pen,
-        points: element.points,
-        shape: element.shape,
-        seed: element.seed,
-        arrowhead: element.arrowhead,
-        corners: element.corners,
-        text: element.text,
       );
 
   static BridgeElement _applied(
     BridgeElement element,
     BridgeElementChange c, {
     bool id = false,
-  }) => BridgeElement(
+  }) => copyElement(
+    element,
     id: id ? c.id : element.id,
-    kind: element.kind,
     x: c.x,
     y: c.y,
     w: c.w,
@@ -359,14 +330,8 @@ class BoardController extends ChangeNotifier {
     rotation: c.rotation,
     color: c.color,
     width: c.width,
-    docPage: element.docPage,
-    pen: element.pen,
-    points: element.points,
-    shape: element.shape,
-    seed: element.seed,
-    arrowhead: c.arrowhead ?? element.arrowhead,
-    corners: element.corners,
-    text: c.text ?? element.text,
+    arrowhead: c.arrowhead,
+    text: c.text,
   );
 
   Future<void> toggleStyle() async {

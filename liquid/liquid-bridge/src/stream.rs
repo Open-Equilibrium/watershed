@@ -69,7 +69,7 @@ impl Credit {
 
     pub(crate) fn end_snapshot(&self, sequence: Option<i64>) {
         if let Some(sequence) = sequence {
-            self.snapshot_sequence.store(sequence, Ordering::Release);
+            self.snapshot_sequence.fetch_max(sequence, Ordering::AcqRel);
         }
         self.snapshots_taken.fetch_sub(1, Ordering::AcqRel);
     }
@@ -107,7 +107,11 @@ pub(crate) struct Outbox {
 
 impl Outbox {
     pub(crate) fn admit(&mut self, event: BridgeEvent, credit: &Credit) {
-        push(&mut self.pending, event, credit.merge_point());
+        if self.unconfirmed(credit) >= WINDOW as u64 {
+            self.pending.push(event);
+        } else {
+            push(&mut self.pending, event, credit.merge_point());
+        }
         if self.pending.len() > PENDING_LIMIT {
             let waiting = self.pending.len();
             self.pending.retain(|event| !is_partial(event));
@@ -128,9 +132,12 @@ impl Outbox {
         self.pending.len() <= PENDING_LIMIT
     }
 
+    fn unconfirmed(&self, credit: &Credit) -> u64 {
+        self.sent.saturating_sub(credit.applied())
+    }
+
     fn send(&mut self, credit: &Credit, deliver: &mut impl FnMut(BridgeEvent) -> bool) -> bool {
-        let unconfirmed = self.sent.saturating_sub(credit.applied());
-        let room = (WINDOW as u64).saturating_sub(unconfirmed);
+        let room = (WINDOW as u64).saturating_sub(self.unconfirmed(credit));
         let count = room.min(self.pending.len() as u64) as usize;
         for event in self.pending.drain(..count) {
             if event.kind == BridgeEventKind::FellBehind {

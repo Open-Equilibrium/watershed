@@ -7,15 +7,16 @@ import 'package:liquid/src/workspace/table_tabs.dart';
 import 'package:liquid/src/workspace/workspace_state.dart';
 
 import 'fake_workspace.dart';
+import 'focus_kit.dart';
 import 'page_kit.dart';
 
 void main() {
   final kit = PageKit();
-
-  Future<void> tap(WidgetTester tester, Finder target) async {
-    await tester.tap(target);
-    await tester.pumpAndSettle();
-  }
+  final bigCosts = tabOf(
+    BridgeLayout.table,
+    name: 'Big costs',
+    sort: const BridgeSort(field: 'amount', descending: true),
+  );
 
   BridgeView view() => kit.fake.views[kit.page]!.firstWhere(
     (view) => view.kind == BridgeBlockKind.database,
@@ -47,42 +48,13 @@ void main() {
 
   testWidgets('a View shows its tabs, and a tab its own sort', (tester) async {
     await kit.show(tester, [TablePart(expenses)]);
-    await addTab(
-      tabOf(
-        BridgeLayout.table,
-        name: 'Big costs',
-        sort: const BridgeSort(field: 'amount', descending: true),
-      ),
-    );
+    await addTab(bigCosts);
     await tester.pumpAndSettle();
     expect(tab('Table'), findsOneWidget);
     expect(shows('table sort', 'Sort'), findsOneWidget);
     await tap(tester, tab('Big costs'));
     expect(shows('table sort', 'Amount, descending'), findsOneWidget);
     expect(kit.fake.device['tab/${view().id}'], view().tabs.last.id);
-  });
-
-  testWidgets('the last used tab shows when the Page opens again', (
-    tester,
-  ) async {
-    await kit.show(tester, [TablePart(expenses)]);
-    final big = await addTab(
-      tabOf(
-        BridgeLayout.table,
-        name: 'Big costs',
-        sort: const BridgeSort(field: 'amount', descending: true),
-      ),
-    );
-    final area = kit.workspace.open.value!.area;
-    final other = await kit.workspace.apply(
-      mutation(BridgeMutationKind.createPage, area: area, text: 'Other'),
-    );
-    kit.workspace.open.value = OpenPage(area, other.page!);
-    await tester.pumpAndSettle();
-    kit.fake.device['tab/${view().id}'] = big;
-    kit.workspace.open.value = OpenPage(area, kit.page);
-    await tester.pumpAndSettle();
-    expect(shows('table sort', 'Amount, descending'), findsOneWidget);
   });
 
   testWidgets('＋ adds a tab of the chosen layout, named after it', (

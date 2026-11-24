@@ -164,11 +164,13 @@ class FormulaText extends TextEditingController {
   @override
   set value(TextEditingValue next) {
     final before = super.value.text;
-    if (before != next.text) chips = _kept(before, next.text);
+    if (before != next.text) {
+      chips = _kept(before, next.text, next.selection.baseOffset);
+    }
     super.value = next;
   }
 
-  List<Reference> _kept(String before, String after) {
+  List<Reference> _kept(String before, String after, int caret) {
     var start = 0;
     while (start < before.length &&
         start < after.length &&
@@ -180,6 +182,15 @@ class FormulaText extends TextEditingController {
         end < after.length - start &&
         before[before.length - 1 - end] == after[after.length - 1 - end]) {
       end++;
+    }
+    final cut = before.length - after.length;
+    if (cut > 0 &&
+        caret >= 0 &&
+        caret + cut <= before.length &&
+        after.startsWith(before.substring(0, caret)) &&
+        after.endsWith(before.substring(caret + cut))) {
+      start = caret;
+      end = before.length - caret - cut;
     }
     int marks(String text) => chipMark.allMatches(text).length;
     final kept = marks(before.substring(0, start));

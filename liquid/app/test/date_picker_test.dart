@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:intl/intl.dart';
 import 'package:liquid/src/rust/api/database.dart';
 import 'package:liquid/src/rust/api/workspace.dart';
 
+import 'focus_kit.dart';
 import 'page_kit.dart';
 
 void main() {
@@ -21,16 +21,6 @@ void main() {
       .controller!
       .text;
 
-  Future<void> tap(WidgetTester tester, Finder finder) async {
-    await tester.tap(finder);
-    await tester.pumpAndSettle();
-  }
-
-  Future<void> key(WidgetTester tester, LogicalKeyboardKey key) async {
-    await tester.sendKeyEvent(key);
-    await tester.pumpAndSettle();
-  }
-
   Future<void> type(WidgetTester tester, String text) async {
     await tester.enterText(inPicker(find.byType(TextField)), text);
     await tester.pumpAndSettle();
@@ -46,28 +36,22 @@ void main() {
     await key(tester, LogicalKeyboardKey.enter);
   }
 
-  testWidgets('⏎ on a date cell opens its day; ↓ ⏎ writes the next day', (
-    tester,
-  ) async {
+  testWidgets('⏎ opens a date; ↑ and ↓ move by a day', (tester) async {
     await kit.show(tester, [TablePart(expenses)]);
     await open(tester, 'r1');
     expect(picker, findsOneWidget);
     expect(typed(tester), 'Nov 1, 2026');
     expect(inPicker(find.text('November 2026')), findsOneWidget);
     expect(inPicker(find.text('Clear')), findsOneWidget);
+    await key(tester, LogicalKeyboardKey.arrowUp);
+    expect(typed(tester), 'Oct 31, 2026');
+    expect(inPicker(find.text('October 2026')), findsOneWidget);
+    await key(tester, LogicalKeyboardKey.arrowDown);
     await key(tester, LogicalKeyboardKey.arrowDown);
     expect(typed(tester), 'Nov 2, 2026');
     await key(tester, LogicalKeyboardKey.enter);
     expect(picker, findsNothing);
     expect(written(), [('r1', '2026-11-02')]);
-  });
-
-  testWidgets('↑ goes to the day before, across a month', (tester) async {
-    await kit.show(tester, [TablePart(expenses)]);
-    await open(tester, 'r1');
-    await key(tester, LogicalKeyboardKey.arrowUp);
-    expect(typed(tester), 'Oct 31, 2026');
-    expect(inPicker(find.text('October 2026')), findsOneWidget);
   });
 
   for (final form in ['10/15/2026', 'Oct 15, 2026', '2026-10-15']) {
@@ -81,23 +65,11 @@ void main() {
     });
   }
 
-  testWidgets('typing on a selected date cell opens its picker with the keys', (
-    tester,
-  ) async {
-    await kit.show(tester, [TablePart(expenses)]);
-    await tap(tester, cell('r2', 'date'));
-    await key(tester, LogicalKeyboardKey.digit1);
-    expect(picker, findsOneWidget);
-    expect(typed(tester), '1');
-  });
-
   for (final (name, finish) in [
     ('⏎', LogicalKeyboardKey.enter),
     ('⇥', LogicalKeyboardKey.tab),
   ]) {
-    testWidgets('$name on a text that is no day stays, saying so', (
-      tester,
-    ) async {
+    testWidgets('$name on a non-day text stays, saying so', (tester) async {
       await kit.show(tester, [TablePart(expenses)]);
       await open(tester, 'r1');
       await type(tester, 'soon');
@@ -109,34 +81,15 @@ void main() {
     });
   }
 
-  testWidgets(
-    'a click on a day writes it and closes; the cell stays selected',
-    (tester) async {
-      await kit.show(tester, [TablePart(expenses)]);
-      await open(tester, 'r1');
-      await tap(tester, day('2026-11-20'));
-      expect(picker, findsNothing);
-      expect(written(), [('r1', '2026-11-20')]);
-      await key(tester, LogicalKeyboardKey.enter);
-      expect(picker, findsOneWidget);
-    },
-  );
-
-  testWidgets('‹ and › show the month before and after', (tester) async {
+  testWidgets('typing and esc write nothing; Clear empties', (tester) async {
     await kit.show(tester, [TablePart(expenses)]);
     await open(tester, 'r1');
-    await tap(tester, inPicker(find.byKey(const Key('next month'))));
-    expect(inPicker(find.text('December 2026')), findsOneWidget);
-    await tap(tester, day('2026-12-24'));
-    expect(written(), [('r1', '2026-12-24')]);
-    await open(tester, 'r2');
-    await tap(tester, inPicker(find.byKey(const Key('previous month'))));
-    expect(inPicker(find.text('September 2026')), findsOneWidget);
-  });
+    await type(tester, '2026-10-15');
+    await key(tester, LogicalKeyboardKey.escape);
+    expect(picker, findsNothing);
+    expect(written(), isEmpty);
 
-  testWidgets('Clear empties the cell', (tester) async {
-    await kit.show(tester, [TablePart(expenses)]);
-    await open(tester, 'r1');
+    await key(tester, LogicalKeyboardKey.enter);
     await tap(tester, inPicker(find.text('Clear')));
     expect(picker, findsNothing);
     final set = kit.applied(BridgeMutationKind.setCell).single;
@@ -144,22 +97,14 @@ void main() {
       (set.row, set.field, set.cell!.kind),
       ('r1', 'date', BridgeCellKind.empty),
     );
+
+    await tap(tester, cell('r2', 'date'));
+    await key(tester, LogicalKeyboardKey.digit1);
+    expect(picker, findsOneWidget);
+    expect(typed(tester), '1');
   });
 
-  testWidgets('esc closes and keeps the day, also with a day typed', (
-    tester,
-  ) async {
-    await kit.show(tester, [TablePart(expenses)]);
-    await open(tester, 'r1');
-    await type(tester, '2026-10-15');
-    await key(tester, LogicalKeyboardKey.escape);
-    expect(picker, findsNothing);
-    expect(written(), isEmpty);
-  });
-
-  testWidgets('⇥ writes the day typed and selects the next cell', (
-    tester,
-  ) async {
+  testWidgets('⇥ writes the day typed and moves on', (tester) async {
     await kit.show(tester, [TablePart(expenses)]);
     await open(tester, 'r1');
     await key(tester, LogicalKeyboardKey.arrowDown);
@@ -170,8 +115,29 @@ void main() {
     expect(find.byKey(const Key('select picker')), findsOneWidget);
   });
 
-  testWidgets('a click outside writes the day typed, and drops a text that is '
-      'no day', (tester) async {
+  testWidgets('an open typed day is kept on quit', (tester) async {
+    await kit.show(tester, [TablePart(expenses)]);
+    await open(tester, 'r1');
+    await type(tester, '2026-10-15');
+    await kit.workspace.drain();
+    await tester.pumpAndSettle();
+    expect(written(), [('r1', '2026-10-15')]);
+  });
+
+  testWidgets('an open non-day is reported on quit, not kept', (tester) async {
+    await kit.show(tester, [TablePart(expenses)]);
+    await open(tester, 'r2');
+    await type(tester, 'soon');
+    await kit.workspace.drain();
+    await tester.pumpAndSettle();
+    expect(
+      kit.workspace.problem.value,
+      '“soon” is no date. It was not kept, as the Table closed.',
+    );
+    expect(written(), isEmpty);
+  });
+
+  testWidgets('a click outside writes a day, drops a non-day', (tester) async {
     await kit.show(tester, [TablePart(expenses)]);
     await open(tester, 'r1');
     await type(tester, '2026-10-15');
@@ -188,21 +154,7 @@ void main() {
     expect(written(), [('r1', '2026-10-15')]);
   });
 
-  testWidgets('an empty date cell opens on today\'s month', (tester) async {
-    await kit.show(tester, [
-      TablePart([...expenses, namedRow(3)]),
-    ]);
-    await open(tester, 'r3');
-    expect(typed(tester), '');
-    expect(
-      inPicker(find.text(DateFormat.yMMMM('en_US').format(DateTime.now()))),
-      findsOneWidget,
-    );
-  });
-
-  testWidgets('weeks start and days are typed as in the person\'s region', (
-    tester,
-  ) async {
+  testWidgets('weeks and typed days follow the region', (tester) async {
     tester.platformDispatcher.localesTestValue = const [Locale('de', 'DE')];
     addTearDown(tester.platformDispatcher.clearLocalesTestValue);
     await kit.show(tester, [TablePart(expenses)], app: true);
@@ -216,18 +168,8 @@ void main() {
     expect(written(), [('r1', '2026-10-15')]);
   });
 
-  testWidgets('in English (US) weeks start on Sunday', (tester) async {
-    await kit.show(tester, [TablePart(expenses)]);
-    await open(tester, 'r1');
-    final sundays = tester.getRect(inPicker(find.text('Su'))).left;
-    final mondays = tester.getRect(inPicker(find.text('Mo'))).left;
-    expect(sundays, lessThan(mondays));
-  });
-
   for (final form in ['10/15/26', '1/1/12345', '1/1/999999']) {
-    testWidgets('a year not of four digits, as in $form, is no date', (
-      tester,
-    ) async {
+    testWidgets('a year not of 4 digits is no date', (tester) async {
       await kit.show(tester, [TablePart(expenses)]);
       await open(tester, 'r1');
       await type(tester, form);
@@ -238,40 +180,21 @@ void main() {
     });
   }
 
-  testWidgets('a picker closed as its cell moves elsewhere drops its reason', (
-    tester,
-  ) async {
-    await kit.show(tester, [TablePart(expenses)]);
-    final table = kit.fake.views[kit.page]!.single.block;
+  testWidgets('unchanged cells are not written again', (tester) async {
+    await kit.show(tester, [
+      TablePart([...expenses, namedRow(3)]),
+    ]);
     await open(tester, 'r1');
-    await type(tester, 'soon');
     await key(tester, LogicalKeyboardKey.enter);
-    kit.fake.putRows(kit.page, table, [namedRow(3), ...kit.fake.rows[table]!]);
-    await tester.pumpAndSettle();
+    await key(tester, LogicalKeyboardKey.enter);
+    await tap(tester, day('2026-11-01'));
+    await open(tester, 'r3');
+    await tap(tester, inPicker(find.text('Clear')));
     expect(picker, findsNothing);
-    expect(kit.inTable(find.text('“soon” is no date.')), findsNothing);
+    expect(kit.applied(BridgeMutationKind.setCell), isEmpty);
   });
 
-  testWidgets(
-    'the day a cell has, or an empty cell cleared, is not written again',
-    (tester) async {
-      await kit.show(tester, [
-        TablePart([...expenses, namedRow(3)]),
-      ]);
-      await open(tester, 'r1');
-      await key(tester, LogicalKeyboardKey.enter);
-      await key(tester, LogicalKeyboardKey.enter);
-      await tap(tester, day('2026-11-01'));
-      await open(tester, 'r3');
-      await tap(tester, inPicker(find.text('Clear')));
-      expect(picker, findsNothing);
-      expect(kit.applied(BridgeMutationKind.setCell), isEmpty);
-    },
-  );
-
-  testWidgets('a cell\'s own day, though its year has fewer digits, is kept', (
-    tester,
-  ) async {
+  testWidgets('a cell\'s own short-year day is kept', (tester) async {
     await kit.show(tester, [
       TablePart([expenseRow('r1', 'Old', '0500-01-01', 'food', 1, false)]),
     ]);

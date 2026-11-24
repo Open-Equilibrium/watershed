@@ -6,7 +6,7 @@ use crate::api::database::BridgeLayout;
 use crate::api::replica::LiquidWorkspace;
 use crate::api::workspace::{
     BridgeChange, BridgeFound, BridgeMutation, BridgeMutationKind, BridgeQuery, BridgeQueryKind,
-    BridgeResource, BridgeResourceKind, BridgeTextStyle, BridgeTile, MAX_WINDOW,
+    BridgeResource, BridgeResourceKind, BridgeTextStyle, BridgeTile, BridgeView, MAX_WINDOW,
 };
 use crate::keys::{KEY_NAME_FILE, Keys, path_name};
 
@@ -20,35 +20,35 @@ impl Memory {
     }
 }
 
-struct Any([u8; 32]);
-
-impl Keys for Any {
-    fn read(&self, _: &str) -> Result<Option<[u8; 32]>, String> {
-        Ok(Some(self.0))
-    }
-
-    fn write(&self, _: &str, _: &[u8; 32]) -> Result<(), String> {
-        Ok(())
-    }
-
-    fn delete(&self, _: &str) -> Result<(), String> {
-        Ok(())
-    }
+#[derive(Default)]
+struct Scripted<'a> {
+    inner: Option<&'a Memory>,
+    key: Option<[u8; 32]>,
+    refuse_write: bool,
+    unreadable: Option<String>,
 }
 
-struct Refusing<'a>(&'a Memory);
-
-impl Keys for Refusing<'_> {
+impl Keys for Scripted<'_> {
     fn read(&self, name: &str) -> Result<Option<[u8; 32]>, String> {
-        self.0.read(name)
+        if self.unreadable.as_deref() == Some(name) {
+            return Err("the keychain is locked".into());
+        }
+        match (self.key, self.inner) {
+            (Some(key), _) => Ok(Some(key)),
+            (None, Some(inner)) => inner.read(name),
+            (None, None) => Ok(None),
+        }
     }
 
-    fn write(&self, _: &str, _: &[u8; 32]) -> Result<(), String> {
-        Err("the keychain refused the write".into())
+    fn write(&self, name: &str, key: &[u8; 32]) -> Result<(), String> {
+        if self.refuse_write {
+            return Err("the keychain refused the write".into());
+        }
+        self.inner.map_or(Ok(()), |inner| inner.write(name, key))
     }
 
     fn delete(&self, name: &str) -> Result<(), String> {
-        self.0.delete(name)
+        self.inner.map_or(Ok(()), |inner| inner.delete(name))
     }
 }
 
@@ -86,6 +86,12 @@ impl Drop for Folder {
     fn drop(&mut self) {
         let _ = std::fs::remove_dir_all(&self.0);
     }
+}
+
+pub(super) fn open(name: &str) -> (Folder, LiquidWorkspace) {
+    let folder = Folder::new(name);
+    let workspace = LiquidWorkspace::open_with(&folder.0, &Memory::default()).unwrap();
+    (folder, workspace)
 }
 
 pub(super) fn mutation(kind: BridgeMutationKind) -> BridgeMutation {
@@ -149,6 +155,22 @@ pub(super) fn query(kind: BridgeQueryKind) -> BridgeQuery {
     }
 }
 
+pub(super) fn on_block(page: &str, block: &str, kind: BridgeMutationKind) -> BridgeMutation {
+    BridgeMutation {
+        page: Some(page.into()),
+        block: Some(block.into()),
+        ..mutation(kind)
+    }
+}
+
+pub(super) fn query_on(page: &str, block: &str, kind: BridgeQueryKind) -> BridgeQuery {
+    BridgeQuery {
+        page: Some(page.into()),
+        block: Some(block.into()),
+        ..query(kind)
+    }
+}
+
 pub(super) fn resource(kind: BridgeResourceKind) -> BridgeResource {
     BridgeResource {
         kind,
@@ -186,14 +208,7 @@ pub(super) fn lisbon(workspace: &LiquidWorkspace) -> (String, String, String, St
     (area, page, added.block.unwrap(), added.view.unwrap())
 }
 
-fn areas(workspace: &LiquidWorkspace) -> i64 {
-    workspace
-        .query(query(BridgeQueryKind::Areas))
-        .unwrap()
-        .count
-}
-
-fn text(workspace: &LiquidWorkspace, page: &str, block: &str) -> Option<String> {
+pub(super) fn text(workspace: &LiquidWorkspace, page: &str, block: &str) -> Option<String> {
     workspace
         .query(BridgeQuery {
             page: Some(page.into()),
@@ -202,6 +217,23 @@ fn text(workspace: &LiquidWorkspace, page: &str, block: &str) -> Option<String> 
         })
         .unwrap()
         .text
+}
+
+pub(super) fn views(workspace: &LiquidWorkspace, page: &str) -> Vec<BridgeView> {
+    workspace
+        .query(BridgeQuery {
+            page: Some(page.into()),
+            ..query(BridgeQueryKind::Views)
+        })
+        .unwrap()
+        .views
+}
+
+fn areas(workspace: &LiquidWorkspace) -> i64 {
+    workspace
+        .query(query(BridgeQueryKind::Areas))
+        .unwrap()
+        .count
 }
 
 #[test]
@@ -233,20 +265,29 @@ fn a_replica_without_its_key_is_refused() {
         missing.err().unwrap(),
         "the replica's key is missing from the keychain"
     );
-    assert!(LiquidWorkspace::open_with(&folder.0, &Any([9; 32])).is_err());
+    let other = Scripted {
+        key: Some([9; 32]),
+        ..Scripted::default()
+    };
+    assert!(LiquidWorkspace::open_with(&folder.0, &other).is_err());
 }
 
 #[test]
 fn a_moved_replica_opens_with_its_key() {
-    let folder = Folder::new("moved");
-    let keys = Memory::default();
-    lisbon(&LiquidWorkspace::open_with(&folder.0, &keys).unwrap());
+    let (folder, keys) = seeded("moved");
     let moved = Folder::new("moved-to");
     std::fs::rename(&folder.0, &moved.0).unwrap();
 
     let workspace = LiquidWorkspace::open_with(&moved.0, &keys).unwrap();
     assert_eq!(areas(&workspace), 1);
     assert!(moved.0.join(KEY_NAME_FILE).is_file());
+}
+
+fn seeded(name: &str) -> (Folder, Memory) {
+    let folder = Folder::new(name);
+    let keys = Memory::default();
+    lisbon(&LiquidWorkspace::open_with(&folder.0, &keys).unwrap());
+    (folder, keys)
 }
 
 fn filed_under_path(folder: &Folder) -> Memory {
@@ -265,6 +306,17 @@ fn a_key_filed_under_the_folder_path_moves_to_a_key_name_once() {
     let keys = filed_under_path(&folder);
     let path = path_name(&folder.0).unwrap();
 
+    let refusing = Scripted {
+        inner: Some(&keys),
+        refuse_write: true,
+        ..Scripted::default()
+    };
+    assert!(LiquidWorkspace::open_with(&folder.0, &refusing).is_err());
+    assert!(
+        keys.read(&path).unwrap().is_some(),
+        "a failed move keeps the old key"
+    );
+
     let workspace = LiquidWorkspace::open_with(&folder.0, &keys).unwrap();
     assert_eq!(areas(&workspace), 1);
     drop(workspace);
@@ -274,22 +326,8 @@ fn a_key_filed_under_the_folder_path_moves_to_a_key_name_once() {
 }
 
 #[test]
-fn a_failed_key_migration_keeps_the_old_key_for_a_retry() {
-    let folder = Folder::new("retry");
-    let keys = filed_under_path(&folder);
-    let path = path_name(&folder.0).unwrap();
-
-    assert!(LiquidWorkspace::open_with(&folder.0, &Refusing(&keys)).is_err());
-    assert!(keys.read(&path).unwrap().is_some());
-    assert!(LiquidWorkspace::open_with(&folder.0, &keys).is_ok());
-    assert_eq!(keys.read(&path).unwrap(), None);
-}
-
-#[test]
 fn a_path_entry_holding_another_key_is_kept() {
-    let folder = Folder::new("other-key");
-    let keys = Memory::default();
-    lisbon(&LiquidWorkspace::open_with(&folder.0, &keys).unwrap());
+    let (folder, keys) = seeded("other-key");
     let path = path_name(&folder.0).unwrap();
     let other = [7; 32];
     keys.write(&path, &other).unwrap();
@@ -298,41 +336,23 @@ fn a_path_entry_holding_another_key_is_kept() {
     assert_eq!(keys.read(&path).unwrap(), Some(other));
 }
 
-struct PathUnreadable<'a>(&'a Memory, String);
-
-impl Keys for PathUnreadable<'_> {
-    fn read(&self, name: &str) -> Result<Option<[u8; 32]>, String> {
-        if name == self.1 {
-            return Err("the keychain is locked".into());
-        }
-        self.0.read(name)
-    }
-
-    fn write(&self, name: &str, key: &[u8; 32]) -> Result<(), String> {
-        self.0.write(name, key)
-    }
-
-    fn delete(&self, name: &str) -> Result<(), String> {
-        self.0.delete(name)
-    }
-}
-
 #[test]
 fn a_failed_path_entry_lookup_does_not_block_the_key_named_by_the_folder() {
-    let folder = Folder::new("path-unreadable");
-    let keys = Memory::default();
-    lisbon(&LiquidWorkspace::open_with(&folder.0, &keys).unwrap());
+    let (folder, keys) = seeded("path-unreadable");
     let path = path_name(&folder.0).unwrap();
 
-    LiquidWorkspace::open_with(&folder.0, &PathUnreadable(&keys, path))
+    let keychain = Scripted {
+        inner: Some(&keys),
+        unreadable: Some(path),
+        ..Scripted::default()
+    };
+    LiquidWorkspace::open_with(&folder.0, &keychain)
         .expect("the key the folder names opens the replica");
 }
 
 #[test]
 fn a_malformed_key_name_file_is_refused() {
-    let folder = Folder::new("malformed");
-    let keys = Memory::default();
-    lisbon(&LiquidWorkspace::open_with(&folder.0, &keys).unwrap());
+    let (folder, keys) = seeded("malformed");
     std::fs::write(folder.0.join(KEY_NAME_FILE), "not a key name").unwrap();
 
     let error = LiquidWorkspace::open_with(&folder.0, &keys).err().unwrap();
@@ -342,9 +362,7 @@ fn a_malformed_key_name_file_is_refused() {
 #[cfg(unix)]
 #[test]
 fn a_key_name_that_is_no_regular_file_is_refused() {
-    let folder = Folder::new("key-name-pipe");
-    let keys = Memory::default();
-    lisbon(&LiquidWorkspace::open_with(&folder.0, &keys).unwrap());
+    let (folder, _) = seeded("key-name-pipe");
     let name = folder.0.join(KEY_NAME_FILE);
     let pipe = folder.0.join("pipe");
     let made = std::process::Command::new("mkfifo")
@@ -373,8 +391,7 @@ fn a_key_name_that_is_no_regular_file_is_refused() {
 
 #[test]
 fn a_write_reaches_only_the_subscribers_of_what_it_changed() {
-    let folder = Folder::new("notify");
-    let workspace = LiquidWorkspace::open_with(&folder.0, &Memory::default()).unwrap();
+    let (_folder, workspace) = open("notify");
     let (_, page, block, view) = lisbon(&workspace);
     let seen: Arc<Mutex<Vec<(i64, BridgeChange)>>> = Arc::default();
     let follow = |id: i64, resource: BridgeResource| {
@@ -435,55 +452,116 @@ fn a_write_reaches_only_the_subscribers_of_what_it_changed() {
 }
 
 #[test]
-fn a_subscription_ends_when_dart_closes_it_or_its_stream() {
-    let folder = Folder::new("close");
-    let workspace = LiquidWorkspace::open_with(&folder.0, &Memory::default()).unwrap();
-    let (area, page, block, _) = lisbon(&workspace);
-    let calls = Arc::new(Mutex::new(0));
-    let counted = calls.clone();
-    let pages = BridgeResource {
-        area: Some(area.clone()),
-        ..resource(BridgeResourceKind::Pages)
-    };
+fn every_way_a_subscription_ends_leaves_nothing_behind() {
+    let (_folder, workspace) = open("ends");
+    let areas = || resource(BridgeResourceKind::Areas);
+    workspace.watch(1, areas(), |_| false).unwrap();
+    workspace.close(1);
+    let mut first = true;
     workspace
-        .watch(7, pages.clone(), move |_| {
+        .watch(2, areas(), move |_| std::mem::take(&mut first))
+        .unwrap();
+    lisbon(&workspace);
+    workspace.close(2);
+
+    workspace.close(3);
+    let heard = Arc::new(Mutex::new(0));
+    let counted = heard.clone();
+    workspace
+        .watch(3, areas(), move |_| {
             *counted.lock().unwrap() += 1;
-            false
+            true
         })
         .unwrap();
-    let blocks = BridgeResource {
-        page: Some(page.clone()),
-        block: Some(block.clone()),
-        ..resource(BridgeResourceKind::Block)
-    };
-    workspace.watch(8, blocks.clone(), |_| true).unwrap();
-    assert!(workspace.watch(8, blocks, |_| true).is_err());
-
-    let rename = |title: &str| {
-        workspace
-            .apply(BridgeMutation {
-                page: Some(page.clone()),
-                text: Some(title.into()),
-                ..mutation(BridgeMutationKind::RenamePage)
-            })
-            .unwrap();
-    };
-    rename("Porto");
-    rename("Faro");
+    workspace.watch(4, areas(), |_| true).unwrap();
+    assert!(
+        workspace.watch(4, areas(), |_| true).is_err(),
+        "an open subscription keeps its id"
+    );
+    workspace.close(4);
+    workspace
+        .apply(BridgeMutation {
+            text: Some("Home".into()),
+            ..mutation(BridgeMutationKind::CreateArea)
+        })
+        .unwrap();
     assert_eq!(
-        *calls.lock().unwrap(),
-        1,
-        "the closed stream got one change"
+        *heard.lock().unwrap(),
+        0,
+        "a close that overtook its subscription ends it quietly"
     );
 
-    workspace.close(8);
+    let nameless = || resource(BridgeResourceKind::Views);
+    assert!(workspace.watch(5, nameless(), |_| true).is_err());
+    workspace.close(5);
+    workspace.close(6);
+    assert!(workspace.watch(6, nameless(), |_| true).is_err());
+
+    assert_eq!(workspace.lifecycle_markers(), 0);
+}
+
+#[test]
+fn a_page_nothing_follows_leaves_memory_after_each_call() {
+    let (_folder, workspace) = open("release");
+    let (_, page, block, _) = lisbon(&workspace);
+    let id = liquid_core::PageId::parse(&page).unwrap();
+    assert!(!workspace.is_loaded(&id), "after the write that made it");
+
+    let views = BridgeResource {
+        page: Some(page.clone()),
+        ..resource(BridgeResourceKind::Views)
+    };
+    workspace.watch(1, views, |_| true).unwrap();
     assert_eq!(text(&workspace, &page, &block).unwrap(), "Five days");
+    assert!(workspace.is_loaded(&id), "while followed");
+    workspace.close(1);
+    assert!(!workspace.is_loaded(&id));
+    assert_eq!(text(&workspace, &page, &block).unwrap(), "Five days");
+    assert!(!workspace.is_loaded(&id), "after a read nothing follows");
+    let refused = workspace.apply(BridgeMutation {
+        page: Some(page.clone()),
+        block: Some(block),
+        text: Some("x".into()),
+        at: 99,
+        ..mutation(BridgeMutationKind::EditText)
+    });
+    assert_eq!(refused.unwrap_err(), "text position out of range");
+    assert!(!workspace.is_loaded(&id), "after a refused write");
+}
+
+#[test]
+fn a_subscription_follows_its_resource_whatever_else_it_names() {
+    let (_folder, workspace) = open("normalize");
+    let (area, page, _, _) = lisbon(&workspace);
+    let seen: Arc<Mutex<Vec<i64>>> = Arc::default();
+    let record = seen.clone();
+    let views = BridgeResource {
+        area: Some(area),
+        page: Some(page.clone()),
+        block: Some("ignored".into()),
+        ..resource(BridgeResourceKind::Views)
+    };
+    workspace
+        .watch(1, views, move |change| {
+            record.lock().unwrap().push(change.seq);
+            true
+        })
+        .unwrap();
+    workspace
+        .apply(BridgeMutation {
+            page: Some(page),
+            text: Some("Tram 28".into()),
+            ..mutation(BridgeMutationKind::AddTextBlock)
+        })
+        .unwrap();
+    assert_eq!(*seen.lock().unwrap(), [1, 2]);
+    let nameless = workspace.watch(2, resource(BridgeResourceKind::Views), |_| true);
+    assert_eq!(nameless.unwrap_err(), "page is missing or no identity");
 }
 
 #[test]
 fn reads_and_writes_refuse_malformed_requests() {
-    let folder = Folder::new("refuse");
-    let workspace = LiquidWorkspace::open_with(&folder.0, &Memory::default()).unwrap();
+    let (_folder, workspace) = open("refuse");
     let (_, page, block, _) = lisbon(&workspace);
 
     let unknown = workspace.apply(BridgeMutation {
@@ -514,8 +592,7 @@ fn reads_and_writes_refuse_malformed_requests() {
 
 #[test]
 fn a_window_never_exceeds_its_cap() {
-    let folder = Folder::new("window");
-    let workspace = LiquidWorkspace::open_with(&folder.0, &Memory::default()).unwrap();
+    let (_folder, workspace) = open("window");
     let (_, page, _, mut after) = lisbon(&workspace);
     let views = BridgeResource {
         page: Some(page.clone()),
@@ -560,10 +637,7 @@ fn the_keychain_keeps_a_replica_key() {
     let folder = Folder::new("keychain");
     lisbon(&LiquidWorkspace::open(folder.0.display().to_string()).unwrap());
     let reopened = LiquidWorkspace::open(folder.0.display().to_string()).unwrap();
-    assert_eq!(
-        reopened.query(query(BridgeQueryKind::Areas)).unwrap().count,
-        1
-    );
+    assert_eq!(areas(&reopened), 1);
     let key_name = std::fs::read_to_string(folder.0.join(KEY_NAME_FILE)).unwrap();
     keychain.delete(&key_name).unwrap();
 }
@@ -659,137 +733,8 @@ fn a_lock_held_only_for_a_moment_is_waited_for() {
 }
 
 #[test]
-fn a_subscription_starts_with_its_resource_s_current_count() {
-    let folder = Folder::new("ack");
-    let workspace = LiquidWorkspace::open_with(&folder.0, &Memory::default()).unwrap();
-    lisbon(&workspace);
-    let seen: Arc<Mutex<Vec<i64>>> = Arc::default();
-    let record = seen.clone();
-    workspace
-        .watch(1, resource(BridgeResourceKind::Areas), move |change| {
-            record.lock().unwrap().push(change.seq);
-            true
-        })
-        .unwrap();
-    workspace
-        .apply(BridgeMutation {
-            text: Some("Home".into()),
-            ..mutation(BridgeMutationKind::CreateArea)
-        })
-        .unwrap();
-    assert_eq!(*seen.lock().unwrap(), [1, 2]);
-}
-
-#[test]
-fn a_close_that_overtakes_its_subscription_still_ends_it() {
-    let folder = Folder::new("overtake");
-    let workspace = LiquidWorkspace::open_with(&folder.0, &Memory::default()).unwrap();
-    workspace.close(4);
-    let calls = Arc::new(Mutex::new(0));
-    let counted = calls.clone();
-    let opened = workspace.watch(4, resource(BridgeResourceKind::Areas), move |_| {
-        *counted.lock().unwrap() += 1;
-        true
-    });
-    assert!(
-        opened.is_ok(),
-        "an already closed subscription ends quietly"
-    );
-    lisbon(&workspace);
-    assert_eq!(*calls.lock().unwrap(), 0);
-}
-
-#[test]
-fn a_page_nothing_follows_leaves_memory_after_each_call() {
-    let folder = Folder::new("release");
-    let workspace = LiquidWorkspace::open_with(&folder.0, &Memory::default()).unwrap();
-    let (_, page, block, _) = lisbon(&workspace);
-    let id = liquid_core::PageId::parse(&page).unwrap();
-    assert!(!workspace.is_loaded(&id), "after the write that made it");
-
-    let views = BridgeResource {
-        page: Some(page.clone()),
-        ..resource(BridgeResourceKind::Views)
-    };
-    workspace.watch(1, views, |_| true).unwrap();
-    assert_eq!(text(&workspace, &page, &block).unwrap(), "Five days");
-    assert!(workspace.is_loaded(&id), "while followed");
-    workspace.close(1);
-    assert!(!workspace.is_loaded(&id));
-    assert_eq!(text(&workspace, &page, &block).unwrap(), "Five days");
-    assert!(!workspace.is_loaded(&id), "after a read nothing follows");
-    let refused = workspace.apply(BridgeMutation {
-        page: Some(page.clone()),
-        block: Some(block),
-        text: Some("x".into()),
-        at: 99,
-        ..mutation(BridgeMutationKind::EditText)
-    });
-    assert_eq!(refused.unwrap_err(), "text position out of range");
-    assert!(!workspace.is_loaded(&id), "after a refused write");
-}
-
-#[test]
-fn a_subscription_follows_its_resource_whatever_else_it_names() {
-    let folder = Folder::new("normalize");
-    let workspace = LiquidWorkspace::open_with(&folder.0, &Memory::default()).unwrap();
-    let (area, page, _, _) = lisbon(&workspace);
-    let seen: Arc<Mutex<Vec<i64>>> = Arc::default();
-    let record = seen.clone();
-    let views = BridgeResource {
-        area: Some(area),
-        page: Some(page.clone()),
-        block: Some("ignored".into()),
-        ..resource(BridgeResourceKind::Views)
-    };
-    workspace
-        .watch(1, views, move |change| {
-            record.lock().unwrap().push(change.seq);
-            true
-        })
-        .unwrap();
-    workspace
-        .apply(BridgeMutation {
-            page: Some(page),
-            text: Some("Tram 28".into()),
-            ..mutation(BridgeMutationKind::AddTextBlock)
-        })
-        .unwrap();
-    assert_eq!(*seen.lock().unwrap(), [1, 2]);
-    let nameless = workspace.watch(2, resource(BridgeResourceKind::Views), |_| true);
-    assert_eq!(nameless.unwrap_err(), "page is missing or no identity");
-}
-
-#[test]
-fn every_way_a_subscription_ends_leaves_nothing_behind() {
-    let folder = Folder::new("ends");
-    let workspace = LiquidWorkspace::open_with(&folder.0, &Memory::default()).unwrap();
-    let areas = || resource(BridgeResourceKind::Areas);
-    workspace.watch(1, areas(), |_| false).unwrap();
-    workspace.close(1);
-    let mut first = true;
-    workspace
-        .watch(2, areas(), move |_| std::mem::take(&mut first))
-        .unwrap();
-    lisbon(&workspace);
-    workspace.close(2);
-    workspace.close(3);
-    workspace.watch(3, areas(), |_| true).unwrap();
-    workspace.watch(4, areas(), |_| true).unwrap();
-    workspace.close(4);
-    let nameless = || resource(BridgeResourceKind::Views);
-    assert!(workspace.watch(5, nameless(), |_| true).is_err());
-    workspace.close(5);
-    workspace.close(6);
-    assert!(workspace.watch(6, nameless(), |_| true).is_err());
-
-    assert_eq!(workspace.lifecycle_markers(), 0);
-}
-
-#[test]
 fn text_blocks_split_and_join_through_the_bridge() {
-    let folder = Folder::new("text");
-    let workspace = LiquidWorkspace::open_with(&folder.0, &Memory::default()).unwrap();
+    let (_folder, workspace) = open("text");
     let (_, page, block, view) = lisbon(&workspace);
     let split = workspace
         .apply(BridgeMutation {
@@ -866,8 +811,7 @@ fn a_closing_workspace_keeps_its_replica_lock_until_its_database_has_closed() {
             *self.1.lock().unwrap() = Some(free);
         }
     }
-    let folder = Folder::new("closing");
-    let workspace = LiquidWorkspace::open_with(&folder.0, &Memory::default()).unwrap();
+    let (folder, workspace) = open("closing");
     let free: Arc<Mutex<Option<bool>>> = Arc::default();
     let probe = Probe(folder.0.clone(), free.clone());
     workspace
@@ -882,8 +826,7 @@ fn a_closing_workspace_keeps_its_replica_lock_until_its_database_has_closed() {
 
 #[test]
 fn a_workspace_whose_call_failed_midway_refuses_every_later_call() {
-    let folder = Folder::new("poisoned");
-    let workspace = LiquidWorkspace::open_with(&folder.0, &Memory::default()).unwrap();
+    let (_folder, workspace) = open("poisoned");
     let mut registered = false;
     workspace
         .watch(1, resource(BridgeResourceKind::Areas), move |_| {
@@ -915,8 +858,7 @@ fn a_workspace_whose_call_failed_midway_refuses_every_later_call() {
 
 #[test]
 fn a_tile_and_a_move_cross_the_bridge() {
-    let folder = Folder::new("arrange");
-    let workspace = LiquidWorkspace::open_with(&folder.0, &Memory::default()).unwrap();
+    let (_folder, workspace) = open("arrange");
     let (_, page, _, first) = lisbon(&workspace);
     let second = workspace
         .apply(BridgeMutation {
@@ -975,8 +917,7 @@ fn a_tile_and_a_move_cross_the_bridge() {
 
 #[test]
 fn search_finds_pages_and_text_across_the_bridge() {
-    let folder = Folder::new("search");
-    let workspace = LiquidWorkspace::open_with(&folder.0, &Memory::default()).unwrap();
+    let (_folder, workspace) = open("search");
     let (_, page, block, _) = lisbon(&workspace);
     let hits = workspace
         .query(BridgeQuery {
@@ -1000,4 +941,25 @@ fn search_finds_pages_and_text_across_the_bridge() {
         .unwrap()
         .hits;
     assert_eq!(pages[0].found, BridgeFound::Page);
+}
+
+#[test]
+fn a_page_s_icon_crosses_the_bridge() {
+    let (_folder, workspace) = open("icon");
+    let (area, page, _, _) = lisbon(&workspace);
+    workspace
+        .apply(BridgeMutation {
+            page: Some(page),
+            text: Some("🧳".into()),
+            ..mutation(BridgeMutationKind::SetPageIcon)
+        })
+        .unwrap();
+    let pages = workspace
+        .query(BridgeQuery {
+            area: Some(area),
+            ..query(BridgeQueryKind::Pages)
+        })
+        .unwrap()
+        .pages;
+    assert_eq!(pages[0].icon, "🧳");
 }

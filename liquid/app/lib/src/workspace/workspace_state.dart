@@ -282,9 +282,9 @@ class WorkspaceState {
 
   final pageHistory = ValueNotifier<String?>(null);
 
-  Future<void> undo() => _revise(workspace.undo, 'undo');
+  Future<void> undo() => track(_revise(workspace.undo, 'undo'));
 
-  Future<void> redo() => _revise(workspace.redo, 'redo');
+  Future<void> redo() => track(_revise(workspace.redo, 'redo'));
 
   Future<void> _revise(Future<bool> Function() revise, String what) async {
     await _applied;
@@ -337,7 +337,10 @@ class WorkspaceState {
     }
   }
 
-  Future<void> press(String table, String row, String field) async {
+  Future<void> press(String table, String row, String field) =>
+      track(_press(table, row, field));
+
+  Future<void> _press(String table, String row, String field) async {
     await _applied;
     try {
       _ran(await workspace.press(table: table, row: row, field: field));
@@ -346,7 +349,10 @@ class WorkspaceState {
     }
   }
 
-  Future<void> testAutomation(String automation) async {
+  Future<void> testAutomation(String automation) =>
+      track(_testAutomation(automation));
+
+  Future<void> _testAutomation(String automation) async {
     await _applied;
     try {
       _ran([await workspace.test(automation: automation)]);
@@ -424,7 +430,7 @@ class WorkspaceState {
         : SourcePlatform.pickFile());
     if (path == null) return;
     try {
-      final source = await workspace.addSource(area: area, path: path);
+      final source = await track(workspace.addSource(area: area, path: path));
       if (_disposed) return;
       open.value = OpenPage.source(area, source);
     } on Object catch (error) {
@@ -627,6 +633,18 @@ class WorkspaceState {
   Future<void> rename(String page, String title) =>
       apply(mutation(BridgeMutationKind.renamePage, page: page, text: title));
 
+  Future<void> setPageIcon(String page, String icon) =>
+      apply(mutation(BridgeMutationKind.setPageIcon, page: page, text: icon));
+
+  String iconOf(String page) {
+    for (final tree in _trees.values) {
+      for (final known in tree.value) {
+        if (known.id == page) return known.icon;
+      }
+    }
+    return '';
+  }
+
   Future<void> readPages(String area) =>
       _treeReads[area]?.call() ?? Future.value();
 
@@ -702,15 +720,17 @@ class WorkspaceState {
     _pages[page] = work;
     track(work);
     unawaited(
-      work.whenComplete(() {
+      work.then<void>((_) {}, onError: (Object _) {}).whenComplete(() {
         if (identical(_pages[page], work)) _pages.remove(page);
       }),
     );
   }
 
-  void track(Future<void> work) {
-    _tracked.add(work);
-    unawaited(work.whenComplete(() => _tracked.remove(work)));
+  Future<T> track<T>(Future<T> work) {
+    final settled = work.then<void>((_) {}, onError: (Object _) {});
+    _tracked.add(settled);
+    unawaited(settled.whenComplete(() => _tracked.remove(settled)));
+    return work;
   }
 
   Future<void> drain() async {

@@ -621,6 +621,30 @@ class PageEditor {
 
   Future<bool> _markdown(EditorTarget target, String before) async {
     if (await _sectionBreak(target, before)) return true;
+    if (codeTyped(target.text, before, target.caret)) {
+      await _replace(target, 0, codeShortcut.length, '');
+      await _apply(
+        mutation(
+          BridgeMutationKind.turnIntoCode,
+          page: _page,
+          block: target.block,
+        ),
+        [target.block],
+      );
+      return true;
+    }
+    if (mathTyped(target.text, before, target.caret)) {
+      await _replace(target, 0, mathShortcut.length, '');
+      await _apply(
+        mutation(
+          BridgeMutationKind.turnIntoMath,
+          page: _page,
+          block: target.block,
+        ),
+        [target.block],
+      );
+      return true;
+    }
     final shortcut = shortcutTyped(
       target.text,
       before,

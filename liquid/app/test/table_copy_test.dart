@@ -3,7 +3,9 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:liquid/src/rust/api/workspace.dart';
 import 'package:liquid/src/workspace/paste.dart';
+import 'package:liquid/src/workspace/workspace_state.dart';
 
+import 'focus_kit.dart';
 import 'page_kit.dart';
 
 void main() {
@@ -25,14 +27,18 @@ void main() {
       if (view.kind == BridgeBlockKind.database) view,
   ];
 
-  Future<void> tap(WidgetTester tester, Finder target) async {
-    await tester.tap(target);
-    await tester.pumpAndSettle();
-  }
-
   Future<void> viewAction(WidgetTester tester, String action) async {
     await tap(tester, find.byKey(const Key('View actions')));
     await tap(tester, find.text(action));
+  }
+
+  Future<void> pasteHere(WidgetTester tester) async {
+    await tester.tap(block(0));
+    await tester.pump();
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+    await key(tester, LogicalKeyboardKey.keyV);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+    await tester.pumpAndSettle();
   }
 
   testWidgets('Duplicate puts a new Table with the same tabs right below', (
@@ -61,12 +67,7 @@ void main() {
     final original = tables().single;
     await viewAction(tester, 'Copy');
     expect(copied, 'Expenses');
-    await tester.tap(block(0));
-    await tester.pump();
-    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
-    await key(tester, LogicalKeyboardKey.keyV);
-    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
-    await tester.pumpAndSettle();
+    await pasteHere(tester);
     final pasted = kit.applied(BridgeMutationKind.duplicateTable).single;
     expect(pasted.block, original.block);
     expect(find.text('Pasted as a copy'), findsOneWidget);
@@ -82,6 +83,45 @@ void main() {
     expect(find.text('Pasted as a copy'), findsNothing);
   });
 
+  Future<String> pasteOnEmptyPage(WidgetTester tester) async {
+    final area = kit.workspace.open.value!.area;
+    final trip = await kit.workspace.apply(
+      mutation(BridgeMutationKind.createPage, area: area, text: 'Trip'),
+    );
+    kit.workspace.open.value = OpenPage(area, trip.page!);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('first-line')));
+    await tester.pump();
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+    await key(tester, LogicalKeyboardKey.keyV);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+    await tester.pumpAndSettle();
+    return trip.page!;
+  }
+
+  testWidgets('⌘V in an empty Page pastes a copied Table, not its name', (
+    tester,
+  ) async {
+    await kit.show(tester, [TablePart(expenses)]);
+    await viewAction(tester, 'Copy');
+    await pasteOnEmptyPage(tester);
+    final pasted = kit.applied(BridgeMutationKind.duplicateTable).single;
+    expect(pasted.block, tables().single.block);
+    expect(pasted.after, isNull);
+    expect(find.text('Pasted as a copy'), findsOneWidget);
+    expect(kit.applied(BridgeMutationKind.addTextBlock), isEmpty);
+  });
+
+  testWidgets('⌘V in an empty Page pastes other text as text', (tester) async {
+    await kit.show(tester, [TablePart(expenses)]);
+    await viewAction(tester, 'Copy');
+    copied = 'Groceries';
+    change++;
+    final trip = await pasteOnEmptyPage(tester);
+    expect(kit.applied(BridgeMutationKind.duplicateTable), isEmpty);
+    expect(kit.fake.textsOf(trip), ['Groceries']);
+  });
+
   testWidgets('the same text copied elsewhere later pastes as text', (
     tester,
   ) async {
@@ -89,12 +129,7 @@ void main() {
     await viewAction(tester, 'Copy');
     copied = 'Expenses';
     change++;
-    await tester.tap(block(0));
-    await tester.pump();
-    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
-    await key(tester, LogicalKeyboardKey.keyV);
-    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
-    await tester.pumpAndSettle();
+    await pasteHere(tester);
     expect(kit.applied(BridgeMutationKind.duplicateTable), isEmpty);
     expect(field(tester, 0).controller!.text, 'Expenses');
   });
@@ -103,12 +138,7 @@ void main() {
     await kit.show(tester, [TablePart(expenses), const TextPart('')]);
     await viewAction(tester, 'Copy');
     kit.fake.dropTable(tables().single.block);
-    await tester.tap(block(0));
-    await tester.pump();
-    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
-    await key(tester, LogicalKeyboardKey.keyV);
-    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
-    await tester.pumpAndSettle();
+    await pasteHere(tester);
     expect(field(tester, 0).controller!.text, 'Expenses');
   });
 }

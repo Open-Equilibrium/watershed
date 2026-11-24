@@ -7,7 +7,9 @@ use meta_harness_core::{
 };
 
 use crate::api::events::{BridgeEvent, BridgeEventKind};
-use crate::stream::{Credit, Outbox, Sink, WINDOW, attach, attach_results, forward, gather, push};
+use crate::stream::{
+    Credit, Outbox, PENDING_LIMIT, Sink, WINDOW, attach, attach_results, forward, gather, push,
+};
 
 fn ev(event: AgentEvent) -> ThreadEvent {
     ThreadEvent { sequence: 1, event }
@@ -52,6 +54,13 @@ fn delta(item: u64, delta: &str) -> ThreadEvent {
     })
 }
 
+fn turn_completed() -> ThreadEvent {
+    ev(AgentEvent::TurnCompleted {
+        turn: TurnId(1),
+        checkpoint: None,
+    })
+}
+
 fn delta_at(sequence: u64, text: &str) -> BridgeEvent {
     BridgeEvent::from(ThreadEvent {
         sequence,
@@ -91,6 +100,13 @@ fn taken(deliveries: &mut tokio::sync::mpsc::UnboundedReceiver<BridgeEvent>) -> 
     std::iter::from_fn(|| deliveries.try_recv().ok()).collect()
 }
 
+fn kinds(events: &[BridgeEvent]) -> Vec<(BridgeEventKind, Option<i64>)> {
+    events
+        .iter()
+        .map(|event| (event.kind, event.item.as_ref().map(|item| item.id)))
+        .collect()
+}
+
 async fn settle() {
     tokio::time::sleep(Duration::from_millis(100)).await;
 }
@@ -101,8 +117,12 @@ async fn within<T>(next: impl Future<Output = T>) -> T {
         .expect("delivered within a second")
 }
 
-fn paused_runtime() -> tokio::runtime::Runtime {
+fn current_thread() -> tokio::runtime::Builder {
     tokio::runtime::Builder::new_current_thread()
+}
+
+fn paused_runtime() -> tokio::runtime::Runtime {
+    current_thread()
         .enable_time()
         .start_paused(true)
         .build()
@@ -111,9 +131,7 @@ fn paused_runtime() -> tokio::runtime::Runtime {
 
 #[test]
 fn gathers_streaming_text_until_its_window_passes() {
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .build()
-        .expect("runtime starts");
+    let runtime = current_thread().build().expect("runtime starts");
     runtime.block_on(async {
         let (sender, mut receiver) = tokio::sync::mpsc::channel(16);
         let (pass, window) = tokio::sync::oneshot::channel::<()>();
@@ -136,13 +154,8 @@ fn gathers_streaming_text_until_its_window_passes() {
             let _ = window.await;
         })
         .await;
-        let text: Vec<_> = outbox
-            .pending
-            .iter()
-            .filter_map(|event| event.text.as_deref())
-            .collect();
         assert_eq!(
-            text.concat(),
+            pending_text(&outbox).concat(),
             "0123456789",
             "everything until the window passed"
         );
@@ -155,13 +168,7 @@ fn gathers_streaming_text_until_its_window_passes() {
 
     runtime.block_on(async {
         let (sender, mut receiver) = tokio::sync::mpsc::channel(16);
-        sender
-            .send(ev(AgentEvent::TurnCompleted {
-                turn: TurnId(1),
-                checkpoint: None,
-            }))
-            .await
-            .expect("sent");
+        sender.send(turn_completed()).await.expect("sent");
         let mut outbox = Outbox::default();
         let credit = Credit::default();
         outbox.admit(BridgeEvent::from(delta(1, "0")), &credit);
@@ -173,66 +180,48 @@ fn gathers_streaming_text_until_its_window_passes() {
 #[test]
 fn forwards_streaming_text_once_its_window_passed() {
     let ms = Duration::from_millis;
-    tokio::runtime::Builder::new_current_thread()
-        .enable_time()
-        .start_paused(true)
-        .build()
-        .expect("runtime starts")
-        .block_on(async {
-            let (events, receiver) = tokio::sync::mpsc::channel(16);
-            let (delivered, mut deliveries) = tokio::sync::mpsc::unbounded_channel();
-            let start = tokio::time::Instant::now();
-            tokio::spawn(forward(
-                receiver,
-                || std::future::ready(Some(never())),
-                Arc::default(),
-                move |event| {
-                    delivered
-                        .send((start.elapsed(), event.kind, event.text))
-                        .is_ok()
-                },
-            ));
-            let streamed =
-                |at, text: &str| Some((at, BridgeEventKind::ContentDelta, Some(text.to_owned())));
-            events.send(delta(1, "Hel")).await.expect("sent");
-            tokio::time::sleep(ms(30)).await;
-            events.send(delta(1, "lo")).await.expect("sent");
-            assert_eq!(within(deliveries.recv()).await, streamed(ms(50), "Hello"));
-            tokio::time::sleep(ms(10)).await;
-            events.send(delta(1, "!")).await.expect("sent");
-            let completed = AgentEvent::TurnCompleted {
-                turn: TurnId(1),
-                checkpoint: None,
-            };
-            events.send(ev(completed)).await.expect("sent");
-            assert_eq!(within(deliveries.recv()).await, streamed(ms(60), "!"));
-            assert_eq!(
-                within(deliveries.recv()).await,
-                Some((ms(60), BridgeEventKind::TurnCompleted, None))
-            );
-        });
+    paused_runtime().block_on(async {
+        let (events, receiver) = tokio::sync::mpsc::channel(16);
+        let (delivered, mut deliveries) = tokio::sync::mpsc::unbounded_channel();
+        let start = tokio::time::Instant::now();
+        tokio::spawn(forward(
+            receiver,
+            || std::future::ready(Some(never())),
+            Arc::default(),
+            move |event| {
+                delivered
+                    .send((start.elapsed(), event.kind, event.text))
+                    .is_ok()
+            },
+        ));
+        let streamed =
+            |at, text: &str| Some((at, BridgeEventKind::ContentDelta, Some(text.to_owned())));
+        events.send(delta(1, "Hel")).await.expect("sent");
+        tokio::time::sleep(ms(30)).await;
+        events.send(delta(1, "lo")).await.expect("sent");
+        assert_eq!(within(deliveries.recv()).await, streamed(ms(50), "Hello"));
+        tokio::time::sleep(ms(10)).await;
+        events.send(delta(1, "!")).await.expect("sent");
+        events.send(turn_completed()).await.expect("sent");
+        assert_eq!(within(deliveries.recv()).await, streamed(ms(60), "!"));
+        assert_eq!(
+            within(deliveries.recv()).await,
+            Some((ms(60), BridgeEventKind::TurnCompleted, None))
+        );
+    });
 }
 
 #[test]
 fn merges_consecutive_deltas_of_one_item() {
-    let delta = |item: u64, text: &str| {
-        BridgeEvent::from(ev(AgentEvent::ContentDelta {
-            item: ItemId(item),
-            delta: text.to_owned(),
-        }))
-    };
     let mut merged = Vec::new();
     for event in [
         delta(1, "He"),
         delta(1, "llo"),
         delta(2, "Hi"),
-        BridgeEvent::from(ev(AgentEvent::TurnCompleted {
-            turn: TurnId(1),
-            checkpoint: None,
-        })),
+        turn_completed(),
         delta(2, "!"),
     ] {
-        push(&mut merged, event, Some(0));
+        push(&mut merged, BridgeEvent::from(event), Some(0));
     }
     let summary: Vec<_> = merged
         .iter()
@@ -283,6 +272,20 @@ fn deltas_taken_while_a_recovery_snapshot_is_taken_stay_apart() {
     outbox.admit(delta_at(2, "B"), &credit);
     credit.end_snapshot(Some(2));
     assert_eq!(pending_text(&outbox), ["A", "B"]);
+}
+
+#[test]
+fn overlapping_recovery_snapshots_keep_the_latest_boundary() {
+    let credit = Credit::default();
+    let mut outbox = Outbox::default();
+    outbox.admit(delta_at(1, "A"), &credit);
+    credit.begin_snapshot();
+    outbox.admit(delta_at(2, "B"), &credit);
+    credit.begin_snapshot();
+    credit.end_snapshot(Some(2));
+    credit.end_snapshot(Some(1));
+    outbox.admit(delta_at(3, "C"), &credit);
+    assert_eq!(pending_text(&outbox), ["A", "B", "C"]);
 }
 
 #[test]
@@ -423,21 +426,15 @@ fn falling_behind_keeps_finished_items_and_sends_one_fell_behind_event() {
         assert_eq!(taken(&mut deliveries).len(), WINDOW);
         credit.confirm(WINDOW as u64);
         settle().await;
-        let sent: Vec<_> = taken(&mut deliveries)
-            .iter()
-            .map(|event| (event.kind, event.item.as_ref().map(|item| item.id)))
-            .collect();
-        let finished_items =
-            (1000i64..1100).map(|item| (BridgeEventKind::ItemCompleted, Some(item)));
-        let live_after = (3157i64..3200).map(|item| (BridgeEventKind::ContentDelta, Some(item)));
-        let started_after = (5000i64..5010).map(|item| (BridgeEventKind::ItemStarted, Some(item)));
-        let expected: Vec<_> = finished_items
+        let expected: Vec<_> = (1000i64..1100)
+            .map(|item| (BridgeEventKind::ItemCompleted, Some(item)))
             .chain([(BridgeEventKind::FellBehind, None)])
-            .chain(live_after)
-            .chain(started_after)
+            .chain((3157i64..3200).map(|item| (BridgeEventKind::ContentDelta, Some(item))))
+            .chain((5000i64..5010).map(|item| (BridgeEventKind::ItemStarted, Some(item))))
             .collect();
         assert_eq!(
-            sent, expected,
+            kinds(&taken(&mut deliveries)),
+            expected,
             "the finished items stay in order, one fell-behind event follows the partial output that went, and what comes after is live"
         );
     });
@@ -463,16 +460,43 @@ fn events_other_than_partial_output_wait_for_liquid_and_are_never_dropped() {
             settle().await;
             delivered.extend(taken(&mut deliveries));
         }
-        let items: Vec<_> = delivered
-            .iter()
-            .map(|event| (event.kind, event.item.as_ref().map(|item| item.id)))
-            .collect();
         let expected: Vec<_> = (1..=1000i64)
             .map(|item| (BridgeEventKind::ItemStarted, Some(item)))
             .collect();
         assert_eq!(
-            items, expected,
+            kinds(&delivered),
+            expected,
             "a queue past its bound waits for confirmations, in order, and drops nothing"
+        );
+    });
+}
+
+#[test]
+fn a_stalled_window_stops_merging_text_so_partial_output_stays_bounded() {
+    paused_runtime().block_on(async {
+        let credit = Arc::new(Credit::default());
+        let (events, mut deliveries) = start_forwarding(credit.clone());
+        for item in 1..=WINDOW as u64 {
+            events.send(started(item)).await.expect("sent");
+        }
+        for _ in 0..1000 {
+            events.send(delta(5000, "x")).await.expect("sent");
+        }
+        settle().await;
+        let mut delivered = taken(&mut deliveries);
+        for applied in [256u64, 512] {
+            credit.confirm(applied);
+            settle().await;
+            delivered.extend(taken(&mut deliveries));
+        }
+        let text: usize = delivered
+            .iter()
+            .filter_map(|event| event.text.as_ref())
+            .map(String::len)
+            .sum();
+        assert!(
+            text <= PENDING_LIMIT,
+            "{text} characters of partial text were held while stalled"
         );
     });
 }
@@ -520,12 +544,8 @@ fn a_dropped_subscription_falls_behind_once_and_continues_on_a_new_one() {
         drop(events);
         again.send(started(2)).await.expect("sent");
         settle().await;
-        let kinds: Vec<_> = taken(&mut deliveries)
-            .iter()
-            .map(|event| (event.kind, event.item.as_ref().map(|item| item.id)))
-            .collect();
         assert_eq!(
-            kinds,
+            kinds(&taken(&mut deliveries)),
             [
                 (BridgeEventKind::ItemStarted, Some(1)),
                 (BridgeEventKind::FellBehind, None),

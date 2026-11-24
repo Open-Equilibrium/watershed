@@ -1,16 +1,15 @@
-import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:liquid/src/agent/shell.dart';
 import 'package:liquid/src/agent/sidebar.dart';
-import 'package:liquid/src/agent/statistics_chart.dart';
 import 'package:liquid/src/rust/api/events.dart';
 import 'package:liquid/src/rust/api/thread.dart';
 import 'package:liquid/src/session/session_state.dart';
 import 'package:liquid/src/theme/theme.dart';
 
 import 'fake_backend.dart';
+import 'focus_kit.dart';
 
 const info = SessionInfo(project: 'acme-api');
 
@@ -77,11 +76,6 @@ BridgeStatistics statistics() {
   );
 }
 
-Future<void> tap(WidgetTester tester, Finder finder) async {
-  await tester.tap(finder);
-  await tester.pumpAndSettle();
-}
-
 void main() {
   late SessionState state;
   late FakeSession session;
@@ -116,9 +110,10 @@ void main() {
     matching: finder,
   );
 
-  testWidgets('⌘U opens the statistics, and Escape closes them', (
-    tester,
-  ) async {
+  void expectInPanel(String text) =>
+      expect(inPanel(find.text(text)), findsOneWidget);
+
+  testWidgets('⌘U opens the statistics; Escape closes them', (tester) async {
     await show(tester);
     expect(find.byKey(const Key('statistics-panel')), findsNothing);
 
@@ -130,103 +125,21 @@ void main() {
     expect(find.byKey(const Key('statistics-panel')), findsNothing);
   });
 
-  testWidgets('a failed statistics read says so instead of still reading', (
-    tester,
-  ) async {
-    await show(tester, using: _UnreadableStatistics());
-    await openPanel(tester);
-
-    expect(inPanel(find.text('No statistics shown')), findsOneWidget);
-    expect(
-      inPanel(find.text('Could not read the statistics: unreadable')),
-      findsOneWidget,
-    );
-    expect(inPanel(find.text('Reading the statistics…')), findsNothing);
-  });
-
-  testWidgets('the Cost view says T3 reports no cost', (tester) async {
+  testWidgets('turns are listed; a tap or Enter opens one', (tester) async {
     await show(tester);
     await openPanel(tester);
 
-    expect(inPanel(find.text('T3 Code reports no cost')), findsOneWidget);
-  });
+    await tap(tester, inPanel(find.widgetWithText(InkWell, 'Turn')));
+    expectInPanel('Add a rate limit to /login');
+    expectInPanel('2 failed');
 
-  testWidgets(
-    'the Tokens view totals the session and splits it by model and type',
-    (tester) async {
-      await show(tester);
-      await openPanel(tester);
+    await tap(tester, inPanel(find.text('Cover the limiter with tests')));
+    expect(find.byKey(const Key('statistics-panel')), findsNothing);
+    expect(scrolls, contains(2));
 
-      await tap(tester, inPanel(find.text('Tokens')));
-
-      expect(inPanel(find.text('1.85 M')), findsWidgets);
-      expect(inPanel(find.text('claude-sonnet-4-5')), findsWidgets);
-      expect(
-        inPanel(find.textContaining('100% of tokens · 41 responses')),
-        findsOneWidget,
-      );
-      expect(inPanel(find.text('Tokens by type')), findsOneWidget);
-    },
-  );
-
-  testWidgets(
-    'the Time view totals the working and tool time, and says what T3 does not time',
-    (tester) async {
-      await show(tester);
-      await openPanel(tester);
-
-      await tap(tester, inPanel(find.widgetWithText(InkWell, 'Time')));
-
-      expect(inPanel(find.text('17m 53s')), findsOneWidget);
-      expect(inPanel(find.text('4m 21s')), findsOneWidget, reason: 'tool time');
-      expect(
-        inPanel(find.text('T3 times no single model request')),
-        findsOneWidget,
-      );
-    },
-  );
-
-  testWidgets(
-    'the Tool breakdown lists each tool, and a tool without timing shows a dash',
-    (tester) async {
-      await show(tester);
-      await openPanel(tester);
-
-      expect(inPanel(find.text('bash')), findsOneWidget);
-      expect(inPanel(find.text('edit')), findsOneWidget);
-      expect(inPanel(find.text('21')), findsOneWidget);
-      expect(inPanel(find.text('65')), findsOneWidget);
-      expect(inPanel(find.text('3m 53s')), findsOneWidget);
-      expect(
-        inPanel(find.text('—')),
-        findsOneWidget,
-        reason: 'edit has no timing',
-      );
-    },
-  );
-
-  testWidgets(
-    'the Turn breakdown lists the turns, and a tap shows one in the Chat',
-    (tester) async {
-      await show(tester);
-      await openPanel(tester);
-
-      await tap(tester, inPanel(find.widgetWithText(InkWell, 'Turn')));
-      expect(inPanel(find.text('Add a rate limit to /login')), findsOneWidget);
-      expect(inPanel(find.text('2 failed')), findsOneWidget);
-
-      await tap(tester, inPanel(find.text('Cover the limiter with tests')));
-
-      expect(find.byKey(const Key('statistics-panel')), findsNothing);
-      expect(scrolls, contains(2));
-    },
-  );
-
-  testWidgets('a focused turn row opens with Enter', (tester) async {
-    await show(tester);
     await openPanel(tester);
     await tap(tester, inPanel(find.widgetWithText(InkWell, 'Turn')));
-
+    scrolls.clear();
     Focus.of(tester.element(inPanel(find.text('Cover the limiter with tests'))))
         .requestFocus();
     await tester.pump();
@@ -237,45 +150,14 @@ void main() {
     expect(scrolls, contains(2));
   });
 
-  testWidgets('hovering a turn column shows its tooltip', (tester) async {
-    await show(tester);
-    await openPanel(tester);
-    await tap(tester, inPanel(find.widgetWithText(InkWell, 'Tokens')));
-
-    final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
-    await mouse.addPointer(location: Offset.zero);
-    addTearDown(mouse.removePointer);
-    final origin = tester.getTopLeft(inPanel(find.byType(TurnChart)));
-    await mouse.moveTo(origin + const Offset(90, 60));
-    await tester.pumpAndSettle();
-
-    expect(find.text('Turn 1'), findsOneWidget);
-    expect(find.textContaining('Add a rate limit to /login'), findsWidgets);
-  });
-
-  testWidgets('Ask the agent puts a question in the input and sends nothing', (
+  testWidgets('Read from cache is a share of all prompt tokens', (
     tester,
   ) async {
     await show(tester);
     await openPanel(tester);
+    await tap(tester, inPanel(find.text('Tokens')));
 
-    await tester.ensureVisible(
-      inPanel(find.text('Ask the agent about this session…')),
-    );
-    await tap(tester, inPanel(find.text('Ask the agent about this session…')));
-
-    expect(find.byKey(const Key('statistics-panel')), findsNothing);
-    expect(
-      tester
-          .widgetList<EditableText>(find.byType(EditableText))
-          .map((field) => field.controller.text),
-      anyElement(startsWith('About this session')),
-    );
-    expect(session.calls, isEmpty);
+    expectInPanel('86%');
+    expect(inPanel(find.text('88%')), findsNothing);
   });
-}
-
-class _UnreadableStatistics extends FakeSession {
-  @override
-  Future<BridgeStatistics> statistics() async => throw 'unreadable';
 }

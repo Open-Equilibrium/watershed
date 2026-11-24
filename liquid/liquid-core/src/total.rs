@@ -59,7 +59,9 @@ pub(crate) fn compute(rows: &[Row], totals: &[FieldTotal]) -> Vec<(FieldId, Valu
                 Total::Filled => count(values.len()),
                 _ if numbers.is_empty() => Value::Blank,
                 Total::Sum => Value::Number(numbers.iter().sum()),
-                Total::Average => Value::Number(numbers.iter().sum::<f64>() / numbers.len() as f64),
+                Total::Average => {
+                    Value::Number(numbers.iter().map(|n| n / numbers.len() as f64).sum())
+                }
                 Total::Min => Value::Number(numbers.iter().copied().fold(f64::INFINITY, f64::min)),
                 Total::Max => {
                     Value::Number(numbers.iter().copied().fold(f64::NEG_INFINITY, f64::max))

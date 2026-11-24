@@ -36,7 +36,7 @@ class AgentSection extends StatefulWidget {
 
 class _AgentSectionState extends State<AgentSection> {
   String? _instructions;
-  String? _readFor;
+  int _reads = 0;
 
   AgentsState get agents => widget.state.agents;
 
@@ -50,7 +50,12 @@ class _AgentSectionState extends State<AgentSection> {
   @override
   void didUpdateWidget(AgentSection old) {
     super.didUpdateWidget(old);
-    if (old.hosted.agent.id != widget.hosted.agent.id) _read();
+    final switched = old.state != widget.state;
+    if (switched) {
+      old.state.agents.changes.removeListener(_read);
+      agents.changes.addListener(_read);
+    }
+    if (switched || old.hosted.agent.id != widget.hosted.agent.id) _read();
   }
 
   @override
@@ -60,11 +65,10 @@ class _AgentSectionState extends State<AgentSection> {
   }
 
   void _read() {
-    final id = widget.hosted.agent.id;
-    _readFor = id;
+    final read = ++_reads;
     unawaited(
       agents.instructions().then((text) {
-        if (mounted && _readFor == id) setState(() => _instructions = text);
+        if (mounted && read == _reads) setState(() => _instructions = text);
       }),
     );
   }

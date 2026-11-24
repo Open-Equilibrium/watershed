@@ -79,7 +79,7 @@ class RustAgentHostLinks implements AgentHostLinks {
   final Random _random;
   final DateTime Function() _clock;
 
-  final _attempts = <String?, Object>{};
+  final _attempts = <String?, Completer<void>>{};
   final _retries = <String?, Timer>{};
   final _failures = <String?, int>{};
   final _connectedAt = <String?, DateTime>{};
@@ -94,7 +94,7 @@ class RustAgentHostLinks implements AgentHostLinks {
         _attempts.containsKey(address)) {
       return;
     }
-    final attempt = _attempts[address] = Object();
+    final attempt = _attempts[address] = Completer<void>();
     bool current() => identical(_attempts[address], attempt);
     _retries.remove(address)?.cancel();
     try {
@@ -118,6 +118,7 @@ class RustAgentHostLinks implements AgentHostLinks {
       if (current()) state.failHost(address, hostProblem(address, error));
     } finally {
       if (current()) _attempts.remove(address);
+      attempt.complete();
     }
   }
 
@@ -188,7 +189,9 @@ class RustAgentHostLinks implements AgentHostLinks {
   Future<String?> startOn(String? address) async {
     final state = _launch.state;
     if (state == null) return _launch.problem;
-    if (!state.answers(address)) await connect(address);
+    if (!state.answers(address)) {
+      await (_attempts[address]?.future ?? connect(address));
+    }
     if (!state.answers(address)) {
       return state.hostProblems.value[address] ??
           'Liquid could not connect to the agent host.';

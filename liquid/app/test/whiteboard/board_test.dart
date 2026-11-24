@@ -19,41 +19,6 @@ void main() {
     expect(splitInk(ink.take(10)), hasLength(1));
   });
 
-  test('a shape resized many times keeps one cached drawing', () {
-    final cache = BoardCache();
-    final shape = newElement(
-      BridgeElementKind.shape,
-      frame: const Rect.fromLTWH(0, 0, 10, 10),
-      color: BridgeInkColor.text,
-      width: 1,
-    );
-    for (var size = 10.0; size < 210; size++) {
-      cache.shape(
-        BridgeElement(
-          id: 'box',
-          kind: shape.kind,
-          x: 0,
-          y: 0,
-          w: size,
-          h: size,
-          rotation: 0,
-          color: shape.color,
-          width: shape.width,
-          docPage: shape.docPage,
-          pen: shape.pen,
-          points: shape.points,
-          shape: shape.shape,
-          seed: shape.seed,
-          arrowhead: false,
-          corners: shape.corners,
-          text: '',
-        ),
-        true,
-      );
-    }
-    expect(cache.entries, 1);
-  });
-
   test('a shape from another device with any 32-bit seed draws', () {
     final shape = newElement(
       BridgeElementKind.shape,

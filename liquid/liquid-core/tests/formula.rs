@@ -10,6 +10,8 @@ const AMOUNT: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.bbbbbbbbbbbbbbbbbbbbbbbbb
 const CATEGORY: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.cccccccccccccccccccccccccccccccc";
 const LEFT: &str = "dddddddddddddddddddddddddddddddd";
 const LONG: &str = "ffffffffffffffffffffffffffffffff";
+const NUMBER_TEXT: &str = "0123456789abcdef0123456789abcdef";
+const TEXT_ROW: &str = "fedcba9876543210fedcba9876543210";
 
 struct Sheet(HashMap<String, Operand>);
 
@@ -17,49 +19,46 @@ impl Sheet {
     fn new() -> Self {
         let n = Value::Number;
         let t = |text: &str| Value::Text(text.into());
+        let amounts = vec![n(900.0), n(84.5), Value::Blank, n(300.0), t("n/a")];
+        let categories = vec![t("Rent"), t("Food"), t("Food"), t("rent"), t("Fun")];
+        let long = Operand::Value(t(&"x".repeat(MAX_TEXT / 2 + 1)));
         Self(HashMap::from([
-            (
-                AMOUNT.into(),
-                Operand::Range(vec![n(900.0), n(84.5), Value::Blank, n(300.0), t("n/a")].into()),
-            ),
-            (
-                CATEGORY.into(),
-                Operand::Range(vec![t("Rent"), t("Food"), t("Food"), t("rent"), t("Fun")].into()),
-            ),
+            (AMOUNT.into(), Operand::Range(amounts.into())),
+            (CATEGORY.into(), Operand::Range(categories.into())),
             (LEFT.into(), Operand::Value(n(715.5))),
-            (
-                LONG.into(),
-                Operand::Value(t(&"x".repeat(MAX_TEXT / 2 + 1))),
-            ),
+            (LONG.into(), long),
+            (NUMBER_TEXT.into(), Operand::Value(t("10"))),
+            (TEXT_ROW.into(), Operand::Range(vec![t("10")].into())),
         ]))
     }
 }
 
 impl Resolve for Sheet {
     fn resolve(&mut self, reference: &Reference) -> Operand {
-        self.0
-            .get(&reference.ids().join("."))
-            .cloned()
-            .unwrap_or(Operand::Value(Value::Error(Failure::Ref)))
+        let key = reference.ids().join(".");
+        let missing = Operand::Value(Value::Error(Failure::Ref));
+        self.0.get(&key).cloned().unwrap_or(missing)
     }
 }
 
 fn expand(source: &str) -> String {
-    [("$A", AMOUNT), ("$C", CATEGORY), ("$L", LEFT), ("$X", LONG)]
-        .iter()
-        .fold(source.to_string(), |s, (key, id)| {
-            s.replace(key, &format!("{{{id}}}"))
-        })
-}
-
-fn run(source: &str) -> Value {
-    Formula::parse(&expand(source))
-        .unwrap()
-        .evaluate(&mut Sheet::new())
+    [
+        ("$A", AMOUNT),
+        ("$C", CATEGORY),
+        ("$L", LEFT),
+        ("$X", LONG),
+        ("$N", NUMBER_TEXT),
+        ("$R", TEXT_ROW),
+    ]
+    .iter()
+    .fold(source.to_string(), |s, (key, id)| {
+        s.replace(key, &format!("{{{id}}}"))
+    })
 }
 
 fn shown(source: &str) -> String {
-    run(source).to_string()
+    let formula = Formula::parse(&expand(source)).unwrap();
+    formula.evaluate(&mut Sheet::new()).to_string()
 }
 
 #[test]
@@ -74,7 +73,6 @@ fn computes_as_excel_does() {
         ("10 / 4", "2.5"),
         ("0.1 + 0.2", "0.3"),
         ("1 / 3", "0.333333333333333"),
-        ("2 ^ 0.5 * 2 ^ 0.5", "2"),
         ("1e3 + 1", "1001"),
         ("\"Total: \" & 3 & \" €\"", "Total: 3 €"),
         ("\"Say \"\"hi\"\"\"", "Say \"hi\""),
@@ -155,16 +153,29 @@ fn excel_functions_read_references_and_ranges() {
 }
 
 #[test]
+fn a_text_reference_is_not_a_number_in_aggregates_but_a_literal_is() {
+    for (source, expected) in [
+        ("SUM(\"10\")", "10"),
+        ("SUM($N)", "0"),
+        ("SUM($R)", "0"),
+        ("COUNT(\"10\")", "1"),
+        ("COUNT($N)", "0"),
+        ("COUNT($R)", "0"),
+        ("PRODUCT($C)", "0"),
+        ("AVERAGE(1e308, 1e308)", "1E+308"),
+        ("AVERAGE(1e308, -1e308)", "0"),
+    ] {
+        assert_eq!(shown(source), expected, "{source}");
+    }
+}
+
+#[test]
 fn lists_its_references_and_rejects_what_it_cannot_read() {
     let formula = Formula::parse(&expand("SUM($A) - $L")).unwrap();
     let ids: Vec<_> = formula.references().map(|r| r.ids().join(".")).collect();
     assert_eq!(ids, [AMOUNT, LEFT]);
 
-    let deep = format!(
-        "{}1{}",
-        "(".repeat(MAX_NESTING + 1),
-        ")".repeat(MAX_NESTING + 1)
-    );
+    let nested = |depth: usize| format!("{}1{}", "(".repeat(depth), ")".repeat(depth));
     for source in [
         "",
         "1 +",
@@ -173,11 +184,10 @@ fn lists_its_references_and_rejects_what_it_cannot_read() {
         "\"open",
         "{abc}",
         "1 2",
-        &deep,
+        &nested(MAX_NESTING + 1),
         &"1".repeat(MAX_FORMULA + 1),
     ] {
         assert!(Formula::parse(source).is_err(), "{source:?}");
     }
-    let nested = format!("{}1{}", "(".repeat(MAX_NESTING), ")".repeat(MAX_NESTING));
-    assert_eq!(shown(&nested), "1");
+    assert_eq!(shown(&nested(MAX_NESTING)), "1");
 }

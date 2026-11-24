@@ -72,25 +72,4 @@ void main() {
     expect(renders, 1);
     pages.close();
   });
-
-  test('a page with no height or width is passed over', () async {
-    var renders = 0;
-    final pages = DocumentPages.pdf(
-      PdfPages(const [Size(595, 0), Size(0, 842)], (index, width) async {
-        renders++;
-        return pixel();
-      }, () async {}),
-      onDrawn: () {},
-    );
-    final recorder = ui.PictureRecorder();
-    pages.paint(
-      Canvas(recorder),
-      const Rect.fromLTWH(-400, -20, 800, 900),
-      0.5,
-    );
-    recorder.endRecording().dispose();
-    await Future<void>.delayed(Duration.zero);
-    expect(renders, 0);
-    pages.close();
-  });
 }

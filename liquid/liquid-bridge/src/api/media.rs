@@ -191,12 +191,15 @@ impl LiquidWorkspace {
             .ok_or_else(|| "not found".to_string())
     }
 
-    fn each_part(
+    #[flutter_rust_bridge::frb(ignore)]
+    pub(crate) fn each_part(
         &self,
         id: &AttachmentId,
         mut take: impl FnMut(Vec<u8>) -> Result<(), String>,
     ) -> Result<(), String> {
+        let size = self.size(id)?;
         let mut index = 0;
+        let mut total = 0;
         loop {
             let part = self
                 .state()?
@@ -204,11 +207,16 @@ impl LiquidWorkspace {
                 .attachment_part(id, index)
                 .map_err(message)?;
             let Some(part) = part else {
-                return Ok(());
+                break;
             };
+            total += part.len() as u64;
             take(part)?;
             index += 1;
         }
+        if total != size {
+            return Err("the file changed while it was read".into());
+        }
+        Ok(())
     }
 }
 

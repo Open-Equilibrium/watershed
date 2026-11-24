@@ -4,6 +4,7 @@ import 'package:liquid/src/rust/api/database.dart';
 import 'package:liquid/src/rust/api/workspace.dart';
 import 'package:liquid/src/workspace/workspace_state.dart';
 
+import 'focus_kit.dart';
 import 'page_kit.dart';
 
 void main() {
@@ -14,11 +15,6 @@ void main() {
     expenseRow('r2', 'Electricity', '2026-10-30', 'home', 96, false),
     expenseRow('r3', 'Rent', '2026-10-27', 'home', 950, true),
   ];
-
-  Future<void> tap(WidgetTester tester, Finder target) async {
-    await tester.tap(target);
-    await tester.pumpAndSettle();
-  }
 
   List<String> names(WidgetTester tester) {
     final shown = {
@@ -33,25 +29,13 @@ void main() {
     (view) => view.kind == BridgeBlockKind.database,
   );
 
-  testWidgets('the note names the Table and opens it', (tester) async {
-    await kit.show(tester, [TablePart(rows)]);
-    final note = find.byKey(const Key('table note'));
-    expect(
-      find.descendant(of: note, matching: find.byType(RichText)),
-      findsOneWidget,
-    );
-    expect(
-      tester
-          .widget<RichText>(
-            find.descendant(of: note, matching: find.byType(RichText)),
-          )
-          .text
-          .toPlainText(),
-      'Table: Expenses',
-    );
-    await tap(tester, note);
-    expect(kit.workspace.open.value?.table, view().block);
-  });
+  Future<void> deleteView(WidgetTester tester) async {
+    await tap(tester, find.byKey(const Key('View actions')));
+    await tap(tester, find.text('Delete View'));
+  }
+
+  List<BridgeView> viewsOf(String block) =>
+      kit.fake.views[kit.page]!.where((shown) => shown.block == block).toList();
 
   testWidgets('a click on a column sorts it, then reverses, then clears', (
     tester,
@@ -84,18 +68,8 @@ void main() {
     expect(names(tester), ['Electricity', 'Rent']);
     expect(kit.inTable(find.text('2 of 3 rows')), findsOneWidget);
     expect(view().tabs.first.filter, isNull);
-    expect(
-      kit.fake.applied.where(
-        (applied) => applied.kind == BridgeMutationKind.setTabFilter,
-      ),
-      isEmpty,
-    );
+    expect(kit.applied(BridgeMutationKind.setTabFilter), isEmpty);
   });
-
-  Future<void> deleteView(WidgetTester tester) async {
-    await tap(tester, find.byKey(const Key('View actions')));
-    await tap(tester, find.text('Delete View'));
-  }
 
   testWidgets('deleting a View while another shows the Table asks nothing', (
     tester,
@@ -119,16 +93,16 @@ void main() {
     );
     await deleteView(tester);
     expect(find.byType(Dialog), findsNothing);
-    expect(
-      kit.fake.views[kit.page]!.any((shown) => shown.block == table),
-      false,
-    );
+    expect(viewsOf(table), isEmpty);
     expect(kit.fake.tables.map((table) => table.id), [table]);
   });
 
-  for (final deleteTable in [false, true]) {
-    testWidgets('the last View asks first, then deletes '
-        '${deleteTable ? 'the Table too' : 'only the View'}', (tester) async {
+  for (final (outcome, button, viewGone, tableGone) in [
+    ('deletes only the View', 'Delete View', true, false),
+    ('deletes the Table too', 'Delete Table too', true, true),
+    ('cancel keeps the last View', 'Cancel', false, false),
+  ]) {
+    testWidgets('the last View asks first, then $outcome', (tester) async {
       await kit.show(tester, [TablePart(rows)]);
       final table = view().block;
       await deleteView(tester);
@@ -137,30 +111,14 @@ void main() {
         find.textContaining('The Table and its 3 rows stay in Tables'),
         findsOneWidget,
       );
-      await tap(
-        tester,
-        find.text(deleteTable ? 'Delete Table too' : 'Delete View'),
-      );
-      expect(
-        kit.fake.views[kit.page]!.where((shown) => shown.block == table),
-        isEmpty,
-      );
+      await tap(tester, find.text(button));
+      expect(viewsOf(table), viewGone ? isEmpty : hasLength(1));
       expect(
         kit.fake.tables.map((table) => table.id),
-        deleteTable ? isEmpty : [table],
+        tableGone ? isEmpty : [table],
       );
     });
   }
-
-  testWidgets('cancel keeps the last View', (tester) async {
-    await kit.show(tester, [TablePart(rows)]);
-    await deleteView(tester);
-    await tap(tester, find.text('Cancel'));
-    expect(
-      kit.fake.views[kit.page]!.where((shown) => shown.block == view().block),
-      hasLength(1),
-    );
-  });
 
   testWidgets('a View whose Table was deleted says so', (tester) async {
     await kit.show(tester, [TablePart(rows)]);

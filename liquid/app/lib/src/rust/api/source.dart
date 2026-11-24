@@ -122,6 +122,7 @@ class BridgeSourceFile {
   final List<BridgeColumn> columns;
   final List<List<String>> rows;
   final String? text;
+  final Uint8List? bytes;
 
   const BridgeSourceFile({
     required this.read,
@@ -133,6 +134,7 @@ class BridgeSourceFile {
     required this.columns,
     required this.rows,
     this.text,
+    this.bytes,
   });
 
   @override
@@ -145,7 +147,8 @@ class BridgeSourceFile {
       shown.hashCode ^
       columns.hashCode ^
       rows.hashCode ^
-      text.hashCode;
+      text.hashCode ^
+      bytes.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -160,7 +163,8 @@ class BridgeSourceFile {
           shown == other.shown &&
           columns == other.columns &&
           rows == other.rows &&
-          text == other.text;
+          text == other.text &&
+          bytes == other.bytes;
 }
 
 enum BridgeSourceKind { file, folder }

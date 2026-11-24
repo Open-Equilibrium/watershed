@@ -285,6 +285,8 @@ class _WriterModelPaneState extends State<WriterModelPane> {
   List<BridgeProvider>? _providers;
   BridgeModelChoice? _choice;
   String? _problem;
+  int _generation = 0;
+  Future<void> _saves = Future.value();
 
   @override
   void initState() {
@@ -309,14 +311,17 @@ class _WriterModelPaneState extends State<WriterModelPane> {
   }
 
   Future<void> _set(BridgeModelChoice next) async {
+    final generation = ++_generation;
     setState(() {
       _choice = next;
       _problem = null;
     });
+    final save = _saves.then((_) => widget.project.setWriterModel(next));
+    _saves = save.catchError((_) {});
     try {
-      await widget.project.setWriterModel(next);
+      await save;
     } on Object catch (error) {
-      if (mounted) {
+      if (mounted && generation == _generation) {
         setState(() => _problem = 'Could not save the writer model: $error');
       }
     }

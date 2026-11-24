@@ -87,22 +87,24 @@ class _LiquidAppState extends State<LiquidApp> {
               UiScale(scale: chosen.textSize.scale, child: child!),
           home: ListenableBuilder(
             listenable: widget.workspaces ?? const _Still(),
-            builder: (context, _) => AgentShell(
-              key: ValueKey((current, widget.workspaces?.current)),
-              state: current.state,
-              info: current.info,
-              workspace: widget.workspaces?.current ?? widget.workspace,
-              workspaceProblem:
-                  widget.workspaces?.problem ?? widget.workspaceProblem,
-              workspaces: widget.workspaces,
-              agentProblem: current.problem,
-              shortcuts: widget.shortcuts,
-              diffSettings: widget.diffSettings,
-              cardSettings: widget.cardSettings,
-              appearance: appearance,
-              agentHosts: widget.agentHosts,
-              settings: _settings,
-            ),
+            builder: (context, _) => widget.workspaces?.switching ?? false
+                ? const SizedBox.shrink()
+                : AgentShell(
+                    key: ValueKey((current, widget.workspaces?.current)),
+                    state: current.state,
+                    info: current.info,
+                    workspace: widget.workspaces?.current ?? widget.workspace,
+                    workspaceProblem:
+                        widget.workspaces?.problem ?? widget.workspaceProblem,
+                    workspaces: widget.workspaces,
+                    agentProblem: current.problem,
+                    shortcuts: widget.shortcuts,
+                    diffSettings: widget.diffSettings,
+                    cardSettings: widget.cardSettings,
+                    appearance: appearance,
+                    agentHosts: widget.agentHosts,
+                    settings: _settings,
+                  ),
           ),
         ),
       ),

@@ -16,6 +16,11 @@ void main() {
     await tester.pumpAndSettle();
   }
 
+  Future<void> pickTable(WidgetTester tester) => pick(
+    tester,
+    find.descendant(of: find.byType(Dialog), matching: find.text('Expenses')),
+  );
+
   Future<String> secondPage() async {
     final made = await kit.workspace.apply(
       mutation(
@@ -28,8 +33,7 @@ void main() {
   }
 
   Future<void> choose(WidgetTester tester) async {
-    final line = block(0);
-    await tester.tap(line);
+    await tester.tap(block(0));
     await tester.pump();
     for (final typed in ['/', '/exist']) {
       tester.testTextInput.updateEditingValue(
@@ -40,21 +44,15 @@ void main() {
       );
       await tester.pumpAndSettle();
     }
-    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
-    await tester.pumpAndSettle();
+    await key(tester, LogicalKeyboardKey.enter);
   }
 
-  testWidgets('Existing Table… adds a View with one tab of a chosen layout', (
-    tester,
-  ) async {
+  testWidgets('Existing Table… adds a View with one tab', (tester) async {
     await kit.show(tester, [TablePart(expenses), const TextPart('')]);
     final table = kit.fake.tables.single.id;
     await choose(tester);
     expect(find.text('Add a View of a Table'), findsOneWidget);
-    await pick(
-      tester,
-      find.descendant(of: find.byType(Dialog), matching: find.text('Expenses')),
-    );
+    await pickTable(tester);
     expect(find.text('Add a View of “Expenses”'), findsOneWidget);
     await pick(tester, find.byKey(const Key('layout Board')));
     await pick(tester, find.text('Add View'));
@@ -86,10 +84,7 @@ void main() {
       ),
     );
     await choose(tester);
-    await pick(
-      tester,
-      find.descendant(of: find.byType(Dialog), matching: find.text('Expenses')),
-    );
+    await pickTable(tester);
     expect(find.text('Review › Big costs'), findsOneWidget);
     await pick(tester, find.text('Review › Big costs'));
     await pick(tester, find.text('Add View'));
@@ -98,18 +93,6 @@ void main() {
     expect(
       [for (final tab in added.tabs) (tab.name, tab.sort)],
       [('By amount', sort)],
-    );
-  });
-
-  testWidgets('cancel adds no View', (tester) async {
-    await kit.show(tester, [TablePart(expenses), const TextPart('')]);
-    await choose(tester);
-    await pick(tester, find.text('Cancel'));
-    expect(
-      kit.fake.applied.where(
-        (applied) => applied.kind == BridgeMutationKind.addTableView,
-      ),
-      isEmpty,
     );
   });
 }

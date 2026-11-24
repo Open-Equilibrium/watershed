@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 
+import '../controls.dart';
 import '../rust/api/database.dart';
 import '../theme/icons.dart';
 import '../theme/theme.dart';
@@ -156,14 +157,9 @@ class _SelectPickerState extends State<SelectPicker> {
         ),
       ),
     );
-    return Container(
+    return FloatingPanel(
       key: const Key('select picker'),
       width: 240,
-      decoration: BoxDecoration(
-        color: ws.surface,
-        borderRadius: BorderRadius.circular(WsMetrics.radiusLg),
-        boxShadow: ws.shadow,
-      ),
       clipBehavior: Clip.antiAlias,
       child: DefaultTextStyle.merge(
         style: TextStyle(fontSize: WsMetrics.fsUi, color: ws.text),
@@ -427,14 +423,9 @@ class _DatePickerState extends State<DatePicker> {
       );
     }
 
-    return Container(
+    return FloatingPanel(
       key: const Key('date picker'),
       width: 244,
-      decoration: BoxDecoration(
-        color: ws.surface,
-        borderRadius: BorderRadius.circular(WsMetrics.radiusLg),
-        boxShadow: ws.shadow,
-      ),
       clipBehavior: Clip.antiAlias,
       child: SingleChildScrollView(
         padding: const EdgeInsets.all(WsMetrics.space2),

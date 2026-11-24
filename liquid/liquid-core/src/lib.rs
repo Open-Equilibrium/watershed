@@ -13,6 +13,8 @@ mod order;
 mod patch;
 mod purge;
 mod revision;
+mod revision_restore;
+mod revision_undo;
 mod role;
 mod search;
 mod sort_key;
@@ -21,6 +23,13 @@ mod store;
 mod tab;
 mod total;
 mod workspace;
+mod workspace_commit;
+mod workspace_index;
+mod workspace_page;
+mod workspace_read;
+mod workspace_table;
+mod workspace_view;
+mod workspace_write;
 
 pub use attachment::{Attachment, AttachmentId, MAX_ATTACHMENT, Media, PART, Upload};
 pub use automation::{

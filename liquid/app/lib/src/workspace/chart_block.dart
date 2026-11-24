@@ -4,6 +4,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart' show NumberFormat;
 
+import '../controls.dart';
 import '../rust/api/chart.dart';
 import '../rust/api/database.dart';
 import '../rust/api/workspace.dart';
@@ -11,6 +12,7 @@ import '../theme/icons.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
 import 'anchored_menu.dart';
+import 'block_title_field.dart';
 import 'explorer.dart' show untitled;
 import 'follow.dart';
 import 'page_views.dart';
@@ -221,36 +223,39 @@ class _ChartBlockState extends State<ChartBlock> {
     }
   }
 
-  void _set(BridgeChartSetup setup) {
-    unawaited(
-      widget.views
-          .write(
-            mutation(
-              BridgeMutationKind.setChart,
-              page: _page,
-              block: _block,
-              chart: setup,
-            ),
-            [_block],
-          )
-          .then((_) {}, onError: (Object _) {}),
-    );
+  Future<void> _writes = Future.value();
+
+  void _set(BridgeChartSetup Function(BridgeChartSetup stored) edit) {
+    final run = _writes.then((_) async {
+      final stored = await _state
+          .read(query(BridgeQueryKind.chart, page: _page, block: _block))
+          .then((read) => read.chart, onError: (Object _) => _chart);
+      await widget.views.write(
+        mutation(
+          BridgeMutationKind.setChart,
+          page: _page,
+          block: _block,
+          chart: edit(stored?.setup ?? _defaultSetup),
+        ),
+        [_block],
+      );
+    });
+    _writes = run.then<void>((_) {}, onError: (Object _) {});
   }
 
-  BridgeChartSetup get _setup =>
-      _chart?.setup ??
-      const BridgeChartSetup(
-        kind: BridgeChartKind.bar,
-        value: BridgeChartValue.count,
-      );
+  static const _defaultSetup = BridgeChartSetup(
+    kind: BridgeChartKind.bar,
+    value: BridgeChartValue.count,
+  );
 
-  BridgeChartSetup _with({
+  BridgeChartSetup get _setup => _chart?.setup ?? _defaultSetup;
+
+  BridgeChartSetup Function(BridgeChartSetup) _with({
     BridgeChartKind? kind,
     (String?, String?, String?, String?)? source,
     (String?,)? group,
     (BridgeChartValue, String?)? value,
-  }) {
-    final setup = _setup;
+  }) => (setup) {
     final (table, page, block, file) =
         source ?? (setup.table, setup.page, setup.block, setup.source);
     final (measure, field) = value ?? (setup.value, setup.field);
@@ -264,7 +269,7 @@ class _ChartBlockState extends State<ChartBlock> {
       value: measure,
       field: field,
     );
-  }
+  };
 
   void _togglePanel() {
     if (_panel.isShowing) {
@@ -285,6 +290,7 @@ class _ChartBlockState extends State<ChartBlock> {
       controller: _panel,
       group: _panel,
       beside: chartPanelWidth,
+      minLeft: WsMetrics.widthSide,
       height: 600,
       onTapOutside: (_) {
         if (_panel.isShowing) setState(_panel.hide);
@@ -323,18 +329,9 @@ class _ChartBlockState extends State<ChartBlock> {
                 Icon(LucideIcons.barChart3, size: 16, color: ws.textFaint),
                 const SizedBox(width: WsMetrics.space3),
                 Expanded(
-                  child: TextField(
+                  child: BlockTitleField(
                     controller: _name.take(),
                     focusNode: _nameFocus,
-                    style: TextStyle(
-                      fontSize: WsMetrics.fsProse,
-                      fontWeight: WsMetrics.fwSemibold,
-                      color: ws.text,
-                    ),
-                    decoration: InputDecoration.collapsed(
-                      hintText: untitled,
-                      hintStyle: TextStyle(color: ws.textFaint),
-                    ),
                   ),
                 ),
                 AnchoredMenu(
@@ -365,7 +362,8 @@ class _ChartBlockState extends State<ChartBlock> {
                   behavior: HitTestBehavior.opaque,
                   onTap: _togglePanel,
                   child: Text(switch (chart?.source) {
-                    final source? => 'from $source',
+                    final source? =>
+                      'from ${source.isEmpty ? untitled : source}',
                     null => 'Choose data',
                   }, style: faint),
                 ),
@@ -463,15 +461,10 @@ class ChoiceList extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final ws = context.ws;
-    return Container(
+    return FloatingPanel(
       width: 220,
       constraints: const BoxConstraints(maxHeight: 320),
       padding: const EdgeInsets.all(WsMetrics.space1),
-      decoration: BoxDecoration(
-        color: ws.surface,
-        borderRadius: BorderRadius.circular(WsMetrics.radiusLg),
-        boxShadow: ws.shadow,
-      ),
       child: SingleChildScrollView(
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -578,17 +571,12 @@ class ChartPanel extends StatelessWidget {
     final caption = TextStyle(fontSize: WsMetrics.fsSmall, color: ws.textFaint);
     final table = setup?.table != null;
     final file = setup?.source != null;
-    return Container(
+    return FloatingPanel(
       key: const Key('chart panel'),
       width: chartPanelWidth,
       padding: const EdgeInsets.symmetric(
         horizontal: WsMetrics.space5,
         vertical: WsMetrics.space4,
-      ),
-      decoration: BoxDecoration(
-        color: ws.surface,
-        borderRadius: BorderRadius.circular(WsMetrics.radiusLg),
-        boxShadow: ws.shadow,
       ),
       child: DefaultTextStyle.merge(
         style: TextStyle(fontSize: WsMetrics.fsCompact, color: ws.text),

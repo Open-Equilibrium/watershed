@@ -24,6 +24,13 @@ fn sequenced(sequence: u64, event: AgentEvent) -> BridgeEvent {
     BridgeEvent::from(ThreadEvent { sequence, event })
 }
 
+fn listed(diff: &str) -> Vec<(String, BridgeChangeStatus, i64, i64)> {
+    convert::diff_files(diff)
+        .iter()
+        .map(|(file, _)| (file.path.clone(), file.status, file.added, file.removed))
+        .collect()
+}
+
 #[test]
 fn a_diff_lists_each_file_with_its_status_and_line_counts() {
     let diff = "\
@@ -56,40 +63,26 @@ diff --git a/lib.rs b/lib.rs
 @@ -1 +1 @@
 --- a
 +++ b
-";
-    let files = convert::diff_files(diff);
-    let listed: Vec<_> = files
-        .iter()
-        .map(|(file, _)| (file.path.as_str(), file.status, file.added, file.removed))
-        .collect();
-    assert_eq!(
-        listed,
-        vec![
-            ("added.txt", BridgeChangeStatus::Added, 2, 0),
-            ("gone.txt", BridgeChangeStatus::Deleted, 0, 1),
-            ("new.txt", BridgeChangeStatus::Renamed, 1, 1),
-            ("lib.rs", BridgeChangeStatus::Modified, 1, 1),
-        ]
-    );
-    assert!(files[2].1.starts_with("diff --git a/old.txt b/new.txt\n"));
-    assert!(files[2].1.ends_with("+is\n"));
-}
-
-#[test]
-fn a_patch_file_that_quotes_a_git_header_stays_one_file() {
-    let diff = "\
 diff --git a/fix.patch b/fix.patch
---- a/fix.patch
+new file mode 100644
+--- /dev/null
 +++ b/fix.patch
 @@ -0,0 +1 @@
 +diff --git a/src/x.rs b/src/x.rs
 ";
+    assert_eq!(
+        listed(diff),
+        [
+            ("added.txt".to_owned(), BridgeChangeStatus::Added, 2, 0),
+            ("gone.txt".to_owned(), BridgeChangeStatus::Deleted, 0, 1),
+            ("new.txt".to_owned(), BridgeChangeStatus::Renamed, 1, 1),
+            ("lib.rs".to_owned(), BridgeChangeStatus::Modified, 1, 1),
+            ("fix.patch".to_owned(), BridgeChangeStatus::Added, 1, 0),
+        ]
+    );
     let files = convert::diff_files(diff);
-    let listed: Vec<_> = files
-        .iter()
-        .map(|(file, _)| (file.path.as_str(), file.added))
-        .collect();
-    assert_eq!(listed, vec![("fix.patch", 1)]);
+    assert!(files[2].1.starts_with("diff --git a/old.txt b/new.txt\n"));
+    assert!(files[2].1.ends_with("+is\n"));
 }
 
 #[test]
@@ -165,23 +158,18 @@ new file mode 100644
 @@ -0,0 +1 @@
 +x
 "#;
-    let files = convert::diff_files(diff);
-    let listed: Vec<_> = files
-        .iter()
-        .map(|(file, _)| (file.path.as_str(), file.status, file.added, file.removed))
-        .collect();
     assert_eq!(
-        listed,
-        vec![
-            ("café.txt", BridgeChangeStatus::Modified, 1, 1),
-            ("tab\tname", BridgeChangeStatus::Added, 1, 0),
-            ("q\"uote", BridgeChangeStatus::Added, 1, 0),
-            ("back\\slash", BridgeChangeStatus::Added, 1, 0),
-            ("nëw.txt", BridgeChangeStatus::Renamed, 1, 1),
-            ("x\u{202e}y.txt", BridgeChangeStatus::Added, 1, 0),
+        listed(diff),
+        [
+            ("café.txt".to_owned(), BridgeChangeStatus::Modified, 1, 1),
+            ("tab\tname".to_owned(), BridgeChangeStatus::Added, 1, 0),
+            ("q\"uote".to_owned(), BridgeChangeStatus::Added, 1, 0),
+            ("back\\slash".to_owned(), BridgeChangeStatus::Added, 1, 0),
+            ("nëw.txt".to_owned(), BridgeChangeStatus::Renamed, 1, 1),
+            ("x\u{202e}y.txt".to_owned(), BridgeChangeStatus::Added, 1, 0),
         ]
     );
-    assert_eq!(files[5].0.shown, "x<U+202E>y.txt");
+    assert_eq!(convert::diff_files(diff)[5].0.shown, "x<U+202E>y.txt");
 }
 
 #[test]
@@ -240,7 +228,7 @@ fn a_task_list_crosses_with_its_steps_and_each_change_of_them() {
 }
 
 #[test]
-fn turn_and_item_events_cross_with_their_turn_item_and_text() {
+fn turn_item_and_model_events_cross_with_their_turn_item_text_and_tokens() {
     let turn = TurnId(2);
     let started = sequenced(
         1,
@@ -341,7 +329,7 @@ fn turn_and_item_events_cross_with_their_turn_item_and_text() {
     .collect();
     assert_eq!(
         kinds,
-        vec![
+        [
             (BridgeEventKind::TurnStarted, Some(2), 4),
             (BridgeEventKind::TurnCompleted, Some(2), 5),
             (BridgeEventKind::TurnAborted, Some(2), 6),
@@ -349,14 +337,11 @@ fn turn_and_item_events_cross_with_their_turn_item_and_text() {
             (BridgeEventKind::RolledBack, None, 8),
         ]
     );
-}
 
-#[test]
-fn a_finished_model_request_crosses_with_its_tokens() {
-    let event = sequenced(
+    let model = sequenced(
         9,
         AgentEvent::ModelRequestCompleted {
-            turn: TurnId(2),
+            turn,
             usage: Usage {
                 input: 3,
                 output: 4,
@@ -366,10 +351,10 @@ fn a_finished_model_request_crosses_with_its_tokens() {
             },
         },
     );
-    assert_eq!(event.kind, BridgeEventKind::ModelRequestCompleted);
-    assert_eq!(event.turn, Some(2));
+    assert_eq!(model.kind, BridgeEventKind::ModelRequestCompleted);
+    assert_eq!(model.turn, Some(2));
     assert_eq!(
-        event.usage,
+        model.usage,
         Some(BridgeUsage {
             input: 3,
             output: 4,
@@ -527,6 +512,37 @@ fn approvals_and_questions_write_out_the_hidden_characters_the_chat_shows() {
     );
     assert_eq!(question.question, "Which?<U+202E>");
     assert_eq!(question.descriptions, ["The<U+202E> first"]);
+
+    let questions = vec![Question {
+        id: "pick".to_owned(),
+        header: "Pick".to_owned(),
+        question: "Which?".to_owned(),
+        options: vec![
+            ("keep\u{202e}".to_owned(), String::new()),
+            ("drop".to_owned(), String::new()),
+        ],
+        multi_select: true,
+        custom: true,
+    }];
+    let shown = convert::request(PendingRequest {
+        id: RequestId("r".to_owned()),
+        turn: TurnId(1),
+        request: Request::Questions(questions.clone()),
+    });
+    assert_eq!(shown.questions[0].options, ["keep<U+202E>", "drop"]);
+    assert_eq!(
+        convert::answer_values(
+            &questions,
+            "pick",
+            vec!["keep<U+202E>".to_owned(), "drop".to_owned()],
+            false
+        ),
+        ["keep\u{202e}", "drop"]
+    );
+    assert_eq!(
+        convert::answer_values(&questions, "pick", vec!["keep<U+202E>".to_owned()], true),
+        ["keep<U+202E>"]
+    );
 }
 
 #[test]
@@ -569,7 +585,7 @@ fn a_snapshot_carries_its_turns_each_with_its_status_and_its_transcript() {
     assert_eq!(snapshot.sequence, 9);
     assert_eq!(
         snapshot.turns.iter().map(|t| t.status).collect::<Vec<_>>(),
-        vec![
+        [
             BridgeTurnStatus::Queued,
             BridgeTurnStatus::Running,
             BridgeTurnStatus::Completed,
@@ -587,7 +603,7 @@ fn a_snapshot_carries_its_turns_each_with_its_status_and_its_transcript() {
 }
 
 #[test]
-fn statistics_cross_with_each_model_tool_and_turn() {
+fn statistics_and_the_context_window_cross_with_each_model_tool_and_turn() {
     let usage = Usage {
         input: 5,
         output: 6,
@@ -630,7 +646,7 @@ fn statistics_cross_with_each_model_tool_and_turn() {
     assert_eq!(statistics.models[0].usage.reasoning, 9);
     assert_eq!(
         statistics.tools,
-        vec![BridgeToolCalls {
+        [BridgeToolCalls {
             name: "Bash".to_owned(),
             succeeded: 3,
             failed: 1,
@@ -641,7 +657,7 @@ fn statistics_cross_with_each_model_tool_and_turn() {
     );
     assert_eq!(
         statistics.turns,
-        vec![BridgeTurnStatistics {
+        [BridgeTurnStatistics {
             number: 4,
             prompt: "First line".to_owned(),
             started_ms: Some(100),
@@ -665,10 +681,7 @@ fn statistics_cross_with_each_model_tool_and_turn() {
         (statistics.started_ms, statistics.ended_ms),
         (Some(100), Some(200))
     );
-}
 
-#[test]
-fn the_context_window_crosses_with_what_is_known_of_it() {
     assert_eq!(
         convert::context(Context {
             tokens: Some(10),
@@ -723,20 +736,16 @@ fn providers_and_model_choices_cross_with_their_options_both_ways() {
         values: vec!["high".to_owned()],
     };
     let core: ModelChoice = convert::to_model_choice(choice.clone()).expect("matching pairs");
-    assert_eq!(core.options, vec![("effort".to_owned(), "high".to_owned())]);
+    assert_eq!(core.options, [("effort".to_owned(), "high".to_owned())]);
     assert_eq!(convert::model_choice(&core), choice);
-}
 
-#[test]
-fn a_model_choice_whose_option_ids_and_values_differ_in_number_is_refused() {
-    let choice = |option_ids: &[&str], values: &[&str]| BridgeModelChoice {
-        instance: "scripted".to_owned(),
-        model: "m1".to_owned(),
+    let unpaired = |option_ids: &[&str], values: &[&str]| BridgeModelChoice {
         option_ids: option_ids.iter().map(|id| (*id).to_owned()).collect(),
         values: values.iter().map(|value| (*value).to_owned()).collect(),
+        ..choice.clone()
     };
-    assert!(convert::to_model_choice(choice(&["effort", "speed"], &["high"])).is_err());
-    assert!(convert::to_model_choice(choice(&["effort"], &["high", "fast"])).is_err());
+    assert!(convert::to_model_choice(unpaired(&["effort", "speed"], &["high"])).is_err());
+    assert!(convert::to_model_choice(unpaired(&["effort"], &["high", "fast"])).is_err());
 }
 
 #[test]
@@ -909,7 +918,7 @@ fn a_pull_request_crosses_with_its_checks_action_and_prompts_with_hidden_charact
     assert_eq!(detail.title, "Add<U+200B>it");
     assert_eq!(
         detail.checks,
-        vec![BridgePullRequestCheck {
+        [BridgePullRequestCheck {
             name: "build<U+202E>".to_owned(),
             status: "failure".to_owned(),
             description: Some("exit<U+200B>1".to_owned()),
@@ -926,38 +935,4 @@ fn a_pull_request_crosses_with_its_checks_action_and_prompts_with_hidden_charact
     assert!(detail.resolve_prompt.starts_with(
         "PR #42 (https://example.invalid/42) conflicts with its base branch `main`. Its branch `feature` is"
     ));
-}
-
-#[test]
-fn a_question_s_options_show_hidden_characters_and_answer_with_the_agent_s_labels() {
-    let questions = vec![Question {
-        id: "pick".to_owned(),
-        header: "Pick".to_owned(),
-        question: "Which?".to_owned(),
-        options: vec![
-            ("keep\u{202e}".to_owned(), String::new()),
-            ("drop".to_owned(), String::new()),
-        ],
-        multi_select: true,
-        custom: true,
-    }];
-    let shown = convert::request(PendingRequest {
-        id: RequestId("r".to_owned()),
-        turn: TurnId(1),
-        request: Request::Questions(questions.clone()),
-    });
-    assert_eq!(shown.questions[0].options, vec!["keep<U+202E>", "drop"]);
-    assert_eq!(
-        convert::answer_values(
-            &questions,
-            "pick",
-            vec!["keep<U+202E>".to_owned(), "drop".to_owned()],
-            false
-        ),
-        vec!["keep\u{202e}", "drop"]
-    );
-    assert_eq!(
-        convert::answer_values(&questions, "pick", vec!["keep<U+202E>".to_owned()], true),
-        vec!["keep<U+202E>"]
-    );
 }

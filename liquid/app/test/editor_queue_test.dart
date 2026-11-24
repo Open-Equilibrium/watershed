@@ -47,8 +47,6 @@ void main() {
       final kit = PageKit();
       await kit.show(tester, const []);
       final fake = kit.fake;
-      final workspace = kit.workspace;
-      final page = kit.page;
       fake.delay = () => Duration(milliseconds: random.nextInt(20));
 
       EditableTextState focused() => tester.state<EditableTextState>(
@@ -101,34 +99,30 @@ void main() {
             );
             typed.insert('你');
           case 6:
-            input(inserted('e\u0301'));
-            typed.insert('e\u0301');
+            input(inserted('é'));
+            typed.insert('é');
           default:
             final letter = String.fromCharCode(97 + random.nextInt(26));
             input(inserted(letter));
             typed.insert(letter);
         }
       }
-      switch (end) {
-        case _End.stay:
-          break;
-        case _End.leave:
-          await tester.tap(find.byTooltip('Settings'));
-        case _End.quit:
-          var drained = false;
-          workspace.drain().then((_) => drained = true);
-          for (var wait = 0; wait < 200 && !drained; wait++) {
-            await tester.pump(const Duration(milliseconds: 20));
-          }
-          expect(drained, isTrue);
-          expect(fake.textsOf(page), typed.lines);
-          return;
+      if (end == _End.leave) await tester.tap(find.byTooltip('Settings'));
+      if (end == _End.quit) {
+        var drained = false;
+        kit.workspace.drain().then((_) => drained = true);
+        for (var wait = 0; wait < 200 && !drained; wait++) {
+          await tester.pump(const Duration(milliseconds: 20));
+        }
+        expect(drained, isTrue);
+        expect(fake.textsOf(kit.page), typed.lines);
+        return;
       }
       for (var frame = 0; frame < 300; frame++) {
         await tester.pump(const Duration(milliseconds: 16));
       }
       await tester.pumpAndSettle();
-      expect(fake.textsOf(page), typed.lines);
+      expect(fake.textsOf(kit.page), typed.lines);
       if (end == _End.stay) {
         final field = focused();
         expect(field.textEditingValue.text, typed.lines[typed.line]);

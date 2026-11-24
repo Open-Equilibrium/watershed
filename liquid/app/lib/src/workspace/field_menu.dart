@@ -83,15 +83,10 @@ class _FieldMenuState extends State<FieldMenu> {
   Widget build(BuildContext context) {
     final ws = context.ws;
     final kind = widget.field.kind;
-    return Container(
+    return FloatingPanel(
       key: const Key('field menu'),
       width: 230,
       padding: const EdgeInsets.all(WsMetrics.space2),
-      decoration: BoxDecoration(
-        color: ws.surface,
-        borderRadius: BorderRadius.circular(WsMetrics.radiusLg),
-        boxShadow: ws.shadow,
-      ),
       child: DefaultTextStyle.merge(
         style: TextStyle(fontSize: WsMetrics.fsUi, color: ws.text),
         child: Column(

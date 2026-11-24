@@ -1,4 +1,3 @@
-import 'dart:math';
 import 'dart:ui';
 
 Path svgPath(String data) {
@@ -83,7 +82,7 @@ Path svgPath(String data) {
         path.arcToPoint(
           Offset(x, y),
           radius: Radius.elliptical(radiusX, radiusY),
-          rotation: rotation * pi / 180,
+          rotation: rotation,
           largeArc: largeArc,
           clockwise: clockwise,
         );

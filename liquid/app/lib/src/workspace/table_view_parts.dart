@@ -63,19 +63,22 @@ class SetupControl extends StatelessWidget {
     required this.label,
     required this.value,
     required this.onTap,
+    this.disabledReason,
   });
 
   final IconData icon;
   final String label;
   final String? value;
-  final VoidCallback onTap;
+  final VoidCallback? onTap;
+  final String? disabledReason;
 
   @override
   Widget build(BuildContext context) {
     final ws = context.ws;
     final value = this.value;
-    return Semantics(
+    final control = Semantics(
       button: true,
+      enabled: onTap != null,
       label: value == null ? label : '$label: $value',
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
@@ -124,6 +127,10 @@ class SetupControl extends StatelessWidget {
         ),
       ),
     );
+    final reason = disabledReason;
+    return onTap == null && reason != null
+        ? Tooltip(message: reason, child: control)
+        : control;
   }
 }
 
@@ -160,14 +167,9 @@ class _MoreMenuState extends State<MoreMenu> {
       end: true,
       height: 40.0 * (widget.plain.length + widget.items.length) + 8,
       onTapOutside: (_) => _close(),
-      menu: (_) => Container(
+      menu: (_) => FloatingPanel(
         width: 220,
         padding: const EdgeInsets.all(WsMetrics.space1),
-        decoration: BoxDecoration(
-          color: ws.surface,
-          borderRadius: BorderRadius.circular(WsMetrics.radiusLg),
-          boxShadow: ws.shadow,
-        ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,

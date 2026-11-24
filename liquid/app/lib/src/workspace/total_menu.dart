@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../controls.dart';
 import '../rust/api/database.dart';
 import '../theme/icons.dart';
 import '../theme/theme.dart';
@@ -43,15 +44,10 @@ class TotalMenu extends StatelessWidget {
             total == BridgeTotal.filled)
           total,
     ];
-    return Container(
+    return FloatingPanel(
       key: const Key('total menu'),
       width: 180,
       padding: const EdgeInsets.all(WsMetrics.space1),
-      decoration: BoxDecoration(
-        color: ws.surface,
-        borderRadius: BorderRadius.circular(WsMetrics.radiusLg),
-        boxShadow: ws.shadow,
-      ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,

@@ -1,15 +1,35 @@
-use super::workspace::{Folder, Memory, lisbon, mutation, query};
+use super::workspace::{lisbon, mutation, open, query};
 use crate::api::chart::{BridgeChartKind, BridgeChartSetup, BridgeChartValue};
-use crate::api::replica::LiquidWorkspace;
 use crate::api::source::{BridgeFileView, BridgeRead, BridgeSourceKind};
 use crate::api::workspace::{
     BridgeFound, BridgeMutation, BridgeMutationKind, BridgeQuery, BridgeQueryKind,
 };
 
 #[test]
+fn an_image_source_crosses_the_bridge_with_the_bytes_read_for_it() {
+    let (folder, workspace) = open("source-image");
+    let (area, ..) = lisbon(&workspace);
+    let files = folder.0.join("files");
+    std::fs::create_dir_all(&files).unwrap();
+    std::fs::write(files.join("receipt.png"), b"png bytes").unwrap();
+    std::fs::write(files.join("notes.md"), "# Notes").unwrap();
+    let dir = workspace
+        .add_source(area, None, files.to_str().unwrap().into())
+        .unwrap();
+    let image = workspace
+        .source_file(dir.clone(), "receipt.png".into())
+        .unwrap();
+    assert_eq!(
+        (image.shown, image.bytes.as_deref()),
+        (BridgeFileView::Image, Some(&b"png bytes"[..]))
+    );
+    let notes = workspace.source_file(dir, "notes.md".into()).unwrap();
+    assert_eq!(notes.bytes, None);
+}
+
+#[test]
 fn a_source_crosses_the_bridge_and_feeds_a_chart() {
-    let folder = Folder::new("source");
-    let workspace = LiquidWorkspace::open_with(&folder.0, &Memory::default()).unwrap();
+    let (folder, workspace) = open("source");
     let (area, page, _, view) = lisbon(&workspace);
     let files = folder.0.join("files");
     std::fs::create_dir_all(files.join("drafts")).unwrap();
@@ -182,4 +202,36 @@ fn a_source_crosses_the_bridge_and_feeds_a_chart() {
         .map(|source| source.name)
         .collect();
     assert_eq!(left, ["files"]);
+}
+
+#[test]
+fn a_source_file_refused_for_its_size_or_kind_still_names_its_path() {
+    let (folder, workspace) = open("source-refused");
+    let (area, ..) = lisbon(&workspace);
+    let files = folder.0.join("files");
+    std::fs::create_dir_all(&files).unwrap();
+    let text = files.join("notes.txt");
+    std::fs::write(&text, [0xff, 0xfe, 0x00]).unwrap();
+    let big = files.join("scan.png");
+    std::fs::File::create(&big)
+        .unwrap()
+        .set_len(liquid_core::MAX_SOURCE_FILE + 1)
+        .unwrap();
+    for (path, read) in [
+        (&text, BridgeRead::Unreadable),
+        (&big, BridgeRead::TooLarge),
+    ] {
+        let source = workspace
+            .add_source(area.clone(), None, path.to_str().unwrap().into())
+            .unwrap();
+        let answer = workspace.source_file(source, String::new()).unwrap();
+        assert_eq!(
+            (answer.read, answer.name.as_str(), answer.path.as_str()),
+            (
+                read,
+                path.file_name().unwrap().to_str().unwrap(),
+                path.to_str().unwrap()
+            )
+        );
+    }
 }

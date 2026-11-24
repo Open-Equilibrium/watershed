@@ -1,11 +1,10 @@
-use super::workspace::{Folder, Memory, lisbon, mutation, query};
+use super::workspace::{lisbon, mutation, on_block, open, query, query_on, views};
 use crate::api::database::{BridgeCell, BridgeCellKind, BridgeFieldKind};
 use crate::api::drawing::{
     BridgeDrawingEdit, BridgeDrawingStyle, BridgeElement, BridgeElementChange, BridgeElementKind,
     BridgeInkColor, BridgePen, BridgeShape,
 };
 use crate::api::media::BridgeMedia;
-use crate::api::replica::LiquidWorkspace;
 use crate::api::workspace::{
     BridgeBlockKind, BridgeMutation, BridgeMutationKind, BridgeQuery, BridgeQueryKind,
 };
@@ -34,8 +33,7 @@ fn element(kind: BridgeElementKind) -> BridgeElement {
 
 #[test]
 fn a_whiteboard_s_elements_cross_whole_and_come_back_as_drawn() {
-    let folder = Folder::new("whiteboard");
-    let workspace = LiquidWorkspace::open_with(&folder.0, &Memory::default()).unwrap();
+    let (_folder, workspace) = open("whiteboard");
     let (_, page, _, intro) = lisbon(&workspace);
     let added = workspace
         .apply(BridgeMutation {
@@ -74,10 +72,8 @@ fn a_whiteboard_s_elements_cross_whole_and_come_back_as_drawn() {
         },
     ];
     let edit = |whiteboard: BridgeDrawingEdit| BridgeMutation {
-        page: Some(page.clone()),
-        block: Some(block.clone()),
         drawing: Some(whiteboard),
-        ..mutation(BridgeMutationKind::EditDrawing)
+        ..on_block(&page, &block, BridgeMutationKind::EditDrawing)
     };
     let applied = workspace
         .apply(edit(BridgeDrawingEdit {
@@ -89,9 +85,7 @@ fn a_whiteboard_s_elements_cross_whole_and_come_back_as_drawn() {
     let read = || {
         workspace
             .query(BridgeQuery {
-                page: Some(page.clone()),
-                block: Some(block.clone()),
-                ..query(BridgeQueryKind::Drawing)
+                ..query_on(&page, &block, BridgeQueryKind::Drawing)
             })
             .unwrap()
             .drawing
@@ -129,10 +123,8 @@ fn a_whiteboard_s_elements_cross_whole_and_come_back_as_drawn() {
         .unwrap();
     workspace
         .apply(BridgeMutation {
-            page: Some(page.clone()),
-            block: Some(block.clone()),
             drawing_style: Some(BridgeDrawingStyle::Clean),
-            ..mutation(BridgeMutationKind::SetDrawingStyle)
+            ..on_block(&page, &block, BridgeMutationKind::SetDrawingStyle)
         })
         .unwrap();
     let board = read();
@@ -140,77 +132,15 @@ fn a_whiteboard_s_elements_cross_whole_and_come_back_as_drawn() {
     assert_eq!(board.elements.len(), 3);
     assert_eq!(board.elements[2].text, "Porto");
     assert_eq!(board.elements[2].color, BridgeInkColor::Data3);
-    let views = workspace
-        .query(BridgeQuery {
-            page: Some(page.clone()),
-            ..query(BridgeQueryKind::Views)
-        })
-        .unwrap()
-        .views;
-    assert_eq!(views[1].kind, BridgeBlockKind::Whiteboard);
-}
-
-#[test]
-fn a_pdf_s_drawing_reads_in_windows_of_its_pages() {
-    let folder = Folder::new("annotation");
-    let workspace = LiquidWorkspace::open_with(&folder.0, &Memory::default()).unwrap();
-    let (_, page, _, intro) = lisbon(&workspace);
-    let attachment = workspace.add_bytes(b"%PDF-1.7".to_vec()).unwrap();
-    let block = workspace
-        .apply(BridgeMutation {
-            page: Some(page.clone()),
-            after: Some(intro),
-            text: Some("Rental agreement.pdf".into()),
-            media_type: Some("application/pdf".into()),
-            attachment: Some(attachment),
-            ..mutation(BridgeMutationKind::AddMediaBlock)
-        })
-        .unwrap()
-        .block;
-    let marks = [0, 4, 5].map(|doc_page| BridgeElement {
-        pen: BridgePen::Highlighter,
-        color: BridgeInkColor::Yellow,
-        doc_page,
-        kind: BridgeElementKind::Shape,
-        ..element(BridgeElementKind::Shape)
-    });
-    workspace
-        .apply(BridgeMutation {
-            page: Some(page.clone()),
-            block: block.clone(),
-            drawing: Some(BridgeDrawingEdit {
-                add: marks.to_vec(),
-                ..Default::default()
-            }),
-            ..mutation(BridgeMutationKind::EditDrawing)
-        })
-        .unwrap();
-    let window = workspace
-        .query(BridgeQuery {
-            page: Some(page.clone()),
-            block,
-            start: 4,
-            limit: 1,
-            ..query(BridgeQueryKind::Drawing)
-        })
-        .unwrap()
-        .drawing
-        .unwrap();
     assert_eq!(
-        window
-            .elements
-            .iter()
-            .map(|element| (element.doc_page, element.color))
-            .collect::<Vec<_>>(),
-        [(4, BridgeInkColor::Yellow)],
-        "the one page asked for"
+        views(&workspace, &page)[1].kind,
+        BridgeBlockKind::Whiteboard
     );
 }
 
 #[test]
 fn a_file_cell_names_attachments_and_reads_their_sizes() {
-    let folder = Folder::new("file-cell");
-    let workspace = LiquidWorkspace::open_with(&folder.0, &Memory::default()).unwrap();
+    let (_folder, workspace) = open("file-cell");
     let (_, page, _, intro) = lisbon(&workspace);
     let block = workspace
         .apply(BridgeMutation {

@@ -45,7 +45,7 @@ class _DiffViewState extends State<DiffView> {
   BridgeFileChange? _selected;
   List<DiffLine> _lines = const [];
 
-  List<String> _widest = const [];
+  ({List<String> texts, int columns}) _widest = (texts: const [], columns: 0);
 
   String? _note;
   String? _shownPath;
@@ -59,6 +59,7 @@ class _DiffViewState extends State<DiffView> {
   final _folded = <String>{};
 
   bool _loading = false;
+  bool _requested = false;
 
   final _scroll = ScrollController();
 
@@ -110,17 +111,21 @@ class _DiffViewState extends State<DiffView> {
       _selected = change;
       if (change?.path != _shownPath || _comparison != _shownComparison) {
         _lines = const [];
-        _widest = const [];
+        _widest = (texts: const [], columns: 0);
         _note = null;
       }
     });
-    if (_loading) return;
+    if (_loading) {
+      _requested = true;
+      return;
+    }
     _loading = true;
     try {
       while (mounted) {
         final wanted = _selected;
         final comparison = _comparison;
         if (wanted == null) return;
+        _requested = false;
         String? note;
         var lines = const <DiffLine>[];
         try {
@@ -129,7 +134,10 @@ class _DiffViewState extends State<DiffView> {
         } on Object catch (error) {
           note = 'Could not show the changes: $error';
         }
-        if (!mounted || _selected != wanted || _comparison != comparison) {
+        if (!mounted ||
+            _requested ||
+            _selected != wanted ||
+            _comparison != comparison) {
           continue;
         }
         final keepPosition =

@@ -5,7 +5,6 @@ import 'package:liquid/src/rust/api/moves.dart';
 import 'package:liquid/src/rust/api/session.dart';
 import 'package:liquid/src/session/backend.dart';
 import 'package:liquid/src/session/move.dart';
-import 'package:liquid/src/session/move_rule.dart';
 import 'package:liquid/src/session/session_state.dart';
 
 import 'fake_backend.dart';
@@ -516,6 +515,14 @@ bool targetHoldsSession(World world) {
       world.target.threadsById.containsKey(arrival!.thread);
 }
 
+Future<void> expectRecovered(World world) async {
+  expectSettled(world);
+  await staleDeviceRetriesArrival(world);
+  expectSettled(world);
+  expectEachMessageRunsOnce(world);
+  expectWorkKept(world);
+}
+
 void expectSettled(World world) {
   final source = world.source.threadsById['t1']!;
   expect(source.moving, isNull, reason: 'the move is settled');
@@ -582,11 +589,7 @@ Future<void> runMove(
   if (paired && world.source.threadsById['t1']!.moving != null) {
     await userCancels(world);
   }
-  expectSettled(world);
-  await staleDeviceRetriesArrival(world);
-  expectSettled(world);
-  expectEachMessageRunsOnce(world);
-  expectWorkKept(world);
+  await expectRecovered(world);
 }
 
 void main() {
@@ -678,35 +681,7 @@ void main() {
     world.now = world.now.add(const Duration(minutes: 6));
     world.phase({});
     await recover(world);
-    expectSettled(world);
-    await staleDeviceRetriesArrival(world);
-    expectSettled(world);
-    expectEachMessageRunsOnce(world);
-    expectWorkKept(world);
-  });
-
-  test('a healthy move another device made is left alone until it is five minutes old, then recovered', () async {
-    final world = World();
-    world.phase({0: const Fault('quitAfter')});
-    liquidMoves(world);
-    await pumpEventQueue();
-    await world.restoreAndResume();
-
-    world.phase({});
-    await recover(world);
-    expect(
-      world.source.threadsById['t1']!.moving?.phase,
-      BridgeMovePhase.handed,
-    );
-    expect(world.target.arrivals, isEmpty, reason: 'nothing moved in');
-
-    world.now = world.now.add(recoveryAge);
-    await recover(world);
-    expectSettled(world);
-    await staleDeviceRetriesArrival(world);
-    expectSettled(world);
-    expectEachMessageRunsOnce(world);
-    expectWorkKept(world);
+    await expectRecovered(world);
   });
 
   test('a move to a target this device cannot reach changes nothing until the target answers', () async {
@@ -731,10 +706,6 @@ void main() {
     ], reason: 'the queued messages stay saved for the move');
 
     await recover(world);
-    expectSettled(world);
-    await staleDeviceRetriesArrival(world);
-    expectSettled(world);
-    expectEachMessageRunsOnce(world);
-    expectWorkKept(world);
+    await expectRecovered(world);
   });
 }

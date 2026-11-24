@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../controls.dart';
 import '../theme/icons.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
@@ -45,6 +46,8 @@ class _FormulaFieldState extends State<FormulaField> {
   List<Suggestion> _suggestions = const [];
   int _chosen = 0;
   bool _done = false;
+  late final String _loaded;
+  Future<void>? _inFlight;
 
   @override
   void initState() {
@@ -54,6 +57,7 @@ class _FormulaFieldState extends State<FormulaField> {
       widget.names,
       always: widget.always,
     );
+    _loaded = text;
     _text
       ..always = widget.always
       ..load(text, chips);
@@ -95,7 +99,11 @@ class _FormulaFieldState extends State<FormulaField> {
     next.isEmpty ? _menu.hide() : _menu.show();
   }
 
-  Future<void> _commit() async {
+  Future<void> _commit() =>
+      _inFlight ??= _save().whenComplete(() => _inFlight = null);
+
+  Future<void> _save() async {
+    if (_text.text == _loaded) return _finish();
     final formula = storedFormula(
       _text.text,
       _text.chips,
@@ -181,14 +189,9 @@ class _FormulaFieldState extends State<FormulaField> {
     );
   }
 
-  Widget _list(WsPalette ws) => Container(
+  Widget _list(WsPalette ws) => FloatingPanel(
     width: 280,
     padding: const EdgeInsets.all(WsMetrics.space1),
-    decoration: BoxDecoration(
-      color: ws.surface,
-      borderRadius: BorderRadius.circular(WsMetrics.radiusLg),
-      boxShadow: ws.shadow,
-    ),
     child: Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,

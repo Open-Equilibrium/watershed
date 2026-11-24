@@ -1,6 +1,5 @@
-use super::workspace::{Folder, Memory, lisbon, mutation, query};
+use super::workspace::{lisbon, mutation, on_block, open, query, query_on, views};
 use crate::api::calculation::{BridgeLineSetup, BridgeLineStyle, BridgeValueKind};
-use crate::api::replica::LiquidWorkspace;
 use crate::api::workspace::{
     BridgeBlockKind, BridgeMutation, BridgeMutationKind, BridgeQuery, BridgeQueryKind,
     BridgeResource, BridgeResourceKind,
@@ -16,31 +15,25 @@ fn setup(label: &str, formula: &str, style: BridgeLineStyle) -> Option<BridgeLin
 
 #[test]
 fn a_calculation_block_s_lines_cross_and_come_back_computed() {
-    let folder = Folder::new("calculation");
-    let workspace = LiquidWorkspace::open_with(&folder.0, &Memory::default()).unwrap();
+    let (_folder, workspace) = open("calculation");
     let (_, page, _, intro) = lisbon(&workspace);
-    let added = workspace
+    let block = workspace
         .apply(BridgeMutation {
             page: Some(page.clone()),
             after: Some(intro),
             ..mutation(BridgeMutationKind::AddCalculationBlock)
         })
-        .unwrap();
-    let block = added.block.unwrap();
-    let views = workspace
-        .query(BridgeQuery {
-            page: Some(page.clone()),
-            ..query(BridgeQueryKind::Views)
-        })
         .unwrap()
-        .views;
-    assert_eq!(views[1].kind, BridgeBlockKind::Calculation);
+        .block
+        .unwrap();
+    assert_eq!(
+        views(&workspace, &page)[1].kind,
+        BridgeBlockKind::Calculation
+    );
     let read = || {
         workspace
             .query(BridgeQuery {
-                page: Some(page.clone()),
-                block: Some(block.clone()),
-                ..query(BridgeQueryKind::Calculation)
+                ..query_on(&page, &block, BridgeQueryKind::Calculation)
             })
             .unwrap()
             .lines
@@ -48,12 +41,10 @@ fn a_calculation_block_s_lines_cross_and_come_back_computed() {
     let first = read()[0].id.clone();
     let edit = |kind, line: Option<String>, after: Option<String>, setup| {
         workspace.apply(BridgeMutation {
-            page: Some(page.clone()),
-            block: Some(block.clone()),
             line,
             after,
             line_setup: setup,
-            ..mutation(kind)
+            ..on_block(&page, &block, kind)
         })
     };
     edit(
@@ -146,8 +137,7 @@ fn a_calculation_block_s_lines_cross_and_come_back_computed() {
 #[test]
 fn a_chart_s_setup_crosses_and_its_points_come_back() {
     use crate::api::chart::{BridgeChartKind, BridgeChartSetup, BridgeChartValue};
-    let folder = Folder::new("chart");
-    let workspace = LiquidWorkspace::open_with(&folder.0, &Memory::default()).unwrap();
+    let (_folder, workspace) = open("chart");
     let (_, page, _, intro) = lisbon(&workspace);
     let report = workspace
         .apply(BridgeMutation {
@@ -229,46 +219,31 @@ fn a_chart_s_setup_crosses_and_its_points_come_back() {
             .collect::<Vec<_>>(),
         [("Flights", 420.0)]
     );
-    let views = workspace
-        .query(BridgeQuery {
-            page: Some(page),
-            ..query(BridgeQueryKind::Views)
-        })
-        .unwrap()
-        .views;
-    assert!(views.iter().any(|view| view.kind == BridgeBlockKind::Chart));
+    assert!(
+        views(&workspace, &page)
+            .iter()
+            .any(|view| view.kind == BridgeBlockKind::Chart)
+    );
 }
 
 #[test]
 fn a_math_block_crosses_as_its_latex() {
-    let folder = Folder::new("math");
-    let workspace = LiquidWorkspace::open_with(&folder.0, &Memory::default()).unwrap();
+    let (_folder, workspace) = open("math");
     let (_, page, block, _) = lisbon(&workspace);
     workspace
         .apply(BridgeMutation {
-            page: Some(page.clone()),
-            block: Some(block.clone()),
-            ..mutation(BridgeMutationKind::TurnIntoMath)
+            ..on_block(&page, &block, BridgeMutationKind::TurnIntoMath)
         })
         .unwrap();
     let read = |kind| {
         workspace
             .query(BridgeQuery {
-                page: Some(page.clone()),
-                block: Some(block.clone()),
-                ..query(kind)
+                ..query_on(&page, &block, kind)
             })
             .unwrap()
             .text
     };
     assert_eq!(read(BridgeQueryKind::Math).as_deref(), Some("Five days"));
     assert_eq!(read(BridgeQueryKind::Text), None);
-    let views = workspace
-        .query(BridgeQuery {
-            page: Some(page.clone()),
-            ..query(BridgeQueryKind::Views)
-        })
-        .unwrap()
-        .views;
-    assert_eq!(views[0].kind, BridgeBlockKind::Math);
+    assert_eq!(views(&workspace, &page)[0].kind, BridgeBlockKind::Math);
 }

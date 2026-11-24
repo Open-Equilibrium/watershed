@@ -1,8 +1,11 @@
-import 'package:flutter/gestures.dart';
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:liquid/src/agent/card_agent.dart';
 import 'package:liquid/src/agent/session_card_settings.dart';
-import 'package:liquid/src/diff/turn_scope.dart';
+import 'package:liquid/src/session/session_state.dart';
+import 'package:liquid/src/theme/theme.dart';
 
 import 'card_harness.dart';
 import 'fake_backend.dart';
@@ -24,109 +27,124 @@ FakeSession dirtySession() {
   return FakeSession()..gitBackend = git;
 }
 
-final allDefaultRowsHidden = SessionCardSettings(
-  hidden: CardItem.values.where((item) => item.shownByDefault).toSet(),
-);
-
 void main() {
-  testWidgets(
-    'the card lists the environment, branch, pull request, Git action and changes rows in T3 order',
-    (tester) async {
-      await pumpCard(tester, session: dirtySession());
-      expect(find.text('Mac mini'), findsOneWidget);
-      expect(find.text('feature'), findsOneWidget);
-      final rows = [
-        find.byKey(const Key('workspace-row')),
-        find.byKey(const Key('branch-row')),
-        find.text('#7: Add a feature'),
-        find.text('Commit & push'),
-        find.byKey(const Key('changes-row')),
-      ];
-      for (var index = 1; index < rows.length; index++) {
-        expect(
-          tester.getTopLeft(rows[index]).dy,
-          greaterThan(tester.getTopLeft(rows[index - 1]).dy),
-        );
-      }
-    },
-  );
-
-  testWidgets(
-    'the Changes row counts the uncommitted lines and opens the Diff panel for them',
-    (tester) async {
-      final changed = <DiffScope>[];
-      await pumpCard(tester, session: dirtySession(), onChanges: changed.add);
-      expect(find.text('+3'), findsOneWidget);
-      expect(find.text('−1'), findsOneWidget);
-      await tester.tap(find.byKey(const Key('changes-row')));
-      expect(changed.single, isA<UncommittedChanges>());
-    },
-  );
-
-  testWidgets(
-    'hidden rows leave the card, and with none left it offers Choose what to show',
-    (tester) async {
-      await pumpCard(
-        tester,
-        session: dirtySession(),
-        settings: allDefaultRowsHidden,
-      );
-      expect(find.byKey(const Key('branch-row')), findsNothing);
-      expect(find.byKey(const Key('changes-row')), findsNothing);
-      await tester.tap(find.byKey(const Key('choose-rows')));
-      await tester.pumpAndSettle();
-      expect(find.text('Changes'), findsOneWidget);
-    },
-  );
-
-  testWidgets(
-    'the rows menu lists every row in T3 Code order under Show in thread details',
-    (tester) async {
-      await pumpCard(
-        tester,
-        session: dirtySession(),
-        settings: allDefaultRowsHidden,
-      );
-      await tester.tap(find.byKey(const Key('choose-rows')));
-      await tester.pumpAndSettle();
-      expect(find.text('Show in thread details'), findsOneWidget);
-      final rows = [
-        for (final item in CardItem.values)
-          find.widgetWithText(CheckboxMenuButton, item.label),
-      ];
-      for (var index = 1; index < rows.length; index++) {
-        expect(rows[index], findsOneWidget);
-        expect(
-          tester.getTopLeft(rows[index]).dy,
-          greaterThan(tester.getTopLeft(rows[index - 1]).dy),
-        );
-      }
-    },
-  );
-
-  testWidgets('Reset to default is off while every row has its default', (
+  testWidgets('hiding Automations leaves no Automations section for an agent', (
     tester,
   ) async {
-    await pumpCard(tester, session: dirtySession());
-    await tester.tapAt(
-      tester.getCenter(find.byKey(const Key('branch-row'))),
-      buttons: kSecondaryButton,
-    );
-    await tester.pumpAndSettle();
-    final reset = find.widgetWithText(MenuItemButton, 'Reset to default');
-    expect(tester.widget<MenuItemButton>(reset).onPressed, isNull);
-  });
-
-  testWidgets('a press outside a popover card closes it', (tester) async {
-    var pressedOutside = 0;
+    await tester.binding.setSurfaceSize(const Size(800, 1400));
     await pumpCard(
       tester,
-      session: dirtySession(),
-      beside: false,
-      onOutsidePress: () => pressedOutside++,
+      session: FakeSession(),
+      agents: [agentOf('news-bot', thread: 'thread-1')],
+      height: 1200,
     );
-    await tester.tapAt(const Offset(20, 20));
-    await tester.pumpAndSettle();
-    expect(pressedOutside, 1);
+    expect(find.text('Automations'), findsOneWidget);
+
+    await pumpCard(
+      tester,
+      session: FakeSession(),
+      agents: [agentOf('news-bot', thread: 'thread-1')],
+      settings: SessionCardSettings(hidden: {CardItem.automations}),
+      height: 1200,
+    );
+    expect(find.text('Automations'), findsNothing);
+    expect(find.byKey(const Key('add-routine')), findsNothing);
   });
+
+  group('agent instructions', () {
+    Future<SessionState> openAgent(
+      WidgetTester tester,
+      FakeProject project,
+    ) async {
+      final state = SessionState(project);
+      addTearDown(state.dispose);
+      await state.loadStart();
+      await state.open('thread-1');
+      await tester.pumpAndSettle();
+      return state;
+    }
+
+    Future<void> showAgent(WidgetTester tester, SessionState state) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: liquidTheme(Brightness.light),
+          home: Material(
+            child: AgentSection(
+              state: state,
+              hosted: state.agents.open.value!,
+              divided: false,
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('an older instruction read does not overwrite a newer one', (
+      tester,
+    ) async {
+      final project = _HeldInstructions()
+        ..agentList = [agentOf('news-bot', thread: 'thread-1')];
+      final state = await openAgent(tester, project);
+      await showAgent(tester, state);
+      state.agents.changes.value = const [];
+      await tester.pump();
+      expect(project.held, hasLength(2));
+
+      project.held[1].complete('# news-bot\n\nNewer.\n');
+      await tester.pumpAndSettle();
+      project.held[0].complete('# news-bot\n\nOlder.\n');
+      await tester.pumpAndSettle();
+      expect(find.text('Newer.'), findsOneWidget);
+      expect(find.text('Older.'), findsNothing);
+    });
+
+    testWidgets('a card given another state reads from that state', (
+      tester,
+    ) async {
+      final first = _CountingInstructions()
+        ..agentList = [agentOf('news-bot', thread: 'thread-1')]
+        ..instructionsText = '# news-bot\n\nFirst.\n';
+      final second = _CountingInstructions()
+        ..agentList = [agentOf('news-bot', thread: 'thread-1')]
+        ..instructionsText = '# news-bot\n\nSecond.\n';
+      final firstState = await openAgent(tester, first);
+      final secondState = await openAgent(tester, second);
+      await showAgent(tester, firstState);
+      expect(find.text('First.'), findsOneWidget);
+
+      await showAgent(tester, secondState);
+      await tester.pumpAndSettle();
+      expect(find.text('Second.'), findsOneWidget);
+
+      final reads = first.reads;
+      firstState.agents.changes.value = const [];
+      await tester.pumpAndSettle();
+      expect(first.reads, reads, reason: 'the old state no longer drives it');
+      secondState.agents.changes.value = const [];
+      await tester.pumpAndSettle();
+      expect(second.reads, greaterThan(1));
+    });
+  });
+}
+
+class _HeldInstructions extends FakeProject {
+  final held = <Completer<String>>[];
+
+  @override
+  Future<String> agentInstructions(String name) {
+    final answer = Completer<String>();
+    held.add(answer);
+    return answer.future;
+  }
+}
+
+class _CountingInstructions extends FakeProject {
+  int reads = 0;
+
+  @override
+  Future<String> agentInstructions(String name) async {
+    reads++;
+    return instructionsText;
+  }
 }

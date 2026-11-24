@@ -69,6 +69,7 @@ pub struct BridgeSourceFile {
     pub columns: Vec<BridgeColumn>,
     pub rows: Vec<Vec<String>>,
     pub text: Option<String>,
+    pub bytes: Option<Vec<u8>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -213,6 +214,13 @@ impl LiquidWorkspace {
     ) -> Result<BridgeSourceFile, String> {
         let source = source(source_id)?;
         let root = self.state()?.workspace.source_root(&source);
+        let path = root.as_ref().ok().map(|root| {
+            if inside.is_empty() {
+                root.clone()
+            } else {
+                root.join(&inside)
+            }
+        });
         let mut answer = BridgeSourceFile {
             read: BridgeRead::Read,
             name: String::new(),
@@ -223,11 +231,21 @@ impl LiquidWorkspace {
             columns: Vec::new(),
             rows: Vec::new(),
             text: None,
+            bytes: None,
         };
         let file = match root.and_then(|root| liquid_core::read_source(&root, &inside)) {
             Ok(file) => file,
             Err(error) => {
                 answer.read = read_of(&error).ok_or_else(|| message(error))?;
+                if matches!(answer.read, BridgeRead::TooLarge | BridgeRead::Unreadable)
+                    && let Some(path) = path
+                {
+                    answer.name = path
+                        .file_name()
+                        .map(|name| name.to_string_lossy().into_owned())
+                        .unwrap_or_default();
+                    answer.path = path.to_string_lossy().into_owned();
+                }
                 return Ok(answer);
             }
         };
@@ -253,8 +271,14 @@ impl LiquidWorkspace {
                 answer.text = Some(text);
                 BridgeFileView::Text
             }
-            Shown::Image => BridgeFileView::Image,
-            Shown::Pdf => BridgeFileView::Pdf,
+            Shown::Image(bytes) => {
+                answer.bytes = Some(bytes);
+                BridgeFileView::Image
+            }
+            Shown::Pdf(bytes) => {
+                answer.bytes = Some(bytes);
+                BridgeFileView::Pdf
+            }
             Shown::Other => BridgeFileView::Other,
         };
         Ok(answer)

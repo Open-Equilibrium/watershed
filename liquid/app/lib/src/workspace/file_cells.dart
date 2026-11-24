@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../controls.dart';
 import '../rust/api/media.dart';
 import '../theme/icons.dart';
 import '../theme/theme.dart';
@@ -243,15 +244,10 @@ class _FilesPickerState extends State<FilesPicker> {
     );
     return Focus(
       focusNode: _focus,
-      child: Container(
+      child: FloatingPanel(
         key: const Key('files picker'),
         width: FilesPicker._width,
         padding: const EdgeInsets.all(WsMetrics.space2),
-        decoration: BoxDecoration(
-          color: ws.surface,
-          borderRadius: BorderRadius.circular(WsMetrics.radiusLg),
-          boxShadow: ws.shadow,
-        ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,

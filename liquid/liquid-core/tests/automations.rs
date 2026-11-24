@@ -1,15 +1,34 @@
 #![allow(clippy::unwrap_used)]
 
+mod common;
+
+use common::*;
 use liquid_core::{
     Actor, Applied, Attention, AutomationId, AutomationSetup, BlockId, Cell, Changed, Created,
-    Error, FieldId, FieldKind, Filter, MAX_AUTOMATION_TEXT, MAX_CONDITIONS, Match, MemoryStore,
-    Mutation, Operation, Origin, PersonId, Place, Request, RowId, RowQuery, Step, Trigger,
+    Error, FieldId, FieldKind, Filter, MAX_AUTOMATION_TEXT, MAX_CONDITIONS, Match, Mutation,
+    Operation, OptionId, Origin, PersonId, Place, Request, RowId, Step, Trigger,
 };
 
-type Workspace = liquid_core::Workspace<MemoryStore>;
+fn setup(name: &str, trigger: Trigger, steps: Vec<Step>) -> AutomationSetup {
+    AutomationSetup {
+        name: name.into(),
+        trigger: Some(trigger),
+        conditions: Vec::new(),
+        steps,
+    }
+}
 
-fn owner() -> Actor {
-    Actor::Person(PersonId::new("benni"))
+fn notify(message: &str) -> Step {
+    Step::Notify {
+        message: message.into(),
+    }
+}
+
+fn created_row(applied: &Applied) -> RowId {
+    match &applied.created {
+        Some(Created::Row(row)) => row.clone(),
+        other => panic!("a row, got {other:?}"),
+    }
 }
 
 struct Budget {
@@ -19,102 +38,77 @@ struct Budget {
     item: FieldId,
     amount: FieldId,
     category: FieldId,
-    review: liquid_core::OptionId,
+    review: OptionId,
+    month_name: FieldId,
     summarize: FieldId,
 }
 
 impl Budget {
     fn new() -> Self {
-        let mut workspace =
-            Workspace::create(PersonId::new("benni"), MemoryStore::default()).unwrap();
-        let mut apply = |mutation| {
-            workspace.apply(Request {
-                actor: owner(),
-                origin: Origin::Ui,
-                mutation,
-            })
+        let mut workspace = workspace();
+        let area = area(&mut workspace, "Private");
+        let table = |workspace: &mut Workspace, name: &str| {
+            let Created::Table(table) = created(
+                workspace,
+                Mutation::CreateTable {
+                    area: area.clone(),
+                    name: name.into(),
+                },
+            ) else {
+                panic!("a Table")
+            };
+            table
         };
-        let Some(Created::Area(area)) = apply(Mutation::CreateArea {
-            name: "Private".into(),
-        })
-        .unwrap()
-        .created
-        else {
-            panic!("an area")
-        };
-        let mut table = |name: &str| match apply(Mutation::CreateTable {
-            area: area.clone(),
-            name: name.into(),
-        })
-        .unwrap()
-        .created
-        {
-            Some(Created::Table(table)) => table,
-            other => panic!("a Table, got {other:?}"),
-        };
-        let expenses = table("Expenses");
-        let months = table("Months");
-        let mut budget = Self {
-            workspace,
-            item: FieldId::parse(&"0".repeat(32)).unwrap(),
-            amount: FieldId::parse(&"0".repeat(32)).unwrap(),
-            category: FieldId::parse(&"0".repeat(32)).unwrap(),
-            summarize: FieldId::parse(&"0".repeat(32)).unwrap(),
-            review: liquid_core::OptionId::parse(&"0".repeat(32)).unwrap(),
-            expenses,
-            months,
-        };
-        budget.item = budget
-            .workspace
-            .database(&budget.expenses)
-            .unwrap()
-            .unwrap()
-            .fields[0]
+        let expenses = table(&mut workspace, "Expenses");
+        let months = table(&mut workspace, "Months");
+        let item = workspace.database(&expenses).unwrap().unwrap().fields[0]
             .id
             .clone();
-        budget.amount = budget.field(&budget.expenses.clone(), "Amount", FieldKind::Number);
-        budget.category = budget.field(&budget.expenses.clone(), "Category", FieldKind::Select);
-        budget.summarize = budget.field(&budget.months.clone(), "Summarize", FieldKind::Button);
-        let add = Mutation::AddOption {
-            block: budget.expenses.clone(),
-            field: budget.category.clone(),
-            name: "Review".into(),
-            color: 4,
+        let month_name = workspace.database(&months).unwrap().unwrap().fields[0]
+            .id
+            .clone();
+        let amount = field(&mut workspace, &expenses, "Amount", FieldKind::Number);
+        let category = field(&mut workspace, &expenses, "Category", FieldKind::Select);
+        let summarize = field(&mut workspace, &months, "Summarize", FieldKind::Button);
+        let Created::Option(review) = created(
+            &mut workspace,
+            Mutation::AddOption {
+                block: expenses.clone(),
+                field: category.clone(),
+                name: "Review".into(),
+                color: 4,
+            },
+        ) else {
+            panic!("an option")
         };
-        budget.review = match budget.edit(add).unwrap().created {
-            Some(Created::Option(option)) => option,
-            other => panic!("an option, got {other:?}"),
-        };
-        budget
-    }
-
-    fn edit(&mut self, mutation: Mutation) -> Result<Applied, Error> {
-        self.workspace.apply(Request {
-            actor: owner(),
-            origin: Origin::Ui,
-            mutation,
-        })
-    }
-
-    fn field(&mut self, table: &BlockId, name: &str, kind: FieldKind) -> FieldId {
-        let add = Mutation::AddField {
-            block: table.clone(),
-            place: Place::Last,
-            name: name.into(),
-            kind,
-        };
-        match self.edit(add).unwrap().created {
-            Some(Created::Field(field)) => field,
-            other => panic!("a field, got {other:?}"),
+        Self {
+            workspace,
+            expenses,
+            months,
+            item,
+            amount,
+            category,
+            review,
+            month_name,
+            summarize,
         }
     }
 
-    fn row(&mut self, table: &BlockId) -> Applied {
+    fn edit(&mut self, mutation: Mutation) -> Result<Applied, Error> {
+        apply(&mut self.workspace, mutation)
+    }
+
+    fn add_row(&mut self, table: &BlockId) -> Applied {
         self.edit(Mutation::AddRow {
             block: table.clone(),
             place: Place::Last,
         })
         .unwrap()
+    }
+
+    fn expense(&mut self) -> RowId {
+        let expenses = self.expenses.clone();
+        created_row(&self.add_row(&expenses))
     }
 
     fn set(&mut self, row: &RowId, field: &FieldId, value: Cell) -> Applied {
@@ -141,30 +135,30 @@ impl Budget {
 
     fn flag_large(&self) -> AutomationSetup {
         AutomationSetup {
-            name: "Flag large expenses".into(),
-            trigger: Some(Trigger::FieldChanged(
-                self.expenses.clone(),
-                self.amount.clone(),
-            )),
             conditions: vec![Filter {
                 field: self.amount.clone(),
                 matches: Match::Above(Cell::Number(500.0)),
             }],
-            steps: vec![
-                Step::Set {
-                    field: self.category.clone(),
-                    value: Cell::Select(self.review.clone()),
-                },
-                Step::Notify {
-                    message: format!("Large expense: {{{}}}", self.item),
-                },
-            ],
+            ..setup(
+                "Flag large expenses",
+                Trigger::FieldChanged(self.expenses.clone(), self.amount.clone()),
+                vec![
+                    Step::Set {
+                        field: self.category.clone(),
+                        value: Cell::Select(self.review.clone()),
+                    },
+                    notify(&format!("Large expense: {{{}}}", self.item)),
+                ],
+            )
         }
     }
 
-    fn cell(&mut self, table: &BlockId, row: &RowId, field: &FieldId) -> Cell {
-        let rows = self.workspace.rows(table, &all()).unwrap();
-        rows.rows
+    fn cell(&mut self, row: &RowId, field: &FieldId) -> Cell {
+        let expenses = self.expenses.clone();
+        self.workspace
+            .rows(&expenses, &all())
+            .unwrap()
+            .rows
             .into_iter()
             .find(|found| &found.id == row)
             .unwrap()
@@ -178,41 +172,34 @@ impl Budget {
     }
 }
 
-fn all() -> RowQuery {
-    RowQuery {
-        sort: None,
-        filter: None,
-        within: None,
-        start: 0,
-        limit: usize::MAX,
-        search: None,
-        totals: Vec::new(),
-    }
-}
-
-fn created_row(applied: &Applied) -> RowId {
-    match &applied.created {
-        Some(Created::Row(row)) => row.clone(),
-        other => panic!("a row, got {other:?}"),
-    }
-}
-
 #[test]
 fn a_change_that_meets_the_conditions_runs_the_steps_as_the_automation() {
     let mut budget = Budget::new();
     let flag = budget.create(budget.flag_large()).unwrap();
-    let rent = created_row(&budget.row(&budget.expenses.clone()));
-    budget.set(&rent, &budget.item.clone(), Cell::Text("Rent".into()));
-
-    let small = budget.set(&rent, &budget.amount.clone(), Cell::Number(120.0));
-    assert!(small.ran.is_empty());
-    assert_eq!(
-        budget.cell(&budget.expenses.clone(), &rent, &budget.category.clone()),
-        Cell::Empty
+    let echo = setup(
+        "Echo",
+        Trigger::FieldChanged(budget.expenses.clone(), budget.category.clone()),
+        vec![notify("Category changed")],
     );
+    budget.create(echo).unwrap();
+    let (item, amount, category) = (
+        budget.item.clone(),
+        budget.amount.clone(),
+        budget.category.clone(),
+    );
+    let rent = budget.expense();
+    budget.set(&rent, &item, Cell::Text("Rent".into()));
 
-    let large = budget.set(&rent, &budget.amount.clone(), Cell::Number(950.0));
-    assert_eq!(large.ran.len(), 1);
+    let small = budget.set(&rent, &amount, Cell::Number(120.0));
+    assert!(small.ran.is_empty());
+    assert_eq!(budget.cell(&rent, &category), Cell::Empty);
+
+    let large = budget.set(&rent, &amount, Cell::Number(950.0));
+    assert_eq!(
+        large.ran.len(),
+        1,
+        "the change an automation makes starts no other"
+    );
     let ran = &large.ran[0];
     assert_eq!(ran.automation, flag);
     assert_eq!(ran.notices, ["Large expense: Rent"]);
@@ -222,7 +209,7 @@ fn a_change_that_meets_the_conditions_runs_the_steps_as_the_automation() {
     );
     let action = ran.outcome.clone().unwrap();
     assert_eq!(
-        budget.cell(&budget.expenses.clone(), &rent, &budget.category.clone()),
+        budget.cell(&rent, &category),
         Cell::Select(budget.review.clone())
     );
 
@@ -244,62 +231,30 @@ fn a_change_that_meets_the_conditions_runs_the_steps_as_the_automation() {
 }
 
 #[test]
-fn a_change_an_automation_makes_starts_no_other_automation() {
-    let mut budget = Budget::new();
-    budget.create(budget.flag_large()).unwrap();
-    let echo = AutomationSetup {
-        name: "Echo".into(),
-        trigger: Some(Trigger::FieldChanged(
-            budget.expenses.clone(),
-            budget.category.clone(),
-        )),
-        conditions: Vec::new(),
-        steps: vec![Step::Notify {
-            message: "Category changed".into(),
-        }],
-    };
-    budget.create(echo).unwrap();
-    let rent = created_row(&budget.row(&budget.expenses.clone()));
-
-    let applied = budget.set(&rent, &budget.amount.clone(), Cell::Number(950.0));
-    assert_eq!(applied.ran.len(), 1);
-    assert_eq!(applied.ran[0].name, "Flag large expenses");
-}
-
-#[test]
 fn a_new_row_runs_the_automations_of_its_table_and_a_step_adds_rows_elsewhere() {
     let mut budget = Budget::new();
-    let note = AutomationSetup {
-        name: "Log new expense".into(),
-        trigger: Some(Trigger::RowAdded(budget.expenses.clone())),
-        conditions: Vec::new(),
-        steps: vec![Step::AddRow {
+    let note = setup(
+        "Log new expense",
+        Trigger::RowAdded(budget.expenses.clone()),
+        vec![Step::AddRow {
             table: budget.months.clone(),
-            cells: vec![(
-                budget
-                    .workspace
-                    .database(&budget.months)
-                    .unwrap()
-                    .unwrap()
-                    .fields[0]
-                    .id
-                    .clone(),
-                Cell::Text("New expense".into()),
-            )],
+            cells: vec![(budget.month_name.clone(), Cell::Text("New expense".into()))],
         }],
-    };
+    );
     let note = budget.create(note).unwrap();
     assert_eq!(budget.workspace.automations().unwrap()[0].owner, None);
 
-    let applied = budget.row(&budget.expenses.clone());
+    let expenses = budget.expenses.clone();
+    let months = budget.months.clone();
+    let applied = budget.add_row(&expenses);
     assert_eq!(applied.ran.len(), 1);
     assert!(
         applied.ran[0]
             .changed
-            .contains(&Changed::Table(budget.months.clone()))
+            .contains(&Changed::Table(months.clone()))
     );
-    assert_eq!(budget.count(&budget.months.clone()), 1);
-    assert!(budget.row(&budget.months.clone()).ran.is_empty());
+    assert_eq!(budget.count(&months), 1);
+    assert!(budget.add_row(&months).ran.is_empty());
 
     budget
         .edit(Mutation::SetAutomationOn {
@@ -307,7 +262,7 @@ fn a_new_row_runs_the_automations_of_its_table_and_a_step_adds_rows_elsewhere() 
             on: false,
         })
         .unwrap();
-    assert!(budget.row(&budget.expenses.clone()).ran.is_empty());
+    assert!(budget.add_row(&expenses).ran.is_empty());
     budget
         .edit(Mutation::RemoveAutomation { automation: note })
         .unwrap();
@@ -317,23 +272,18 @@ fn a_new_row_runs_the_automations_of_its_table_and_a_step_adds_rows_elsewhere() 
 #[test]
 fn a_button_field_runs_its_automations_and_holds_no_value() {
     let mut budget = Budget::new();
-    let summary = AutomationSetup {
-        name: "Monthly summary".into(),
-        trigger: Some(Trigger::Clicked(
-            budget.months.clone(),
-            budget.summarize.clone(),
-        )),
-        conditions: Vec::new(),
-        steps: vec![Step::Notify {
-            message: "Summarized".into(),
-        }],
-    };
+    let summary = setup(
+        "Monthly summary",
+        Trigger::Clicked(budget.months.clone(), budget.summarize.clone()),
+        vec![notify("Summarized")],
+    );
     budget.create(summary).unwrap();
-    let october = created_row(&budget.row(&budget.months.clone()));
+    let months = budget.months.clone();
+    let october = created_row(&budget.add_row(&months));
 
     let ran = budget
         .workspace
-        .press(&owner(), &budget.months, &october, &budget.summarize)
+        .press(&owner(), &months, &october, &budget.summarize)
         .unwrap();
     assert_eq!(ran.len(), 1);
     assert_eq!(ran[0].notices, ["Summarized"]);
@@ -342,7 +292,7 @@ fn a_button_field_runs_its_automations_and_holds_no_value() {
     assert_eq!(
         budget
             .workspace
-            .press(&owner(), &budget.months, &october, &budget.amount)
+            .press(&owner(), &months, &october, &budget.amount)
             .unwrap_err(),
         Error::NotFound
     );
@@ -350,19 +300,19 @@ fn a_button_field_runs_its_automations_and_holds_no_value() {
     assert_eq!(
         budget
             .workspace
-            .press(&stranger, &budget.months, &october, &budget.summarize)
+            .press(&stranger, &months, &october, &budget.summarize)
             .unwrap_err(),
         Error::NotAllowed
     );
     let value = Mutation::SetCell {
-        block: budget.months.clone(),
+        block: months.clone(),
         row: october,
         field: budget.summarize.clone(),
         value: Cell::Text("x".into()),
     };
     assert_eq!(budget.edit(value).unwrap_err(), Error::WrongKind);
     let mut on_button = budget.flag_large();
-    on_button.trigger = Some(Trigger::RowAdded(budget.months.clone()));
+    on_button.trigger = Some(Trigger::RowAdded(months));
     on_button.conditions = vec![Filter {
         field: budget.summarize.clone(),
         matches: Match::NotEmpty,
@@ -379,70 +329,70 @@ fn test_runs_an_automation_once_on_the_last_row() {
         budget.workspace.test(&owner(), &flag).unwrap_err(),
         Error::NotFound
     );
-    let first = created_row(&budget.row(&budget.expenses.clone()));
-    let last = created_row(&budget.row(&budget.expenses.clone()));
-    budget.set(&first, &budget.amount.clone(), Cell::Number(10.0));
-    budget.set(&last, &budget.amount.clone(), Cell::Number(10.0));
+    let amount = budget.amount.clone();
+    let first = budget.expense();
+    let last = budget.expense();
+    budget.set(&first, &amount, Cell::Number(10.0));
+    budget.set(&last, &amount, Cell::Number(10.0));
 
     let ran = budget.workspace.test(&owner(), &flag).unwrap();
     assert!(ran.outcome.is_ok());
+    let category = budget.category.clone();
     assert_eq!(
-        budget.cell(&budget.expenses.clone(), &last, &budget.category.clone()),
+        budget.cell(&last, &category),
         Cell::Select(budget.review.clone())
     );
-    assert_eq!(
-        budget.cell(&budget.expenses.clone(), &first, &budget.category.clone()),
-        Cell::Empty
-    );
+    assert_eq!(budget.cell(&first, &category), Cell::Empty);
 }
 
 #[test]
 fn a_setup_must_name_fields_of_the_right_kind_and_stay_within_bounds() {
     let mut budget = Budget::new();
-    let formula = budget.field(&budget.expenses.clone(), "Left", FieldKind::Formula);
+    let expenses = budget.expenses.clone();
+    let formula = field(&mut budget.workspace, &expenses, "Left", FieldKind::Formula);
+    let flag = |budget: &Budget| budget.flag_large();
     let mut broken = Vec::new();
-    let mut setup = budget.flag_large();
-    setup.trigger = Some(Trigger::Clicked(
-        budget.expenses.clone(),
-        budget.amount.clone(),
-    ));
+    let mut setup = flag(&budget);
+    setup.trigger = Some(Trigger::Clicked(expenses.clone(), budget.amount.clone()));
     broken.push((setup, Error::WrongKind));
-    let mut setup = budget.flag_large();
-    setup.trigger = Some(Trigger::FieldChanged(
-        budget.expenses.clone(),
-        formula.clone(),
-    ));
+    let mut setup = flag(&budget);
+    setup.trigger = Some(Trigger::FieldChanged(expenses.clone(), formula.clone()));
     broken.push((setup, Error::WrongKind));
-    let mut setup = budget.flag_large();
+    let mut setup = flag(&budget);
     setup.steps = vec![Step::Set {
         field: formula,
         value: Cell::Number(1.0),
     }];
     broken.push((setup, Error::WrongKind));
-    let mut setup = budget.flag_large();
+    let mut setup = flag(&budget);
     setup.steps = vec![Step::Set {
         field: budget.amount.clone(),
         value: Cell::Text("many".into()),
     }];
     broken.push((setup, Error::WrongKind));
-    let mut setup = budget.flag_large();
+    let mut setup = flag(&budget);
     setup.conditions = vec![Filter {
         field: budget.amount.clone(),
         matches: Match::Above(Cell::Text("x".into())),
     }];
     broken.push((setup, Error::WrongKind));
-    let mut setup = budget.flag_large();
-    setup.steps = vec![Step::Notify {
-        message: format!("{{{}}}", budget.summarize),
+    let due = field(&mut budget.workspace, &expenses, "Due", FieldKind::Date);
+    let mut setup = flag(&budget);
+    setup.conditions = vec![Filter {
+        field: due,
+        matches: Match::Between("2026-01-01".into(), "2026-12-31".into()),
     }];
+    broken.push((setup, Error::WrongKind));
+    let mut setup = flag(&budget);
+    setup.steps = vec![notify(&format!("{{{}}}", budget.summarize))];
     broken.push((setup, Error::NotFound));
-    let mut setup = budget.flag_large();
+    let mut setup = flag(&budget);
     setup.conditions = vec![setup.conditions[0].clone(); MAX_CONDITIONS + 1];
     broken.push((setup, Error::TooMany));
-    let mut setup = budget.flag_large();
+    let mut setup = flag(&budget);
     setup.trigger = None;
     broken.push((setup, Error::NotFound));
-    let mut setup = budget.flag_large();
+    let mut setup = flag(&budget);
     setup.steps = vec![Step::Set {
         field: budget.item.clone(),
         value: Cell::Text("x".repeat(MAX_AUTOMATION_TEXT + 1)),
@@ -466,18 +416,14 @@ fn a_setup_must_name_fields_of_the_right_kind_and_stay_within_bounds() {
 fn deleting_a_table_takes_its_own_automations_and_turns_off_those_that_use_it() {
     let mut budget = Budget::new();
     let flag = budget.create(budget.flag_large()).unwrap();
-    let summary = AutomationSetup {
-        name: "Monthly summary".into(),
-        trigger: Some(Trigger::Clicked(
-            budget.months.clone(),
-            budget.summarize.clone(),
-        )),
-        conditions: Vec::new(),
-        steps: vec![Step::AddRow {
+    let summary = setup(
+        "Monthly summary",
+        Trigger::Clicked(budget.months.clone(), budget.summarize.clone()),
+        vec![Step::AddRow {
             table: budget.expenses.clone(),
             cells: Vec::new(),
         }],
-    };
+    );
     let summary = budget.create(summary).unwrap();
 
     let deleted = budget
@@ -528,11 +474,9 @@ fn removing_a_field_an_automation_uses_turns_it_off() {
     );
     assert_eq!(
         automation.setup.steps,
-        [Step::Notify {
-            message: format!("Large expense: {{{}}}", budget.item),
-        }]
+        [notify(&format!("Large expense: {{{}}}", budget.item))]
     );
-    let rent = created_row(&budget.row(&budget.expenses.clone()));
+    let rent = budget.expense();
     assert!(
         budget
             .set(&rent, &budget.amount.clone(), Cell::Number(950.0))
@@ -554,9 +498,9 @@ fn removing_a_field_an_automation_uses_turns_it_off() {
 fn an_automation_whose_trigger_field_went_is_repaired_by_choosing_another() {
     let mut budget = Budget::new();
     let mut setup = budget.flag_large();
-    setup.steps.push(Step::Notify {
-        message: format!("{{{}}} spent", budget.amount),
-    });
+    setup
+        .steps
+        .push(notify(&format!("{{{}}} spent", budget.amount)));
     let flag = budget.create(setup).unwrap();
     budget
         .edit(Mutation::RemoveField {
@@ -566,12 +510,7 @@ fn an_automation_whose_trigger_field_went_is_repaired_by_choosing_another() {
         .unwrap();
     let broken = budget.workspace.automations().unwrap().remove(0);
     assert!(broken.setup.conditions.is_empty());
-    assert_eq!(
-        broken.setup.steps.last(),
-        Some(&Step::Notify {
-            message: "{Amount} spent".into()
-        })
-    );
+    assert_eq!(broken.setup.steps.last(), Some(&notify("{Amount} spent")));
     let on = Mutation::SetAutomationOn {
         automation: flag.clone(),
         on: true,
@@ -610,34 +549,36 @@ fn no_one_writes_as_an_automation_from_outside() {
 #[test]
 fn conditions_compare_numbers_and_dates_and_rule_out_values() {
     let mut budget = Budget::new();
-    let due = budget.field(&budget.expenses.clone(), "Due", FieldKind::Date);
+    let expenses = budget.expenses.clone();
+    let due = field(&mut budget.workspace, &expenses, "Due", FieldKind::Date);
+    let (amount, category) = (budget.amount.clone(), budget.category.clone());
     let setup = AutomationSetup {
-        name: "Early and small".into(),
-        trigger: Some(Trigger::FieldChanged(budget.expenses.clone(), due.clone())),
         conditions: vec![
             Filter {
                 field: due.clone(),
                 matches: Match::Below(Cell::Date("2026-11-01".into())),
             },
             Filter {
-                field: budget.amount.clone(),
+                field: amount.clone(),
                 matches: Match::Below(Cell::Number(100.0)),
             },
             Filter {
-                field: budget.category.clone(),
+                field: category.clone(),
                 matches: Match::IsNot(Cell::Select(budget.review.clone())),
             },
         ],
-        steps: vec![Step::Notify {
-            message: format!("{{{}}} is due on {{{due}}}", budget.amount),
-        }],
+        ..setup(
+            "Early and small",
+            Trigger::FieldChanged(expenses.clone(), due.clone()),
+            vec![notify(&format!("{{{amount}}} is due on {{{due}}}"))],
+        )
     };
     budget.create(setup).unwrap();
-    let row = created_row(&budget.row(&budget.expenses.clone()));
+    let row = budget.expense();
     let due_on = |budget: &mut Budget, date: &str| {
         budget
             .edit(Mutation::SetCell {
-                block: budget.expenses.clone(),
+                block: expenses.clone(),
                 row: row.clone(),
                 field: due.clone(),
                 value: Cell::Date(date.into()),
@@ -646,52 +587,49 @@ fn conditions_compare_numbers_and_dates_and_rule_out_values() {
             .ran
     };
     assert!(due_on(&mut budget, "2026-10-01").is_empty());
-    budget.set(&row, &budget.amount.clone(), Cell::Number(42.5));
+    budget.set(&row, &amount, Cell::Number(42.5));
     assert!(due_on(&mut budget, "2026-12-01").is_empty());
     assert_eq!(
         due_on(&mut budget, "2026-10-02")[0].notices,
         ["42.5 is due on 2026-10-02"]
     );
-    budget.set(
-        &row,
-        &budget.category.clone(),
-        Cell::Select(budget.review.clone()),
-    );
+    budget.set(&row, &category, Cell::Select(budget.review.clone()));
     assert!(due_on(&mut budget, "2026-10-03").is_empty());
 }
 
 #[test]
 fn a_deleted_trigger_table_takes_its_uses_along_so_choosing_another_repairs() {
     let mut budget = Budget::new();
-    let setup = AutomationSetup {
-        name: "Mirror".into(),
-        trigger: Some(Trigger::RowAdded(budget.expenses.clone())),
+    let (expenses, months) = (budget.expenses.clone(), budget.months.clone());
+    let mirror = AutomationSetup {
         conditions: vec![Filter {
             field: budget.amount.clone(),
             matches: Match::NotEmpty,
         }],
-        steps: vec![
-            Step::AddRow {
-                table: budget.expenses.clone(),
-                cells: Vec::new(),
-            },
-            Step::AddRow {
-                table: budget.months.clone(),
-                cells: Vec::new(),
-            },
-            Step::Set {
-                field: budget.category.clone(),
-                value: Cell::Empty,
-            },
-            Step::Notify {
-                message: format!("{{{}}} added", budget.item),
-            },
-        ],
+        ..setup(
+            "Mirror",
+            Trigger::RowAdded(expenses.clone()),
+            vec![
+                Step::AddRow {
+                    table: expenses.clone(),
+                    cells: Vec::new(),
+                },
+                Step::AddRow {
+                    table: months.clone(),
+                    cells: Vec::new(),
+                },
+                Step::Set {
+                    field: budget.category.clone(),
+                    value: Cell::Empty,
+                },
+                notify(&format!("{{{}}} added", budget.item)),
+            ],
+        )
     };
-    let mirror = budget.create(setup).unwrap();
+    let mirror = budget.create(mirror).unwrap();
     budget
         .edit(Mutation::DeleteTable {
-            block: budget.expenses.clone(),
+            block: expenses.clone(),
         })
         .unwrap();
     let broken = budget.workspace.automations().unwrap().remove(0);
@@ -700,16 +638,14 @@ fn a_deleted_trigger_table_takes_its_uses_along_so_choosing_another_repairs() {
         broken.setup.steps,
         [
             Step::AddRow {
-                table: budget.months.clone(),
+                table: months.clone(),
                 cells: Vec::new(),
             },
-            Step::Notify {
-                message: "{Name} added".into(),
-            },
+            notify("{Name} added"),
         ]
     );
     let mut repaired = broken.setup;
-    repaired.trigger = Some(Trigger::RowAdded(budget.months.clone()));
+    repaired.trigger = Some(Trigger::RowAdded(months));
     budget
         .edit(Mutation::SetAutomation {
             automation: mirror.clone(),

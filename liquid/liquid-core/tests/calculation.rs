@@ -1,11 +1,14 @@
 #![allow(clippy::unwrap_used)]
 
-use liquid_core::{
-    Actor, Applied, BlockId, Cell, Created, Error, FieldId, FieldKind, LineId, LineSetup,
-    LineStyle, MAX_LINES, MemoryStore, Mutation, Origin, PageId, PersonId, Place, Request, RowId,
-};
+mod common;
 
-type Workspace = liquid_core::Workspace<MemoryStore>;
+use common::*;
+use liquid_core::{
+    Applied, BlockId, Cell, ChartKind, ChartSetup, ChartSource, ChartValue, Created, Error,
+    FieldId, FieldKind, FieldTotal, Filter, LineId, LineSetup, LineStyle, MAX_CHART_POINTS,
+    MAX_DEPTH, MAX_FORMULA, MAX_LINES, MAX_NESTING, Match, Mutation, PageId, RowId, RowQuery, Sort,
+    Total, Used,
+};
 
 struct Home {
     workspace: Workspace,
@@ -23,117 +26,154 @@ fn line(label: &str, formula: &str, style: LineStyle) -> LineSetup {
     }
 }
 
+fn query(totals: Vec<FieldTotal>) -> RowQuery {
+    RowQuery {
+        sort: None,
+        filter: None,
+        within: None,
+        start: 0,
+        limit: 10,
+        search: None,
+        totals,
+    }
+}
+
+fn shown(lines: &[(&str, &str)]) -> Vec<(String, String)> {
+    lines
+        .iter()
+        .map(|(label, value)| (label.to_string(), value.to_string()))
+        .collect()
+}
+
 impl Home {
     fn new() -> Self {
+        let (mut workspace, area, first) = private_page("Household budget");
+        let other = page(&mut workspace, &area, "Review");
+        let (table, _) = table(&mut workspace, &first, "Expenses");
+        let amount = field(&mut workspace, &table, "Amount", FieldKind::Number);
         let mut home = Self {
-            workspace: Workspace::create(PersonId::new("benni"), MemoryStore::default()).unwrap(),
-            page: PageId::parse(&"0".repeat(32)).unwrap(),
-            other: PageId::parse(&"0".repeat(32)).unwrap(),
-            table: BlockId::parse(&"0".repeat(32)).unwrap(),
-            amount: FieldId::parse(&"0".repeat(32)).unwrap(),
+            workspace,
+            page: first,
+            other,
+            table,
+            amount,
         };
-        let Some(Created::Area(area)) = home
-            .edit(Mutation::CreateArea {
-                name: "Private".into(),
-            })
-            .unwrap()
-            .created
-        else {
-            panic!("an Area")
-        };
-        let page = |home: &mut Self, title: &str| {
-            let Some(Created::Page(page)) = home
-                .edit(Mutation::CreatePage {
-                    area: area.clone(),
-                    parent: None,
-                    title: title.into(),
-                })
-                .unwrap()
-                .created
-            else {
-                panic!("a Page")
-            };
-            page
-        };
-        home.page = page(&mut home, "Household budget");
-        home.other = page(&mut home, "Review");
-        let Some(Created::Block { block, .. }) = home
-            .edit(Mutation::AddDatabaseBlock {
-                page: home.page.clone(),
-                after: None,
-                name: "Expenses".into(),
-                layout: liquid_core::Layout::Table,
-            })
-            .unwrap()
-            .created
-        else {
-            panic!("a Table")
-        };
-        home.table = block;
-        let Some(Created::Field(amount)) = home
-            .edit(Mutation::AddField {
-                block: home.table.clone(),
-                place: Place::Last,
-                name: "Amount".into(),
-                kind: FieldKind::Number,
-            })
-            .unwrap()
-            .created
-        else {
-            panic!("a field")
-        };
-        home.amount = amount;
+        let amount = home.amount.clone();
         for value in [900.0, 384.5] {
             let row = home.row();
-            home.set(&row, Cell::Number(value));
+            home.set_cell(&row, &amount, Cell::Number(value));
         }
         home
     }
 
     fn edit(&mut self, mutation: Mutation) -> Result<Applied, Error> {
-        self.workspace.apply(Request {
-            actor: Actor::Person(PersonId::new("benni")),
-            origin: Origin::Ui,
-            mutation,
-        })
+        apply(&mut self.workspace, mutation)
     }
 
     fn row(&mut self) -> RowId {
-        let Some(Created::Row(row)) = self
-            .edit(Mutation::AddRow {
-                block: self.table.clone(),
-                place: Place::Last,
-            })
-            .unwrap()
-            .created
-        else {
-            panic!("a row")
-        };
-        row
+        row(&mut self.workspace, &self.table)
     }
 
-    fn set(&mut self, row: &RowId, value: Cell) {
-        self.edit(Mutation::SetCell {
+    fn rows(&mut self) -> Vec<liquid_core::Row> {
+        let table = self.table.clone();
+        self.workspace
+            .rows(&table, &query(Vec::new()))
+            .unwrap()
+            .rows
+    }
+
+    fn first_row(&mut self) -> RowId {
+        self.rows()[0].id.clone()
+    }
+
+    fn set_cell(&mut self, row: &RowId, field: &FieldId, value: Cell) {
+        set_cell(&mut self.workspace, &self.table, row, field, value);
+    }
+
+    fn field(&mut self, name: &str, kind: FieldKind) -> FieldId {
+        field(&mut self.workspace, &self.table, name, kind)
+    }
+
+    fn set_formula(&mut self, field: &FieldId, formula: String) -> Result<Applied, Error> {
+        self.edit(Mutation::SetFieldFormula {
             block: self.table.clone(),
-            row: row.clone(),
-            field: self.amount.clone(),
-            value,
+            field: field.clone(),
+            formula,
         })
-        .unwrap();
+    }
+
+    fn computed(&mut self) -> Vec<Vec<(FieldId, String)>> {
+        self.rows()
+            .iter()
+            .map(|row| {
+                row.computed
+                    .iter()
+                    .map(|(field, value)| (field.clone(), value.to_string()))
+                    .collect()
+            })
+            .collect()
+    }
+
+    fn block(&mut self, mutation: Mutation) -> BlockId {
+        let Created::Block { block, .. } = created(&mut self.workspace, mutation) else {
+            panic!("a Block")
+        };
+        block
     }
 
     fn calculation(&mut self, page: &PageId) -> BlockId {
-        let Some(Created::Block { block, .. }) = self
-            .edit(Mutation::AddCalculationBlock {
-                page: page.clone(),
-                after: None,
-            })
+        self.block(Mutation::AddCalculationBlock {
+            page: page.clone(),
+            after: None,
+        })
+    }
+
+    fn chart(&mut self, page: &PageId) -> BlockId {
+        self.block(Mutation::AddChartBlock {
+            page: page.clone(),
+            after: None,
+        })
+    }
+
+    fn set_chart(
+        &mut self,
+        page: &PageId,
+        chart: &BlockId,
+        setup: ChartSetup,
+    ) -> Result<Applied, Error> {
+        self.edit(Mutation::SetChart {
+            page: page.clone(),
+            block: chart.clone(),
+            setup,
+        })
+    }
+
+    fn table_chart(&mut self, page: &PageId, setup: ChartSetup) -> BlockId {
+        let chart = self.chart(page);
+        self.set_chart(page, &chart, setup).unwrap();
+        chart
+    }
+
+    fn points(&mut self, page: &PageId, chart: &BlockId) -> (Option<String>, Vec<(String, f64)>) {
+        let drawn = self.workspace.chart(page, chart).unwrap().unwrap();
+        (
+            drawn.source_name,
+            drawn
+                .points
+                .into_iter()
+                .map(|point| (point.label, point.value))
+                .collect(),
+        )
+    }
+
+    fn table_view(&mut self, page: &PageId) -> liquid_core::View {
+        let table = self.table.clone();
+        self.workspace
+            .views(page, 0, 10)
             .unwrap()
-            .created
-        else {
-            panic!("a Calculation Block")
-        };
-        block
+            .into_iter()
+            .find(|view| view.block == table)
+            .unwrap()
     }
 
     fn add(
@@ -157,39 +197,73 @@ impl Home {
         }
     }
 
+    fn calc(&mut self, page: &PageId, block: &BlockId) -> liquid_core::Calculation {
+        self.workspace.calculation(page, block).unwrap().unwrap()
+    }
+
+    fn first_line(&mut self, page: &PageId, block: &BlockId) -> LineId {
+        self.calc(page, block).lines[0].id.clone()
+    }
+
+    fn set_line(&mut self, page: &PageId, block: &BlockId, line: &LineId, setup: LineSetup) {
+        self.edit(Mutation::SetLine {
+            page: page.clone(),
+            block: block.clone(),
+            line: line.clone(),
+            setup,
+        })
+        .unwrap();
+    }
+
     fn lines(&mut self, page: &PageId, block: &BlockId) -> Vec<(String, String)> {
-        let calculation = self.workspace.calculation(page, block).unwrap().unwrap();
-        calculation
+        self.calc(page, block)
             .lines
             .iter()
             .map(|line| (line.label.clone(), line.value.to_string()))
             .collect()
     }
-}
 
-fn shown(lines: &[(&str, &str)]) -> Vec<(String, String)> {
-    lines
-        .iter()
-        .map(|(label, value)| (label.to_string(), value.to_string()))
-        .collect()
+    fn chain(&mut self, page: &PageId, report: &BlockId, extra: usize) -> Vec<LineId> {
+        let mut ids = vec![self.first_line(page, report)];
+        for _ in 0..extra {
+            let after = ids.last().cloned();
+            ids.push(
+                self.add(
+                    page,
+                    report,
+                    after.as_ref(),
+                    line("", "1", LineStyle::Plain),
+                )
+                .unwrap(),
+            );
+        }
+        ids
+    }
 }
 
 #[test]
 fn a_calculation_block_computes_a_report_in_excel_s_layout() {
     let mut home = Home::new();
-    let (page, other) = (home.page.clone(), home.other.clone());
+    let (page, other, table, amount) = (
+        home.page.clone(),
+        home.other.clone(),
+        home.table.clone(),
+        home.amount.clone(),
+    );
     let report = home.calculation(&page);
-    let first = home.workspace.calculation(&page, &report).unwrap().unwrap();
-    assert_eq!(first.lines.len(), 1, "a new Block starts with one line");
-    let first = first.lines[0].id.clone();
-    let column = format!("{{{}.{}}}", home.table, home.amount);
-    home.edit(Mutation::SetLine {
-        page: page.clone(),
-        block: report.clone(),
-        line: first.clone(),
-        setup: line("Income", "", LineStyle::Heading),
-    })
-    .unwrap();
+    assert_eq!(
+        home.lines(&page, &report).len(),
+        1,
+        "a new Block starts with one line"
+    );
+    let first = home.first_line(&page, &report);
+    let column = format!("{{{table}.{amount}}}");
+    home.set_line(
+        &page,
+        &report,
+        &first,
+        line("Income", "", LineStyle::Heading),
+    );
     let mut last = first;
     let mut ids = Vec::new();
     for setup in [
@@ -229,7 +303,7 @@ fn a_calculation_block_computes_a_report_in_excel_s_layout() {
         ("Left over", "1865.5"),
     ];
     assert_eq!(home.lines(&page, &report), shown(&expected));
-    let named = home.workspace.calculation(&page, &report).unwrap().unwrap();
+    let named = home.calc(&page, &report);
     assert_eq!(
         named.lines[5].references,
         [Some("Expenses.Amount".to_string())]
@@ -243,34 +317,25 @@ fn a_calculation_block_computes_a_report_in_excel_s_layout() {
     );
 
     let row = home.row();
-    home.set(&row, Cell::Number(15.5));
-    home.edit(Mutation::SetLine {
-        page: page.clone(),
-        block: report.clone(),
-        line: ids[2].clone(),
-        setup: line("Earned", "SUM(ABOVE)", LineStyle::Subtotal),
-    })
-    .unwrap();
+    home.set_cell(&row, &amount, Cell::Number(15.5));
+    home.set_line(
+        &page,
+        &report,
+        &ids[2],
+        line("Earned", "SUM(ABOVE)", LineStyle::Subtotal),
+    );
     let elsewhere = home.calculation(&other);
-    let copied = home
-        .workspace
-        .calculation(&other, &elsewhere)
-        .unwrap()
-        .unwrap()
-        .lines[0]
-        .id
-        .clone();
-    home.edit(Mutation::SetLine {
-        page: other.clone(),
-        block: elsewhere.clone(),
-        line: copied,
-        setup: line(
+    let copied = home.first_line(&other, &elsewhere);
+    home.set_line(
+        &other,
+        &elsewhere,
+        &copied,
+        line(
             "Left, twice",
             &format!("{} * 2", reference(&left)),
             LineStyle::Plain,
         ),
-    })
-    .unwrap();
+    );
     assert_eq!(
         home.lines(&other, &elsewhere),
         shown(&[("Left, twice", "3700")]),
@@ -283,13 +348,12 @@ fn a_calculation_block_computes_a_report_in_excel_s_layout() {
         line: ids[6].clone(),
     })
     .unwrap();
-    home.edit(Mutation::SetLine {
-        page: page.clone(),
-        block: report.clone(),
-        line: ids[1].clone(),
-        setup: line("Side project", &reference(&left), LineStyle::Plain),
-    })
-    .unwrap();
+    home.set_line(
+        &page,
+        &report,
+        &ids[1],
+        line("Side project", &reference(&left), LineStyle::Plain),
+    );
     let lines = home.lines(&page, &report);
     assert_eq!(lines.len(), 8);
     assert_eq!(
@@ -297,7 +361,7 @@ fn a_calculation_block_computes_a_report_in_excel_s_layout() {
         "a line that refers to itself, through others"
     );
     assert_eq!(lines[7].1, "#REF!", "a removed line");
-    let named = home.workspace.calculation(&page, &report).unwrap().unwrap();
+    let named = home.calc(&page, &report);
     assert_eq!(
         named.lines[7].references,
         [Some("Earned".to_string()), None],
@@ -320,11 +384,7 @@ fn lines_are_checked_before_they_are_written() {
             Error::TooLong,
         ),
         (
-            line(
-                "",
-                &"1".repeat(liquid_core::MAX_FORMULA + 1),
-                LineStyle::Plain,
-            ),
+            line("", &"1".repeat(MAX_FORMULA + 1), LineStyle::Plain),
             Error::TooLong,
         ),
     ] {
@@ -363,45 +423,14 @@ fn lines_are_checked_before_they_are_written() {
 fn a_formula_field_computes_each_row_from_the_row_s_fields() {
     let mut home = Home::new();
     let (table, amount) = (home.table.clone(), home.amount.clone());
-    let field = |home: &mut Home, name: &str| {
-        let Some(Created::Field(field)) = home
-            .edit(Mutation::AddField {
-                block: table.clone(),
-                place: Place::Last,
-                name: name.into(),
-                kind: FieldKind::Formula,
-            })
-            .unwrap()
-            .created
-        else {
-            panic!("a field")
-        };
-        field
-    };
-    let (with_tip, share) = (field(&mut home, "With tip"), field(&mut home, "Share"));
-    let formula = |home: &mut Home, field: &FieldId, formula: String| {
-        home.edit(Mutation::SetFieldFormula {
-            block: table.clone(),
-            field: field.clone(),
-            formula,
-        })
-    };
-    formula(&mut home, &with_tip, format!("{{{amount}}} * 1.1")).unwrap();
-    formula(&mut home, &share, format!("{{{with_tip}}} / 2")).unwrap();
-    let computed = |home: &mut Home| {
-        let rows = home.workspace.rows(&table, &query(Vec::new())).unwrap();
-        rows.rows
-            .iter()
-            .map(|row| {
-                row.computed
-                    .iter()
-                    .map(|(field, value)| (field.clone(), value.to_string()))
-                    .collect::<Vec<_>>()
-            })
-            .collect::<Vec<_>>()
-    };
+    let with_tip = home.field("With tip", FieldKind::Formula);
+    let share = home.field("Share", FieldKind::Formula);
+    home.set_formula(&with_tip, format!("{{{amount}}} * 1.1"))
+        .unwrap();
+    home.set_formula(&share, format!("{{{with_tip}}} / 2"))
+        .unwrap();
     assert_eq!(
-        computed(&mut home),
+        home.computed(),
         [
             [
                 (with_tip.clone(), "990".to_string()),
@@ -416,46 +445,33 @@ fn a_formula_field_computes_each_row_from_the_row_s_fields() {
 
     let page = home.page.clone();
     let report = home.calculation(&page);
-    let first = home
-        .workspace
-        .calculation(&page, &report)
-        .unwrap()
-        .unwrap()
-        .lines[0]
-        .id
-        .clone();
-    home.edit(Mutation::SetLine {
-        page: page.clone(),
-        block: report.clone(),
-        line: first,
-        setup: line(
+    let first = home.first_line(&page, &report);
+    home.set_line(
+        &page,
+        &report,
+        &first,
+        line(
             "Shares",
             &format!("SUM({{{table}.{share}}})"),
             LineStyle::Plain,
         ),
-    })
-    .unwrap();
+    );
     assert_eq!(home.lines(&page, &report), shown(&[("Shares", "706.475")]));
 
-    formula(&mut home, &with_tip, format!("{{{share}}} + 1")).unwrap();
+    home.set_formula(&with_tip, format!("{{{share}}} + 1"))
+        .unwrap();
     assert_eq!(
-        computed(&mut home)[0][0].1,
+        home.computed()[0][0].1,
         "#REF!",
         "two fields that need each other"
     );
 
-    let view = home
-        .workspace
-        .views(&page, 0, 10)
-        .unwrap()
-        .into_iter()
-        .find(|view| view.block == table)
-        .unwrap();
+    let view = home.table_view(&page);
     let by_share = home.edit(Mutation::SetTabSort {
         page: page.clone(),
         view: view.id.clone(),
         tab: view.tabs[0].id.clone(),
-        sort: Some(liquid_core::Sort {
+        sort: Some(Sort {
             field: share.clone(),
             descending: false,
         }),
@@ -472,9 +488,9 @@ fn a_formula_field_computes_each_row_from_the_row_s_fields() {
             }),
             Error::WrongKind,
         ),
-        (formula(&mut home, &amount, "1".into()), Error::WrongKind),
+        (home.set_formula(&amount, "1".into()), Error::WrongKind),
         (
-            formula(&mut home, &share, "SUM(".into()),
+            home.set_formula(&share, "SUM(".into()),
             Error::Formula { at: 4 },
         ),
     ] {
@@ -483,44 +499,27 @@ fn a_formula_field_computes_each_row_from_the_row_s_fields() {
 }
 
 #[test]
+fn a_formula_field_that_reads_its_own_column_stops_at_once() {
+    let mut home = Home::new();
+    let table = home.table.clone();
+    for _ in 0..4_000 {
+        home.row();
+    }
+    let share = home.field("Share", FieldKind::Formula);
+    home.set_formula(&share, format!("1 / SUM({{{table}.{share}}})"))
+        .unwrap();
+    assert_eq!(home.computed()[0][0].1, "#REF!");
+}
+
+#[test]
 fn a_tab_s_total_row_counts_the_rows_it_shows() {
-    use liquid_core::{FieldTotal, Filter, Match, RowQuery, Total};
     let mut home = Home::new();
     let (table, amount, page) = (home.table.clone(), home.amount.clone(), home.page.clone());
     home.row();
-    let Some(Created::Field(paid)) = home
-        .edit(Mutation::AddField {
-            block: table.clone(),
-            place: Place::Last,
-            name: "Paid".into(),
-            kind: FieldKind::Checkbox,
-        })
-        .unwrap()
-        .created
-    else {
-        panic!("a field")
-    };
-    let first = home
-        .workspace
-        .rows(&table, &query(Vec::new()))
-        .unwrap()
-        .rows[0]
-        .id
-        .clone();
-    home.edit(Mutation::SetCell {
-        block: table.clone(),
-        row: first,
-        field: paid.clone(),
-        value: Cell::Checkbox(true),
-    })
-    .unwrap();
-    let view = home
-        .workspace
-        .views(&page, 0, 10)
-        .unwrap()
-        .into_iter()
-        .find(|view| view.block == table)
-        .unwrap();
+    let paid = home.field("Paid", FieldKind::Checkbox);
+    let first = home.first_row();
+    home.set_cell(&first, &paid, Cell::Checkbox(true));
+    let view = home.table_view(&page);
     let tab = view.tabs[0].id.clone();
     let totals = [
         Total::Sum,
@@ -552,7 +551,7 @@ fn a_tab_s_total_row_counts_the_rows_it_shows() {
             }]
         );
     }
-    let shown = |home: &mut Home, filter: Option<Filter>| {
+    let shown_totals = |home: &mut Home, filter: Option<Filter>| {
         let all: Vec<_> = totals
             .iter()
             .map(|total| FieldTotal {
@@ -576,7 +575,7 @@ fn a_tab_s_total_row_counts_the_rows_it_shows() {
             .collect::<Vec<_>>()
     };
     assert_eq!(
-        shown(&mut home, None),
+        shown_totals(&mut home, None),
         ["1284.5", "642.25", "3", "384.5", "900", "1", "2"]
     );
     let unpaid = Filter {
@@ -584,7 +583,7 @@ fn a_tab_s_total_row_counts_the_rows_it_shows() {
         matches: Match::Is(Cell::Checkbox(false)),
     };
     assert_eq!(
-        shown(&mut home, Some(unpaid)),
+        shown_totals(&mut home, Some(unpaid)),
         ["384.5", "384.5", "2", "384.5", "384.5", "1", "1"],
         "a filter changes what it counts"
     );
@@ -639,96 +638,34 @@ fn a_tab_s_total_row_counts_the_rows_it_shows() {
     );
 }
 
-fn query(totals: Vec<liquid_core::FieldTotal>) -> liquid_core::RowQuery {
-    liquid_core::RowQuery {
-        sort: None,
-        filter: None,
-        within: None,
-        start: 0,
-        limit: 10,
-        search: None,
-        totals,
-    }
-}
-
 #[test]
 fn a_chart_draws_a_table_s_groups_or_a_calculation_s_lines() {
-    use liquid_core::{ChartKind, ChartSetup, ChartSource, ChartValue};
     let mut home = Home::new();
     let (table, amount, page) = (home.table.clone(), home.amount.clone(), home.page.clone());
-    let Some(Created::Field(paid)) = home
-        .edit(Mutation::AddField {
-            block: table.clone(),
-            place: Place::Last,
-            name: "Paid".into(),
-            kind: FieldKind::Checkbox,
-        })
-        .unwrap()
-        .created
-    else {
-        panic!("a field")
-    };
-    let first = home
-        .workspace
-        .rows(&table, &query(Vec::new()))
-        .unwrap()
-        .rows[0]
-        .id
-        .clone();
-    home.edit(Mutation::SetCell {
-        block: table.clone(),
-        row: first,
-        field: paid.clone(),
-        value: Cell::Checkbox(true),
-    })
-    .unwrap();
-    let Some(Created::Block { block: chart, .. }) = home
-        .edit(Mutation::AddChartBlock {
-            page: page.clone(),
-            after: None,
-        })
-        .unwrap()
-        .created
-    else {
-        panic!("a Chart")
-    };
+    let paid = home.field("Paid", FieldKind::Checkbox);
+    let first = home.first_row();
+    home.set_cell(&first, &paid, Cell::Checkbox(true));
+    let chart = home.chart(&page);
     let empty = home.workspace.chart(&page, &chart).unwrap().unwrap();
     assert_eq!((empty.setup.source, empty.points.len()), (None, 0));
 
-    let set = |home: &mut Home, setup: ChartSetup| {
-        home.edit(Mutation::SetChart {
-            page: page.clone(),
-            block: chart.clone(),
-            setup,
-        })
-    };
     let by_paid = ChartSetup {
         kind: ChartKind::Bar,
         source: Some(ChartSource::Table(table.clone())),
         group: Some(paid.clone()),
         value: ChartValue::Sum(amount.clone()),
     };
-    set(&mut home, by_paid.clone()).unwrap();
-    let points = |home: &mut Home| {
-        let drawn = home.workspace.chart(&page, &chart).unwrap().unwrap();
-        (
-            drawn.source_name,
-            drawn
-                .points
-                .into_iter()
-                .map(|point| (point.label, point.value))
-                .collect::<Vec<_>>(),
-        )
-    };
+    home.set_chart(&page, &chart, by_paid.clone()).unwrap();
     assert_eq!(
-        points(&mut home),
+        home.points(&page, &chart),
         (
             Some("Expenses".to_string()),
             vec![("No".to_string(), 384.5), ("Yes".to_string(), 900.0)]
         )
     );
-    set(
-        &mut home,
+    home.set_chart(
+        &page,
+        &chart,
         ChartSetup {
             value: ChartValue::Count,
             group: None,
@@ -736,22 +673,19 @@ fn a_chart_draws_a_table_s_groups_or_a_calculation_s_lines() {
         },
     )
     .unwrap();
-    assert_eq!(points(&mut home).1, [("Expenses".to_string(), 2.0)]);
+    assert_eq!(
+        home.points(&page, &chart).1,
+        [("Expenses".to_string(), 2.0)]
+    );
 
     let report = home.calculation(&page);
-    let lines = home
-        .workspace
-        .calculation(&page, &report)
-        .unwrap()
-        .unwrap()
-        .lines;
-    home.edit(Mutation::SetLine {
-        page: page.clone(),
-        block: report.clone(),
-        line: lines[0].id.clone(),
-        setup: line("Rent", "900", LineStyle::Plain),
-    })
-    .unwrap();
+    let lines = home.calc(&page, &report).lines;
+    home.set_line(
+        &page,
+        &report,
+        &lines[0].id,
+        line("Rent", "900", LineStyle::Plain),
+    );
     let mut last = lines[0].id.clone();
     for setup in [
         line("Food", "384.5", LineStyle::Plain),
@@ -759,8 +693,9 @@ fn a_chart_draws_a_table_s_groups_or_a_calculation_s_lines() {
     ] {
         last = home.add(&page, &report, Some(&last), setup).unwrap();
     }
-    set(
-        &mut home,
+    home.set_chart(
+        &page,
+        &chart,
         ChartSetup {
             kind: ChartKind::Pie,
             source: Some(ChartSource::Calculation {
@@ -773,7 +708,7 @@ fn a_chart_draws_a_table_s_groups_or_a_calculation_s_lines() {
     )
     .unwrap();
     assert_eq!(
-        points(&mut home).1,
+        home.points(&page, &chart).1,
         [("Rent".to_string(), 900.0), ("Food".to_string(), 384.5)],
         "a total is not drawn"
     );
@@ -792,46 +727,12 @@ fn a_chart_draws_a_table_s_groups_or_a_calculation_s_lines() {
             ..by_paid
         },
     ] {
-        assert!(set(&mut home, refused).is_err());
+        assert!(home.set_chart(&page, &chart, refused).is_err());
     }
-}
-
-#[test]
-fn a_formula_field_that_reads_its_own_column_stops_at_once() {
-    let mut home = Home::new();
-    let table = home.table.clone();
-    for _ in 0..4_000 {
-        home.row();
-    }
-    let Some(Created::Field(share)) = home
-        .edit(Mutation::AddField {
-            block: table.clone(),
-            place: Place::Last,
-            name: "Share".into(),
-            kind: FieldKind::Formula,
-        })
-        .unwrap()
-        .created
-    else {
-        panic!("a field")
-    };
-    home.edit(Mutation::SetFieldFormula {
-        block: table.clone(),
-        field: share.clone(),
-        formula: format!("1 / SUM({{{table}.{share}}})"),
-    })
-    .unwrap();
-    let rows = home
-        .workspace
-        .rows(&table, &query(Vec::new()))
-        .unwrap()
-        .rows;
-    assert_eq!(rows[0].computed[0].1.to_string(), "#REF!");
 }
 
 #[test]
 fn a_computed_value_names_every_block_and_table_it_read() {
-    use liquid_core::{ChartSetup, ChartSource, ChartValue, Used};
     let mut home = Home::new();
     let (table, amount, page, other) = (
         home.table.clone(),
@@ -840,73 +741,42 @@ fn a_computed_value_names_every_block_and_table_it_read() {
         home.other.clone(),
     );
     let source = home.calculation(&page);
-    let first = home
-        .workspace
-        .calculation(&page, &source)
-        .unwrap()
-        .unwrap()
-        .lines[0]
-        .id
-        .clone();
-    home.edit(Mutation::SetLine {
-        page: page.clone(),
-        block: source.clone(),
-        line: first.clone(),
-        setup: line(
+    let first = home.first_line(&page, &source);
+    home.set_line(
+        &page,
+        &source,
+        &first,
+        line(
             "Spent",
             &format!("SUM({{{table}.{amount}}})"),
             LineStyle::Plain,
         ),
-    })
-    .unwrap();
+    );
     let reader = home.calculation(&other);
-    let reading = home
-        .workspace
-        .calculation(&other, &reader)
-        .unwrap()
-        .unwrap()
-        .lines[0]
-        .id
-        .clone();
-    home.edit(Mutation::SetLine {
-        page: other.clone(),
-        block: reader.clone(),
-        line: reading,
-        setup: line(
+    let reading = home.first_line(&other, &reader);
+    home.set_line(
+        &other,
+        &reader,
+        &reading,
+        line(
             "Twice",
             &format!("{{{page}.{source}.{first}}} * 2"),
             LineStyle::Plain,
         ),
-    })
-    .unwrap();
-    let uses = home
-        .workspace
-        .calculation(&other, &reader)
-        .unwrap()
-        .unwrap()
-        .uses;
+    );
     assert_eq!(
-        uses,
+        home.calc(&other, &reader).uses,
         [
             Used::Table(table.clone()),
             Used::Block(page.clone(), source.clone())
         ]
     );
 
-    let Some(Created::Block { block: chart, .. }) = home
-        .edit(Mutation::AddChartBlock {
-            page: other.clone(),
-            after: None,
-        })
-        .unwrap()
-        .created
-    else {
-        panic!("a Chart")
-    };
-    home.edit(Mutation::SetChart {
-        page: other.clone(),
-        block: chart.clone(),
-        setup: ChartSetup {
+    let chart = home.chart(&other);
+    home.set_chart(
+        &other,
+        &chart,
+        ChartSetup {
             source: Some(ChartSource::Calculation {
                 page: other.clone(),
                 block: reader.clone(),
@@ -914,7 +784,7 @@ fn a_computed_value_names_every_block_and_table_it_read() {
             value: ChartValue::Count,
             ..ChartSetup::default()
         },
-    })
+    )
     .unwrap();
     let uses = home.workspace.chart(&other, &chart).unwrap().unwrap().uses;
     let mut expected = vec![
@@ -927,135 +797,50 @@ fn a_computed_value_names_every_block_and_table_it_read() {
 }
 
 #[test]
-fn a_chain_of_references_deeper_than_the_bound_stops_with_an_error() {
-    let mut home = Home::new();
-    let page = home.page.clone();
-    let report = home.calculation(&page);
-    let mut ids = vec![
-        home.workspace
-            .calculation(&page, &report)
-            .unwrap()
-            .unwrap()
-            .lines[0]
-            .id
-            .clone(),
-    ];
-    for _ in 0..liquid_core::MAX_DEPTH + 40 {
-        let after = ids.last().cloned();
-        ids.push(
-            home.add(
-                &page,
-                &report,
-                after.as_ref(),
-                line("", "1", LineStyle::Plain),
-            )
-            .unwrap(),
-        );
-    }
-    for pair in ids.windows(2) {
-        home.edit(Mutation::SetLine {
-            page: page.clone(),
-            block: report.clone(),
-            line: pair[0].clone(),
-            setup: line(
-                "",
-                &format!("{{{page}.{report}.{}}} + 1", pair[1]),
-                LineStyle::Plain,
-            ),
+fn chains_that_read_too_deep_or_too_nested_stop_with_an_error() {
+    type Formula = fn(&PageId, &BlockId, &[LineId], usize) -> Option<String>;
+    let reads_next: Formula = |page, report, ids, at| {
+        (at + 1 < ids.len()).then(|| format!("{{{page}.{report}.{}}} + 1", ids[at + 1]))
+    };
+    let nested: Formula = |page, report, ids, at| {
+        (at + 1 < ids.len()).then(|| {
+            let reference = format!("{{{page}.{report}.{}}}", ids[at + 1]);
+            let depth = MAX_NESTING - 1;
+            format!("{}{reference}{}", "SUM(".repeat(depth), ")".repeat(depth))
         })
-        .unwrap();
-    }
-    let lines = home.lines(&page, &report);
-    assert_eq!(lines[0].1, "#REF!", "too deep to follow");
-    assert_eq!(lines.last().unwrap().1, "1");
-}
-
-#[test]
-fn nested_formulas_along_a_long_chain_stop_within_one_budget() {
-    let mut home = Home::new();
-    let page = home.page.clone();
-    let report = home.calculation(&page);
-    let mut ids = vec![
-        home.workspace
-            .calculation(&page, &report)
-            .unwrap()
-            .unwrap()
-            .lines[0]
-            .id
-            .clone(),
-    ];
-    for _ in 0..liquid_core::MAX_DEPTH {
-        let after = ids.last().cloned();
-        ids.push(
-            home.add(
-                &page,
-                &report,
-                after.as_ref(),
-                line("", "1", LineStyle::Plain),
+    };
+    let reads_next_two: Formula = |page, report, ids, at| {
+        (at + 2 < ids.len()).then(|| {
+            format!(
+                "{{{page}.{report}.{}}} + {{{page}.{report}.{}}}",
+                ids[at + 1],
+                ids[at + 2]
             )
-            .unwrap(),
-        );
-    }
-    let nested = liquid_core::MAX_NESTING - 1;
-    for pair in ids.windows(2) {
-        let reference = format!("{{{page}.{report}.{}}}", pair[1]);
-        let formula = format!("{}{reference}{}", "SUM(".repeat(nested), ")".repeat(nested));
-        home.edit(Mutation::SetLine {
-            page: page.clone(),
-            block: report.clone(),
-            line: pair[0].clone(),
-            setup: line("", &formula, LineStyle::Plain),
         })
-        .unwrap();
+    };
+    for (extra, formula, back, value) in [
+        (MAX_DEPTH + 40, reads_next, 1, "1"),
+        (MAX_DEPTH, nested, 2, "1"),
+        (MAX_DEPTH, reads_next_two, 3, "2"),
+    ] {
+        let mut home = Home::new();
+        let page = home.page.clone();
+        let report = home.calculation(&page);
+        let ids = home.chain(&page, &report, extra);
+        for at in 0..ids.len() {
+            if let Some(formula) = formula(&page, &report, &ids, at) {
+                home.set_line(
+                    &page,
+                    &report,
+                    &ids[at],
+                    line("", &formula, LineStyle::Plain),
+                );
+            }
+        }
+        let lines = home.lines(&page, &report);
+        assert_eq!(lines[0].1, "#REF!", "too deep or nested to follow");
+        assert_eq!(lines[lines.len() - back].1, value);
     }
-    let lines = home.lines(&page, &report);
-    assert_eq!(lines[0].1, "#REF!");
-    assert_eq!(lines[lines.len() - 2].1, "1");
-}
-
-#[test]
-fn lines_that_each_read_the_next_two_stop_without_blowing_up() {
-    let mut home = Home::new();
-    let page = home.page.clone();
-    let report = home.calculation(&page);
-    let mut ids = vec![
-        home.workspace
-            .calculation(&page, &report)
-            .unwrap()
-            .unwrap()
-            .lines[0]
-            .id
-            .clone(),
-    ];
-    for _ in 0..liquid_core::MAX_DEPTH {
-        let after = ids.last().cloned();
-        ids.push(
-            home.add(
-                &page,
-                &report,
-                after.as_ref(),
-                line("", "1", LineStyle::Plain),
-            )
-            .unwrap(),
-        );
-    }
-    for at in 0..ids.len() - 2 {
-        let formula = format!(
-            "{{{page}.{report}.{}}} + {{{page}.{report}.{}}}",
-            ids[at + 1],
-            ids[at + 2]
-        );
-        home.edit(Mutation::SetLine {
-            page: page.clone(),
-            block: report.clone(),
-            line: ids[at].clone(),
-            setup: line("", &formula, LineStyle::Plain),
-        })
-        .unwrap();
-    }
-    let lines = home.lines(&page, &report);
-    assert_eq!(lines[0].1, "#REF!");
-    assert_eq!(lines[lines.len() - 3].1, "2");
 }
 
 #[test]
@@ -1064,14 +849,7 @@ fn lines_that_need_each_other_are_errors_whatever_order_reads_them() {
     let page = home.page.clone();
     for swapped in [false, true] {
         let report = home.calculation(&page);
-        let first = home
-            .workspace
-            .calculation(&page, &report)
-            .unwrap()
-            .unwrap()
-            .lines[0]
-            .id
-            .clone();
+        let first = home.first_line(&page, &report);
         let second = home
             .add(&page, &report, Some(&first), line("", "", LineStyle::Plain))
             .unwrap();
@@ -1085,13 +863,12 @@ fn lines_that_need_each_other_are_errors_whatever_order_reads_them() {
             (guarded, format!("IFERROR({}, 0)", at(plain))),
             (plain, format!("{} + 1", at(guarded))),
         ] {
-            home.edit(Mutation::SetLine {
-                page: page.clone(),
-                block: report.clone(),
-                line: line_id.clone(),
-                setup: line("", &formula, LineStyle::Plain),
-            })
-            .unwrap();
+            home.set_line(
+                &page,
+                &report,
+                line_id,
+                line("", &formula, LineStyle::Plain),
+            );
         }
         let values: Vec<_> = home
             .lines(&page, &report)
@@ -1104,83 +881,31 @@ fn lines_that_need_each_other_are_errors_whatever_order_reads_them() {
 
 #[test]
 fn a_chart_of_a_select_with_many_options_draws_the_ones_in_use() {
-    use liquid_core::{ChartSetup, ChartSource, ChartValue, MAX_CHART_POINTS};
     let mut home = Home::new();
     let (table, page) = (home.table.clone(), home.page.clone());
-    let Some(Created::Field(kind)) = home
-        .edit(Mutation::AddField {
-            block: table.clone(),
-            place: Place::Last,
-            name: "Kind".into(),
-            kind: FieldKind::Select,
-        })
-        .unwrap()
-        .created
-    else {
-        panic!("a field")
-    };
+    let kind = home.field("Kind", FieldKind::Select);
     let mut last = None;
     for at in 0..MAX_CHART_POINTS + 20 {
-        let Some(Created::Option(option)) = home
-            .edit(Mutation::AddOption {
-                block: table.clone(),
-                field: kind.clone(),
-                name: format!("Kind {at}"),
-                color: 0,
-            })
-            .unwrap()
-            .created
-        else {
-            panic!("an option")
-        };
-        last = Some(option);
+        last = Some(option(
+            &mut home.workspace,
+            &table,
+            &kind,
+            &format!("Kind {at}"),
+        ));
     }
-    let row = home
-        .workspace
-        .rows(&table, &query(Vec::new()))
-        .unwrap()
-        .rows[0]
-        .id
-        .clone();
-    home.edit(Mutation::SetCell {
-        block: table.clone(),
-        row,
-        field: kind.clone(),
-        value: Cell::Select(last.unwrap()),
-    })
-    .unwrap();
-    let Some(Created::Block { block: chart, .. }) = home
-        .edit(Mutation::AddChartBlock {
-            page: page.clone(),
-            after: None,
-        })
-        .unwrap()
-        .created
-    else {
-        panic!("a Chart")
-    };
-    home.edit(Mutation::SetChart {
-        page: page.clone(),
-        block: chart.clone(),
-        setup: ChartSetup {
+    let row = home.first_row();
+    home.set_cell(&row, &kind, Cell::Select(last.unwrap()));
+    let chart = home.table_chart(
+        &page,
+        ChartSetup {
             source: Some(ChartSource::Table(table)),
             group: Some(kind),
             value: ChartValue::Count,
             ..ChartSetup::default()
         },
-    })
-    .unwrap();
-    let labels: Vec<_> = home
-        .workspace
-        .chart(&page, &chart)
-        .unwrap()
-        .unwrap()
-        .points
-        .into_iter()
-        .map(|point| (point.label, point.value))
-        .collect();
+    );
     assert_eq!(
-        labels,
+        home.points(&page, &chart).1,
         [
             (format!("Kind {}", MAX_CHART_POINTS + 19), 1.0),
             ("Empty".to_string(), 1.0)
@@ -1190,38 +915,24 @@ fn a_chart_of_a_select_with_many_options_draws_the_ones_in_use() {
 
 #[test]
 fn a_duplicated_table_keeps_its_formulas_and_overflow_is_an_error() {
-    use liquid_core::{ChartSetup, ChartSource, ChartValue, FieldTotal, Total};
     let mut home = Home::new();
     let (table, amount, page) = (home.table.clone(), home.amount.clone(), home.page.clone());
-    let Some(Created::Field(double)) = home
-        .edit(Mutation::AddField {
-            block: table.clone(),
-            place: Place::Last,
-            name: "Double".into(),
-            kind: FieldKind::Formula,
-        })
-        .unwrap()
-        .created
-    else {
-        panic!("a field")
-    };
-    home.edit(Mutation::SetFieldFormula {
-        block: table.clone(),
-        field: double.clone(),
-        formula: format!("{{{amount}}} * 2 + SUM({{{table}.{amount}}})"),
-    })
+    let double = home.field("Double", FieldKind::Formula);
+    home.set_formula(
+        &double,
+        format!("{{{amount}}} * 2 + SUM({{{table}.{amount}}})"),
+    )
     .unwrap();
-    let Some(Created::Block { block: copy, .. }) = home
-        .edit(Mutation::DuplicateTable {
+    let Created::Block { block: copy, .. } = created(
+        &mut home.workspace,
+        Mutation::DuplicateTable {
             page: page.clone(),
             after: None,
             table: table.clone(),
             name: "Expenses copy".into(),
             tabs: Vec::new(),
-        })
-        .unwrap()
-        .created
-    else {
+        },
+    ) else {
         panic!("a copy")
     };
     let copied = home.workspace.database(&copy).unwrap().unwrap();
@@ -1236,12 +947,7 @@ fn a_duplicated_table_keeps_its_formulas_and_overflow_is_an_error() {
         "the copy reads its own column"
     );
 
-    for row in home
-        .workspace
-        .rows(&table, &query(Vec::new()))
-        .unwrap()
-        .rows
-    {
+    for row in home.rows() {
         home.edit(Mutation::SetCell {
             block: table.clone(),
             row: row.id,
@@ -1256,26 +962,91 @@ fn a_duplicated_table_keeps_its_formulas_and_overflow_is_an_error() {
     }];
     let totals = home.workspace.rows(&table, &query(sum)).unwrap().totals;
     assert_eq!(totals[0].1.to_string(), "#NUM!");
-    let Some(Created::Block { block: chart, .. }) = home
-        .edit(Mutation::AddChartBlock {
-            page: page.clone(),
-            after: None,
-        })
-        .unwrap()
-        .created
-    else {
-        panic!("a Chart")
-    };
-    home.edit(Mutation::SetChart {
-        page: page.clone(),
-        block: chart.clone(),
-        setup: ChartSetup {
+    let chart = home.table_chart(
+        &page,
+        ChartSetup {
             source: Some(ChartSource::Table(table)),
             value: ChartValue::Sum(amount),
             ..ChartSetup::default()
         },
-    })
-    .unwrap();
+    );
     let points = home.workspace.chart(&page, &chart).unwrap().unwrap().points;
     assert!(points.iter().all(|point| point.value.is_finite()));
+}
+
+#[test]
+fn a_chart_keeps_select_options_with_the_same_name_apart() {
+    let mut home = Home::new();
+    let (table, page) = (home.table.clone(), home.page.clone());
+    let kind = home.field("Kind", FieldKind::Select);
+    let options: Vec<_> = (0..2)
+        .map(|_| option(&mut home.workspace, &table, &kind, "Other"))
+        .collect();
+    let rows = home.rows();
+    for (row, option) in rows.iter().zip(options) {
+        home.set_cell(&row.id, &kind, Cell::Select(option));
+    }
+    let chart = home.table_chart(
+        &page,
+        ChartSetup {
+            source: Some(ChartSource::Table(table)),
+            group: Some(kind),
+            value: ChartValue::Count,
+            ..ChartSetup::default()
+        },
+    );
+    assert_eq!(
+        home.points(&page, &chart).1,
+        [("Other".to_string(), 1.0), ("Other".to_string(), 1.0)]
+    );
+}
+
+#[test]
+fn a_total_and_a_chart_average_keep_the_mean_of_huge_values() {
+    let mut home = Home::new();
+    let (table, amount, page) = (home.table.clone(), home.amount.clone(), home.page.clone());
+    for row in home.rows() {
+        home.set_cell(&row.id, &amount, Cell::Number(1e308));
+    }
+    let average = FieldTotal {
+        field: amount.clone(),
+        total: Total::Average,
+    };
+    let totals = home
+        .workspace
+        .rows(&table, &query(vec![average]))
+        .unwrap()
+        .totals;
+    assert_eq!(totals[0].1.to_string(), "1E+308");
+    let chart = home.table_chart(
+        &page,
+        ChartSetup {
+            source: Some(ChartSource::Table(table)),
+            value: ChartValue::Average(amount),
+            ..ChartSetup::default()
+        },
+    );
+    assert_eq!(
+        home.points(&page, &chart).1,
+        [("Expenses".to_string(), 1e308)]
+    );
+}
+
+#[test]
+fn a_calculation_uses_the_table_named_in_an_inactive_branch() {
+    let mut home = Home::new();
+    let (table, amount, page) = (home.table.clone(), home.amount.clone(), home.page.clone());
+    let report = home.calculation(&page);
+    let first = home.first_line(&page, &report);
+    home.set_line(
+        &page,
+        &report,
+        &first,
+        line(
+            "Guard",
+            &format!("IF(FALSE, SUM({{{table}.{amount}}}), 0)"),
+            LineStyle::Plain,
+        ),
+    );
+    assert_eq!(home.calc(&page, &report).uses, [Used::Table(table)]);
 }

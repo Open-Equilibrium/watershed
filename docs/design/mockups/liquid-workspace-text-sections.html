@@ -2,46 +2,13 @@
 <html lang="en"><head><title>Liquid: Sections mockups</title>
 <link rel="stylesheet" href="mockup.css"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <style>
-.ga{display:grid;grid-template-columns:repeat(12,1fr);gap:16px;align-items:start;position:relative}
-.ga.lines::before{content:"";position:absolute;inset:-8px 0;background:repeating-linear-gradient(to right,color-mix(in srgb,var(--ws-accent) 6%,transparent) 0,color-mix(in srgb,var(--ws-accent) 6%,transparent) calc((100% - 176px)/12),transparent calc((100% - 176px)/12),transparent calc((100% - 176px)/12 + 16px));pointer-events:none}
-.t{position:relative;border-radius:8px;padding:10px 12px;background:var(--ws-canvas);box-shadow:0 0 0 1px var(--ws-border-strong);min-width:0;font-size:15px;line-height:22px}
-.t.sel{box-shadow:0 0 0 2px var(--ws-accent)}
-.t.dim,.grp.dim{opacity:.4}
-.t .mv,.grp>.mv{position:absolute;top:-11px;left:50%;transform:translateX(-50%);height:18px;padding:0 6px;border-radius:4px;background:var(--ws-surface);box-shadow:0 0 0 1px var(--ws-border-strong);font-size:11px;color:var(--ws-text-faint);display:flex;align-items:center;letter-spacing:1px;z-index:1}
-.t .rs,.grp>.rs{position:absolute;right:-5px;top:50%;width:8px;height:28px;margin-top:-14px;border-radius:4px;background:var(--ws-surface);box-shadow:0 0 0 1px var(--ws-border-strong);z-index:1}
-.t.sel .mv,.t.sel .rs,.grp.sel>.mv,.grp.sel>.rs{background:var(--ws-accent);color:var(--ws-on-accent);box-shadow:none}
-.t .span,.grp>.span{position:absolute;right:10px;bottom:-11px;font-size:11px;line-height:18px;padding:0 6px;border-radius:4px;background:var(--ws-accent);color:var(--ws-on-accent);z-index:1}
-.t .sb{position:absolute;left:10px;top:-10px;font-size:11px;line-height:18px;padding:0 6px;border-radius:4px;background:var(--ws-accent);color:var(--ws-on-accent)}
-.grp{position:relative;border-radius:12px;padding:18px 12px 12px;border:1.5px dashed var(--ws-border-strong);background:color-mix(in srgb,var(--ws-subtle) 60%,transparent)}
-.grp.sel{border:2px solid var(--ws-accent)}
-.grp.open{border:2px dashed var(--ws-accent);background:var(--ws-canvas)}
-.glab{position:absolute;top:-11px;left:12px;font-size:12px;line-height:20px;padding:0 8px;border-radius:4px;background:var(--ws-canvas);box-shadow:0 0 0 1px var(--ws-border-strong);color:var(--ws-text-muted);display:flex;gap:6px;align-items:center;z-index:1}
-.grp.sel .glab,.grp.open .glab{background:var(--ws-accent);color:var(--ws-on-accent);box-shadow:none}
-.gi{display:grid;grid-template-columns:repeat(var(--c),1fr);gap:12px;position:relative}
-.gi.lines::before{content:"";position:absolute;inset:-6px 0;background:repeating-linear-gradient(to right,color-mix(in srgb,var(--ws-accent) 8%,transparent) 0,color-mix(in srgb,var(--ws-accent) 8%,transparent) calc((100% - 48px)/5),transparent calc((100% - 48px)/5),transparent calc((100% - 48px)/5 + 12px));pointer-events:none}
-.grp .t{box-shadow:0 0 0 1px var(--ws-border)}
-.grp .t.sel{box-shadow:0 0 0 2px var(--ws-accent)}
-.ins{height:0;border-top:3px solid var(--ws-accent);position:relative;margin:-6px 0;grid-column:1/-1}
-.ins span{position:absolute;right:0;top:-12px;font-size:11px;line-height:18px;padding:0 6px;border-radius:4px;background:var(--ws-accent);color:var(--ws-on-accent)}
-.ghost{position:absolute;z-index:5;opacity:.85;transform:rotate(-1.5deg);box-shadow:var(--ws-shadow)!important}
-.crumb2{display:flex;gap:6px;align-items:center}
-.crumb2 span{opacity:.7}
-.mini{font-size:15px;line-height:22px}
-.mini b{font-weight:600;display:block;font-size:16px;margin-bottom:2px}
 .dv{height:1px;background:var(--ws-border-strong);margin:12px 8px}
-.bk{position:relative;border-radius:6px}
-.bk.hl{box-shadow:0 0 0 1.5px var(--ws-accent);background:color-mix(in srgb,var(--ws-accent) 4%,transparent)}
-.bk .lab{position:absolute;left:-118px;top:2px;width:104px;text-align:right;font-size:12px;color:var(--ws-accent)}
-.cmp2{display:grid;grid-template-columns:1fr 1fr;gap:24px}
-.cmp2 h5{margin:0 0 8px;font-size:12px;font-weight:500;color:var(--ws-text-faint)}
 .secb{position:relative;border-radius:8px;box-shadow:0 0 0 1.5px var(--ws-accent);padding:8px 10px;background:color-mix(in srgb,var(--ws-accent) 4%,transparent)}
 .secb .lab,.othb .lab{position:absolute;left:-150px;top:6px;width:136px;text-align:right;font-size:12px;line-height:16px;color:var(--ws-accent)}
 .othb{position:relative}
 .othb .lab{color:var(--ws-text-faint)}
 .tb{border-radius:4px;box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--ws-accent) 25%,transparent);padding:1px 6px;margin:2px 0}
 .tb h4{margin:0;font-size:16px;line-height:24px;font-weight:600}
-.slab{position:absolute;left:10px;top:-10px;font-size:11px;line-height:18px;padding:0 6px;border-radius:4px;background:var(--ws-surface);box-shadow:0 0 0 1px var(--ws-border-strong);color:var(--ws-text-muted)}
-.t.sel .slab{background:var(--ws-accent);color:var(--ws-on-accent);box-shadow:none}
 .toast{position:absolute;left:50%;bottom:20px;transform:translateX(-50%);display:flex;gap:14px;align-items:center;padding:8px 10px 8px 14px;border-radius:8px;background:var(--ws-text);color:var(--ws-canvas);font-size:13px;box-shadow:var(--ws-shadow);white-space:nowrap;z-index:3}
 .toast b{font-weight:600}
 .toast .u{color:var(--ws-canvas);opacity:.75}
@@ -96,21 +63,7 @@ zap:sv('<path d="M9 1.5L3 9h4.5L7 14.5 13 7H8.5z"/>'),
 clock:sv('<circle cx="8" cy="8" r="6"/><path d="M8 4.5V8l2.5 1.5"/>'),
 grid:sv('<rect x="2" y="2" width="5" height="5" rx="1"/><rect x="9" y="2" width="5" height="5" rx="1"/><rect x="2" y="9" width="5" height="5" rx="1"/><rect x="9" y="9" width="5" height="5" rx="1"/>'),
 more:sv('<circle cx="3.5" cy="8" r=".8"/><circle cx="8" cy="8" r=".8"/><circle cx="12.5" cy="8" r=".8"/>'),
-drag:sv('<circle cx="6" cy="4" r=".8"/><circle cx="10" cy="4" r=".8"/><circle cx="6" cy="8" r=".8"/><circle cx="10" cy="8" r=".8"/><circle cx="6" cy="12" r=".8"/><circle cx="10" cy="12" r=".8"/>'),
-plus:sv('<path d="M8 3v10M3 8h10"/>'),
-text:sv('<path d="M3 3.5h10M8 3.5V13"/>'),
-db:sv('<rect x="2" y="2.5" width="12" height="11" rx="1.5"/><path d="M2 6h12M6 6v7.5"/>'),
-chart:sv('<path d="M2.5 13.5h11"/><path d="M4.5 11V8M8 11V4M11.5 11V6.5"/>'),
-code:sv('<path d="M5.5 4.5L2 8l3.5 3.5M10.5 4.5L14 8l-3.5 3.5"/>'),
-fx:sv('<path d="M11.5 3H5.5l4 5-4 5h6"/>'),
-img:sv('<rect x="2" y="2.5" width="12" height="11" rx="1.5"/><circle cx="6" cy="6.5" r="1.2"/><path d="M2.5 12l3.5-3.5 2.5 2.5 2-2 3 3"/>'),
-pen:sv('<path d="M10.5 2.5l3 3L6 13H3v-3z"/>'),
-link:sv('<path d="M6.5 9.5l3-3"/><path d="M7 4.5l1-1a2.5 2.5 0 013.5 3.5l-1 1M9 11.5l-1 1A2.5 2.5 0 014.5 9l1-1"/>'),
-copy:sv('<rect x="5" y="5" width="8.5" height="8.5" rx="1.5"/><path d="M11 5V3.5c0-.6-.4-1-1-1H3.5c-.6 0-1 .4-1 1V10c0 .6.4 1 1 1H5"/>'),
-tpl:sv('<rect x="2" y="2" width="12" height="12" rx="1.5"/><path d="M2 6h12M6 6v8"/>'),
 cog:sv('<circle cx="8" cy="8" r="2"/><path d="M8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2M3.4 3.4l1.4 1.4M11.2 11.2l1.4 1.4M3.4 12.6l1.4-1.4M11.2 4.8l1.4-1.4"/>'),
-reload:sv('<path d="M13 8a5 5 0 11-1.5-3.5"/><path d="M13 2.5V5h-2.5"/>'),
-back:sv('<path d="M10 3.5L5.5 8l4.5 4.5"/>'),
 };
 const E={budget:'💰',review:'📊',trip:'🧳',road:'🗺️',api:'🧩',plan:'🗓️'};
 const em=e=>`<span class="em">${e}</span>`;
@@ -135,14 +88,6 @@ function head(crumb,o={}){return `<div class="head"><span class="crumb">${crumb}
 function frame(id,o){document.getElementById(id).innerHTML=`<div class="tbar"><div class="lights"><i style="background:#ff5f57"></i><i style="background:#febc2e"></i><i style="background:#28c840"></i></div></div>
 <div class="body" style="--h:${o.h}px">${side(o.side||{})}<div class="main">${o.head||''}${o.main}</div>${o.over||''}</div>`}
 
-const rows=[['1 Nov','Groceries','Food','t1','84.20'],['30 Oct','Electricity','Home','t2','96.00'],['28 Oct','Train to Porto','Travel','t3','42.50'],['27 Oct','Rent','Home','t2','950.00'],['25 Oct','Cinema','Leisure','t4','111.80']];
-const dbTable=(o={})=>`<div class="tbl" style="--cols:96px 1fr 120px 110px"><div class="tr hd"><span>Date</span><span>Item</span><span>Category</span><span class="num">Amount</span></div>
-${rows.slice(0,o.n||5).map(r=>`<div class="tr"><span>${r[0]}</span><span>${r[1]}</span><span><span class="tag ${r[3]}">${r[2]}</span></span><span class="num">€ ${r[4]}</span></div>`).join('')}
-<div class="tr sum"><span>5 rows</span><span></span><span></span><span class="num">Sum € 1,284.50</span></div></div>`;
-const dbHead=(o={})=>`<div class="bh"><span class="ico">${I.db}</span><b>Expenses</b><span class="chip">Table ⌄</span><span class="end">${o.synced?'<span class="cap">Synced · on 2 Pages</span>':''}<span class="ib">${I.more}</span></span></div>`;
-const chart=(h=120)=>`<div class="bars" style="height:${h}px">${[['Home',1046],['Leisure',112],['Food',84],['Travel',43]].map(([k,v])=>`<div><span>€ ${v}</span><i style="height:${Math.max(4,v/1046*(h-30))}px"></i></div>`).join('')}</div><div class="blab"><span>Home</span><span>Leisure</span><span>Food</span><span>Travel</span></div>`;
-const chartBlk=`<div class="bh"><span class="ico">${I.chart}</span><b>Spending by category</b><span class="chip">Bar ⌄</span><span class="end"><span class="cap">from Expenses</span></span></div>${chart()}`;
-const fxBlk=(o={})=>`<div class="card"><div class="cap">Left this month</div><div class="big">€ 715.50</div>${o.f!==false?`<div class="fx" style="margin-top:4px">= 2000 − SUM(<span class="ref">${I.db} Expenses › Amount</span>)</div>`:''}</div>`;
 
 const tb=h=>`<div class="tb">${h}</div>`;
 const S1=`${tb('<h4>Plan</h4>')}${tb('Five days in Lisbon, one in Porto. We fly on 12 November.')}${tb('<h4>Before we go</h4>')}${tb('<div class="todo"><span class="cb on">✓</span><span style="color:var(--ws-text-faint);text-decoration:line-through">Book the flat in Alfama</span></div>')}${tb('<div class="todo"><span class="cb"></span>Renew the passport</div>')}`;
@@ -150,7 +95,6 @@ const S2=`${tb('<h4>Notes</h4>')}${tb('Tram 28 is crowded before ten; buy the Vi
 const S3=`${tb('<h4>Ideas</h4>')}${tb('Day trip to Sintra if the weather holds.')}`;
 const IMG=`<div class="img" style="height:150px"></div>`;
 const WB=`<div class="wb" style="height:120px"><svg viewBox="0 0 400 120"><rect x="30" y="30" width="110" height="48" rx="8" fill="none" stroke="var(--ws-data-1)" stroke-width="2"/><text x="85" y="59" text-anchor="middle" font-size="13" fill="var(--ws-text)">Lisbon</text><rect x="260" y="46" width="110" height="48" rx="8" fill="none" stroke="var(--ws-data-2)" stroke-width="2"/><text x="315" y="75" text-anchor="middle" font-size="13" fill="var(--ws-text)">Porto</text><path d="M142 54 C 200 52, 200 72, 256 70" fill="none" stroke="var(--ws-text-muted)" stroke-width="1.6"/></svg></div>`;
-const plain=h=>h.replace(/class="tb"/g,'class="tb" style="box-shadow:none"');
 frame('w-t1',{h:880,side:{sel:'trip'},head:head('Private <span>›</span> <b>🧳 Trip to Lisbon</b>'),main:`<div class="pg"><div class="col" style="gap:10px;font-size:15px;line-height:22px">
 <div class="ttl"><span class="tic">🧳</span>Trip to Lisbon</div>
 <div class="secb"><span class="lab">Section 1<br>5 Paragraphs</span>${S1}</div>
@@ -159,8 +103,6 @@ frame('w-t1',{h:880,side:{sel:'trip'},head:head('Private <span>›</span> <b>�
 <div class="othb"><span class="lab">Media Block<br>ends Section 2</span>${IMG}</div>
 <div class="secb"><span class="lab">Section 3<br>2 Paragraphs</span>${S3}</div>
 <div class="othb"><span class="lab">Whiteboard</span>${WB}</div></div></div>`});
-const tl=(span,body,o={})=>`<div class="t ${o.sel?'sel':''}" style="grid-column:span ${span};${o.style||''}">${o.lab?`<span class="slab">${o.lab}</span>`:''}${o.h?'<span class="mv">• • •</span><span class="rs"></span>':''}${o.sp?`<span class="span">${o.sp}</span>`:''}${body}</div>`;
-const bar=(left,right)=>`<div class="armode"><b>${I.grid}</b>${left}<span class="end">${right||''}<span class="sg2"><span class="on">Desktop</span><span>Narrow</span><span>Phone</span></span><span class="btn pri">Done <kbd>esc</kbd></span></span></div>`;
 const card=(label,inner)=>`<div class="win" style="width:600px;flex:none;padding:18px 24px 22px;box-sizing:border-box;font-size:15px;line-height:22px"><div class="cap" style="margin-bottom:10px">${label}</div>${inner}</div>`;
 const split=card('Typing <code>---</code> and ⏎ after “Book the flat”: one Section becomes two',`<div class="secb">${tb('<h4>Plan</h4>')}${tb('Five days in Lisbon, one in Porto.')}${tb('<h4>Before we go</h4>')}${tb('<div class="todo"><span class="cb on">✓</span>Book the flat in Alfama</div>')}</div><div class="dv"></div><div class="secb">${tb('<div class="todo"><span class="cb"></span>Renew the passport</div>')}</div>`);
 const join=card('⌫ at the start of “Renew the passport”: the divider goes, both Sections join',`<div class="secb">${tb('<h4>Plan</h4>')}${tb('Five days in Lisbon, one in Porto.')}${tb('<h4>Before we go</h4>')}${tb('<div class="todo"><span class="cb on">✓</span>Book the flat in Alfama</div>')}${tb('<div class="todo"><span class="cb"></span><span class="caret" style="margin-right:2px"></span>Renew the passport</div>')}</div><div style="margin-top:14px;display:flex;justify-content:center"><span class="toast" style="position:static;transform:none">Joined Sections<span class="u">Undo ⌘Z</span></span></div>`);

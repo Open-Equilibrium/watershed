@@ -66,6 +66,7 @@ class _QuestionCardState extends State<QuestionCard> with ReadDelay {
   }
 
   void _go(int index) => setState(() {
+    _advance?.cancel();
     _index = index;
     final typed = TextEditingValue(text: _typed[_questions[index].id] ?? '');
     if (writeText(_text, typed)) _text = adoptController(_text);
@@ -97,18 +98,24 @@ class _QuestionCardState extends State<QuestionCard> with ReadDelay {
     }
   }
 
-  void _send() => decided(
-    () => widget.state.answer(widget.request, [
-      for (final question in _questions)
-        BridgeQuestionAnswer(
-          question: question.id,
-          values: _values(question),
-          typed: _isTyped(question),
-        ),
-    ]),
-  );
+  void _send() {
+    _advance?.cancel();
+    decided(
+      () => widget.state.answer(widget.request, [
+        for (final question in _questions)
+          BridgeQuestionAnswer(
+            question: question.id,
+            values: _values(question),
+            typed: _isTyped(question),
+          ),
+      ]),
+    );
+  }
 
-  void _dismiss() => decided(() => widget.state.dismiss(widget.request));
+  void _dismiss() {
+    _advance?.cancel();
+    decided(() => widget.state.dismiss(widget.request));
+  }
 
   @override
   Widget build(BuildContext context) {

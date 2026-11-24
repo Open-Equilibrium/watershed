@@ -89,13 +89,14 @@ class AgentsState {
     composing.value = true;
   }
 
-  Future<void> start(String request) async {
+  Future<bool> start(String request) async {
     final project = _state.project;
     final model = _state.model.value;
     if (project == null || model == null) {
       _state.notify(NoticeLevel.error, 'No model is available.');
-      return;
+      return false;
     }
+    final navigations = _state.navigations;
     try {
       final agent = await project.agentStart(
         model,
@@ -104,9 +105,12 @@ class AgentsState {
       );
       composing.value = false;
       await load();
+      if (navigations != _state.navigations) return true;
       await show(HostAgent(address: _state.startAddress, agent: agent));
+      return true;
     } on Object catch (error) {
       _state.notify(NoticeLevel.error, 'Could not start the agent: $error');
+      return false;
     }
   }
 
@@ -114,6 +118,9 @@ class AgentsState {
     composing.value = false;
     _poll?.cancel();
     if (list.value.isEmpty) await load();
+    if (_state.session?.id != thread || _state.sessionAddress != address) {
+      return;
+    }
     final hosted = ofThread(thread, address);
     open.value = hosted;
     changes.value = const [];
@@ -159,7 +166,13 @@ class AgentsState {
       if (read.any((mention) => !mention.answered)) {
         _poll = Timer(mentionPoll, () => unawaited(readMentions()));
       }
-    } on Object catch (_) {}
+    } on Object catch (_) {
+      if (_state.session?.id == thread &&
+          mentions.value.any((m) => !m.answered)) {
+        _poll?.cancel();
+        _poll = Timer(mentionPoll, () => unawaited(readMentions()));
+      }
+    }
   }
 
   (HostAgent, String)? _mentioned(String text) {
@@ -173,6 +186,8 @@ class AgentsState {
     return (hosted, match.group(2)!.trim());
   }
 
+  bool isMention(String text) => _mentioned(text) != null;
+
   Future<bool> mention(String text) async {
     final found = _mentioned(text);
     final thread = _state.session?.id;
@@ -181,13 +196,14 @@ class AgentsState {
     try {
       await _project(hosted).agentMention(hosted.agent.id, thread, said);
       await readMentions();
+      return true;
     } on Object catch (error) {
       _state.notify(
         NoticeLevel.error,
         'Could not send the message to ${hosted.name}: $error',
       );
+      return false;
     }
-    return true;
   }
 
   Future<void> apply(BridgeAgentChange change) => _change(

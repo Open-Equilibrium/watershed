@@ -9,7 +9,8 @@ import '../theme/icons.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
 import '../rust/api/source.dart';
-import 'source_page.dart' show sourceIcon;
+import 'page_icon.dart';
+import 'source_kind.dart' show sourceIcon;
 import 'workspace_state.dart';
 
 const untitled = 'Untitled';
@@ -194,6 +195,41 @@ extension on String {
   String? get nonEmpty => isEmpty ? null : this;
 }
 
+class _RowShell extends StatelessWidget {
+  const _RowShell({
+    required this.selected,
+    required this.onOpen,
+    this.depth = 0,
+    required this.children,
+  });
+
+  final bool selected;
+  final VoidCallback onOpen;
+  final int depth;
+  final List<Widget> children;
+
+  @override
+  Widget build(BuildContext context) => Semantics(
+    selected: selected,
+    child: InkWell(
+      onTap: onOpen,
+      borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
+      child: Ink(
+        height: WsMetrics.rowSide,
+        padding: EdgeInsets.only(
+          left: WsMetrics.space3 + depth * 18,
+          right: WsMetrics.space3,
+        ),
+        decoration: BoxDecoration(
+          color: selected ? context.ws.selected : null,
+          borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
+        ),
+        child: Row(children: children),
+      ),
+    ),
+  );
+}
+
 class _TableRow extends StatelessWidget {
   const _TableRow({
     super.key,
@@ -209,42 +245,29 @@ class _TableRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final ws = context.ws;
-    return Semantics(
+    return _RowShell(
       selected: selected,
-      child: InkWell(
-        onTap: onOpen,
-        borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
-        child: Ink(
-          height: WsMetrics.rowSide,
-          padding: const EdgeInsets.symmetric(horizontal: WsMetrics.space3),
-          decoration: BoxDecoration(
-            color: selected ? ws.selected : null,
-            borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
-          ),
-          child: Row(
-            children: [
-              const SizedBox(width: 12 + WsMetrics.space2),
-              SizedBox(
-                width: 18,
-                child: Icon(LucideIcons.table, size: 14, color: ws.textFaint),
-              ),
-              const SizedBox(width: WsMetrics.space2),
-              Expanded(
-                child: Text(
-                  table.name.isEmpty ? untitled : table.name,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: selected ? ws.text : ws.textMuted,
-                    fontSize: WsMetrics.fsSide,
-                    height: WsMetrics.lhSide / WsMetrics.fsSide,
-                  ),
-                ),
-              ),
-            ],
+      onOpen: onOpen,
+      children: [
+        const SizedBox(width: 12 + WsMetrics.space2),
+        SizedBox(
+          width: 18,
+          child: Icon(LucideIcons.table, size: 14, color: ws.textFaint),
+        ),
+        const SizedBox(width: WsMetrics.space2),
+        Expanded(
+          child: Text(
+            table.name.isEmpty ? untitled : table.name,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              color: selected ? ws.text : ws.textMuted,
+              fontSize: WsMetrics.fsSide,
+              height: WsMetrics.lhSide / WsMetrics.fsSide,
+            ),
           ),
         ),
-      ),
+      ],
     );
   }
 }
@@ -559,77 +582,53 @@ class _PageRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final ws = context.ws;
-    return Semantics(
-      selected: selected,
-      child: RowMenu(
-        actions: [RowAction('Add a page inside', onAddInside)],
-        builder: (context, menu, _) => Shortcuts(
-          shortcuts: activateKeys,
-          child: InkWell(
-            onTap: onOpen,
-            borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
-            child: Ink(
-              height: WsMetrics.rowSide,
-              padding: EdgeInsets.only(
-                left: WsMetrics.space3 + depth * 18,
-                right: WsMetrics.space3,
-              ),
-              decoration: BoxDecoration(
-                color: selected ? ws.selected : null,
-                borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
-              ),
-              child: Row(
-                children: [
-                  SizedBox(
-                    width: 12,
-                    child: nests
-                        ? Semantics(
-                            label: expanded ? 'Collapse' : 'Expand',
-                            button: true,
-                            child: InkWell(
-                              key: const Key('disclosure'),
-                              onTap: onToggle,
-                              borderRadius: BorderRadius.circular(
-                                WsMetrics.radiusSm,
-                              ),
-                              child: Icon(
-                                expanded
-                                    ? LucideIcons.chevronDown
-                                    : LucideIcons.chevronRight,
-                                size: 11,
-                                color: ws.textFaint,
-                              ),
-                            ),
-                          )
-                        : null,
-                  ),
-                  const SizedBox(width: WsMetrics.space2),
-                  SizedBox(
-                    width: 18,
-                    child: Icon(
-                      LucideIcons.file,
-                      size: 14,
-                      color: ws.textFaint,
-                    ),
-                  ),
-                  const SizedBox(width: WsMetrics.space2),
-                  Expanded(
-                    child: Text(
-                      page.title.isEmpty ? untitled : page.title,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        color: selected ? ws.text : ws.textMuted,
-                        fontSize: WsMetrics.fsSide,
-                        height: WsMetrics.lhSide / WsMetrics.fsSide,
+    return RowMenu(
+      actions: [RowAction('Add a page inside', onAddInside)],
+      builder: (context, menu, _) => Shortcuts(
+        shortcuts: activateKeys,
+        child: _RowShell(
+          selected: selected,
+          onOpen: onOpen,
+          depth: depth,
+          children: [
+            SizedBox(
+              width: 12,
+              child: nests
+                  ? Semantics(
+                      label: expanded ? 'Collapse' : 'Expand',
+                      button: true,
+                      child: InkWell(
+                        key: const Key('disclosure'),
+                        onTap: onToggle,
+                        borderRadius: BorderRadius.circular(WsMetrics.radiusSm),
+                        child: Icon(
+                          expanded
+                              ? LucideIcons.chevronDown
+                              : LucideIcons.chevronRight,
+                          size: 11,
+                          color: ws.textFaint,
+                        ),
                       ),
-                    ),
-                  ),
-                  menu,
-                ],
+                    )
+                  : null,
+            ),
+            const SizedBox(width: WsMetrics.space2),
+            SizedBox(width: 18, child: Center(child: PageIcon(page.icon))),
+            const SizedBox(width: WsMetrics.space2),
+            Expanded(
+              child: Text(
+                page.title.isEmpty ? untitled : page.title,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: selected ? ws.text : ws.textMuted,
+                  fontSize: WsMetrics.fsSide,
+                  height: WsMetrics.lhSide / WsMetrics.fsSide,
+                ),
               ),
             ),
-          ),
+            menu,
+          ],
         ),
       ),
     );
@@ -661,68 +660,48 @@ class _SourceRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final ws = context.ws;
-    return Semantics(
+    return _RowShell(
       selected: selected,
-      child: InkWell(
-        onTap: onOpen,
-        borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
-        child: Ink(
-          height: WsMetrics.rowSide,
-          padding: EdgeInsets.only(
-            left: WsMetrics.space3 + depth * 18,
-            right: WsMetrics.space3,
-          ),
-          decoration: BoxDecoration(
-            color: selected ? ws.selected : null,
-            borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
-          ),
-          child: Row(
-            children: [
-              SizedBox(
-                width: 12,
-                child: folder
-                    ? Semantics(
-                        label: expanded ? 'Collapse' : 'Expand',
-                        button: true,
-                        child: InkWell(
-                          key: const Key('source disclosure'),
-                          onTap: onToggle,
-                          borderRadius: BorderRadius.circular(
-                            WsMetrics.radiusSm,
-                          ),
-                          child: Icon(
-                            expanded
-                                ? LucideIcons.chevronDown
-                                : LucideIcons.chevronRight,
-                            size: 11,
-                            color: ws.textFaint,
-                          ),
-                        ),
-                      )
-                    : null,
-              ),
-              const SizedBox(width: WsMetrics.space2),
-              SizedBox(
-                width: 18,
-                child: Icon(icon, size: 14, color: ws.textFaint),
-              ),
-              const SizedBox(width: WsMetrics.space2),
-              Expanded(
-                child: Text(
-                  name,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: selected ? ws.text : ws.textMuted,
-                    fontSize: WsMetrics.fsSide,
-                    height: WsMetrics.lhSide / WsMetrics.fsSide,
+      onOpen: onOpen,
+      depth: depth,
+      children: [
+        SizedBox(
+          width: 12,
+          child: folder
+              ? Semantics(
+                  label: expanded ? 'Collapse' : 'Expand',
+                  button: true,
+                  child: InkWell(
+                    key: const Key('source disclosure'),
+                    onTap: onToggle,
+                    borderRadius: BorderRadius.circular(WsMetrics.radiusSm),
+                    child: Icon(
+                      expanded
+                          ? LucideIcons.chevronDown
+                          : LucideIcons.chevronRight,
+                      size: 11,
+                      color: ws.textFaint,
+                    ),
                   ),
-                ),
-              ),
-            ],
+                )
+              : null,
+        ),
+        const SizedBox(width: WsMetrics.space2),
+        SizedBox(width: 18, child: Icon(icon, size: 14, color: ws.textFaint)),
+        const SizedBox(width: WsMetrics.space2),
+        Expanded(
+          child: Text(
+            name,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              color: selected ? ws.text : ws.textMuted,
+              fontSize: WsMetrics.fsSide,
+              height: WsMetrics.lhSide / WsMetrics.fsSide,
+            ),
           ),
         ),
-      ),
+      ],
     );
   }
 }

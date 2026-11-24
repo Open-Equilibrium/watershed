@@ -65,7 +65,7 @@ fn a_change_set_that_moved_since_it_was_shown_is_refused_and_an_unchanged_one_pa
 }
 
 #[test]
-fn a_move_check_says_whether_its_session_has_moved() {
+fn a_move_check_says_whether_it_has_moved_and_names_the_move_it_is_making() {
     let check = |moved| MoveCheck {
         title: "Fix".into(),
         model: None,
@@ -82,22 +82,7 @@ fn a_move_check_says_whether_its_session_has_moved() {
 
     assert!(move_check_of(check(true)).moved);
     assert!(!move_check_of(check(false)).moved);
-}
 
-#[test]
-fn a_lost_connection_during_move_in_is_not_a_refusal() {
-    let lost = move_in_failure("Meta-Harness closed the connection before it answered.".to_owned());
-    let refused = move_in_failure(
-        "This project has no Git remote that T3 can resolve, so the session cannot move here."
-            .to_owned(),
-    );
-
-    assert!(lost.lost && lost.thread.is_none());
-    assert!(!refused.lost && refused.thread.is_none());
-}
-
-#[test]
-fn a_move_check_names_the_move_it_is_making() {
     let check: MoveCheck = serde_json::from_value(serde_json::json!({
         "title": "Fix",
         "model": null,
@@ -130,6 +115,18 @@ fn a_move_check_names_the_move_it_is_making() {
             since_ms: 1700,
         })
     );
+}
+
+#[test]
+fn a_lost_connection_during_move_in_is_not_a_refusal() {
+    let lost = move_in_failure("Meta-Harness closed the connection before it answered.".to_owned());
+    let refused = move_in_failure(
+        "This project has no Git remote that T3 can resolve, so the session cannot move here."
+            .to_owned(),
+    );
+
+    assert!(lost.lost && lost.thread.is_none());
+    assert!(!refused.lost && refused.thread.is_none());
 }
 
 #[test]

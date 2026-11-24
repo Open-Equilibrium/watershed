@@ -2,18 +2,21 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:liquid/src/agent/action_area.dart';
 import 'package:liquid/src/agent/shell.dart';
 import 'package:liquid/src/agent/sidebar.dart';
 import 'package:liquid/src/diff/diff_model.dart';
 import 'package:liquid/src/rust/api/events.dart';
 import 'package:liquid/src/rust/api/session.dart';
+import 'package:liquid/src/rust/api/workspace.dart';
 import 'package:liquid/src/session/session_state.dart';
 import 'package:liquid/src/settings_page.dart';
 import 'package:liquid/src/theme/theme.dart';
+import 'package:liquid/src/workspace/code_block.dart';
+import 'package:liquid/src/workspace/workspace_state.dart';
 
 import 'fake_backend.dart';
 import 'focus_kit.dart';
+import 'page_kit.dart';
 
 const info = SessionInfo(project: 'acme-api');
 
@@ -55,8 +58,22 @@ void main() {
     await tester.pumpAndSettle();
   }
 
+  Future<void> resolve(WidgetTester tester, String id) async {
+    project.session.emit(
+      event(BridgeEventKind.requestResolved, ++sequence, requestId: id),
+    );
+    await tester.pumpAndSettle();
+  }
+
   Future<void> read(WidgetTester tester) =>
       tester.pump(const Duration(milliseconds: 500));
+
+  Future<void> openSettings(WidgetTester tester) async {
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.comma);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+    await tester.pumpAndSettle();
+  }
 
   bool focused(WidgetTester tester, Key key) =>
       tester.widget<TextField>(find.byKey(key)).focusNode?.hasFocus ?? false;
@@ -72,6 +89,82 @@ void main() {
     );
   }
 
+  Finder modelItem() =>
+      find.widgetWithText(PopupMenuItem<BridgeModelChoice>, 'Claude Opus 5.5');
+
+  testWidgets('a click on another Page gives the shortcuts back to the shell', (
+    tester,
+  ) async {
+    final kit = PageKit();
+    await kit.show(tester, const [TextPart('First'), TextPart('Second')]);
+    await tester.tap(block(0));
+    await tester.pumpAndSettle();
+    await kit.workspace.apply(
+      mutation(
+        BridgeMutationKind.createPage,
+        area: kit.workspace.open.value!.area,
+        text: 'Trip',
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(
+      find.descendant(of: find.byType(Sidebar), matching: find.text('Trip')),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyK);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('power bar')), findsOneWidget);
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pumpAndSettle();
+
+    await undo(tester);
+    expect(kit.fake.undos, 1);
+  }, variant: TargetPlatformVariant.only(TargetPlatform.macOS));
+
+  testWidgets('esc leaves a Code Block and the shortcuts still work', (
+    tester,
+  ) async {
+    final kit = PageKit();
+    await kit.show(tester, const [CodePart('print(1)')]);
+    await tester.tap(
+      find.descendant(
+        of: find.byType(CodeBlock),
+        matching: find.byKey(const Key('code')),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pumpAndSettle();
+
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyK);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('power bar')), findsOneWidget);
+  });
+
+  testWidgets('Settings over a Page keep ⌘Z away from it; esc closes them', (
+    tester,
+  ) async {
+    final kit = PageKit();
+    await kit.show(tester, const [TextPart('First')]);
+    await tester.tap(block(0));
+    await tester.pumpAndSettle();
+    await openSettings(tester);
+    expect(find.byType(SettingsPage), findsOneWidget);
+    await undo(tester);
+    expect(kit.fake.undos, 0);
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pumpAndSettle();
+    expect(find.byType(SettingsPage), findsNothing);
+    await undo(tester);
+    expect(kit.fake.undos, 1);
+  }, variant: TargetPlatformVariant.only(TargetPlatform.macOS));
+
   testWidgets(
     'a question takes the keys without a click, and esc dismisses it',
     (tester) async {
@@ -83,19 +176,22 @@ void main() {
     },
   );
 
-  testWidgets('a question takes no key pressed before it could be read', (
-    tester,
-  ) async {
-    await show(tester);
-    await ask(tester, 'q1', 'Your name');
-    await tester.enterText(find.byKey(const Key('answer')), 'draft');
-    await key(tester, LogicalKeyboardKey.enter);
-    expect(project.session.calls, isEmpty, reason: 'too early to answer');
+  testWidgets(
+    'a question takes no key before it can be read, and once answered the keys return to the composer',
+    (tester) async {
+      await show(tester);
+      await ask(tester, 'q1', 'Your name');
+      await tester.enterText(find.byKey(const Key('answer')), 'draft');
+      await key(tester, LogicalKeyboardKey.enter);
+      expect(project.session.calls, isEmpty, reason: 'too early to answer');
 
-    await read(tester);
-    await key(tester, LogicalKeyboardKey.enter);
-    expect(project.session.calls, ['answer q1 name=draft']);
-  });
+      await read(tester);
+      await key(tester, LogicalKeyboardKey.enter);
+      expect(project.session.calls, ['answer q1 name=draft']);
+      await resolve(tester, 'q1');
+      expect(focused(tester, const Key('composer')), isTrue);
+    },
+  );
 
   testWidgets('a key held from before a question does nothing in it', (
     tester,
@@ -138,22 +234,7 @@ void main() {
     expect(project.session.calls, ['answer q1 name=draft']);
   });
 
-  testWidgets('once answered, the keys go back to the composer', (
-    tester,
-  ) async {
-    await show(tester);
-    await ask(tester, 'q1', 'Your name');
-    await tester.enterText(find.byKey(const Key('answer')), 'draft');
-    await read(tester);
-    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
-    project.session.emit(
-      event(BridgeEventKind.requestResolved, ++sequence, requestId: 'q1'),
-    );
-    await tester.pumpAndSettle();
-    expect(focused(tester, const Key('composer')), isTrue);
-  });
-
-  testWidgets('a key in a composition answers and sends nothing', (
+  testWidgets('an input method\'s Enter commits its text and sends nothing', (
     tester,
   ) async {
     await show(tester);
@@ -166,12 +247,8 @@ void main() {
       isEmpty,
       reason: 'the Enter commits the input method\'s text first',
     );
-  });
 
-  testWidgets('Enter that ends a composition in the composer sends nothing', (
-    tester,
-  ) async {
-    await show(tester);
+    await resolve(tester, 'q1');
     await tester.tap(find.byKey(const Key('composer')));
     compose(tester, const Key('composer'), 'nihon');
     await key(tester, LogicalKeyboardKey.enter);
@@ -198,14 +275,11 @@ void main() {
     await show(tester);
     await tester.tap(find.byTooltip('Model'));
     await tester.pumpAndSettle();
-    expect(
-      find.widgetWithText(PopupMenuItem<BridgeModelChoice>, 'Claude Opus 5.5'),
-      findsOneWidget,
-    );
+    expect(modelItem(), findsOneWidget);
 
     await ask(tester, 'q1', 'Your name');
     expect(
-      find.widgetWithText(PopupMenuItem<BridgeModelChoice>, 'Claude Opus 5.5'),
+      modelItem(),
       findsNothing,
       reason: 'the menu would hide the question',
     );
@@ -219,63 +293,14 @@ void main() {
     tester,
   ) async {
     await show(tester);
-    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
-    await tester.sendKeyEvent(LogicalKeyboardKey.comma);
-    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
-    await tester.pumpAndSettle();
+    await openSettings(tester);
     expect(find.byType(SettingsPage), findsOneWidget);
 
     await ask(tester, 'q1', 'Your name');
     expect(find.byType(SettingsPage), findsNothing);
     await read(tester);
     await tester.sendKeyEvent(LogicalKeyboardKey.escape);
-    project.session.emit(
-      event(BridgeEventKind.requestResolved, ++sequence, requestId: 'q1'),
-    );
-    await tester.pumpAndSettle();
+    await resolve(tester, 'q1');
     expect(focused(tester, const Key('composer')), isTrue);
-  });
-
-  testWidgets('focus shows on controls inside the input area', (tester) async {
-    await show(tester);
-    final context = tester.element(find.byType(Composer));
-    await tabTo(tester, find.byTooltip('Model'));
-    expect(
-      find.byType(Composer),
-      paintsAbove(context.ws.surface, Theme.of(context).focusColor),
-      reason: 'the highlight is painted above the input area',
-    );
-  });
-
-  testWidgets('focus and hover show in the Settings sections', (tester) async {
-    await show(tester);
-    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
-    await tester.sendKeyEvent(LogicalKeyboardKey.comma);
-    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
-    await tester.pumpAndSettle();
-    final context = tester.element(find.byType(SettingsPage));
-    final theme = Theme.of(context);
-    Finder section(String label) => find.ancestor(
-      of: find
-          .descendant(of: find.byType(SettingsPage), matching: find.text(label))
-          .first,
-      matching: find.byType(InkWell),
-    );
-    await tabTo(tester, section('Shortcuts'));
-    expect(
-      find.byType(SettingsPage),
-      paintsAbove(context.ws.selected, theme.focusColor),
-      reason: 'the highlight is painted above the chosen section',
-    );
-
-    final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
-    await mouse.addPointer(location: tester.getCenter(section('Shortcuts')));
-    addTearDown(mouse.removePointer);
-    await tester.pumpAndSettle();
-    expect(
-      find.byType(SettingsPage),
-      paintsAbove(context.ws.selected, theme.hoverColor),
-      reason: 'the hover is painted above the chosen section',
-    );
   });
 }

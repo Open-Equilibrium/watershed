@@ -494,7 +494,14 @@ impl Eval<'_> {
     }
 
     fn operands(&self, args: &[Expr]) -> Vec<Operand> {
-        args.iter().map(|arg| self.operand(arg)).collect()
+        args.iter()
+            .map(|arg| match self.operand(arg) {
+                Operand::Value(value) if matches!(arg, Expr::Ref(_) | Expr::Above) => {
+                    Operand::Range(Rc::from(vec![value]))
+                }
+                operand => operand,
+            })
+            .collect()
     }
 
     fn numbers(&self, args: &[Expr]) -> Outcome<Vec<f64>> {
@@ -566,7 +573,11 @@ impl Eval<'_> {
         let n = Value::Number;
         Ok(match name {
             "SUM" => n(self.numbers(args)?.iter().sum()),
-            "PRODUCT" => n(self.numbers(args)?.iter().product()),
+            "PRODUCT" => n(self
+                .numbers(args)?
+                .into_iter()
+                .reduce(|product, number| product * number)
+                .unwrap_or(0.0)),
             "AVERAGE" => average(&self.numbers(args)?)?,
             "MIN" => n(self
                 .numbers(args)?
@@ -772,7 +783,8 @@ fn average(numbers: &[f64]) -> Outcome<Value> {
     if numbers.is_empty() {
         return Err(Failure::Div0);
     }
-    finite(numbers.iter().sum::<f64>() / numbers.len() as f64)
+    let len = numbers.len() as f64;
+    finite(numbers.iter().map(|number| number / len).sum())
 }
 
 fn power(base: f64, exponent: f64) -> Outcome<Value> {

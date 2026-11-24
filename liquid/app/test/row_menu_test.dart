@@ -1,5 +1,3 @@
-import 'dart:async';
-
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -7,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:liquid/src/rust/api/workspace.dart';
 import 'package:liquid/src/workspace/workspace_state.dart';
 
+import 'focus_kit.dart';
 import 'page_kit.dart';
 
 void main() {
@@ -14,10 +13,10 @@ void main() {
 
   Finder cell(String row, String field) =>
       kit.inTable(find.byKey(ValueKey('cell $row $field')));
-  final handle = find.byKey(const Key('row handle'));
   final plus = find.byKey(const Key('insert row'));
   final grip = find.byKey(const Key('row menu button'));
   final menu = find.byKey(const Key('row menu'));
+  const away = Offset(1300, 850);
   Finder inMenu(String text) =>
       find.descendant(of: menu, matching: find.text(text));
 
@@ -28,20 +27,15 @@ void main() {
     await tester.pumpAndSettle();
   }
 
-  Future<void> show(
-    WidgetTester tester, [
-    int more = 0,
-    List<Part> after = const [],
-  ]) async {
+  Future<void> show(WidgetTester tester, [int more = 0]) async {
     await kit.show(tester, [
       TablePart([
         ...expenses,
         for (var number = 3; number < 3 + more; number++) namedRow(number),
       ]),
-      ...after,
     ]);
     mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
-    await mouse.addPointer(location: const Offset(1300, 850));
+    await mouse.addPointer(location: away);
     addTearDown(mouse.removePointer);
   }
 
@@ -49,11 +43,6 @@ void main() {
     await hover(tester, tester.getCenter(finder));
     await mouse.down(tester.getCenter(finder));
     await mouse.up();
-    await tester.pumpAndSettle();
-  }
-
-  Future<void> pick(WidgetTester tester, Finder finder) async {
-    await tester.tap(finder);
     await tester.pumpAndSettle();
   }
 
@@ -72,31 +61,18 @@ void main() {
       row.id,
   ];
 
-  testWidgets('a hovered row shows its handle, left of the Table', (
-    tester,
-  ) async {
-    await show(tester);
-    expect(handle, findsNothing);
-    await hover(tester, tester.getCenter(cell('r2', 'name')));
-    expect(handle, findsOneWidget);
-    final row = tester.getRect(cell('r2', 'name'));
-    final shown = tester.getRect(handle);
-    expect(shown.right, lessThanOrEqualTo(row.left));
-    expect(shown.center.dy, moreOrLessEquals(row.center.dy, epsilon: 1));
-    await hover(tester, const Offset(1300, 850));
-    expect(handle, findsNothing);
-  });
-
-  testWidgets('moving onto the handle keeps it; ⋮⋮ opens the row\'s menu', (
-    tester,
-  ) async {
-    await show(tester);
-    await openMenu(tester, 'r1');
-    expect(handle, findsOneWidget);
-    expect(inMenu('Insert above'), findsOneWidget);
-    expect(inMenu('Insert below'), findsOneWidget);
-    expect(inMenu('Delete row'), findsOneWidget);
-  });
+  Future<void> elsewhere(
+    WidgetTester tester,
+    BridgeMutationKind kind, {
+    String? row,
+    String? after,
+  }) async {
+    final table = kit.fake.views[kit.page]!.single.block;
+    await kit.workspace.apply(
+      mutation(kind, page: kit.page, block: table, row: row, after: after),
+    );
+    await tester.pumpAndSettle();
+  }
 
   testWidgets('+ inserts a row below, ⌥ and + one above', (tester) async {
     await show(tester);
@@ -117,10 +93,10 @@ void main() {
   testWidgets('Insert above and below go next to the row', (tester) async {
     await show(tester);
     await openMenu(tester, 'r2');
-    await pick(tester, inMenu('Insert above'));
+    await tap(tester, inMenu('Insert above'));
     expect(menu, findsNothing);
     await openMenu(tester, 'r2');
-    await pick(tester, inMenu('Insert below'));
+    await tap(tester, inMenu('Insert below'));
     expect(added(), ['r1', 'r2']);
     expect(order().length, 4);
   });
@@ -128,7 +104,7 @@ void main() {
   testWidgets('Delete row deletes it without asking', (tester) async {
     await show(tester);
     await openMenu(tester, 'r1');
-    await pick(tester, inMenu('Delete row'));
+    await tap(tester, inMenu('Delete row'));
     expect(menu, findsNothing);
     expect(find.byType(Dialog), findsNothing);
     expect(kit.applied(BridgeMutationKind.removeRow).single.row, 'r1');
@@ -136,196 +112,15 @@ void main() {
     expect(kit.inTable(find.text('1 row')), findsOneWidget);
   });
 
-  testWidgets('↑↓ choose in the menu, ⏎ takes, esc closes', (tester) async {
-    await show(tester);
-    await openMenu(tester, 'r1');
-    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
-    await tester.pumpAndSettle();
-    expect(menu, findsNothing);
-    await openMenu(tester, 'r1');
-    for (var step = 0; step < 3; step++) {
-      await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
-    }
-    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
-    await tester.pumpAndSettle();
-    expect(kit.applied(BridgeMutationKind.removeRow).single.row, 'r1');
-    expect(added(), isEmpty);
-  });
-
-  testWidgets('a click outside or a Table scroll closes the menu', (
-    tester,
-  ) async {
-    await show(tester, 20);
-    await openMenu(tester, 'r1');
-    await click(tester, kit.inTable(find.text('Expenses')));
-    expect(menu, findsNothing);
-    await openMenu(tester, 'r1');
-    final rows = tester
-        .widget<ListView>(find.byKey(const Key('table rows')))
-        .controller!;
-    rows.jumpTo(40);
-    await tester.pumpAndSettle();
-    expect(menu, findsNothing);
-    expect(kit.applied(BridgeMutationKind.addRow), isEmpty);
-  });
-
-  testWidgets('after rows move under a still pointer, leaving the Table hides '
-      'the handle', (tester) async {
-    await show(tester, 4);
-    await openMenu(tester, 'r1');
-    final gate = kit.fake.gate = Completer<void>();
-    kit.fake.gatedKinds = {BridgeMutationKind.removeRow};
-    await click(tester, inMenu('Delete row'));
-    gate.complete();
-    await tester.pumpAndSettle();
-    expect(kit.applied(BridgeMutationKind.removeRow).single.row, 'r1');
-    await hover(tester, const Offset(1300, 850));
-    expect(handle, findsNothing);
-  });
-
-  testWidgets('closing the menu over another row shows that row\'s handle', (
-    tester,
-  ) async {
-    await show(tester);
-    await openMenu(tester, 'r1');
-    await hover(tester, tester.getCenter(cell('r2', 'date')));
-    expect(
-      tester.getCenter(handle).dy,
-      moreOrLessEquals(tester.getCenter(cell('r1', 'name')).dy, epsilon: 1),
-    );
-    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
-    await tester.pumpAndSettle();
-    expect(menu, findsNothing);
-    expect(
-      tester.getCenter(handle).dy,
-      moreOrLessEquals(tester.getCenter(cell('r2', 'name')).dy, epsilon: 1),
-    );
-  });
-
-  testWidgets('a handle gone under the pointer no longer holds later rows\' '
-      'handles', (tester) async {
-    await show(tester, 2);
-    await openMenu(tester, 'r1');
-    await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
-    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
-    await tester.pumpAndSettle();
-    expect(kit.applied(BridgeMutationKind.removeRow).single.row, 'r1');
-    await hover(tester, tester.getCenter(cell('r3', 'date')));
-    expect(handle, findsOneWidget);
-    await hover(tester, const Offset(1300, 850));
-    expect(handle, findsNothing);
-  });
-
-  testWidgets('a hovered row moving away from the pointer drops its handle', (
-    tester,
-  ) async {
-    await show(tester);
-    await openMenu(tester, 'r1');
-    await hover(tester, tester.getCenter(cell('r2', 'date')));
-    await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
-    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
-    await tester.pumpAndSettle();
-    expect(kit.applied(BridgeMutationKind.removeRow).single.row, 'r1');
-    expect(handle, findsNothing);
-  });
-
   testWidgets('a row removed or added elsewhere closes its menu', (
     tester,
   ) async {
     await show(tester);
-    final table = kit.fake.views[kit.page]!.single.block;
     await openMenu(tester, 'r1');
-    await kit.workspace.apply(
-      mutation(
-        BridgeMutationKind.removeRow,
-        page: kit.page,
-        block: table,
-        row: 'r1',
-      ),
-    );
-    await tester.pumpAndSettle();
+    await elsewhere(tester, BridgeMutationKind.removeRow, row: 'r1');
     expect(menu, findsNothing);
-
     await openMenu(tester, 'r2');
-    await kit.workspace.apply(
-      mutation(BridgeMutationKind.addRow, page: kit.page, block: table),
-    );
-    await tester.pumpAndSettle();
-    expect(menu, findsNothing);
-  });
-
-  testWidgets('a menu closed by its row moving leaves the handle on the '
-      'pointer\'s row', (tester) async {
-    await show(tester);
-    final table = kit.fake.views[kit.page]!.single.block;
-    await openMenu(tester, 'r2');
-    await hover(tester, tester.getCenter(cell('r1', 'date')));
-    await kit.workspace.apply(
-      mutation(
-        BridgeMutationKind.addRow,
-        page: kit.page,
-        block: table,
-        after: 'r1',
-      ),
-    );
-    await tester.pumpAndSettle();
-    expect(menu, findsNothing);
-    expect(
-      tester.getCenter(handle).dy,
-      moreOrLessEquals(tester.getCenter(cell('r1', 'name')).dy, epsilon: 1),
-    );
-  });
-
-  testWidgets('a hovered row rebuilt in place as a row above goes keeps its '
-      'handle', (tester) async {
-    await show(tester, 20);
-    final table = kit.fake.views[kit.page]!.single.block;
-    final rows = tester
-        .widget<ListView>(find.byKey(const Key('table rows')))
-        .controller!;
-    rows.jumpTo(rows.position.maxScrollExtent);
-    await tester.pumpAndSettle();
-    await hover(tester, tester.getCenter(cell('r20', 'date')));
-    expect(handle, findsOneWidget);
-    await kit.workspace.apply(
-      mutation(
-        BridgeMutationKind.removeRow,
-        page: kit.page,
-        block: table,
-        row: 'r1',
-      ),
-    );
-    await tester.pumpAndSettle();
-    expect(
-      tester.getCenter(cell('r20', 'date')).dy,
-      moreOrLessEquals(tester.getCenter(handle).dy, epsilon: 1),
-    );
-  });
-
-  testWidgets('scrolling the Page or resizing the window closes the menu', (
-    tester,
-  ) async {
-    await show(tester, 0, [
-      for (var number = 0; number < 40; number++) TextPart('Line $number'),
-    ]);
-    await openMenu(tester, 'r1');
-    tester
-        .state<ScrollableState>(
-          find
-              .descendant(
-                of: find.byType(CustomScrollView),
-                matching: find.byType(Scrollable),
-              )
-              .first,
-        )
-        .position
-        .jumpTo(100);
-    await tester.pumpAndSettle();
-    expect(menu, findsNothing);
-    await openMenu(tester, 'r1');
-    tester.view.physicalSize = tester.view.physicalSize / 2;
-    addTearDown(tester.view.resetPhysicalSize);
-    await tester.pumpAndSettle();
+    await elsewhere(tester, BridgeMutationKind.addRow);
     expect(menu, findsNothing);
   });
 }

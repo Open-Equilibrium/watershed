@@ -11,7 +11,18 @@ import 'package:liquid/src/session/backend.dart';
 
 const fakeEnvironment = 'env-fake';
 
-class FakeProject implements ProjectBackend {
+mixin CallHooks {
+  final gates = <String, Completer<void>>{};
+  final failures = <String, Object>{};
+
+  Future<void> hook(String call) async {
+    final gate = gates.remove(call);
+    if (gate != null) await gate.future;
+    if (failures.remove(call) case final error?) throw error;
+  }
+}
+
+class FakeProject with CallHooks implements ProjectBackend {
   FakeProject({FakeSession? session, FakeGit? git})
     : session = session ?? FakeSession(),
       gitBackend = git ?? FakeGit();
@@ -21,32 +32,19 @@ class FakeProject implements ProjectBackend {
   String? moveOutEnvironment;
   FakeGit gitBackend;
   final calls = <String>[];
-
   List<BridgeThreadSummary> threadList = [];
   List<BridgeProvider> providerList = [providerOf()];
   BridgeModelChoice? writer;
+  final writerGates = <String, Completer<void>>{};
   bool onlyInWorktree = false;
-
   Object? openError;
-
   Completer<void>? hold;
-
   Object? onlyInWorktreeError;
-
   @override
   String root = '/work/acme-api';
-
   BridgeMoveCheck moveCheckAnswer = moveCheckOf();
-  Object? moveCheckError;
   Map<String, BridgeLanding> landings = {};
-
-  @override
-  Future<BridgeLanding> preflight(String root, String branch) async {
-    calls.add('preflight $root $branch');
-    return landings[root] ??
-        const BridgeLanding(kind: BridgeLandingKind.newWorktree);
-  }
-
+  Object? moveCheckError;
   Object? moveOutError;
   Object? cloneError;
   Object? moveInError;
@@ -56,12 +54,37 @@ class FakeProject implements ProjectBackend {
   bool movesSupported = true;
   BridgeMoveRecord? moveRecordAnswer;
   List<BridgeConfigChange> configChanges = [];
-
   BridgeHostProject? addedProject;
   Object? addProjectError;
+  bool moveOutLostAfterHandover = false;
+  BridgeMoving? moving;
+  bool _sealed = false;
+  int moveInLostReplies = 0;
+  bool lostRepliesLanded = false;
+  String? landedThread;
+  bool startingThread = false;
+  bool undelivered = false;
+  ConfigurationChanges? broughtChanges;
+  String hostName = 'Mac mini';
+  bool closed = false;
+  List<BridgeAgent> agentList = [];
+  List<BridgeAgentChange> changeList = [];
+  List<BridgeMention> mentionList = [];
+  Object? mentionError;
+  String instructionsText = '';
 
   @override
-  Future<List<BridgeThreadSummary>> threads() async => threadList;
+  Future<BridgeLanding> preflight(String root, String branch) async {
+    calls.add('preflight $root $branch');
+    return landings[root] ??
+        const BridgeLanding(kind: BridgeLandingKind.newWorktree);
+  }
+
+  @override
+  Future<List<BridgeThreadSummary>> threads() async {
+    await hook('threads');
+    return threadList;
+  }
 
   @override
   Future<SessionBackend> start(
@@ -103,6 +126,7 @@ class FakeProject implements ProjectBackend {
 
   @override
   Future<BridgeMoveCheck> moveCheck(String id) async {
+    await hook('moveCheck');
     calls.add('move check $id');
     if (moveCheckError case final error?) throw error;
     return moveCheckWith(
@@ -111,10 +135,6 @@ class FakeProject implements ProjectBackend {
       moving: moving,
     );
   }
-
-  bool moveOutLostAfterHandover = false;
-  BridgeMoving? moving;
-  bool _sealed = false;
 
   @override
   Future<String> environmentId() async => environment;
@@ -142,6 +162,7 @@ class FakeProject implements ProjectBackend {
 
   @override
   Future<void> moveFinish(String id, String transfer, String? toHost) async {
+    await hook('moveFinish');
     calls.add('move finish $id $transfer ${toHost ?? 'null'}');
     if (toHost != null) _sealed = true;
     moving = null;
@@ -153,17 +174,20 @@ class FakeProject implements ProjectBackend {
     ];
   }
 
-  @override
-  Future<BridgeArrival> moveAbort(String transfer) async {
-    calls.add('move abort $transfer');
+  BridgeArrival? _landedArrival() {
     final landed = landedThread;
     if (landed != null && undelivered) {
       return const BridgeArrival(kind: BridgeArrivalKind.starting);
     }
-    if (landed != null) {
-      return BridgeArrival(kind: BridgeArrivalKind.landed, thread: landed);
-    }
-    return const BridgeArrival(kind: BridgeArrivalKind.refused);
+    if (landed == null) return null;
+    return BridgeArrival(kind: BridgeArrivalKind.landed, thread: landed);
+  }
+
+  @override
+  Future<BridgeArrival> moveAbort(String transfer) async {
+    calls.add('move abort $transfer');
+    return _landedArrival() ??
+        const BridgeArrival(kind: BridgeArrivalKind.refused);
   }
 
   @override
@@ -180,6 +204,7 @@ class FakeProject implements ProjectBackend {
 
   @override
   Future<BridgeHostProject> addProject(String root) async {
+    await hook('addProject');
     calls.add('add project $root');
     if (addProjectError case final error?) throw error;
     return addedProject ??
@@ -206,6 +231,7 @@ class FakeProject implements ProjectBackend {
     CarriedMove move, {
     required String root,
   }) async {
+    await hook('moveIn');
     calls.add('move in $root');
     if (moveInError case final error?) throw error;
     if (moveInLostReplies > 0) {
@@ -219,35 +245,19 @@ class FakeProject implements ProjectBackend {
     return session;
   }
 
-  int moveInLostReplies = 0;
-  bool lostRepliesLanded = false;
-  String? landedThread;
-
   @override
   Future<BridgeArrival> moveStatus(String transfer) async {
     calls.add('move status $transfer');
-    final landed = landedThread;
-    if (landed != null && undelivered) {
-      return const BridgeArrival(kind: BridgeArrivalKind.starting);
-    }
-    if (landed != null) {
-      return BridgeArrival(kind: BridgeArrivalKind.landed, thread: landed);
-    }
-    if (startingThread) {
-      return const BridgeArrival(kind: BridgeArrivalKind.starting);
-    }
-    return const BridgeArrival(kind: BridgeArrivalKind.unknown);
+    return _landedArrival() ??
+        (startingThread
+            ? const BridgeArrival(kind: BridgeArrivalKind.starting)
+            : const BridgeArrival(kind: BridgeArrivalKind.unknown));
   }
-
-  bool startingThread = false;
-  bool undelivered = false;
 
   @override
   Future<ConfigurationChanges> configurationChanges(
     ProjectBackend from,
   ) async => FakeConfigurationChanges(configChanges);
-
-  ConfigurationChanges? broughtChanges;
 
   @override
   Future<void> bringConfiguration(
@@ -266,7 +276,10 @@ class FakeProject implements ProjectBackend {
   GitBackend git() => gitBackend;
 
   @override
-  Future<List<BridgeProvider>> providers() async => providerList;
+  Future<List<BridgeProvider>> providers() async {
+    await hook('providers');
+    return providerList;
+  }
 
   @override
   Future<BridgeModelChoice?> writerModel() async => writer;
@@ -274,15 +287,12 @@ class FakeProject implements ProjectBackend {
   @override
   Future<void> setWriterModel(BridgeModelChoice model) async {
     calls.add('writer ${model.model}');
+    await writerGates[model.model]?.future;
     writer = model;
   }
 
-  String hostName = 'Mac mini';
-
   @override
   Future<String> environmentName() async => hostName;
-
-  bool closed = false;
 
   @override
   void close() => closed = true;
@@ -290,19 +300,19 @@ class FakeProject implements ProjectBackend {
   @override
   Future<String> environmentMachine() async => 'server';
 
-  List<BridgeAgent> agentList = [];
-  List<BridgeAgentChange> changeList = [];
-  List<BridgeMention> mentionList = [];
-  String instructionsText = '';
-
   @override
-  Future<List<BridgeAgent>> agents() async => agentList;
+  Future<List<BridgeAgent>> agents() async {
+    await hook('agents');
+    return agentList;
+  }
+
   @override
   Future<BridgeAgent> agentStart(
     BridgeModelChoice model,
     BridgePermissions permissions,
     String request,
   ) async {
+    await hook('agentStart');
     calls.add('agent start $request');
     final started = agentOf('agent-1', named: false);
     agentList = [...agentList, started];
@@ -310,31 +320,47 @@ class FakeProject implements ProjectBackend {
   }
 
   @override
-  Future<String> agentRemove(String name) async {
-    calls.add('agent remove $name');
+  Future<String> agentRemove(String id) async {
+    calls.add('agent remove $id');
+    final agent = agentList.firstWhere((agent) => agent.id == id);
     agentList = [
-      for (final agent in agentList)
-        if (agent.name != name) agent,
+      for (final other in agentList)
+        if (other.id != id) other,
     ];
-    return '/home/agents/$name/memory';
+    return '/home/agents/${agent.name}/memory';
   }
 
   @override
   Future<BridgeAgent> agentUpdate(
-    String name, {
+    String id, {
     String? rename,
     BridgeModelChoice? model,
     BridgePermissions? permissions,
   }) async {
     calls.add(
-      'agent update $name rename=$rename model=${model?.model} '
+      'agent update $id rename=$rename model=${model?.model} '
       'permissions=${permissions?.name}',
     );
-    return agentList.firstWhere((agent) => agent.name == name);
+    final agent = agentList.firstWhere((agent) => agent.id == id);
+    final next = BridgeAgent(
+      id: agent.id,
+      name: rename ?? agent.name,
+      named: agent.named,
+      root: agent.root,
+      model: model ?? agent.model,
+      permissions: permissions ?? agent.permissions,
+      memory: agent.memory,
+      thread: agent.thread,
+      threads: agent.threads,
+      nextRunMs: agent.nextRunMs,
+    );
+    agentList = [for (final other in agentList) other.id == id ? next : other];
+    return next;
   }
 
   @override
   Future<String> agentInstructions(String name) async => instructionsText;
+
   @override
   Future<void> agentSetInstructions(String name, String text) async {
     calls.add('agent instructions $name');
@@ -343,12 +369,15 @@ class FakeProject implements ProjectBackend {
 
   @override
   Future<List<BridgeAgentChange>> agentChanges(String name) async => changeList;
+
   @override
   Future<void> agentUndo(String name, int change) async =>
       calls.add('agent undo $name $change');
+
   @override
   Future<void> agentApply(String name, int change) async =>
       calls.add('agent apply $name $change');
+
   @override
   Future<BridgeAddedRoutine> agentRoutineAdd(
     String name,
@@ -368,11 +397,15 @@ class FakeProject implements ProjectBackend {
   @override
   Future<String> agentMention(String name, String thread, String text) async {
     calls.add('agent mention $name $thread $text');
+    if (mentionError case final error?) throw error;
     return 'msg-1';
   }
 
   @override
-  Future<List<BridgeMention>> agentMentions(String thread) async => mentionList;
+  Future<List<BridgeMention>> agentMentions(String thread) async {
+    await hook('agentMentions');
+    return mentionList;
+  }
 }
 
 BridgeAgent agentOf(
@@ -405,14 +438,13 @@ class UnreachableProject extends FakeProject {
       Future.error('the host is down');
 }
 
-class FakeSession implements SessionBackend {
+class FakeSession with CallHooks implements SessionBackend {
   FakeSession({this.id = 'thread-1'});
 
   @override
   final String id;
   final calls = <String>[];
   final _events = StreamController<BridgeEvent>.broadcast();
-
   BridgeSnapshot current = snapshotOf();
   List<BridgeTurn> turnList = [];
   List<BridgeFileChange> changes = [];
@@ -422,28 +454,32 @@ class FakeSession implements SessionBackend {
   BridgeModelChoice? chosen;
   String sessionTitle = 'Session';
   FakeGit gitBackend = FakeGit();
-
   String revertedPrompt = '';
-
   Object? sendError;
-
   Object? permissionsError;
   Object? modelError;
-
   final confirmed = <int>[];
-
-  void emit(BridgeEvent event) => _events.add(event);
-
-  void fail(Object error) => _events.addError(error);
-
+  final _firstRead = <String>{};
+  List<BridgeLocalServer> serverList = [];
+  final serverUpdates = StreamController<List<BridgeLocalServer>>.broadcast();
+  List<BridgeAutomation> automationList = [];
+  final automationUpdates =
+      StreamController<List<BridgeAutomation>>.broadcast();
+  BridgeLineage family = lineageOf();
+  final lineageUpdates = StreamController<BridgeLineage>.broadcast();
+  BridgeUsageLimits? limits;
   bool closed = false;
+  void emit(BridgeEvent event) => _events.add(event);
+  void fail(Object error) => _events.addError(error);
 
   @override
   void close() => closed = true;
 
   @override
-  Future<BridgeSubscription> subscribe() async =>
-      BridgeSubscription(id: 1, snapshot: current);
+  Future<BridgeSubscription> subscribe() async {
+    await hook('subscribe');
+    return BridgeSubscription(id: 1, snapshot: current);
+  }
 
   @override
   Stream<BridgeEvent> events(int subscription) {
@@ -460,9 +496,16 @@ class FakeSession implements SessionBackend {
   }
 
   @override
-  Future<void> confirmApplied(int applied) async => confirmed.add(applied);
+  Future<void> confirmApplied(int applied) async {
+    await hook('confirmApplied');
+    confirmed.add(applied);
+  }
+
   @override
-  Future<BridgeSnapshot> snapshot() async => current;
+  Future<BridgeSnapshot> snapshot() async {
+    await hook('snapshot');
+    return current;
+  }
 
   @override
   Future<void> send(String text, {required bool steer}) async {
@@ -472,8 +515,12 @@ class FakeSession implements SessionBackend {
 
   @override
   Future<void> stop() async => calls.add('stop');
+
   @override
-  Future<List<BridgeTurn>> turns() async => turnList;
+  Future<List<BridgeTurn>> turns() async {
+    await hook('turns');
+    return turnList;
+  }
 
   @override
   Future<List<BridgeFileChange>> turnChanges(
@@ -508,6 +555,7 @@ class FakeSession implements SessionBackend {
   @override
   Future<void> respond(String request, String decision) async =>
       calls.add('respond $request $decision');
+
   @override
   Future<void> answer(
     String request,
@@ -515,16 +563,28 @@ class FakeSession implements SessionBackend {
   ) async => calls.add(
     'answer $request ${[for (final a in answers) '${a.question}=${a.values.join('+')}'].join(' ')}',
   );
+
   @override
   Future<void> dismiss(String request) async => calls.add('dismiss $request');
+
   @override
-  Future<BridgeStatistics> statistics() async => stats;
+  Future<BridgeStatistics> statistics() async {
+    await hook('statistics');
+    return stats;
+  }
+
   @override
-  Future<BridgeContext?> context() async => contextWindow;
+  Future<BridgeContext?> context() async {
+    await hook('context');
+    return contextWindow;
+  }
+
   @override
   Future<BridgeModelChoice?> model() async => chosen;
+
   @override
   Future<void> setModel(BridgeModelChoice model) async {
+    await hook('setModel');
     calls.add('model ${model.model}');
     if (modelError case final error?) throw error;
     chosen = model;
@@ -532,26 +592,38 @@ class FakeSession implements SessionBackend {
 
   @override
   Future<void> setPermissions(BridgePermissions permissions) async {
+    await hook('setPermissions');
     calls.add('permissions ${permissions.name}');
     if (permissionsError case final error?) throw error;
   }
 
   @override
   Future<void> sendQueuedNow(int turn) async => calls.add('send now $turn');
+
   @override
   Future<void> editQueued(int turn, String text) async =>
       calls.add('edit $turn $text');
+
   @override
   Future<void> cancelQueued(int turn) async => calls.add('cancel $turn');
+
   @override
-  Future<String> title() async => sessionTitle;
+  Future<String> title() async {
+    await hook('title');
+    return sessionTitle;
+  }
+
   @override
   Future<String?> worktree() async => null;
+
   @override
   GitBackend git() => gitBackend;
+
   @override
-  Future<void> setBranch(String branch, {String? worktree}) async =>
-      calls.add('branch $branch worktree=$worktree');
+  Future<void> setBranch(String branch, {String? worktree}) async {
+    await hook('setBranch');
+    calls.add('branch $branch worktree=$worktree');
+  }
 
   @override
   Future<String> exportRecord({
@@ -561,16 +633,6 @@ class FakeSession implements SessionBackend {
     calls.add('export $host $day');
     return '/Downloads/$day';
   }
-
-  final _firstRead = <String>{};
-  List<BridgeLocalServer> serverList = [];
-  final serverUpdates = StreamController<List<BridgeLocalServer>>.broadcast();
-  List<BridgeAutomation> automationList = [];
-  final automationUpdates =
-      StreamController<List<BridgeAutomation>>.broadcast();
-  BridgeLineage family = lineageOf();
-  final lineageUpdates = StreamController<BridgeLineage>.broadcast();
-  BridgeUsageLimits? limits;
 
   Stream<T> _changes<T>(String section, Stream<T> Function() changes) =>
       _firstRead.contains(section)
@@ -588,9 +650,11 @@ class FakeSession implements SessionBackend {
   @override
   Stream<List<BridgeLocalServer>> serverChanges() =>
       _changes('servers', () => serverUpdates.stream);
+
   @override
   Future<void> stopServer(int pid, int port) async =>
       calls.add('stop server $pid $port');
+
   @override
   Future<List<BridgeAutomation>> automations() async {
     _firstRead.add('automations');
@@ -600,15 +664,18 @@ class FakeSession implements SessionBackend {
   @override
   Stream<List<BridgeAutomation>> automationChanges() =>
       _changes('automations', () => automationUpdates.stream);
+
   @override
   Future<void> setAutomationEnabled(String id, {required bool enabled}) async =>
       calls.add('automation $id enabled=$enabled');
+
   @override
   Future<void> runAutomationNow(String id) async =>
       calls.add('run automation $id');
-  int visits = 0;
+
   @override
-  Future<void> visit() async => visits++;
+  Future<void> visit() async {}
+
   @override
   Future<BridgeLineage> lineage() async {
     _firstRead.add('lineage');
@@ -618,34 +685,37 @@ class FakeSession implements SessionBackend {
   @override
   Stream<BridgeLineage> lineageChanges() =>
       _changes('lineage', () => lineageUpdates.stream);
+
   @override
-  Future<void> mergeBack() async => calls.add('merge back');
+  Future<void> mergeBack() async {
+    await hook('mergeBack');
+    calls.add('merge back');
+  }
+
   @override
   Future<void> disconnect() async => calls.add('disconnect');
+
   @override
   Future<void> stopSubagent(String id) async => calls.add('stop subagent $id');
+
   @override
   Future<BridgeUsageLimits?> usageLimits() async => limits;
 }
 
-class FakeGit implements GitBackend {
+class FakeGit with CallHooks implements GitBackend {
   FakeGit({BridgeGitStatus? status}) : current = status ?? gitStatusOf();
-
   BridgeGitStatus current;
   final statuses = StreamController<BridgeGitStatus>.broadcast();
   final calls = <String>[];
   List<BridgeRef> refList = [refOf('main', current: true, isDefault: true)];
   List<BridgeFileChange> changes = [];
   Map<String, String> patches = {};
-
   List<BridgeGitProgress> steps = [
     progressOf(BridgeGitProgressKind.finished, 'Done'),
   ];
-
   Object? refError;
-
-  Object? statusError;
-
+  List<BridgeFileChange> branchFiles = [];
+  BridgePullRequestDetail? detail;
   bool closed = false;
 
   @override
@@ -657,13 +727,11 @@ class FakeGit implements GitBackend {
   }
 
   @override
-  Future<BridgeGitStatus> status() async {
-    if (statusError case final error?) throw error;
-    return current;
-  }
+  Future<BridgeGitStatus> status() async => current;
 
   @override
   Stream<BridgeGitStatus> watch() async* {
+    await hook('watch');
     yield current;
     yield* statuses.stream;
   }
@@ -674,6 +742,7 @@ class FakeGit implements GitBackend {
     int cursor = 0,
     int limit = 50,
   }) async {
+    await hook('refs');
     if (refError case final error?) throw error;
     final found = [
       for (final ref in refList)
@@ -695,10 +764,14 @@ class FakeGit implements GitBackend {
   }
 
   @override
-  Future<void> init() async => calls.add('init');
+  Future<void> init() async {
+    await hook('init');
+    calls.add('init');
+  }
 
   @override
   Future<(String, String)> pull() async {
+    await hook('pull');
     calls.add('pull');
     return ('Pulled', 'Up to date');
   }
@@ -729,6 +802,7 @@ class FakeGit implements GitBackend {
 
   @override
   Future<BridgeResolvedPullRequest> resolvePullRequest(String reference) async {
+    await hook('resolvePullRequest');
     calls.add('resolve $reference');
     return const BridgeResolvedPullRequest(
       number: 42,
@@ -745,6 +819,7 @@ class FakeGit implements GitBackend {
     String reference, {
     required bool worktree,
   }) async {
+    await hook('checkOutPullRequest');
     calls.add('check out $reference worktree=$worktree');
     return BridgeCheckedOut(
       branch: 'feature',
@@ -757,29 +832,36 @@ class FakeGit implements GitBackend {
     String provider,
     String repository, {
     required bool public,
-  }) async => calls.add('publish $provider $repository public=$public');
-
-  List<BridgeFileChange> branchFiles = [];
-  BridgePullRequestDetail? detail;
+  }) async {
+    await hook('publish');
+    calls.add('publish $provider $repository public=$public');
+  }
 
   @override
   Future<List<BridgeFileChange>> branchChanges({
     required bool hideWhitespace,
   }) async => branchFiles;
+
   @override
   Future<String> branchPatch(
     String path, {
     required bool hideWhitespace,
   }) async => patches[path] ?? '';
+
   @override
   Future<BridgePullRequestDetail> pullRequest(int number) async =>
       detail ?? pullRequestDetailOf(number: number);
+
   @override
   Future<void> runPullRequestAction(
     int number,
     String action, {
     String? mergeMethod,
-  }) async => calls.add('pr $number $action merge=$mergeMethod');
+  }) async {
+    await hook('runPullRequestAction');
+    calls.add('pr $number $action merge=$mergeMethod');
+  }
+
   @override
   Future<BridgeCheckedOut> pullRequestWorktree(String url) async {
     calls.add('pr worktree $url');
@@ -811,11 +893,8 @@ BridgeMoveCheck moveCheckOf({
   int uncommittedFiles = 0,
   String? blocked,
   String? remoteUrl = 'git@github.com:acme/api.git',
-  bool moved = false,
-  BridgeMoving? moving,
   BridgeAgentMove? agent,
 }) => BridgeMoveCheck(
-  moving: moving,
   agent: agent,
   title: 'Fix the flaky port test',
   movable: true,
@@ -826,7 +905,7 @@ BridgeMoveCheck moveCheckOf({
   branch: 'fix/ports',
   remoteUrl: remoteUrl,
   blocked: blocked,
-  moved: moved,
+  moved: false,
 );
 
 class FakeConfigurationChanges implements ConfigurationChanges {
@@ -884,7 +963,6 @@ BridgeThreadSummary threadOf(
   bool movable = true,
   bool harnessKnown = true,
   BridgeMoving? moving,
-  int? visitedMs,
 }) => BridgeThreadSummary(
   id: id,
   title: title ?? id,
@@ -895,7 +973,6 @@ BridgeThreadSummary threadOf(
   movable: movable,
   harnessKnown: harnessKnown,
   moving: moving,
-  visitedMs: visitedMs,
 );
 
 BridgeSnapshot snapshotOf({
@@ -960,6 +1037,18 @@ BridgeTaskStep step(String text, BridgeStepStatus status) =>
 BridgeTranscriptItem chatItem(BridgeItem item, int turn, String text) =>
     BridgeTranscriptItem(item: item, turn: turn, text: text);
 
+BridgeTranscriptItem userMessage(int turn, String text) => chatItem(
+  item(turn * 10 + 1, BridgeItemKind.userMessage, ended: true),
+  turn,
+  text,
+);
+
+BridgeTranscriptItem reply(int turn, String text) => chatItem(
+  item(turn * 10 + 2, BridgeItemKind.assistantMessage, ended: true),
+  turn,
+  text,
+);
+
 BridgeUsage usage(int input, int output) => BridgeUsage(
   input: input,
   output: output,
@@ -990,13 +1079,12 @@ BridgeTurn turnOf(
 
 BridgeRequest approvalOf(
   String id, {
-  String kind = 'command',
   String prompt = 'rm -rf build',
   List<BridgeApprovalOption> options = const [],
 }) => BridgeRequest(
   id: id,
   turn: 1,
-  approval: BridgeApproval(kind: kind, prompt: prompt, options: options),
+  approval: BridgeApproval(kind: 'command', prompt: prompt, options: options),
   questions: const [],
 );
 

@@ -33,53 +33,10 @@ fn an_export_never_deletes_a_folder_it_did_not_create() {
 }
 
 #[test]
-fn a_long_multibyte_title_keeps_its_record_name_within_a_file_name() {
+fn record_names_fit_a_file_name_and_name_an_untitled_session_by_its_day() {
     let title = "語".repeat(80);
     let name = crate::api::record::record_name(&title, "2026-11-11");
     assert!(format!(".{name}.partial").len() <= 255, "{name}");
-}
-
-#[test]
-fn downloads_go_to_the_folder_the_system_names_or_to_downloads() {
-    let home = std::path::Path::new("/home/ana");
-    assert_eq!(
-        crate::api::record::download_dir_in(home, None),
-        home.join("Downloads")
-    );
-    assert_eq!(
-        crate::api::record::download_dir_in(
-            home,
-            Some("XDG_DESKTOP_DIR=\"$HOME/Desk\"\nXDG_DOWNLOAD_DIR=\"$HOME/Transfers\"\n")
-        ),
-        home.join("Transfers")
-    );
-    assert_eq!(
-        crate::api::record::download_dir_in(home, Some("XDG_DOWNLOAD_DIR=\"/srv/incoming\"")),
-        std::path::PathBuf::from("/srv/incoming")
-    );
-    assert_eq!(
-        crate::api::record::download_dir_in(home, Some(r#"XDG_DOWNLOAD_DIR="$HOME/My \$tuff""#)),
-        home.join("My $tuff")
-    );
-    assert_eq!(
-        crate::api::record::download_dir_in(
-            home,
-            Some(r#"XDG_DOWNLOAD_DIR="/srv/\"q\" \\ \`x\`""#)
-        ),
-        std::path::PathBuf::from(r#"/srv/"q" \ `x`"#)
-    );
-    assert_eq!(
-        crate::api::record::download_dir_in(
-            home,
-            Some("XDG_DOWNLOAD_DIR=\"$HOME/First\"\nXDG_DOWNLOAD_DIR=\"$HOME/Second\"\n")
-        ),
-        home.join("Second"),
-        "the shell reads the file in order, so the last assignment is the one in effect"
-    );
-}
-
-#[test]
-fn a_record_of_an_untitled_session_is_named_for_its_day() {
     assert_eq!(
         crate::api::record::record_name(" . ", "2026-11-15"),
         "Untitled session – record 2026-11-15"

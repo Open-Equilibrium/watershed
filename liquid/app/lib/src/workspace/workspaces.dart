@@ -32,6 +32,18 @@ class Workspaces extends ChangeNotifier {
   WorkspaceState? _current;
   WorkspaceState? get current => _current;
 
+  bool _switching = false;
+  bool get switching => _switching;
+
+  int _shells = 0;
+  Completer<void>? _vacated;
+
+  void shellMounted() => _shells++;
+
+  void shellUnmounted() {
+    if (--_shells == 0) _vacated?.complete();
+  }
+
   String? _problem;
   String? get problem => _problem;
 
@@ -106,6 +118,7 @@ class Workspaces extends ChangeNotifier {
     _at = index;
     _current = state;
     _problem = problem;
+    _switching = false;
     state?.named.addListener(_named);
     notifyListeners();
     _save();
@@ -113,10 +126,14 @@ class Workspaces extends ChangeNotifier {
 
   Future<void> _close() async {
     final state = _current;
-    if (state == null) return;
-    state.named.removeListener(_named);
+    state?.named.removeListener(_named);
     _current = null;
+    _switching = true;
+    _vacated = _shells == 0 ? null : Completer<void>();
     notifyListeners();
+    await _vacated?.future;
+    _vacated = null;
+    if (state == null) return;
     await state.drain();
     await state.dispose();
     state.workspace.dispose();

@@ -135,7 +135,8 @@ bool sameFilter(BridgeFilter? a, BridgeFilter? b) {
       x?.kind == y?.kind &&
       x?.text == y?.text &&
       x?.number == y?.number &&
-      x?.checked == y?.checked;
+      x?.checked == y?.checked &&
+      a.until == b.until;
 }
 
 String? filterLabel(
@@ -222,16 +223,11 @@ class _PanelState extends State<_Panel> {
         }
         return KeyEventResult.ignored;
       },
-      child: Container(
+      child: FloatingPanel(
         key: const Key('table query menu'),
         width: _menuWidth,
         constraints: const BoxConstraints(maxHeight: _menuHeight),
         padding: const EdgeInsets.all(WsMetrics.space2),
-        decoration: BoxDecoration(
-          color: ws.surface,
-          borderRadius: BorderRadius.circular(WsMetrics.radiusLg),
-          boxShadow: ws.shadow,
-        ),
         child: DefaultTextStyle.merge(
           style: TextStyle(fontSize: WsMetrics.fsUi, color: ws.text),
           child: Column(
@@ -362,32 +358,36 @@ class ChoiceMenu extends StatelessWidget {
     final divider = Divider(height: 9, thickness: 1, color: ws.border);
     return _Panel(
       onEscape: onClose,
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          ?switch (title) {
-            final title? => faint(title),
-            null => null,
-          },
-          for (final (index, section) in sections.indexed) ...[
-            if (section.label case final label?)
-              faint(label)
-            else if (index > 0)
-              divider,
-            for (final choice in section.choices)
-              _Item(
-                icon: choice.icon,
-                label: choice.label,
-                checked: choice.checked,
-                onTap: () {
-                  onClose();
-                  choice.onTap();
-                },
-              ),
-          ],
-          if (hint case final hint?) ...[divider, faint(hint)],
-        ],
+      child: Flexible(
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              ?switch (title) {
+                final title? => faint(title),
+                null => null,
+              },
+              for (final (index, section) in sections.indexed) ...[
+                if (section.label case final label?)
+                  faint(label)
+                else if (index > 0)
+                  divider,
+                for (final choice in section.choices)
+                  _Item(
+                    icon: choice.icon,
+                    label: choice.label,
+                    checked: choice.checked,
+                    onTap: () {
+                      onClose();
+                      choice.onTap();
+                    },
+                  ),
+              ],
+              if (hint case final hint?) ...[divider, faint(hint)],
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -593,7 +593,12 @@ class _FilterMenuState extends State<FilterMenu> {
   void didUpdateWidget(FilterMenu old) {
     super.didUpdateWidget(old);
     final filter = widget.filter;
-    if (filter != null &&
+    if (filter == null && old.filter != null) {
+      setState(() {
+        _show('');
+        _refused = false;
+      });
+    } else if (filter != null &&
         !sameFilter(filter, old.filter) &&
         !sameFilter(filter, _built())) {
       setState(_load);
@@ -681,6 +686,7 @@ class _FilterMenuState extends State<FilterMenu> {
     final typed = _typed.text.trim().isNotEmpty;
     setState(() => _refused = typed && _built() == null);
     _writeTyped();
+    _typing.requestFocus();
   }
 
   Widget _dropdown(Key key, String label, _Choosing choosing) {

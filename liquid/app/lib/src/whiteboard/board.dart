@@ -50,11 +50,13 @@ bool isHighlight(BridgeElement element) =>
 
 const highlighterSizes = [12.0, 18.0, 26.0];
 
+double inkWidth(BridgePen pen, int width) => (pen == BridgePen.highlighter
+    ? highlighterSizes
+    : penSizes)[width.clamp(0, 2)];
+
 StrokeOptions penOptions(BridgePen pen, int width, {bool complete = true}) =>
     StrokeOptions(
-      size: (pen == BridgePen.highlighter
-          ? highlighterSizes
-          : penSizes)[width.clamp(0, 2)],
+      size: inkWidth(pen, width),
       thinning: switch (pen) {
         BridgePen.ball || BridgePen.highlighter => 0,
         BridgePen.fountain => 0.5,
@@ -148,7 +150,11 @@ Rect boundsOf(BridgeElement element) {
       Rect.fromCenter(center: point, width: 0, height: 0),
     );
   }
-  return bounds.inflate(penSizes.last);
+  return bounds.inflate(
+    element.kind == BridgeElementKind.stroke
+        ? inkWidth(element.pen, element.width)
+        : penSizes.last,
+  );
 }
 
 class BoardCache {
@@ -322,7 +328,7 @@ bool touches(BridgeElement element, BoardCache cache, Offset at, double slop) {
   switch (element.kind) {
     case BridgeElementKind.stroke:
       final points = cache.points(element);
-      final half = penSizes[element.width.clamp(0, 2)] / 2 + slop;
+      final half = inkWidth(element.pen, element.width) / 2 + slop;
       for (var i = 0; i < points.length; i++) {
         final a = strokePoint(element, cache, points[i].offset);
         final b = i + 1 < points.length
@@ -374,6 +380,39 @@ BridgeElement newElement(
   arrowhead: arrowhead,
   corners: Float64List.fromList(corners),
   text: text,
+);
+
+BridgeElement copyElement(
+  BridgeElement e, {
+  String? id,
+  double? x,
+  double? y,
+  double? w,
+  double? h,
+  double? rotation,
+  BridgeInkColor? color,
+  int? width,
+  int? docPage,
+  bool? arrowhead,
+  String? text,
+}) => BridgeElement(
+  id: id,
+  kind: e.kind,
+  x: x ?? e.x,
+  y: y ?? e.y,
+  w: w ?? e.w,
+  h: h ?? e.h,
+  rotation: rotation ?? e.rotation,
+  color: color ?? e.color,
+  width: width ?? e.width,
+  docPage: docPage ?? e.docPage,
+  pen: e.pen,
+  points: e.points,
+  shape: e.shape,
+  seed: e.seed,
+  arrowhead: arrowhead ?? e.arrowhead,
+  corners: e.corners,
+  text: text ?? e.text,
 );
 
 BridgeElementChange changeOf(
