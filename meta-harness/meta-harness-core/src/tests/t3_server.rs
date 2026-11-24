@@ -50,16 +50,29 @@ async fn a_token_issue_that_never_ends_is_killed_at_its_wait() {
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     let binary = dir.join("t3");
-    std::fs::write(&binary, "#!/bin/sh\nexec sleep 60\n").unwrap();
+    std::fs::write(
+        &binary,
+        "#!/bin/sh\necho $$ > \"$T3CODE_HOME/pid\"\nexec sleep 60\n",
+    )
+    .unwrap();
     std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o755)).unwrap();
 
     let started = std::time::Instant::now();
-    let result = issue(binary, dir.clone(), Duration::from_millis(200)).await;
+    let result = issue(binary, dir.clone(), Duration::from_secs(1)).await;
     assert!(result.is_err(), "{result:?}");
     assert!(
         started.elapsed() < Duration::from_secs(10),
         "{:?}",
         started.elapsed()
+    );
+    let pid = std::fs::read_to_string(dir.join("pid")).unwrap();
+    let issuer = rustix::process::Pid::from_raw(pid.trim().parse().unwrap()).unwrap();
+    assert!(
+        crate::util::until(Duration::from_secs(5), Duration::from_millis(50), || {
+            rustix::process::test_kill_process(issuer).is_err()
+        })
+        .await,
+        "a token issue outlives its wait"
     );
     let _ = std::fs::remove_dir_all(&dir);
 }
