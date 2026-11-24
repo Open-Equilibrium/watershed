@@ -90,10 +90,14 @@ struct Flaky {
     failing: bool,
     index_failing: bool,
     history_failing: bool,
+    unreadable: Option<Document>,
 }
 
 impl Store for Flaky {
     fn chunks(&mut self, document: &Document) -> Result<Vec<Vec<u8>>, Error> {
+        if self.unreadable.as_ref() == Some(document) {
+            return Err(Error::Storage("unreadable".into()));
+        }
         self.inner.chunks(document)
     }
 
@@ -637,5 +641,29 @@ fn an_unreadable_area_does_not_stop_the_open() {
         store.index_version().unwrap(),
         0,
         "the next open tries again"
+    );
+}
+
+#[test]
+fn removing_a_table_view_whose_table_cannot_load_is_refused_whole() {
+    let mut workspace = Workspace::create(PersonId::new("benni"), Flaky::default()).unwrap();
+    let (_, page) = new_page(&mut workspace);
+    let Created::Block { block, view } = created(
+        &mut workspace,
+        Mutation::AddDatabaseBlock {
+            page: page.clone(),
+            after: None,
+            name: "Bills".into(),
+            layout: crate::Layout::Table,
+        },
+    ) else {
+        panic!("a Table")
+    };
+    let mut store = workspace.into_store();
+    store.unreadable = Some(Document::Table(block));
+    let mut workspace = Workspace::open(store).unwrap();
+    assert_eq!(
+        apply(&mut workspace, Mutation::RemoveView { page, view }).map(|_| ()),
+        Err(Error::Storage("unreadable".into()))
     );
 }

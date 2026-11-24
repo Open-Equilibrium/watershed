@@ -144,8 +144,10 @@ impl<S: Store> Workspace<S> {
         self.table_deleted(table, &database, &mut written)?;
         self.table_left_roles(table, &mut written)?;
         for (page, view) in shown {
-            let Ok((doc, order)) = self.page(&page) else {
-                continue;
+            let (doc, order) = match self.page(&page) {
+                Ok(loaded) => loaded,
+                Err(Error::NotFound) => continue,
+                Err(error) => return Err(error),
             };
             if let Some(entry) = model::live(doc, VIEWS, view.as_str()) {
                 model::mark_deleted(doc, &entry)?;

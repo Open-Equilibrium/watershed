@@ -146,7 +146,12 @@ impl<S: Store> Workspace<S> {
             order.remove(view);
             let mut written = Written::views(page);
             let table = BlockId::stored(&table);
-            if let Ok(doc) = self.table_doc(&table)
+            let table_doc = match self.table_doc(&table) {
+                Ok(doc) => Some(doc),
+                Err(Error::NotFound) => None,
+                Err(error) => return Err(error),
+            };
+            if let Some(doc) = table_doc
                 && let Some(shown) = model::live(doc, VIEWS, view.as_str())
             {
                 model::mark_deleted(doc, &shown)?;
