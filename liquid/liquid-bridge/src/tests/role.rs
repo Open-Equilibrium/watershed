@@ -182,3 +182,25 @@ fn roles_protection_and_refused_runs_cross_the_bridge() {
             .is_err()
     );
 }
+
+#[test]
+fn role_queries_return_only_the_requested_page() {
+    let (_folder, workspace) = open("role-pages");
+    let page = |start, limit| {
+        workspace
+            .query(BridgeQuery {
+                start,
+                limit,
+                ..query(BridgeQueryKind::Roles)
+            })
+            .unwrap()
+    };
+    let all = page(0, 100).roles;
+    let window = page(1, 1);
+    assert_eq!(window.count, 3);
+    assert_eq!(
+        window.roles.iter().map(|role| &role.id).collect::<Vec<_>>(),
+        [&all[1].id]
+    );
+    assert!(page(3, 1).roles.is_empty());
+}

@@ -531,7 +531,12 @@ impl LiquidWorkspace {
             BridgeQueryKind::Roles => {
                 let roles = workspace.roles().map_err(message)?;
                 answer.count = roles.len() as i64;
-                answer.roles = roles.into_iter().map(BridgeRole::of).collect();
+                answer.roles = roles
+                    .into_iter()
+                    .skip(start)
+                    .take(limit)
+                    .map(BridgeRole::of)
+                    .collect();
             }
             BridgeQueryKind::Allows => {
                 let block = id(&query.block, BlockId::parse, "block")?;
