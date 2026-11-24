@@ -423,14 +423,17 @@ class _MediaBlockState extends State<MediaBlock> {
         attachment: attachment,
       );
       final buffer = await ui.ImmutableBuffer.fromUint8List(bytes);
-      final descriptor = await ui.ImageDescriptor.encoded(buffer);
-      final size = Size(
-        descriptor.width.toDouble(),
-        descriptor.height.toDouble(),
-      );
-      descriptor.dispose();
-      buffer.dispose();
-      return (bytes, size);
+      try {
+        final descriptor = await ui.ImageDescriptor.encoded(buffer);
+        final size = Size(
+          descriptor.width.toDouble(),
+          descriptor.height.toDouble(),
+        );
+        descriptor.dispose();
+        return (bytes, size);
+      } finally {
+        buffer.dispose();
+      }
     } on Object {
       return null;
     }
