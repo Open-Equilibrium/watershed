@@ -1,3 +1,4 @@
+use meta_harness_core::api::UNKNOWN_REQUEST;
 use meta_harness_core::remote::{Host, Thread, connection_lost};
 use meta_harness_core::{
     Arrival, Change, Difference, Direction, Harness, Landing, MoveCheck, MoveFinish, MovePackage,
@@ -7,8 +8,6 @@ use meta_harness_core::{
 use super::session::{AgentHost, AgentProject, AgentSession, run};
 use crate::api::thread::BridgeTranscriptItem;
 use crate::convert;
-
-const UNKNOWN_CALL: &str = "Meta-Harness does not understand this request";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BridgeMoveCheck {
@@ -247,7 +246,7 @@ impl AgentHost {
     pub fn supports_moves(&self) -> Result<bool, String> {
         match run(self.host.projects()) {
             Ok(_) => Ok(true),
-            Err(error) if error.starts_with(UNKNOWN_CALL) => Ok(false),
+            Err(error) if error.starts_with(UNKNOWN_REQUEST) => Ok(false),
             Err(error) => Err(error),
         }
     }

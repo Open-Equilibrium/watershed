@@ -1,8 +1,7 @@
-use std::time::{SystemTime, UNIX_EPOCH};
-
 use serde_json::{Value, json};
 
 use super::Thread;
+use crate::store::now_ms;
 use crate::t3::{Watch, millis};
 
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq, Eq)]
@@ -218,14 +217,6 @@ fn schedule_json(schedule: &Schedule) -> Value {
     }
 }
 
-fn now_ms() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .ok()
-        .and_then(|elapsed| u64::try_from(elapsed.as_millis()).ok())
-        .unwrap_or_default()
-}
-
 impl Thread {
     pub async fn servers(&self) -> Result<Watch<Vec<LocalServer>>, String> {
         let thread = self.id.clone();
@@ -315,11 +306,11 @@ impl Thread {
     }
 
     pub(crate) async fn routine_tasks(&self) -> Result<Vec<Value>, String> {
-        let mut stream = self
+        let list = self
             .client
-            .stream("scheduledTasks.subscribe", json!({}))
-            .await?;
-        let list = stream.recv().await.ok_or("T3 sent no routines")?;
+            .first("scheduledTasks.subscribe")
+            .await?
+            .ok_or("T3 sent no routines")?;
         Ok(bound(&list, &self.id)
             .map(crate::agents::routine_copy)
             .collect())

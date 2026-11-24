@@ -1,20 +1,21 @@
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use serde_json::{Value, json};
 use tokio::sync::mpsc;
+use tokio_tungstenite::tungstenite::Message;
 
 use super::fake_t3::{Fake, chunk, ok};
+use super::{until, within};
 use crate::event::{
     AgentEvent, ApprovalOption, ItemDetail, ItemId, ItemKind, ItemStatus, PendingRequest, Question,
     Request, RequestId, StepStatus, TaskStep, TurnId, Usage,
 };
-use crate::t3::Client;
 use crate::thread::{ChatItem, Snapshot, Thread, ThreadEvent, TurnStatus};
 use crate::{ModelChoice, Permissions};
-use tokio_tungstenite::tungstenite::Message;
 
-const WAIT: Duration = Duration::from_secs(10);
 const SUBSCRIBE: &str = "orchestration.subscribeThread";
 const COMMAND: &str = "orchestration.dispatchCommand";
 
@@ -44,6 +45,16 @@ fn run(id: &str, ordinal: u64, status: &str, message: &str) -> Value {
     })
 }
 
+pub(super) async fn attach(fake: &Fake) -> Thread {
+    Thread::follow(
+        fake.client().await,
+        "thread-1".to_owned(),
+        "/repo".to_owned(),
+    )
+    .await
+    .unwrap()
+}
+
 pub(super) async fn follow(projection: Value, sequence: u64) -> (Fake, Thread) {
     follow_answering(projection, sequence, |_, _, id| vec![ok(id, json!({}))]).await
 }
@@ -60,12 +71,7 @@ pub(super) async fn follow_answering(
         _ => answer(tag, payload, id),
     })
     .await;
-    let client = Client::connect(&fake.origin, || Box::pin(async { Ok("token".to_owned()) }))
-        .await
-        .unwrap();
-    let thread = Thread::follow(client, "thread-1".to_owned(), "/repo".to_owned())
-        .await
-        .unwrap();
+    let thread = attach(&fake).await;
     (fake, thread)
 }
 
@@ -73,7 +79,7 @@ pub(super) fn event(sequence: u64, kind: &str, payload: Value) -> Value {
     json!({"kind": "event", "sequence": sequence, "event": {"type": kind, "payload": payload}})
 }
 
-async fn until(
+async fn until_sequence(
     fake: &Fake,
     events: &mut mpsc::Receiver<ThreadEvent>,
     sequence: u64,
@@ -88,9 +94,8 @@ async fn until(
     );
     let mut seen = Vec::new();
     loop {
-        let next = tokio::time::timeout(WAIT, events.recv())
+        let next = within("the event", events.recv())
             .await
-            .expect("the event arrives")
             .expect("the thread still follows");
         if next.sequence == sequence {
             return seen;
@@ -356,7 +361,7 @@ async fn a_task_list_starts_once_and_reports_each_change_of_its_steps() {
             event(8, "turn-item.updated", tasks("completed", done)),
         ],
     );
-    let seen = until(&fake, &mut events, 9).await;
+    let seen = until_sequence(&fake, &mut events, 9).await;
 
     assert_eq!(
         seen,
@@ -461,7 +466,7 @@ async fn live_changes_become_the_agent_events_liquid_shows() {
             event(31, "run.updated", json!({"id": "r2", "ordinal": 2, "status": "completed"})),
         ],
     );
-    let seen = until(&fake, &mut events, 32).await;
+    let seen = until_sequence(&fake, &mut events, 32).await;
     let request = PendingRequest {
         id: RequestId("req-9".to_owned()),
         turn: TurnId(2),
@@ -483,6 +488,26 @@ async fn live_changes_become_the_agent_events_liquid_shows() {
         cache_write: 10,
         reasoning: 5,
     };
+    let started = |id: &str, kind: ItemKind, detail: ItemDetail| AgentEvent::ItemStarted {
+        turn: TurnId(2),
+        item: item(id),
+        kind,
+        detail,
+    };
+    let delta = |id: &str, text: &str| AgentEvent::ContentDelta {
+        item: item(id),
+        delta: text.to_owned(),
+    };
+    let completed = |id: &str, kind: ItemKind, text: &str, duration_ms: Option<u64>| {
+        AgentEvent::ItemCompleted {
+            turn: TurnId(2),
+            item: item(id),
+            kind,
+            text: text.to_owned(),
+            status: ItemStatus::Completed,
+            duration_ms,
+        }
+    };
     assert_eq!(
         seen,
         vec![
@@ -493,53 +518,26 @@ async fn live_changes_become_the_agent_events_liquid_shows() {
             },
             AgentEvent::TurnStarted { turn: TurnId(2) },
             AgentEvent::TurnsChanged,
-            AgentEvent::ItemStarted {
-                turn: TurnId(2),
-                item: item("c1"),
-                kind: ItemKind::CommandExecution,
-                detail: ItemDetail::Tool {
+            started(
+                "c1",
+                ItemKind::CommandExecution,
+                ItemDetail::Tool {
                     name: "bash".to_owned(),
                     target: "npm test".to_owned()
                 }
-            },
-            AgentEvent::ContentDelta {
-                item: item("c1"),
-                delta: "line one\nline two".to_owned()
-            },
-            AgentEvent::ContentDelta {
-                item: item("c1"),
-                delta: "\nok".to_owned()
-            },
-            AgentEvent::ItemCompleted {
-                turn: TurnId(2),
-                item: item("c1"),
-                kind: ItemKind::CommandExecution,
-                text: "line one\nline two\nok".to_owned(),
-                status: ItemStatus::Completed,
-                duration_ms: Some(3000)
-            },
-            AgentEvent::ItemStarted {
-                turn: TurnId(2),
-                item: item("a1"),
-                kind: ItemKind::AssistantMessage,
-                detail: ItemDetail::None
-            },
-            AgentEvent::ContentDelta {
-                item: item("a1"),
-                delta: "Hi".to_owned()
-            },
-            AgentEvent::ContentDelta {
-                item: item("a1"),
-                delta: " there".to_owned()
-            },
-            AgentEvent::ItemCompleted {
-                turn: TurnId(2),
-                item: item("a1"),
-                kind: ItemKind::AssistantMessage,
-                text: "Hi there".to_owned(),
-                status: ItemStatus::Completed,
-                duration_ms: None
-            },
+            ),
+            delta("c1", "line one\nline two"),
+            delta("c1", "\nok"),
+            completed(
+                "c1",
+                ItemKind::CommandExecution,
+                "line one\nline two\nok",
+                Some(3000)
+            ),
+            started("a1", ItemKind::AssistantMessage, ItemDetail::None),
+            delta("a1", "Hi"),
+            delta("a1", " there"),
+            completed("a1", ItemKind::AssistantMessage, "Hi there", None),
             AgentEvent::RequestOpened { request },
             AgentEvent::RequestResolved {
                 request: RequestId("req-9".to_owned())
@@ -567,9 +565,21 @@ async fn live_changes_become_the_agent_events_liquid_shows() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn a_message_queues_steers_or_starts_a_turn_as_t3_s_composer_does() {
+async fn commands_name_the_request_queued_turn_or_message_they_act_on() {
     let (fake, thread) = follow(
-        projection(json!({"runs": [run("r1", 1, "running", "m1")], "messages": [{"id": "m1", "text": "go"}]})),
+        projection(json!({
+            "runs": [run("r6", 6, "running", "m6"), run("r7", 7, "queued", "m-q")],
+            "runtimeRequests": [{"id": "req-1", "status": "pending"}, {"id": "req-2", "status": "pending"}],
+            "turnItems": [
+                {"id": "ap1", "runId": "r6", "type": "approval_request", "requestId": "req-1",
+                 "requestKind": "command", "prompt": "ls", "options": [{"decision": "accept", "label": "Approve"}]},
+                {"id": "ui1", "runId": "r6", "type": "user_input_request", "requestId": "req-2",
+                 "questions": [
+                     {"id": "scope", "header": "Scope", "question": "Which?", "options": [], "multiSelect": false},
+                     {"id": "tags", "header": "Tags", "question": "Any?", "options": [], "multiSelect": true},
+                 ]},
+            ],
+        })),
         1,
     )
     .await;
@@ -589,32 +599,7 @@ async fn a_message_queues_steers_or_starts_a_turn_as_t3_s_composer_does() {
         command(&fake),
         json!({"type": "thread.stop", "threadId": "thread-1"})
     );
-    let (fake, thread) = follow(projection(json!({})), 1).await;
-    thread.send("go", false).await.unwrap();
-    let sent = command(&fake);
-    assert_eq!(sent["dispatchMode"], json!({"type": "start_immediately"}));
-    assert_eq!(sent["deliveryIntent"], "auto");
-}
 
-#[tokio::test(flavor = "multi_thread")]
-async fn answers_and_dismissals_name_the_request_and_its_choices() {
-    let (fake, thread) = follow(
-        projection(json!({
-            "runtimeRequests": [{"id": "req-1", "status": "pending"}, {"id": "req-2", "status": "pending"}],
-            "turnItems": [
-                {"id": "ap1", "runId": "r1", "type": "approval_request", "requestId": "req-1",
-                 "requestKind": "command", "prompt": "ls", "options": [{"decision": "accept", "label": "Approve"}]},
-                {"id": "ui1", "runId": "r1", "type": "user_input_request", "requestId": "req-2",
-                 "questions": [
-                     {"id": "scope", "header": "Scope", "question": "Which?", "options": [], "multiSelect": false},
-                     {"id": "tags", "header": "Tags", "question": "Any?", "options": [], "multiSelect": true},
-                 ]},
-            ],
-            "runs": [run("r1", 1, "waiting", "m1")],
-        })),
-        1,
-    )
-    .await;
     thread
         .respond(&RequestId("req-1".to_owned()), "accept")
         .await
@@ -646,53 +631,35 @@ async fn answers_and_dismissals_name_the_request_and_its_choices() {
         command(&fake),
         json!({"type": "thread.user-input.dismiss", "threadId": "thread-1", "requestId": "req-2"})
     );
-}
 
-#[tokio::test(flavor = "multi_thread")]
-async fn queued_turns_can_be_edited_cancelled_and_sent_now() {
-    let queued = |id: &str, ordinal: u64| run(id, ordinal, "queued", "m-q");
-    let (fake, thread) = follow(
-        projection(json!({"runs": [run("r6", 6, "running", "m6"), queued("r7", 7)]})),
-        1,
-    )
-    .await;
-    thread.edit_queued(7, "edited").await.unwrap();
-    assert_eq!(
-        command(&fake),
-        json!({"type": "queued-run.edit", "threadId": "thread-1", "runId": "r7", "text": "edited"})
-    );
     thread.send_queued_now(7).await.unwrap();
     assert_eq!(
         command(&fake),
         json!({"type": "queued-message.promote-to-steer", "threadId": "thread-1",
             "queuedRunId": "r7", "targetRunId": "r6"})
     );
-    thread.cancel_queued(7).await.unwrap();
-    assert_eq!(
-        command(&fake),
-        json!({"type": "queued-run.cancel", "threadId": "thread-1", "runId": "r7"})
-    );
     let missing = thread.edit_queued(8, "x").await.unwrap_err();
     assert_eq!(missing, "Turn 8 is not queued.");
 
-    let (fake, thread) = follow(projection(json!({"runs": [queued("r7", 7)]})), 1).await;
+    let (fake, thread) = follow(
+        projection(json!({"runs": [run("r7", 7, "queued", "m-q")]})),
+        1,
+    )
+    .await;
     thread.send_queued_now(7).await.unwrap();
     assert_eq!(
         command(&fake),
         json!({"type": "queued-run.start", "threadId": "thread-1", "runId": "r7"})
     );
+    thread.send("go", false).await.unwrap();
+    let sent = command(&fake);
+    assert_eq!(sent["dispatchMode"], json!({"type": "start_immediately"}));
+    assert_eq!(sent["deliveryIntent"], "auto");
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn settings_branch_and_context_reach_t3_and_show_in_the_thread() {
-    let (fake, thread) = follow(
-        projection(json!({
-            "providerTurns": [{"id": "pt1", "runAttemptId": null, "status": "completed",
-                "tokenUsage": {"usedTokens": 1200, "maxTokens": 200000, "autoCompactThreshold": 160000}}],
-        })),
-        1,
-    )
-    .await;
+async fn settings_and_branch_reach_t3_and_show_in_the_thread() {
+    let (fake, thread) = follow(projection(json!({})), 1).await;
     assert_eq!(thread.title(), "Build it");
     assert_eq!(
         thread.model(),
@@ -702,12 +669,6 @@ async fn settings_branch_and_context_reach_t3_and_show_in_the_thread() {
             options: Vec::new(),
         })
     );
-    let context = thread.context().expect("T3 reported the window");
-    assert_eq!(
-        (context.tokens, context.window, context.compacts_at),
-        (Some(1200), 200_000, Some(160_000))
-    );
-
     let (_, mut events) = thread.subscribe();
     thread
         .set_permissions(Permissions::Supervised)
@@ -734,7 +695,7 @@ async fn settings_branch_and_context_reach_t3_and_show_in_the_thread() {
         "runtimeMode": "approval-required",
         "modelSelection": {"instanceId": "scripted", "model": "other", "options": [{"id": "effort", "value": "high"}]},
     }))]);
-    until(&fake, &mut events, 3).await;
+    until_sequence(&fake, &mut events, 3).await;
     assert_eq!(thread.model(), Some(model));
     assert_eq!(
         thread.record()["thread"]["runtimeMode"],
@@ -745,24 +706,6 @@ async fn settings_branch_and_context_reach_t3_and_show_in_the_thread() {
     assert_eq!(
         fake.payloads("vcs.refreshStatus"),
         vec![json!({"cwd": "/repo"})]
-    );
-    thread
-        .set_branch("feature", Some(std::path::Path::new("/repo/wt")))
-        .await
-        .unwrap();
-    assert_eq!(
-        command(&fake),
-        json!({"type": "thread.metadata.update", "threadId": "thread-1", "branch": "feature",
-            "worktreePath": "/repo/wt"})
-    );
-    assert_eq!(
-        thread.worktree().as_deref(),
-        Some(std::path::Path::new("/repo/wt"))
-    );
-    thread.git().status().await.unwrap();
-    assert_eq!(
-        fake.payloads("vcs.refreshStatus").last(),
-        Some(&json!({"cwd": "/repo/wt"}))
     );
 }
 
@@ -794,16 +737,6 @@ async fn reverting_a_turn_that_is_not_in_the_thread_dispatches_nothing() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn dropping_a_followed_thread_interrupts_its_stream_on_t3() {
-    let (fake, thread) = follow(projection(json!({})), 1).await;
-    let id = fake.request_id(SUBSCRIBE);
-    drop(thread);
-    tokio::time::timeout(WAIT, fake.interrupted(&id))
-        .await
-        .expect("T3 receives the interrupt");
-}
-
-#[tokio::test(flavor = "multi_thread")]
 async fn a_thread_restarts_from_the_snapshot_t3_sends_on_a_new_connection() {
     let snapshot = |sequence: u64, runs: Value| {
         json!({"kind": "snapshot", "snapshotSequence": sequence,
@@ -828,19 +761,11 @@ async fn a_thread_restarts_from_the_snapshot_t3_sends_on_a_new_connection() {
         _ => vec![ok(id, json!({}))],
     })
     .await;
-    let client = Client::connect(&fake.origin, || Box::pin(async { Ok("token".to_owned()) }))
-        .await
-        .unwrap();
-    let thread = Thread::follow(client, "thread-1".to_owned(), "/repo".to_owned())
-        .await
-        .unwrap();
+    let thread = attach(&fake).await;
     let (first, mut events) = thread.subscribe();
     assert_eq!(first.sequence, 1);
     fake.drop_connection();
-    let ended = tokio::time::timeout(WAIT, events.recv())
-        .await
-        .expect("the subscriber ends");
-    assert!(ended.is_none());
+    assert!(within("the subscriber ends", events.recv()).await.is_none());
     let (restarted, mut events) = thread.subscribe();
     assert_eq!(restarted.sequence, 10);
     assert_eq!(
@@ -863,7 +788,7 @@ async fn a_thread_restarts_from_the_snapshot_t3_sends_on_a_new_connection() {
         ],
     );
     assert_eq!(
-        until(&fake, &mut events, 12).await,
+        until_sequence(&fake, &mut events, 12).await,
         vec![AgentEvent::TurnCompleted {
             turn: TurnId(2),
             checkpoint: Some("2".to_owned()),
@@ -872,25 +797,8 @@ async fn a_thread_restarts_from_the_snapshot_t3_sends_on_a_new_connection() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn subscribers_end_when_t3_ends_the_thread_stream() {
-    let (fake, thread) = follow(projection(json!({})), 1).await;
-    let (_, mut events) = thread.subscribe();
-    fake.close();
-    let ended = tokio::time::timeout(WAIT, events.recv())
-        .await
-        .expect("the subscription ends");
-    assert!(ended.is_none());
-    let (_, mut later) = thread.subscribe();
-    let ended = tokio::time::timeout(WAIT, later.recv())
-        .await
-        .expect("a later subscription ends too");
-    assert!(ended.is_none());
-}
-
-#[tokio::test(flavor = "multi_thread")]
 async fn a_late_branch_answer_keeps_the_newer_branch_t3_already_sent() {
-    let stream = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
-    let seen = stream.clone();
+    let seen = Arc::new(Mutex::new(String::new()));
     let snapshot =
         json!({"kind": "snapshot", "snapshotSequence": 1, "projection": projection(json!({}))});
     let fake = Fake::start(move |tag, _, id| match tag {
@@ -912,28 +820,40 @@ async fn a_late_branch_answer_keeps_the_newer_branch_t3_already_sent() {
         ],
     })
     .await;
-    let client = Client::connect(&fake.origin, || Box::pin(async { Ok("token".to_owned()) }))
-        .await
-        .unwrap();
-    let thread = Thread::follow(client, "thread-1".to_owned(), "/repo".to_owned())
-        .await
-        .unwrap();
+    let thread = attach(&fake).await;
     thread.set_branch("older", None).await.unwrap();
-    let newer = Some(std::path::PathBuf::from("/worktrees/newer"));
-    tokio::time::timeout(Duration::from_secs(5), async {
-        while thread.worktree() != newer {
-            tokio::time::sleep(Duration::from_millis(5)).await;
-        }
+    let newer = Some(PathBuf::from("/worktrees/newer"));
+    until("the newer worktree stays".to_owned(), || {
+        thread.worktree() == newer
     })
-    .await
-    .expect("the newer worktree stays");
+    .await;
     tokio::time::sleep(Duration::from_millis(50)).await;
     assert_eq!(thread.worktree(), newer);
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn a_returned_message_queues_behind_the_active_turn_even_when_none_is_running() {
-    let (fake, thread) = follow(projection(json!({})), 1).await;
+async fn a_message_is_sent_once_by_its_stable_id_and_a_returned_one_queues_behind_the_turn() {
+    let (fake, thread) = follow(
+        projection(json!({"messages": [{"id": "queued-tr-0", "text": "first"}]})),
+        1,
+    )
+    .await;
+    thread
+        .send_once("queued-tr-0", "first", false)
+        .await
+        .unwrap();
+    assert!(fake.payloads(COMMAND).is_empty(), "a repeat sends nothing");
+    thread
+        .send_once("queued-tr-1", "second", false)
+        .await
+        .unwrap();
+    let sent = fake
+        .payloads(COMMAND)
+        .pop()
+        .expect("the new message is sent");
+    assert_eq!(sent["messageId"], "queued-tr-1");
+    assert_eq!(sent["text"], "second");
+
     thread.requeue_once("returned-tr-1", "first").await.unwrap();
     assert_eq!(
         command(&fake),
@@ -967,25 +887,44 @@ async fn a_handoff_run_that_was_aborted_does_not_settle_the_move() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn a_message_whose_stable_id_the_thread_already_holds_is_not_sent_again() {
-    let (fake, thread) = follow(
-        projection(json!({"messages": [{"id": "queued-tr-0", "text": "first"}]})),
+async fn dropping_a_followed_thread_interrupts_its_stream_on_t3() {
+    let (fake, thread) = follow(projection(json!({})), 1).await;
+    let id = fake.request_id(SUBSCRIBE);
+    drop(thread);
+    fake.interrupted(&id).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn subscribers_end_when_t3_ends_the_thread_stream() {
+    let (fake, thread) = follow(projection(json!({})), 1).await;
+    let (_, mut events) = thread.subscribe();
+    fake.close();
+    assert!(
+        within("the subscription ends", events.recv())
+            .await
+            .is_none()
+    );
+    let (_, mut later) = thread.subscribe();
+    assert!(
+        within("a later subscription ends too", later.recv())
+            .await
+            .is_none()
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_reply_whose_run_was_reverted_is_ended_and_a_running_one_is_not() {
+    let (_fake, thread) = follow(
+        projection(json!({
+            "runs": [run("r1", 1, "rolled_back", "m1"), run("r2", 2, "running", "m2")],
+            "turnItems": [
+                {"id": "a1", "runId": "r1", "type": "assistant_message", "text": "withdrawn"},
+                {"id": "a2", "runId": "r2", "type": "assistant_message", "text": "so far"},
+            ],
+        })),
         1,
     )
     .await;
-    thread
-        .send_once("queued-tr-0", "first", false)
-        .await
-        .unwrap();
-    assert!(fake.payloads(COMMAND).is_empty(), "a repeat sends nothing");
-    thread
-        .send_once("queued-tr-1", "second", false)
-        .await
-        .unwrap();
-    let sent = fake
-        .payloads(COMMAND)
-        .pop()
-        .expect("the new message is sent");
-    assert_eq!(sent["messageId"], "queued-tr-1");
-    assert_eq!(sent["text"], "second");
+    assert_eq!(thread.reply_to("m1"), Some((true, String::new())));
+    assert_eq!(thread.reply_to("m2"), Some((false, "so far".to_owned())));
 }

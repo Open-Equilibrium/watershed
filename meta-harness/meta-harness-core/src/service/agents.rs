@@ -55,10 +55,8 @@ impl Watchers {
 }
 
 pub(super) fn start_all(shared: &Arc<Shared>) {
-    if let Err(error) = agents::migrate(&shared.store.db(), &shared.home) {
-        eprintln!("meta: the persistent agents are not moved to their new store: {error}");
-    }
-    match agents::list(&shared.store.db(), &shared.home) {
+    let listed = agents::list(&shared.store.db(), &shared.home);
+    match listed {
         Ok(listed) => {
             for agent in listed {
                 shared.agents.start(shared, &agent.id);
@@ -100,22 +98,7 @@ pub(super) async fn call(shared: &Arc<Shared>, call: AgentsCall) -> Result<Value
             shared.agents.start(shared, &agent.id);
             to(agent)
         }
-        AgentsCall::Remove(name) => {
-            let agent = named(shared, &name)?;
-            for id in [Some(&agent.thread), agent.previous.as_ref()]
-                .into_iter()
-                .flatten()
-            {
-                if let Some(thread) = existing(shared, &agent.root, id).await? {
-                    for routine in thread.automations().await?.current() {
-                        thread.remove_routine(&routine.id).await?;
-                    }
-                }
-            }
-            agents::remove(&shared.store.db(), &agent.id)?;
-            shared.agents.stop(&agent.id);
-            to(agent.memory)
-        }
+        AgentsCall::Remove(name) => remove_agent(shared, &name).await,
         AgentsCall::Routines(name) => {
             let agent = named(shared, &name)?;
             match existing(shared, &agent.root, &agent.thread).await? {
@@ -160,29 +143,7 @@ pub(super) async fn call(shared: &Arc<Shared>, call: AgentsCall) -> Result<Value
             rename,
             model,
             permissions,
-        } => {
-            let agent = named(shared, &name)?;
-            if let Some(rename) = rename {
-                rename_to(shared, &agent, &rename).await?;
-            }
-            if model.is_some() || permissions.is_some() {
-                let model = model.unwrap_or_else(|| agent.model.clone());
-                let permissions = permissions.unwrap_or(agent.permissions);
-                agents::set_model(&shared.store.db(), &agent.id, &model, permissions)?;
-                if let Some(thread) = existing(shared, &agent.root, &agent.thread).await? {
-                    thread.set_model(&model).await?;
-                    thread.set_permissions(permissions).await?;
-                    thread.retune_routines(&model, permissions).await?;
-                }
-                absorb(shared, &agent, |seen| {
-                    for task in &mut seen.routines {
-                        task["modelSelection"] = model.to_t3();
-                        task["runtimeMode"] = json!(permissions.mode());
-                    }
-                })?;
-            }
-            to(named(shared, &agent.id)?)
-        }
+        } => update_agent(shared, &name, rename, model, permissions).await,
         AgentsCall::Instructions(name) => to(agents::instructions(&named(shared, &name)?)?),
         AgentsCall::SetInstructions { name, text } => {
             let agent = named(shared, &name)?;
@@ -208,31 +169,85 @@ pub(super) async fn call(shared: &Arc<Shared>, call: AgentsCall) -> Result<Value
             root,
             thread,
             text,
-        } => {
-            let agent = named(shared, &name)?;
-            let target = current(shared, &agent).await?;
-            let source = shared
-                .host
-                .project(Path::new(&root))
-                .await?
-                .open(&thread)
-                .await?;
-            let label = label(&source.title());
-            let context_id = crate::t3::fresh_id("ctx");
-            let message = crate::t3::fresh_id("msg");
-            let context = json!({"version": 1, "records": [{
-                "version": 1, "contextId": context_id, "label": label, "kind": "thread",
-                "environmentId": shared.host.environment_id().await?,
-                "threadId": thread, "title": label,
-            }]});
-            let sent =
-                format!("Mentioned in [{label}](t3-context://v1/thread/{context_id}): {text}");
-            target.post_with_context(&message, &sent, context).await?;
-            agents::add_mention(&shared.store.db(), &agent, &thread, &message, &text)?;
-            to(message)
-        }
+        } => send_mention(shared, &name, &root, &thread, &text).await,
         AgentsCall::Mentions(thread) => mentions(shared, &thread).await,
     }
+}
+
+async fn remove_agent(shared: &Shared, name: &str) -> Result<Value, String> {
+    let agent = named(shared, name)?;
+    for id in [Some(&agent.thread), agent.previous.as_ref()]
+        .into_iter()
+        .flatten()
+    {
+        if let Some(thread) = existing(shared, &agent.root, id).await? {
+            for routine in thread.automations().await?.current() {
+                thread.remove_routine(&routine.id).await?;
+            }
+        }
+    }
+    agents::remove(&shared.store.db(), &agent.id)?;
+    shared.agents.stop(&agent.id);
+    to(agent.memory)
+}
+
+async fn update_agent(
+    shared: &Shared,
+    name: &str,
+    rename: Option<String>,
+    model: Option<crate::ModelChoice>,
+    permissions: Option<crate::Permissions>,
+) -> Result<Value, String> {
+    let agent = named(shared, name)?;
+    if let Some(rename) = rename {
+        rename_to(shared, &agent, &rename).await?;
+    }
+    if model.is_some() || permissions.is_some() {
+        let model = model.unwrap_or_else(|| agent.model.clone());
+        let permissions = permissions.unwrap_or(agent.permissions);
+        agents::set_model(&shared.store.db(), &agent.id, &model, permissions)?;
+        if let Some(thread) = existing(shared, &agent.root, &agent.thread).await? {
+            thread.set_model(&model).await?;
+            thread.set_permissions(permissions).await?;
+            thread.retune_routines(&model, permissions).await?;
+        }
+        absorb(shared, &agent, |seen| {
+            for task in &mut seen.routines {
+                task["modelSelection"] = model.to_t3();
+                task["runtimeMode"] = json!(permissions.mode());
+            }
+        })?;
+    }
+    to(named(shared, &agent.id)?)
+}
+
+async fn send_mention(
+    shared: &Shared,
+    name: &str,
+    root: &str,
+    thread: &str,
+    text: &str,
+) -> Result<Value, String> {
+    let agent = named(shared, name)?;
+    let target = current(shared, &agent).await?;
+    let source = shared
+        .host
+        .project(Path::new(root))
+        .await?
+        .open(thread)
+        .await?;
+    let label = label(&source.title());
+    let context_id = crate::t3::fresh_id("ctx");
+    let message = crate::t3::fresh_id("msg");
+    let context = json!({"version": 1, "records": [{
+        "version": 1, "contextId": context_id, "label": label, "kind": "thread",
+        "environmentId": shared.host.environment_id().await?,
+        "threadId": thread, "title": label,
+    }]});
+    let sent = format!("Mentioned in [{label}](t3-context://v1/thread/{context_id}): {text}");
+    target.post_with_context(&message, &sent, context).await?;
+    agents::add_mention(&shared.store.db(), &agent, thread, &message, text)?;
+    to(message)
 }
 
 async fn mentions(shared: &Shared, source: &str) -> Result<Value, String> {
@@ -283,7 +298,12 @@ pub(super) async fn carry(
     let _serial = shared.agents.serial.lock().await;
     let agent = agents::of_thread(&shared.store.db(), &shared.home, thread.id())?;
     match agent {
-        Some(agent) => Ok(Some(agents::pack(&agent, thread.routine_tasks().await?)?)),
+        Some(agent) => {
+            let routines = thread.routine_tasks().await?;
+            Ok(Some(
+                blocking(move || agents::pack(&agent, routines)).await?,
+            ))
+        }
         None => Ok(None),
     }
 }
@@ -292,7 +312,7 @@ pub(super) async fn adopt(
     shared: &Arc<Shared>,
     root: &str,
     thread: &Thread,
-    carry: crate::agents::AgentCarry,
+    mut carry: crate::agents::AgentCarry,
 ) -> Result<(), String> {
     let _serial = shared.agents.serial.lock().await;
     let known = agents::of_thread(&shared.store.db(), &shared.home, thread.id())?;
@@ -318,7 +338,8 @@ pub(super) async fn adopt(
             thread.id(),
         )?,
     };
-    agents::unpack(&agent.memory, &carry.files)?;
+    let (memory, files) = (agent.memory.clone(), std::mem::take(&mut carry.files));
+    blocking(move || agents::unpack(&memory, &files)).await?;
     let mut routines = Vec::new();
     for routine in &carry.routines {
         routines.push(thread.save_routine(routine, false).await?);
@@ -341,6 +362,16 @@ pub(super) async fn adopt(
         )
         .await?;
     shared.agents.start(shared, &agent.id);
+    Ok(())
+}
+
+pub(super) async fn forget(shared: &Shared, thread: &str) -> Result<(), String> {
+    let _serial = shared.agents.serial.lock().await;
+    let agent = agents::of_thread(&shared.store.db(), &shared.home, thread)?;
+    if let Some(agent) = agent {
+        agents::remove(&shared.store.db(), &agent.id)?;
+        shared.agents.stop(&agent.id);
+    }
     Ok(())
 }
 
@@ -453,12 +484,13 @@ async fn still(
     agent: &Agent,
     change: &crate::AgentChange,
 ) -> Result<bool, String> {
-    let task = |text: &Option<String>| {
-        text.as_deref()
-            .and_then(|text| serde_json::from_str::<Value>(text).ok())
-    };
+    let task = |text: &Option<String>| routine_json(text).ok().flatten();
     Ok(match change.kind {
-        AgentChangeKind::Name => true,
+        AgentChangeKind::Name => {
+            let instructions = agents::instructions(agent)?;
+            let current = agents::heading(&instructions);
+            change.before.as_deref() == current || change.after.as_deref() == current
+        }
         AgentChangeKind::Instructions => {
             agents::instructions(agent)? == change.before.clone().unwrap_or_default()
         }
@@ -484,11 +516,6 @@ async fn restore(
     from: &Option<String>,
     to: &Option<String>,
 ) -> Result<(), String> {
-    let task = |text: &Option<String>| -> Result<Option<Value>, String> {
-        text.as_deref()
-            .map(|text| serde_json::from_str(text).map_err(|e| e.to_string()))
-            .transpose()
-    };
     match kind {
         AgentChangeKind::Name => {
             if let Some(name) = to {
@@ -501,7 +528,7 @@ async fn restore(
         AgentChangeKind::RoutineAdded
         | AgentChangeKind::RoutineRemoved
         | AgentChangeKind::RoutineChanged => {
-            let (from, to) = (task(from)?, task(to)?);
+            let (from, to) = (routine_json(from)?, routine_json(to)?);
             let thread = current(shared, agent).await?;
             let gone = from.as_ref().map(|task| task["id"].clone());
             let replaced = to.as_ref().map(|task| task["id"].clone());
@@ -657,10 +684,7 @@ fn baseline(
     mut now: Snapshot,
     held: &[(AgentChangeKind, Option<String>, Option<String>)],
 ) -> Snapshot {
-    let task = |text: &Option<String>| {
-        text.as_deref()
-            .and_then(|text| serde_json::from_str::<Value>(text).ok())
-    };
+    let task = |text: &Option<String>| routine_json(text).ok().flatten();
     for (kind, before, after) in held {
         match kind {
             AgentChangeKind::Name => {}
@@ -682,6 +706,12 @@ fn baseline(
         }
     }
     now
+}
+
+fn routine_json(text: &Option<String>) -> Result<Option<Value>, String> {
+    text.as_deref()
+        .map(|text| serde_json::from_str(text).map_err(|e| e.to_string()))
+        .transpose()
 }
 
 async fn snapshot(agent: &Agent, thread: &Thread) -> Result<Snapshot, String> {
@@ -799,4 +829,12 @@ fn idle(thread: &Thread) -> bool {
 
 fn filled(thread: &Thread) -> bool {
     idle(thread) && agents::full(thread.context())
+}
+
+async fn blocking<T: Send + 'static>(
+    work: impl FnOnce() -> Result<T, String> + Send + 'static,
+) -> Result<T, String> {
+    tokio::task::spawn_blocking(work)
+        .await
+        .map_err(|error| format!("The agent's memory could not be moved: {error}"))?
 }

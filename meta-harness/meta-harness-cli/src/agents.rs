@@ -1,7 +1,8 @@
 use std::path::Path;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use meta_harness_core::{
-    ModelChoice, NewAgent, NewRoutine, Permissions, Schedule, ScheduleKind, remote,
+    ModelChoice, NewAgent, NewRoutine, Permissions, Schedule, ScheduleKind, remote, rfc3339_millis,
 };
 
 use crate::{USAGE, print};
@@ -52,12 +53,17 @@ fn new_agent(name: &str, mut args: &[&str]) -> Result<NewAgent, String> {
     while let [flag, value, rest @ ..] = args {
         match *flag {
             "--project" => {
-                root = Some(
-                    std::fs::canonicalize(Path::new(value))
-                        .map_err(|e| format!("The project {value} is not readable: {e}"))?
-                        .to_string_lossy()
-                        .into_owned(),
-                );
+                let path = std::fs::canonicalize(Path::new(value))
+                    .map_err(|e| format!("The project {value} is not readable: {e}"))?;
+                if !path.is_dir() {
+                    return Err(format!("The project {value} is not a folder."));
+                }
+                root = Some(path.into_os_string().into_string().map_err(|_| {
+                    format!(
+                        "The project {value} resolves to a path that is not valid UTF-8; use a \
+                         folder whose real path is UTF-8."
+                    )
+                })?);
             }
             "--model" => {
                 let (instance, model_id) = value.split_once('/').ok_or_else(|| {
@@ -82,11 +88,13 @@ fn new_agent(name: &str, mut args: &[&str]) -> Result<NewAgent, String> {
         }
         args = rest;
     }
-    if !args.is_empty() {
-        return Err(format!(
-            "meta agent create misses a value after {}",
-            args[0]
-        ));
+    if let [flag] = args {
+        return Err(match *flag {
+            "--project" | "--model" | "--permissions" | "--instructions" => {
+                format!("meta agent create misses a value after {flag}")
+            }
+            _ => format!("meta agent create does not take {flag}\n{USAGE}"),
+        });
     }
     Ok(NewAgent {
         name: Some(name.to_owned()),
@@ -103,28 +111,40 @@ fn routine(mut args: &[&str]) -> Result<NewRoutine, String> {
     while !args.is_empty() {
         args = match args {
             ["--webhook", rest @ ..] => {
-                schedule = Some(blank(ScheduleKind::Webhook));
+                choose(&mut schedule, blank(ScheduleKind::Webhook))?;
                 rest
             }
             ["--every", every, rest @ ..] => {
-                schedule = Some(Schedule {
-                    every_ms: Some(duration(every)?),
-                    ..blank(ScheduleKind::Interval)
-                });
+                let every_ms = Some(duration(every)?);
+                choose(
+                    &mut schedule,
+                    Schedule {
+                        every_ms,
+                        ..blank(ScheduleKind::Interval)
+                    },
+                )?;
                 rest
             }
             ["--at", time, rest @ ..] => {
-                schedule = Some(Schedule {
-                    time_of_day: Some((*time).to_owned()),
-                    ..blank(ScheduleKind::FixedTime)
-                });
+                time_of_day(time)?;
+                choose(
+                    &mut schedule,
+                    Schedule {
+                        time_of_day: Some((*time).to_owned()),
+                        ..blank(ScheduleKind::FixedTime)
+                    },
+                )?;
                 rest
             }
             ["--once", at, rest @ ..] => {
-                schedule = Some(Schedule {
-                    run_at: Some((*at).to_owned()),
-                    ..blank(ScheduleKind::Once)
-                });
+                future_instant(at)?;
+                choose(
+                    &mut schedule,
+                    Schedule {
+                        run_at: Some((*at).to_owned()),
+                        ..blank(ScheduleKind::Once)
+                    },
+                )?;
                 rest
             }
             ["--days", list, rest @ ..] => {
@@ -155,7 +175,9 @@ fn routine(mut args: &[&str]) -> Result<NewRoutine, String> {
         }
         schedule.weekdays = days;
     }
-    let prompt: String = prompt.ok_or("meta agent routine add needs --prompt TEXT")?;
+    let prompt = prompt
+        .filter(|text| !text.trim().is_empty())
+        .ok_or("meta agent routine add needs a non-empty --prompt TEXT")?;
     Ok(NewRoutine {
         title: title.unwrap_or_else(|| {
             prompt
@@ -169,6 +191,16 @@ fn routine(mut args: &[&str]) -> Result<NewRoutine, String> {
         prompt,
         schedule,
     })
+}
+
+fn choose(slot: &mut Option<Schedule>, schedule: Schedule) -> Result<(), String> {
+    if slot.is_some() {
+        return Err(
+            "meta agent routine add takes one of --every, --at, --once or --webhook".to_owned(),
+        );
+    }
+    *slot = Some(schedule);
+    Ok(())
 }
 
 fn blank(kind: ScheduleKind) -> Schedule {
@@ -194,6 +226,35 @@ fn duration(text: &str) -> Result<u64, String> {
         .ok_or_else(|| format!("{text:?} is shorter than a minute or too long."))
 }
 
+fn time_of_day(text: &str) -> Result<(), String> {
+    let valid = |part: &str, below: u32| {
+        part.len() <= 2
+            && part.bytes().all(|b| b.is_ascii_digit())
+            && part.parse::<u32>().is_ok_and(|n| n < below)
+    };
+    match text.split_once(':') {
+        Some((hour, minute)) if valid(hour, 24) && minute.len() == 2 && valid(minute, 60) => Ok(()),
+        _ => Err(format!(
+            "{text:?} is no time of day such as 07:30, with hours 00 to 23 and minutes 00 to 59."
+        )),
+    }
+}
+
+fn future_instant(text: &str) -> Result<(), String> {
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |elapsed| {
+            i64::try_from(elapsed.as_millis()).unwrap_or(i64::MAX)
+        });
+    match rfc3339_millis(text) {
+        Some(at) if at > now => Ok(()),
+        Some(_) => Err(format!("{text:?} is not later than now.")),
+        None => Err(format!(
+            "{text:?} is no date and time with an offset, such as 2026-12-01T07:30:00+01:00."
+        )),
+    }
+}
+
 fn weekdays(list: &str) -> Result<Vec<u8>, String> {
     list.split(',')
         .map(|day| {
@@ -212,7 +273,21 @@ fn weekdays(list: &str) -> Result<Vec<u8>, String> {
 mod tests {
     use meta_harness_core::{Permissions, ScheduleKind};
 
-    use super::{new_agent, routine};
+    use super::{new_agent, rfc3339_millis, routine};
+
+    #[test]
+    fn a_flag_without_a_value_is_named_as_missing_only_when_it_is_known() {
+        let unknown = new_agent("bot", &["--bogus"]).unwrap_err();
+        assert!(
+            unknown.starts_with("meta agent create does not take --bogus"),
+            "{unknown}"
+        );
+        let missing = new_agent("bot", &["--project"]).unwrap_err();
+        assert!(
+            missing.starts_with("meta agent create misses a value after --project"),
+            "{missing}"
+        );
+    }
 
     #[test]
     fn an_agent_needs_a_project_and_a_model_and_asks_for_approval_by_default() {
@@ -241,6 +316,8 @@ mod tests {
         assert!(new_agent("news-bot", &["--model", "codex/gpt-6.1"]).is_err());
         assert!(new_agent("news-bot", &["--project", project]).is_err());
         assert!(new_agent("news-bot", &["--project", project, "--model", "gpt"]).is_err());
+        let file = concat!(env!("CARGO_MANIFEST_DIR"), "/Cargo.toml");
+        assert!(new_agent("news-bot", &["--project", file, "--model", "codex/gpt-6.1"]).is_err());
         let full = new_agent(
             "news-bot",
             &[
@@ -254,6 +331,23 @@ mod tests {
         )
         .unwrap();
         assert_eq!(full.permissions, Permissions::FullAccess);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_project_whose_real_path_is_not_utf8_is_refused() {
+        use std::os::unix::ffi::OsStrExt;
+        let dir = crate::testing::Dir::new();
+        let real = dir.join(std::ffi::OsStr::from_bytes(b"odd-\xff"));
+        std::fs::create_dir_all(&real).unwrap();
+        let link = dir.join("link");
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+        let project = link.to_str().unwrap();
+        let Err(error) = new_agent("bot", &["--project", project, "--model", "codex/gpt-6.1"])
+        else {
+            panic!("a path that is not UTF-8 is refused");
+        };
+        assert!(error.contains("UTF-8"), "{error}");
     }
 
     #[test]
@@ -291,10 +385,62 @@ mod tests {
             &["--every", "0m", "--prompt", "Never."],
             &["--every", "5ü", "--prompt", "Not a unit."],
             &["--webhook"],
+            &["--webhook", "--every", "30m", "--prompt", "Two schedules."],
+            &[
+                "--every",
+                "30m",
+                "--at",
+                "07:00",
+                "--prompt",
+                "Two schedules.",
+            ],
+            &["--every", "30m", "--prompt", ""],
+            &["--at", "25:00", "--prompt", "Late."],
+            &["--at", "7:60", "--prompt", "Late."],
+            &["--at", "7:3", "--prompt", "Late."],
             &["--webhook", "--days", "mon", "--prompt", "Days need --at."],
             &["--at", "07:30", "--days", "someday", "--prompt", "Plan."],
         ] {
             assert!(routine(wrong).is_err(), "{wrong:?} is refused");
         }
+    }
+
+    #[test]
+    fn a_once_routine_takes_a_future_time_with_an_offset() {
+        for wrong in [
+            "2026-12-01T07:30:00",
+            "tomorrow",
+            "2000-01-01T00:00:00Z",
+            "2999-02-29T07:30:00Z",
+            "2999-04-31T07:30:00Z",
+            "2999-12-01T24:00:00Z",
+            "2999-12-01 07:30:00Z",
+            "2999-12-01T07:30:00+00:60",
+            "2999-12-01T07:30:00-01:99",
+            "2999-12-01T07:30:00+24:00",
+            "2999-12-01T07:30:00+99:99",
+        ] {
+            assert!(
+                routine(&["--once", wrong, "--prompt", "Once."]).is_err(),
+                "{wrong} is refused"
+            );
+        }
+        for right in [
+            "2999-12-01T07:30:00Z",
+            "2999-12-01T07:30:00+01:00",
+            "2999-06-01T07:30:00-05:00",
+        ] {
+            let once = routine(&["--once", right, "--prompt", "Once."]).unwrap();
+            assert_eq!(once.schedule.run_at.as_deref(), Some(right));
+        }
+        assert_eq!(rfc3339_millis("1970-01-01T00:00:00Z"), Some(0));
+        assert_eq!(
+            rfc3339_millis("2000-03-01T00:00:00Z"),
+            Some(951_868_800_000)
+        );
+        assert_eq!(
+            rfc3339_millis("2000-03-01T01:00:00+01:00"),
+            Some(951_868_800_000)
+        );
     }
 }

@@ -5,6 +5,7 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::TcpListener;
 use tokio_tungstenite::tungstenite::Message;
 
+use super::{Dir, put, within};
 use crate::remote::{Host, connection_lost};
 
 #[tokio::test(flavor = "multi_thread")]
@@ -22,9 +23,8 @@ async fn dropping_the_last_handle_closes_the_connection_to_the_service() {
     });
     let host = Host::connect_to(&url, "token", "test").await.unwrap();
     drop(host);
-    tokio::time::timeout(Duration::from_secs(10), service)
+    within("the service sees the connection end", service)
         .await
-        .expect("the service sees the connection end")
         .unwrap();
 }
 
@@ -46,6 +46,25 @@ async fn a_call_dropped_before_its_answer_stops_waiting_for_it() {
     assert_eq!(host.waiting().await, 0);
 }
 
+#[tokio::test]
+async fn a_stream_error_ends_its_answer_even_while_the_producer_stays_open() {
+    let (out, mut sent) = tokio::sync::mpsc::channel(8);
+    let items = futures_util::stream::iter([Err::<serde_json::Value, String>("broke".to_owned())])
+        .chain(futures_util::stream::pending());
+    tokio::time::timeout(
+        Duration::from_secs(5),
+        crate::service::answer(&out, 7, serde_json::Value::Null, items),
+    )
+    .await
+    .expect("the answer ends after its error");
+    let mut texts = Vec::new();
+    while let Ok(Message::Text(text)) = sent.try_recv() {
+        texts.push(text.to_string());
+    }
+    assert_eq!(texts.len(), 2, "the ok reply and the error only");
+    assert!(texts[1].contains("broke"));
+}
+
 async fn refusing_peer(reply: &'static [u8]) -> String {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let url = format!("ws://{}", listener.local_addr().unwrap());
@@ -64,39 +83,53 @@ async fn refusing_peer(reply: &'static [u8]) -> String {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn a_service_of_another_api_version_refuses_the_connection_with_the_version_it_speaks() {
-    let url = refusing_peer(
-        b"HTTP/1.1 426 Upgrade Required\r\nmeta-harness-api: 2\r\ncontent-length: 0\r\nconnection: close\r\n\r\n",
-    )
-    .await;
-    let error = Host::connect_to(&url, "token", "test")
-        .await
-        .err()
-        .expect("the connection is refused");
-    assert_eq!(
-        error,
-        "Meta-Harness speaks API version 2; this client needs 1. Update Meta-Harness or Liquid."
-    );
-    assert!(!connection_lost(&error), "a refusal is not retried");
+async fn a_refused_connection_says_why_and_is_not_retried() {
+    type Refusal = (&'static [u8], fn(&str) -> String);
+    let cases: [Refusal; 2] = [
+        (
+            b"HTTP/1.1 426 Upgrade Required\r\nmeta-harness-api: 2\r\ncontent-length: 0\r\nconnection: close\r\n\r\n",
+            |_| "Meta-Harness speaks API version 2; this client needs 1. Restart Meta-Harness, or update whichever side is older.".to_owned(),
+        ),
+        (
+            b"HTTP/1.1 401 Unauthorized\r\ncontent-length: 0\r\nconnection: close\r\n\r\n",
+            |url| format!("Meta-Harness at {url} no longer accepts this device's pairing; pair this device again."),
+        ),
+    ];
+    for (reply, expected) in cases {
+        let url = refusing_peer(reply).await;
+        let error = Host::connect_to(&url, "token", "test")
+            .await
+            .err()
+            .expect("the connection is refused");
+        assert_eq!(error, expected(&url));
+        assert!(
+            !connection_lost(&error),
+            "a refusal is not retried: {error}"
+        );
+    }
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn a_revoked_device_is_refused_with_its_pairing_named_and_not_retried() {
+async fn a_connection_file_whose_token_is_refused_says_to_restart_meta_harness() {
+    let home = Dir::new();
     let url = refusing_peer(
         b"HTTP/1.1 401 Unauthorized\r\ncontent-length: 0\r\nconnection: close\r\n\r\n",
     )
     .await;
-    let error = Host::connect_to(&url, "token", "test")
+    put(
+        home.join(crate::service::CONNECTION_FILE),
+        serde_json::json!({"url": url, "token": "token"}).to_string(),
+    );
+    let error = Host::connect(&home, "test")
         .await
         .err()
         .expect("the connection is refused");
     assert_eq!(
         error,
         format!(
-            "Meta-Harness at {url} no longer accepts this device's pairing; pair this device again."
+            "Meta-Harness at {url} does not accept the token in connection.json; restart Meta-Harness."
         )
     );
-    assert!(!connection_lost(&error), "a revoked pairing is not retried");
 }
 
 #[tokio::test]

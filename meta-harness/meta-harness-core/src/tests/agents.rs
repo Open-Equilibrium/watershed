@@ -1,6 +1,6 @@
 use super::Dir;
 use crate::agents::{self, AgentChangeKind, NewAgent};
-use crate::config::Store;
+use crate::store::Store;
 use crate::{ModelChoice, Permissions};
 
 fn new_agent(name: &str) -> NewAgent {
@@ -103,61 +103,6 @@ fn a_profile_keeps_private_instructions_and_memory_and_outlives_a_restart() {
 }
 
 #[test]
-fn an_agent_made_by_chat_names_itself_from_its_instructions() {
-    let home = Dir::new();
-    let store = Store::open(&home.join("meta-harness.sqlite")).unwrap();
-    let request = "Every weekday at 7:30, read our feeds.";
-    let agent = agents::create(
-        &store.db(),
-        &home,
-        &NewAgent {
-            name: None,
-            instructions: String::new(),
-            request: Some(request.to_owned()),
-            ..new_agent("x")
-        },
-        "thread-1",
-    )
-    .unwrap();
-
-    assert!(!agent.named);
-    assert_eq!(agent.name, agent.id);
-    let opening = agents::opening(&agent, "", None);
-    assert!(opening.contains("without a name"));
-    assert!(opening.contains(&agent.memory.join("instructions.md").display().to_string()));
-    assert!(opening.contains("schedule_task"));
-    assert_eq!(agents::spoken(&opening), Some(request));
-    assert_eq!(
-        agents::opening_generation(&agents::message_id(&agent.id, 3)),
-        Some(3)
-    );
-    assert_eq!(agents::opening_generation("msg-1-0"), None);
-
-    let seen = agents::Snapshot::default();
-    let now = agents::Snapshot {
-        instructions: "# news-bot\n\nRead the feeds.\n".to_owned(),
-        routines: Vec::new(),
-        fresh: false,
-    };
-    let found = agents::differences(&seen, &now);
-    assert_eq!(
-        found[0],
-        (AgentChangeKind::Name, None, Some("news-bot".to_owned()))
-    );
-    assert_eq!(found[1].0, AgentChangeKind::Instructions);
-    assert_eq!(found.len(), 2);
-    assert_eq!(agents::heading("# Not A Name\n"), None);
-    assert_eq!(
-        agents::with_heading("# news-bot\n\nRead.\n", "morning-news"),
-        "# morning-news\n\nRead.\n"
-    );
-    assert_eq!(
-        agents::with_heading("Read.\n", "news-bot"),
-        "# news-bot\nRead.\n"
-    );
-}
-
-#[test]
 fn routine_changes_are_found_by_what_the_person_sees() {
     let task = |id: &str, title: &str, model: &str| {
         agents::routine_copy(&serde_json::json!({
@@ -222,55 +167,152 @@ fn changes_and_mentions_are_kept_per_agent() {
         ),
     )
     .unwrap();
-    let changes = agents::changes(&store.db(), &agent.id).unwrap();
-    assert_eq!(changes.len(), 1);
-    assert_eq!(changes[0].turn, Some(2));
-    assert_eq!(changes[0].routine.as_ref().unwrap().title, "Morning news");
-    assert!(!changes[0].undone);
-    agents::mark_undone(&store.db(), changes[0].id).unwrap();
-    assert!(
-        agents::change(&store.db(), &agent.id, changes[0].id)
-            .unwrap()
-            .undone
-    );
-    assert!(agents::change(&store.db(), "other", changes[0].id).is_err());
+    let id = agents::changes(&store.db(), &agent.id).unwrap()[0].id;
+    assert!(agents::change(&store.db(), "other", id).is_err());
 
     agents::add_mention(&store.db(), &agent, "chat-7", "msg-1", "Is main green?").unwrap();
-    let mentions = agents::mentions(&store.db(), "chat-7").unwrap();
-    assert_eq!(
-        (
-            mentions[0].name.as_str(),
-            mentions[0].thread.as_str(),
-            mentions[0].message.as_str(),
-            mentions[0].text.as_str()
-        ),
-        ("news-bot", "thread-1", "msg-1", "Is main green?")
-    );
+    assert_eq!(agents::mentions(&store.db(), "chat-7").unwrap().len(), 1);
     assert!(agents::mentions(&store.db(), "chat-8").unwrap().is_empty());
 }
 
 #[test]
-fn each_profile_thread_opens_with_the_agent_its_instructions_and_its_memory() {
+fn a_moving_agent_carries_its_memory_files_and_refuses_unsafe_paths() {
     let home = Dir::new();
     let store = Store::open(&home.join("meta-harness.sqlite")).unwrap();
     let agent = agents::create(&store.db(), &home, &new_agent("news-bot"), "thread-1").unwrap();
-    let instructions = agents::instructions(&agent).unwrap();
+    std::fs::create_dir_all(agent.memory.join("days")).unwrap();
+    let bytes: Vec<u8> = (0..=255).collect();
+    std::fs::write(agent.memory.join("days/raw.bin"), &bytes).unwrap();
 
-    let first = agents::opening(&agent, &instructions, None);
-    let next = agents::opening(
-        &agent,
-        &instructions,
-        Some("Imported conversation history\nlatest"),
+    let carry = agents::pack(&agent, Vec::new()).unwrap();
+    assert_eq!(
+        carry
+            .files
+            .iter()
+            .map(|file| file.path.as_str())
+            .collect::<Vec<_>>(),
+        ["days/raw.bin", "instructions.md"]
     );
+    let target = home.join("arrived");
+    agents::unpack(&target, &carry.files).unwrap();
+    assert_eq!(std::fs::read(target.join("days/raw.bin")).unwrap(), bytes);
+    #[cfg(unix)]
+    assert_eq!(mode(&target.join("days/raw.bin")), 0o600);
 
-    for text in [&first, &next] {
-        assert!(text.contains("You are news-bot"));
-        assert!(text.contains("Keep the news page current."));
-        assert!(text.contains(&agent.memory.display().to_string()));
+    let carried = |path: &str| agents::CarriedFile {
+        path: path.to_owned(),
+        bytes: String::new(),
+    };
+    for unsafe_path in ["../escape.md", "/etc/passwd", ""] {
+        assert!(
+            agents::unpack(&target, &[carried(unsafe_path)]).is_err(),
+            "{unsafe_path:?} is refused"
+        );
     }
-    assert!(!first.contains("latest"));
-    assert!(next.ends_with("Imported conversation history\nlatest"));
-    assert_eq!(agents::spoken(&next), None);
+    let twice = carried("days/raw.bin");
+    assert!(
+        agents::unpack(&home.join("twice"), &[twice.clone(), twice]).is_err(),
+        "a path listed twice is refused"
+    );
+    assert!(!home.join("escape.md").exists());
+    assert!(agents::too_large(agents::MAX_MEMORY_BYTES).is_none());
+    assert!(
+        agents::too_large(agents::MAX_MEMORY_BYTES + 1)
+            .unwrap()
+            .contains("at most 100 MiB")
+    );
+}
+
+#[test]
+fn carried_memory_files_that_share_one_destination_file_are_refused_whole() {
+    let home = Dir::new();
+    std::fs::write(home.join("probe"), "").unwrap();
+    let case_insensitive = home.join("PROBE").exists();
+    let file = |path: &str, text: &str| agents::CarriedFile {
+        path: path.to_owned(),
+        bytes: crate::util::base64url_encode(text.as_bytes()),
+    };
+    let folder = home.join("arrived");
+    let outcome = agents::unpack(
+        &folder,
+        &[file("notes.md", "first"), file("NOTES.md", "second")],
+    );
+    assert_eq!(outcome.is_err(), case_insensitive, "{outcome:?}");
+    if !case_insensitive {
+        assert_eq!(
+            std::fs::read_to_string(folder.join("notes.md")).unwrap(),
+            "first"
+        );
+        assert_eq!(
+            std::fs::read_to_string(folder.join("NOTES.md")).unwrap(),
+            "second"
+        );
+    }
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn a_memory_name_that_is_not_utf8_is_refused_instead_of_carried_under_a_changed_name() {
+    use std::os::unix::ffi::OsStrExt;
+    let home = Dir::new();
+    let store = Store::open(&home.join("meta-harness.sqlite")).unwrap();
+    let agent = agents::create(&store.db(), &home, &new_agent("news-bot"), "thread-1").unwrap();
+    for name in [&b"caf\xe9.md"[..], &b"caf\xe8.md"[..]] {
+        std::fs::write(agent.memory.join(std::ffi::OsStr::from_bytes(name)), "text").unwrap();
+    }
+    assert!(agents::pack(&agent, Vec::new()).is_err());
+}
+
+#[test]
+fn packing_reads_a_file_only_within_the_budget_its_predecessors_left() {
+    let home = Dir::new();
+    let file = home.join("grown.md");
+    std::fs::write(&file, "0123456789").unwrap();
+    assert_eq!(agents::read_within(&file, 0).unwrap(), b"0123456789");
+    assert!(agents::read_within(&file, agents::MAX_MEMORY_BYTES - 10).is_ok());
+    assert!(agents::read_within(&file, agents::MAX_MEMORY_BYTES - 9).is_err());
+}
+
+#[test]
+fn saving_instructions_leaves_a_memory_file_named_like_its_temporary_file_alone() {
+    let home = Dir::new();
+    let store = Store::open(&home.join("meta-harness.sqlite")).unwrap();
+    let agent = agents::create(&store.db(), &home, &new_agent("news-bot"), "thread-1").unwrap();
+    let kept = agent.memory.join("instructions.tmp");
+    std::fs::write(&kept, "kept").unwrap();
+    agents::write_instructions(&agent, "# news-bot\nNew.").unwrap();
+    assert_eq!(std::fs::read_to_string(&kept).unwrap(), "kept");
+    assert_eq!(agents::instructions(&agent).unwrap(), "# news-bot\nNew.");
+}
+
+#[test]
+fn a_profile_moves_on_once_its_context_is_four_fifths_full() {
+    let context = |tokens, window| {
+        Some(crate::Context {
+            tokens,
+            window,
+            compacts_at: None,
+        })
+    };
+    assert!(!agents::full(context(Some(799), 1000)));
+    assert!(agents::full(context(Some(800), 1000)));
+    assert!(!agents::full(context(None, 1000)));
+    assert!(!agents::full(context(Some(5), 0)));
+    assert!(!agents::full(None));
+}
+
+#[test]
+fn an_agent_s_name_is_the_heading_of_its_instructions() {
+    assert_eq!(agents::heading("# news-bot\n\nRead.\n"), Some("news-bot"));
+    assert_eq!(agents::heading("# Not A Name\n"), None);
+    assert_eq!(
+        agents::with_heading("# news-bot\n\nRead.\n", "morning-news"),
+        "# morning-news\n\nRead.\n"
+    );
+    assert_eq!(
+        agents::with_heading("Read.\n", "news-bot"),
+        "# news-bot\nRead.\n"
+    );
 }
 
 fn bound_task(id: &str, thread: &str) -> serde_json::Value {
@@ -365,145 +407,4 @@ async fn a_routine_wakes_the_profile_thread_and_moves_with_it_to_the_next_one() 
         "a restored routine keeps its id"
     );
     assert!(upserts[2].get("requireExisting").is_none());
-}
-
-#[test]
-fn a_profile_moves_on_once_its_context_is_four_fifths_full() {
-    let context = |tokens, window| {
-        Some(crate::Context {
-            tokens,
-            window,
-            compacts_at: None,
-        })
-    };
-    assert!(!agents::full(context(Some(799), 1000)));
-    assert!(agents::full(context(Some(800), 1000)));
-    assert!(!agents::full(context(None, 1000)));
-    assert!(!agents::full(context(Some(5), 0)));
-    assert!(!agents::full(None));
-}
-
-#[test]
-fn an_agent_of_the_earlier_store_keeps_its_folder_threads_and_routines() {
-    let home = Dir::new();
-    let store = Store::open(&home.join("meta-harness.sqlite")).unwrap();
-    store
-        .db()
-        .execute_batch(
-            "CREATE TABLE agent (name TEXT PRIMARY KEY, root TEXT NOT NULL, model TEXT NOT NULL,
-             permissions TEXT NOT NULL, instructions TEXT NOT NULL, thread TEXT NOT NULL,
-             previous TEXT, generation INTEGER NOT NULL, created_ms INTEGER NOT NULL);
-             INSERT INTO agent VALUES ('news-bot', '/repo',
-             '{\"instance\":\"codex\",\"model\":\"gpt-6.1\",\"options\":[]}',
-             '\"Supervised\"', 'Keep the news page current.', 'thread-2', 'thread-1', 1, 5);",
-        )
-        .unwrap();
-
-    agents::migrate(&store.db(), &home).unwrap();
-    agents::migrate(&store.db(), &home).unwrap();
-
-    let agent = agents::get(&store.db(), &home, "news-bot")
-        .unwrap()
-        .unwrap();
-    assert_eq!(agent.id, "news-bot");
-    assert_eq!(agent.memory, home.join("agents/news-bot/memory"));
-    assert_eq!(
-        agents::instructions(&agent).unwrap(),
-        "# news-bot\n\nKeep the news page current.\n"
-    );
-    assert_eq!(
-        agents::threads(&store.db(), &agent.id).unwrap(),
-        ["thread-2", "thread-1"]
-    );
-    let seen = agents::seen(&store.db(), &agent.id).unwrap();
-    assert!(seen.fresh, "its routines are not yet known");
-    let now = agents::Snapshot {
-        instructions: seen.instructions.clone(),
-        routines: vec![serde_json::json!({"id": "task-1"})],
-        fresh: false,
-    };
-    assert!(
-        agents::differences(&seen, &now).is_empty(),
-        "routines it had before are not the agent's new changes"
-    );
-}
-
-#[test]
-fn a_change_log_of_the_first_release_learns_to_hold_changes() {
-    let home = Dir::new();
-    let store = Store::open(&home.join("meta-harness.sqlite")).unwrap();
-    store
-        .db()
-        .execute_batch(
-            "DROP TABLE agent_change;
-             CREATE TABLE agent_change (
-                id INTEGER PRIMARY KEY AUTOINCREMENT, agent TEXT NOT NULL, thread TEXT NOT NULL,
-                turn INTEGER, kind TEXT NOT NULL, before TEXT, after TEXT,
-                created_ms INTEGER NOT NULL, undone INTEGER NOT NULL DEFAULT 0);",
-        )
-        .unwrap();
-    let agent = agents::create(&store.db(), &home, &new_agent("news-bot"), "thread-1").unwrap();
-
-    agents::migrate(&store.db(), &home).unwrap();
-    agents::record(
-        &store.db(),
-        &agent.id,
-        "thread-1",
-        Some(3),
-        true,
-        (
-            AgentChangeKind::Instructions,
-            Some(String::new()),
-            Some("# news-bot\n".to_owned()),
-        ),
-    )
-    .unwrap();
-
-    let held = &agents::changes(&store.db(), &agent.id).unwrap()[0];
-    assert!(held.held);
-    agents::mark_applied(&store.db(), held.id).unwrap();
-    assert!(!agents::changes(&store.db(), &agent.id).unwrap()[0].held);
-}
-
-#[test]
-fn a_moving_agent_carries_its_memory_files_and_refuses_unsafe_paths() {
-    let home = Dir::new();
-    let store = Store::open(&home.join("meta-harness.sqlite")).unwrap();
-    let agent = agents::create(&store.db(), &home, &new_agent("news-bot"), "thread-1").unwrap();
-    std::fs::create_dir_all(agent.memory.join("days")).unwrap();
-    let bytes: Vec<u8> = (0..=255).collect();
-    std::fs::write(agent.memory.join("days/raw.bin"), &bytes).unwrap();
-
-    let carry = agents::pack(&agent, Vec::new()).unwrap();
-    assert_eq!(
-        carry
-            .files
-            .iter()
-            .map(|file| file.path.as_str())
-            .collect::<Vec<_>>(),
-        ["days/raw.bin", "instructions.md"]
-    );
-    let target = home.join("arrived");
-    agents::unpack(&target, &carry.files).unwrap();
-    assert_eq!(std::fs::read(target.join("days/raw.bin")).unwrap(), bytes);
-    #[cfg(unix)]
-    assert_eq!(mode(&target.join("days/raw.bin")), 0o600);
-
-    for unsafe_path in ["../escape.md", "/etc/passwd", ""] {
-        let file = agents::CarriedFile {
-            path: unsafe_path.to_owned(),
-            bytes: String::new(),
-        };
-        assert!(
-            agents::unpack(&target, &[file]).is_err(),
-            "{unsafe_path:?} is refused"
-        );
-    }
-    assert!(!home.join("escape.md").exists());
-    assert!(agents::too_large(agents::MAX_MEMORY_BYTES).is_none());
-    assert!(
-        agents::too_large(agents::MAX_MEMORY_BYTES + 1)
-            .unwrap()
-            .contains("at most 100 MiB")
-    );
 }

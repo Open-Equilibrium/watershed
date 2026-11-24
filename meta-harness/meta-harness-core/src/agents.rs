@@ -1,10 +1,12 @@
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::config::{failed, now_ms, sql};
+use crate::config::json;
+use crate::store::{failed, now_ms, sql};
 use crate::{ModelChoice, Permissions};
 
 pub(crate) const SCHEMA: &str = "
@@ -66,9 +68,7 @@ pub struct Agent {
     pub thread: String,
     pub previous: Option<String>,
     pub generation: u64,
-    #[serde(default)]
     pub next_run_ms: Option<u64>,
-    #[serde(default)]
     pub threads: Vec<String>,
 }
 
@@ -133,7 +133,6 @@ pub const MAX_MEMORY_BYTES: u64 = 100 * 1024 * 1024;
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct AgentCarry {
     pub name: String,
-    #[serde(default = "named_default")]
     pub named: bool,
     pub model: ModelChoice,
     pub permissions: Permissions,
@@ -153,10 +152,6 @@ pub struct AgentMoveFacts {
     pub memory_bytes: u64,
     pub routines: u32,
     pub earlier: u32,
-}
-
-fn named_default() -> bool {
-    true
 }
 
 pub(crate) fn free_name(db: &Connection, home: &Path, name: &str) -> Result<String, String> {
@@ -186,7 +181,12 @@ pub(crate) fn memory_files(folder: &Path) -> Result<Vec<(String, PathBuf, u64)>,
             let kind = entry
                 .file_type()
                 .map_err(|e| format!("Could not read {}: {e}", entry.path().display()))?;
-            let name = entry.file_name().to_string_lossy().into_owned();
+            let name = entry.file_name().into_string().map_err(|_| {
+                format!(
+                    "{} has a name that is not valid UTF-8, so a move cannot carry it.",
+                    entry.path().display()
+                )
+            })?;
             let relative = if prefix.is_empty() {
                 name
             } else {
@@ -224,21 +224,31 @@ pub(crate) fn too_large(bytes: u64) -> Option<String> {
     })
 }
 
-pub(crate) fn pack(agent: &Agent, routines: Vec<Value>) -> Result<AgentCarry, String> {
-    if let Some(reason) = too_large(memory_bytes(agent)?) {
-        return Err(reason);
-    }
-    let files = memory_files(&agent.memory)?
-        .into_iter()
-        .map(|(path, full, _)| {
-            let bytes = std::fs::read(&full)
-                .map_err(|e| format!("Could not read {}: {e}", full.display()))?;
-            Ok(CarriedFile {
-                path,
-                bytes: crate::util::base64url_encode(&bytes),
-            })
+pub(crate) fn read_within(path: &Path, carried: u64) -> Result<Vec<u8>, String> {
+    let mut bytes = Vec::new();
+    std::fs::File::open(path)
+        .and_then(|file| {
+            file.take(MAX_MEMORY_BYTES.saturating_sub(carried) + 1)
+                .read_to_end(&mut bytes)
         })
-        .collect::<Result<_, String>>()?;
+        .map_err(|e| format!("Could not read {}: {e}", path.display()))?;
+    match too_large(carried + bytes.len() as u64) {
+        Some(reason) => Err(reason),
+        None => Ok(bytes),
+    }
+}
+
+pub(crate) fn pack(agent: &Agent, routines: Vec<Value>) -> Result<AgentCarry, String> {
+    let mut carried = 0;
+    let mut files = Vec::new();
+    for (path, full, _) in memory_files(&agent.memory)? {
+        let bytes = read_within(&full, carried)?;
+        carried += bytes.len() as u64;
+        files.push(CarriedFile {
+            path,
+            bytes: crate::util::base64url_encode(&bytes),
+        });
+    }
     Ok(AgentCarry {
         name: agent.name.clone(),
         named: agent.named,
@@ -250,6 +260,16 @@ pub(crate) fn pack(agent: &Agent, routines: Vec<Value>) -> Result<AgentCarry, St
 }
 
 pub(crate) fn unpack(folder: &Path, files: &[CarriedFile]) -> Result<(), String> {
+    let staging = folder.with_extension("unpacking");
+    let _ = std::fs::remove_dir_all(&staging);
+    crate::service::create_private_dir(&staging)?;
+    let placed = stage(&staging, files).and_then(|()| place(&staging, folder, files));
+    let _ = std::fs::remove_dir_all(&staging);
+    placed
+}
+
+fn stage(staging: &Path, files: &[CarriedFile]) -> Result<(), String> {
+    let mut listed = std::collections::HashSet::new();
     for file in files {
         let relative = Path::new(&file.path);
         let plain = relative
@@ -261,13 +281,35 @@ pub(crate) fn unpack(folder: &Path, files: &[CarriedFile]) -> Result<(), String>
                 file.path
             ));
         }
+        if !listed.insert(relative) {
+            return Err(format!(
+                "The carried memory file {} is listed twice.",
+                file.path
+            ));
+        }
         let bytes = crate::util::base64url_decode(&file.bytes)
             .ok_or_else(|| format!("The carried memory file {} is not readable.", file.path))?;
-        let target = folder.join(relative);
+        let target = staging.join(relative);
         if let Some(parent) = target.parent() {
             crate::service::create_private_dir(parent)?;
         }
-        std::fs::write(&target, &bytes)
+        std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&target)
+            .and_then(|mut out| out.write_all(&bytes))
+            .map_err(|e| format!("Could not write {}: {e}", target.display()))?;
+    }
+    Ok(())
+}
+
+fn place(staging: &Path, folder: &Path, files: &[CarriedFile]) -> Result<(), String> {
+    for file in files {
+        let target = folder.join(&file.path);
+        if let Some(parent) = target.parent() {
+            crate::service::create_private_dir(parent)?;
+        }
+        std::fs::rename(staging.join(&file.path), &target)
             .map_err(|e| format!("Could not write {}: {e}", target.display()))?;
         crate::platform::owner_only(&target, false)?;
     }
@@ -279,9 +321,7 @@ pub(crate) fn of_thread(
     home: &Path,
     thread: &str,
 ) -> Result<Option<Agent>, String> {
-    Ok(list(db, home)?
-        .into_iter()
-        .find(|agent| agent.thread == thread))
+    single(db, home, "thread = ?1", thread)
 }
 
 pub(crate) fn memory(home: &Path, id: &str) -> PathBuf {
@@ -365,8 +405,8 @@ pub(crate) fn create(
             name,
             named,
             new.root,
-            to_json(&new.model)?,
-            to_json(&new.permissions)?,
+            json(&new.model),
+            json(&new.permissions),
             new.request,
             thread,
             text,
@@ -398,8 +438,12 @@ pub(crate) fn list(db: &Connection, home: &Path) -> Result<Vec<Agent>, String> {
 }
 
 pub(crate) fn get(db: &Connection, home: &Path, key: &str) -> Result<Option<Agent>, String> {
+    single(db, home, "id = ?1 OR name = ?1", key)
+}
+
+fn single(db: &Connection, home: &Path, filter: &str, key: &str) -> Result<Option<Agent>, String> {
     db.query_row(
-        &format!("SELECT {COLUMNS} FROM agent_profile WHERE id = ?1 OR name = ?1"),
+        &format!("SELECT {COLUMNS} FROM agent_profile WHERE {filter}"),
         [key],
         |row| row_of(row, home),
     )
@@ -408,15 +452,24 @@ pub(crate) fn get(db: &Connection, home: &Path, key: &str) -> Result<Option<Agen
     .transpose()
 }
 
+fn update(
+    db: &Connection,
+    id: &str,
+    sql: &str,
+    params: impl rusqlite::Params,
+) -> Result<(), String> {
+    let changed = db.execute(sql, params).map_err(failed)?;
+    found(changed, id)
+}
+
 pub(crate) fn advance(db: &Connection, id: &str, next: &str) -> Result<(), String> {
-    let changed = db
-        .execute(
-            "UPDATE agent_profile SET previous = thread, thread = ?2, generation = generation + 1
-             WHERE id = ?1",
-            params![id, next],
-        )
-        .map_err(failed)?;
-    found(changed, id)?;
+    update(
+        db,
+        id,
+        "UPDATE agent_profile SET previous = thread, thread = ?2, generation = generation + 1
+         WHERE id = ?1",
+        params![id, next],
+    )?;
     db.execute(
         "INSERT INTO agent_thread (agent, thread, generation)
          SELECT id, thread, generation FROM agent_profile WHERE id = ?1",
@@ -427,13 +480,12 @@ pub(crate) fn advance(db: &Connection, id: &str, next: &str) -> Result<(), Strin
 }
 
 pub(crate) fn settle(db: &Connection, id: &str) -> Result<(), String> {
-    let changed = db
-        .execute(
-            "UPDATE agent_profile SET previous = NULL WHERE id = ?1",
-            [id],
-        )
-        .map_err(failed)?;
-    found(changed, id)
+    update(
+        db,
+        id,
+        "UPDATE agent_profile SET previous = NULL WHERE id = ?1",
+        [id],
+    )
 }
 
 pub(crate) fn rename(db: &Connection, home: &Path, id: &str, name: &str) -> Result<(), String> {
@@ -441,13 +493,12 @@ pub(crate) fn rename(db: &Connection, home: &Path, id: &str, name: &str) -> Resu
     if get(db, home, name)?.is_some_and(|other| other.id != id) {
         return Err(format!("An agent named {name} already exists."));
     }
-    let changed = db
-        .execute(
-            "UPDATE agent_profile SET name = ?2, named = 1 WHERE id = ?1",
-            params![id, name],
-        )
-        .map_err(failed)?;
-    found(changed, id)
+    update(
+        db,
+        id,
+        "UPDATE agent_profile SET name = ?2, named = 1 WHERE id = ?1",
+        params![id, name],
+    )
 }
 
 pub(crate) fn set_model(
@@ -456,13 +507,12 @@ pub(crate) fn set_model(
     model: &ModelChoice,
     permissions: Permissions,
 ) -> Result<(), String> {
-    let changed = db
-        .execute(
-            "UPDATE agent_profile SET model = ?2, permissions = ?3 WHERE id = ?1",
-            params![id, to_json(model)?, to_json(&permissions)?],
-        )
-        .map_err(failed)?;
-    found(changed, id)
+    update(
+        db,
+        id,
+        "UPDATE agent_profile SET model = ?2, permissions = ?3 WHERE id = ?1",
+        params![id, json(model), json(&permissions)],
+    )
 }
 
 pub(crate) fn threads(db: &Connection, id: &str) -> Result<Vec<String>, String> {
@@ -474,10 +524,7 @@ pub(crate) fn threads(db: &Connection, id: &str) -> Result<Vec<String>, String> 
 }
 
 pub(crate) fn remove(db: &Connection, id: &str) -> Result<(), String> {
-    let changed = db
-        .execute("DELETE FROM agent_profile WHERE id = ?1", [id])
-        .map_err(failed)?;
-    found(changed, id)?;
+    update(db, id, "DELETE FROM agent_profile WHERE id = ?1", [id])?;
     for table in ["agent_thread", "agent_change", "agent_mention"] {
         db.execute(&format!("DELETE FROM {table} WHERE agent = ?1"), [id])
             .map_err(failed)?;
@@ -502,114 +549,13 @@ pub(crate) fn seen(db: &Connection, id: &str) -> Result<Snapshot, String> {
     })
 }
 
-pub(crate) fn migrate(db: &Connection, home: &Path) -> Result<(), String> {
-    let held: i64 = db
-        .query_row(
-            "SELECT count(*) FROM pragma_table_info('agent_change') WHERE name = 'held'",
-            [],
-            |row| row.get(0),
-        )
-        .map_err(failed)?;
-    if held == 0 {
-        db.execute(
-            "ALTER TABLE agent_change ADD COLUMN held INTEGER NOT NULL DEFAULT 0",
-            [],
-        )
-        .map_err(failed)?;
-    }
-    let old: i64 = db
-        .query_row(
-            "SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'agent'",
-            [],
-            |row| row.get(0),
-        )
-        .map_err(failed)?;
-    if old == 0 {
-        return Ok(());
-    }
-    type Old = (
-        String,
-        String,
-        String,
-        String,
-        String,
-        String,
-        Option<String>,
-        i64,
-        i64,
-    );
-    let rows: Vec<Old> = db
-        .prepare(
-            "SELECT name, root, model, permissions, instructions, thread, previous, generation,
-             created_ms FROM agent",
-        )
-        .map_err(failed)?
-        .query_map([], |row| {
-            Ok((
-                row.get(0)?,
-                row.get(1)?,
-                row.get(2)?,
-                row.get(3)?,
-                row.get(4)?,
-                row.get(5)?,
-                row.get(6)?,
-                row.get(7)?,
-                row.get(8)?,
-            ))
-        })
-        .map_err(failed)?
-        .collect::<Result<_, _>>()
-        .map_err(failed)?;
-    for (name, root, model, permissions, instructions, thread, previous, generation, created) in
-        rows
-    {
-        let folder = memory(home, &name);
-        crate::service::create_private_dir(&folder)?;
-        let text = with_heading(&format!("\n{}\n", instructions.trim()), &name);
-        let file = folder.join(INSTRUCTIONS);
-        if !file.exists() {
-            crate::service::write_private(&file, &text)?;
-        }
-        db.execute(
-            "INSERT OR IGNORE INTO agent_profile (id, name, named, root, model, permissions,
-             request, thread, previous, generation, seen_instructions, seen_routines, created_ms)
-             VALUES (?1, ?1, 1, ?2, ?3, ?4, NULL, ?5, ?6, ?7, ?8, 'null', ?9)",
-            params![
-                name,
-                root,
-                model,
-                permissions,
-                thread,
-                previous,
-                generation,
-                text,
-                created
-            ],
-        )
-        .map_err(failed)?;
-        let earlier = previous.map(|previous| (previous, generation - 1));
-        for (thread, generation) in std::iter::once((thread, generation)).chain(earlier) {
-            db.execute(
-                "INSERT OR IGNORE INTO agent_thread (agent, thread, generation)
-                 VALUES (?1, ?2, ?3)",
-                params![name, thread, generation],
-            )
-            .map_err(failed)?;
-        }
-    }
-    db.execute("DROP TABLE agent", [])
-        .map_err(failed)
-        .map(|_| ())
-}
-
 pub(crate) fn set_seen(db: &Connection, id: &str, seen: &Snapshot) -> Result<(), String> {
-    let changed = db
-        .execute(
-            "UPDATE agent_profile SET seen_instructions = ?2, seen_routines = ?3 WHERE id = ?1",
-            params![id, seen.instructions, to_json(&seen.routines)?],
-        )
-        .map_err(failed)?;
-    found(changed, id)
+    update(
+        db,
+        id,
+        "UPDATE agent_profile SET seen_instructions = ?2, seen_routines = ?3 WHERE id = ?1",
+        params![id, seen.instructions, json(&seen.routines)],
+    )
 }
 
 pub(crate) fn routine_copy(task: &Value) -> Value {
@@ -692,7 +638,7 @@ pub(crate) fn record(
             id,
             thread,
             turn.map(sql),
-            to_json(&kind)?,
+            json(&kind),
             before,
             after,
             sql(now_ms()),
@@ -727,15 +673,16 @@ pub(crate) fn change(db: &Connection, id: &str, change: i64) -> Result<AgentChan
 }
 
 pub(crate) fn mark_applied(db: &Connection, change: i64) -> Result<(), String> {
-    db.execute("UPDATE agent_change SET held = 0 WHERE id = ?1", [change])
-        .map_err(failed)
-        .map(|_| ())
+    mark(db, change, "held = 0")
 }
 
 pub(crate) fn mark_undone(db: &Connection, change: i64) -> Result<(), String> {
-    db.execute("UPDATE agent_change SET undone = 1 WHERE id = ?1", [change])
-        .map_err(failed)
-        .map(|_| ())
+    mark(db, change, "undone = 1")
+}
+
+fn mark(db: &Connection, change: i64, set: &str) -> Result<(), String> {
+    let sql = format!("UPDATE agent_change SET {set} WHERE id = ?1");
+    update(db, &change.to_string(), &sql, [change])
 }
 
 pub(crate) fn add_mention(
@@ -848,10 +795,6 @@ fn found(changed: usize, id: &str) -> Result<(), String> {
     } else {
         Ok(())
     }
-}
-
-fn to_json(value: &impl Serialize) -> Result<String, String> {
-    serde_json::to_string(value).map_err(|e| e.to_string())
 }
 
 fn change_of(row: &rusqlite::Row<'_>) -> rusqlite::Result<Result<AgentChange, String>> {

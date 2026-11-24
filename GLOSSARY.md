@@ -35,7 +35,7 @@ Canonical terms. Use these exactly; do not introduce synonyms. Tool names are fi
 - **Protocol** — The versioned contract over which the tools communicate (the integration seam). Canonical: [PROTOCOL.md](PROTOCOL.md).
 - **Meta-Agent** — The agent that _operates_ the Meta-Harness; either Liquid-native or BYOA. May propose configuration changes for underlying agents, which take effect only once approved (ADR-0298).
 - **Configuration block** — One named instruction, skill or MCP server in Meta-Harness's central configuration, written into every harness home; not a Flow Agent Building Block (ADR-0298).
-- **Configuration proposal** — A change to Meta-Harness's central configuration that takes effect only once someone on the account approves it, which makes a new revision (ADR-0298).
+- **Configuration proposal** — A change to Meta-Harness's central configuration that takes effect only once a local client or paired device approves it, which makes a new revision (ADR-0298).
 - **Configuration revision** — One state of the central configuration: 0 before the first approval, then one more with each approved proposal (ADR-0298).
 - **Harness home** — The configuration folder Meta-Harness owns for one harness, such as Claude Code's `CLAUDE_CONFIG_DIR` or Codex's `CODEX_HOME`, which T3 Code starts the harness with; the person's own harness configuration stays untouched (ADR-0298).
 - **Meta-Harness service** — The `meta serve` process that owns a data folder (`META_HARNESS_HOME`, else `~/.meta-harness`), runs the pinned T3 Code server and serves Meta-Harness's API to clients such as `meta` and Liquid (ADR-0297).
@@ -43,6 +43,7 @@ Canonical terms. Use these exactly; do not introduce synonyms. Tool names are fi
 - **Remote access** — The service's listener on this computer's Tailscale addresses, off until a person turns it on (ADR-0299).
 - **Pairing code** — The single-use code that `meta invite` issues so that one device or host can pair with this computer's remote access (ADR-0299).
 - **Pairing name** — The name a device or host pairs under, unique among the clients paired here; T3 labels a host link's sessions with it, and `meta host revoke` names it (ADR-0300, ADR-0301).
+- **Permission mode** — How much a thread's agent may do without asking, chosen per thread or Agent profile: `approval-required`, `auto-accept-edits`, `auto` or `full-access`; unlike an Access level, it is not a cap set by another host.
 - **Access level** — The level at which a linked host's agents may act here, as T3 names them (`read-only` to `full-access`); the receiving host sets it when it invites the host, and a link may ask for less (ADR-0300).
 - **Device token** — The token a device keeps after pairing; what it may reach is in [SECURITY.md](SECURITY.md#meta-harness-service-and-configuration) (ADR-0299).
 - **Host token** — The token another host keeps after pairing; what it may reach is in [SECURITY.md](SECURITY.md#meta-harness-service-and-configuration) (ADR-0288, ADR-0299).

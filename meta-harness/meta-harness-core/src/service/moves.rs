@@ -6,12 +6,12 @@ use std::time::Duration;
 use serde_json::Value;
 
 use super::{Session, Shared, to};
-use crate::config::{Store, now_ms};
 use crate::handoff::{self, TRANSCRIPT_BYTES};
 use crate::host::projects::settled;
 use crate::host_move::{
     self, Arrival, ArrivalRow, Departure, MoveFinish, MovePackage, MoveRecord, Saved,
 };
+use crate::store::{Store, now_ms};
 use crate::thread::TurnStatus;
 use crate::thread::move_out::Saving;
 use crate::util::until;
@@ -43,9 +43,9 @@ impl Session {
     ) -> Result<Value, String> {
         let shared = self.shared.clone();
         let thread = thread.clone();
-        to(detached(
-            async move { depart(&shared, &thread, &transfer, &target, commit, message).await },
-        )
+        to(detached(&self.shared, async move {
+            depart(&shared, &thread, &transfer, &target, commit, message).await
+        })
         .await?)
     }
 
@@ -57,7 +57,10 @@ impl Session {
     ) -> Result<Value, String> {
         let shared = self.shared.clone();
         let thread = thread.clone();
-        detached(async move { finish_move(&shared, &thread, &transfer, finish).await }).await?;
+        detached(&self.shared, async move {
+            finish_move(&shared, &thread, &transfer, finish).await
+        })
+        .await?;
         to(())
     }
 
@@ -70,8 +73,10 @@ impl Session {
         let shared = self.shared.clone();
         let project = project.clone();
         let root = root.to_owned();
-        let thread =
-            detached(async move { arrive(&shared, &project, &root, package).await }).await?;
+        let thread = detached(&self.shared, async move {
+            arrive(&shared, &project, &root, package).await
+        })
+        .await?;
         let id = thread.id().to_owned();
         self.keep(thread).await;
         to(id)
@@ -79,9 +84,25 @@ impl Session {
 }
 
 async fn detached<T: Send + 'static>(
+    shared: &Shared,
     work: impl Future<Output = Result<T, String>> + Send + 'static,
 ) -> Result<T, String> {
-    match tokio::spawn(work).await {
+    let task = tokio::spawn(work);
+    {
+        let mut tasks = crate::util::lock(&shared.detached);
+        tasks.retain(|task| !task.is_finished());
+        tasks.push(task.abort_handle());
+    }
+    match task.await {
+        Ok(result) => result,
+        Err(error) => Err(format!("The move did not finish: {error}")),
+    }
+}
+
+async fn blocking<T: Send + 'static>(
+    work: impl FnOnce() -> Result<T, String> + Send + 'static,
+) -> Result<T, String> {
+    match tokio::task::spawn_blocking(work).await {
         Ok(result) => result,
         Err(error) => Err(format!("The move did not finish: {error}")),
     }
@@ -93,17 +114,9 @@ pub(super) async fn move_status(shared: &Shared, transfer: &str) -> Result<Arriv
         .run(transfer, async {
             let row = host_move::arrival(&shared.store.db(), transfer)?;
             Ok(match row {
-                Some(row) if row.state == "landed" => {
-                    let project = shared.host.project(Path::new(&row.root)).await?;
-                    if !project.is_listed(&row.thread).await? {
-                        return Ok(Arrival::Unknown);
-                    }
-                    if delivered(shared, &project, transfer).await? {
-                        Arrival::Landed { thread: row.thread }
-                    } else {
-                        Arrival::Starting
-                    }
-                }
+                Some(row) if row.state == "landed" => landed(shared, &row, transfer)
+                    .await?
+                    .unwrap_or(Arrival::Unknown),
                 Some(row) if row.state == "starting" => Arrival::Starting,
                 _ => Arrival::Unknown,
             })
@@ -116,17 +129,10 @@ pub(super) async fn move_abort(shared: &Shared, transfer: &str) -> Result<Arriva
         .transfers
         .run(transfer, async {
             let row = host_move::arrival(&shared.store.db(), transfer)?;
-            if let Some(landed) = row.as_ref().filter(|row| row.state == "landed") {
-                let project = shared.host.project(Path::new(&landed.root)).await?;
-                if project.is_listed(&landed.thread).await? {
-                    return Ok(if delivered(shared, &project, transfer).await? {
-                        Arrival::Landed {
-                            thread: landed.thread.clone(),
-                        }
-                    } else {
-                        Arrival::Starting
-                    });
-                }
+            if let Some(row) = row.as_ref().filter(|row| row.state == "landed")
+                && let Some(arrival) = landed(shared, row, transfer).await?
+            {
+                return Ok(arrival);
             }
             let refused = match row {
                 Some(row) => ArrivalRow {
@@ -148,6 +154,24 @@ pub(super) async fn move_abort(shared: &Shared, transfer: &str) -> Result<Arriva
         .await
 }
 
+async fn landed(
+    shared: &Shared,
+    row: &ArrivalRow,
+    transfer: &str,
+) -> Result<Option<Arrival>, String> {
+    let project = shared.host.project(Path::new(&row.root)).await?;
+    if !project.is_listed(&row.thread).await? {
+        return Ok(None);
+    }
+    Ok(Some(if delivered(shared, &project, transfer).await? {
+        Arrival::Landed {
+            thread: row.thread.clone(),
+        }
+    } else {
+        Arrival::Starting
+    }))
+}
+
 async fn withdraw(shared: &Shared, row: &ArrivalRow) -> Result<(), String> {
     if row.thread.is_empty() {
         return Ok(());
@@ -156,10 +180,11 @@ async fn withdraw(shared: &Shared, row: &ArrivalRow) -> Result<(), String> {
     if project.is_listed(&row.thread).await? {
         if let Ok(thread) = project.open(&row.thread).await {
             let _ = thread.stop().await;
+            super::agents::moved_away(shared, &thread).await?;
         }
         project.discard_id(&row.thread).await?;
     }
-    Ok(())
+    super::agents::forget(shared, &row.thread).await
 }
 
 const NOT_FINISHED: &str = "The moved messages are not all delivered yet, so the session has not finished moving; try again.";
@@ -173,7 +198,7 @@ enum Entry {
 }
 
 async fn depart(
-    shared: &Shared,
+    shared: &Arc<Shared>,
     thread: &Thread,
     transfer: &str,
     target: &(String, String, String),
@@ -189,18 +214,18 @@ async fn depart(
 }
 
 async fn depart_once(
-    shared: &Shared,
+    shared: &Arc<Shared>,
     thread: &Thread,
     transfer: &str,
     target: &(String, String, String),
     commit: bool,
     message: Option<String>,
 ) -> Result<MovePackage, String> {
+    host_move::owned_by(&shared.store.db(), transfer, thread.id())?;
     if host_move::phase(&shared.store.db(), transfer)? == Some(host_move::Phase::Preparing) {
         reconcile(thread, &shared.store, transfer).await?;
     }
     let facts = thread.move_facts().await?;
-    host_move::owned_by(&shared.store.db(), transfer, thread.id())?;
     let fresh = host_move::phase(&shared.store.db(), transfer)?.is_none();
     if fresh
         && let Some(agent) = super::agents::move_facts(shared, thread).await?
@@ -264,9 +289,13 @@ async fn depart_once(
         .await?;
     package.queued = host_move::queued(&store.db(), transfer)?;
     package.agent = super::agents::carry(shared, thread).await?.map(Box::new);
-    let text = serde_json::to_string(&package).map_err(|e| e.to_string())?;
-    host_move::hand(&store.db(), transfer, &text, now_ms())?;
-    Ok(package)
+    let (owner, transfer) = (shared.clone(), transfer.to_owned());
+    blocking(move || {
+        let text = serde_json::to_string(&package).map_err(|e| e.to_string())?;
+        host_move::hand(&owner.store.db(), &transfer, &text, now_ms())?;
+        Ok(package)
+    })
+    .await
 }
 
 async fn finish_move(
@@ -354,14 +383,14 @@ async fn resume(shared: &Shared, project: &Project, transfer: &str) -> Result<()
     deliver(&shared.store, &thread, transfer).await
 }
 
-async fn deliver(store: &Store, thread: &Thread, transfer: &str) -> Result<(), String> {
+pub(crate) async fn deliver(store: &Store, thread: &Thread, transfer: &str) -> Result<(), String> {
     let Some(row) = host_move::arrival(&store.db(), transfer)? else {
         return Ok(());
     };
     let done = usize::try_from(row.delivered).unwrap_or(usize::MAX);
     for (index, text) in row.queued.iter().enumerate().skip(done) {
-        if let Some(previous) = index.checked_sub(1).map(|earlier| &row.queued[earlier]) {
-            start_held(thread, previous).await?;
+        if let Some(previous) = index.checked_sub(1) {
+            start_held(thread, &host_move::queued_id(transfer, previous)).await?;
         }
         thread
             .send_once(&host_move::queued_id(transfer, index), text, false)
@@ -371,14 +400,8 @@ async fn deliver(store: &Store, thread: &Thread, transfer: &str) -> Result<(), S
     Ok(())
 }
 
-async fn start_held(thread: &Thread, text: &str) -> Result<(), String> {
-    let queued = |thread: &Thread| {
-        thread
-            .turns()
-            .into_iter()
-            .find(|turn| turn.prompt == text && turn.status == TurnStatus::Queued)
-    };
-    let Some(turn) = queued(thread) else {
+async fn start_held(thread: &Thread, message: &str) -> Result<(), String> {
+    let Some(turn) = thread.queued_turn(message) else {
         return Ok(());
     };
     if thread
@@ -388,8 +411,12 @@ async fn start_held(thread: &Thread, text: &str) -> Result<(), String> {
     {
         return Ok(());
     }
-    thread.send_queued_now(turn.number).await?;
-    if until(DELIVERY_WAIT, POLL, || queued(thread).is_none()).await {
+    thread.send_queued_now(turn).await?;
+    if until(DELIVERY_WAIT, POLL, || {
+        thread.queued_turn(message).is_none()
+    })
+    .await
+    {
         Ok(())
     } else {
         Err(
@@ -425,6 +452,12 @@ async fn arrive(
                     return Err(NOT_FINISHED.to_owned());
                 }
                 return Ok(thread);
+            }
+            Some(row) if row.root != root => {
+                return Err(
+                    "This transfer started in another project folder, so the session did not move here."
+                        .to_owned(),
+                );
             }
             Some(row) if project.is_listed(&row.thread).await? => {
                 let thread = project.open(&row.thread).await?;

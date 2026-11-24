@@ -81,11 +81,11 @@ impl Git {
     }
 
     async fn pull_request_reference(&self, number: u64) -> Result<Value, String> {
-        let mut shell = self
+        let first = self
             .client
-            .stream("orchestration.subscribeShell", json!({}))
-            .await?;
-        let first = shell.recv().await.ok_or("T3 sent no projects")?;
+            .first("orchestration.subscribeShell")
+            .await?
+            .ok_or("T3 sent no projects")?;
         let snapshot = &first["snapshot"];
         let threads = snapshot["threads"]
             .as_array()

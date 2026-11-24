@@ -15,13 +15,29 @@ pub(crate) fn owner_only(path: &Path, folder: bool) -> Result<(), String> {
 }
 
 #[cfg(unix)]
-pub(crate) fn terminate(pid: u32) {
+fn signal(pid: u32, signal: rustix::process::Signal) {
     if let Some(pid) = i32::try_from(pid)
         .ok()
         .and_then(rustix::process::Pid::from_raw)
     {
-        let _ = rustix::process::kill_process(pid, rustix::process::Signal::TERM);
+        let _ = rustix::process::kill_process(pid, signal);
     }
+}
+
+#[cfg(unix)]
+fn signal_tree(pid: u32, how: rustix::process::Signal) {
+    match i32::try_from(pid)
+        .ok()
+        .and_then(rustix::process::Pid::from_raw)
+    {
+        Some(group) if rustix::process::kill_process_group(group, how).is_ok() => {}
+        _ => signal(pid, how),
+    }
+}
+
+#[cfg(unix)]
+pub(crate) fn terminate(pid: u32) {
+    signal_tree(pid, rustix::process::Signal::TERM);
 }
 
 #[cfg(windows)]
@@ -31,12 +47,7 @@ pub(crate) fn terminate(pid: u32) {
 
 #[cfg(unix)]
 pub(crate) fn kill(pid: u32) {
-    if let Some(pid) = i32::try_from(pid)
-        .ok()
-        .and_then(rustix::process::Pid::from_raw)
-    {
-        let _ = rustix::process::kill_process(pid, rustix::process::Signal::KILL);
-    }
+    signal_tree(pid, rustix::process::Signal::KILL);
 }
 
 #[cfg(windows)]
@@ -138,6 +149,11 @@ mod windows {
         }
     }
 
+    fn open(pid: u32, access: u32) -> Option<Handle> {
+        let process = unsafe { OpenProcess(access, 0, pid) };
+        (!process.is_null()).then_some(Handle(process))
+    }
+
     fn wide(path: &Path) -> Vec<u16> {
         path.as_os_str().encode_wide().chain(Some(0)).collect()
     }
@@ -229,20 +245,14 @@ mod windows {
             {
                 return None;
             }
-            let process = OpenProcess(PROCESS_TERMINATE | PROCESS_SET_QUOTA, 0, pid);
-            if process.is_null() {
-                return None;
-            }
-            let process = Handle(process);
+            let process = open(pid, PROCESS_TERMINATE | PROCESS_SET_QUOTA)?;
             (AssignProcessToJobObject(job.0, process.0) != 0).then_some(Tree(job))
         }
     }
 
     pub(super) fn terminate(pid: u32) {
-        unsafe {
-            let process = OpenProcess(PROCESS_TERMINATE, 0, pid);
-            if !process.is_null() {
-                let process = Handle(process);
+        if let Some(process) = open(pid, PROCESS_TERMINATE) {
+            unsafe {
                 TerminateProcess(process.0, 1);
             }
         }
@@ -252,12 +262,8 @@ mod windows {
         use windows_sys::Win32::Foundation::FILETIME;
         use windows_sys::Win32::System::Threading::GetProcessTimes;
         const UNIX_EPOCH_IN_TICKS: u64 = 116_444_736_000_000_000;
+        let process = open(pid, PROCESS_QUERY_LIMITED_INFORMATION)?;
         unsafe {
-            let process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
-            if process.is_null() {
-                return None;
-            }
-            let process = Handle(process);
             let mut times: [FILETIME; 4] = std::mem::zeroed();
             let [created, exited, kernel, user] = &mut times;
             if GetProcessTimes(process.0, created, exited, kernel, user) == 0 {
@@ -271,12 +277,8 @@ mod windows {
     }
 
     pub(super) fn image(pid: u32) -> Option<PathBuf> {
+        let process = open(pid, PROCESS_QUERY_LIMITED_INFORMATION)?;
         unsafe {
-            let process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
-            if process.is_null() {
-                return None;
-            }
-            let process = Handle(process);
             let mut buffer = vec![0u16; 32_768];
             let mut size = u32::try_from(buffer.len()).ok()?;
             if QueryFullProcessImageNameW(
@@ -292,4 +294,49 @@ mod windows {
             Some(PathBuf::from(String::from_utf16_lossy(&buffer)))
         }
     }
+}
+
+pub fn write_atomic(path: &Path, bytes: &[u8], private: bool) -> std::io::Result<()> {
+    use std::io::Write;
+    let mut random = [0u8; 8];
+    getrandom::fill(&mut random).expect("the operating system provides random bytes");
+    let name = path.file_name().unwrap_or_default().to_string_lossy();
+    let temporary = path.with_file_name(format!(
+        ".{name}.{}.meta-harness-tmp",
+        crate::util::hex(&random)
+    ));
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::mode(&mut options, if private { 0o600 } else { 0o666 });
+    let result = options
+        .open(&temporary)
+        .and_then(|mut file| {
+            #[cfg(windows)]
+            if private {
+                owner_only(&temporary, false).map_err(std::io::Error::other)?;
+            }
+            file.write_all(bytes)?;
+            file.sync_all()
+        })
+        .and_then(|()| std::fs::rename(&temporary, path))
+        .and_then(|()| sync_folder(path));
+    if result.is_err() {
+        let _ = std::fs::remove_file(&temporary);
+    }
+    result
+}
+
+#[cfg(unix)]
+fn sync_folder(file: &Path) -> std::io::Result<()> {
+    let dir = file
+        .parent()
+        .filter(|dir| !dir.as_os_str().is_empty())
+        .unwrap_or(Path::new("."));
+    std::fs::File::open(dir)?.sync_all()
+}
+
+#[cfg(not(unix))]
+fn sync_folder(_file: &Path) -> std::io::Result<()> {
+    Ok(())
 }

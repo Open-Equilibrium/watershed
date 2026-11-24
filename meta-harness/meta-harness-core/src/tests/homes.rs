@@ -3,12 +3,8 @@ use std::path::{Path, PathBuf};
 
 use serde_json::json;
 
-use super::Dir;
+use super::{Dir, put, read};
 use crate::config::{Blocks, Homes, McpServer, provider_instances};
-
-fn read(path: &Path) -> String {
-    std::fs::read_to_string(path).unwrap_or_else(|e| panic!("{}: {e}", path.display()))
-}
 
 fn blocks() -> Blocks {
     Blocks {
@@ -40,6 +36,21 @@ fn blocks() -> Blocks {
             ),
         ]),
     }
+}
+
+fn skill(name: &str, files: &[(&str, &str)]) -> Blocks {
+    let files = files
+        .iter()
+        .map(|(path, text)| ((*path).to_owned(), (*text).to_owned()))
+        .collect();
+    Blocks {
+        skills: BTreeMap::from([(name.to_owned(), files)]),
+        ..Blocks::default()
+    }
+}
+
+fn write(homes: &Homes, blocks: &Blocks, dir: &Dir) {
+    homes.write(blocks, &dir.join("person")).unwrap();
 }
 
 #[test]
@@ -95,17 +106,13 @@ fn every_block_reaches_both_harnesses_in_their_own_formats() {
 fn a_removed_block_leaves_and_the_harness_s_own_files_stay() {
     let dir = Dir::new();
     let homes = Homes::under(&dir.join("meta"));
-    homes.write(&blocks(), &dir.join("person")).unwrap();
-    std::fs::create_dir_all(homes.codex.join("sessions")).unwrap();
-    std::fs::write(homes.codex.join("sessions/s.jsonl"), "{}").unwrap();
-    std::fs::create_dir_all(homes.claude.join("skills/own")).unwrap();
-    std::fs::write(homes.claude.join("skills/own/SKILL.md"), "mine").unwrap();
+    write(&homes, &blocks(), &dir);
+    put(homes.codex.join("sessions/s.jsonl"), "{}");
+    put(homes.claude.join("skills/own/SKILL.md"), "mine");
     std::fs::remove_file(homes.codex.join("auth.json")).unwrap();
-    std::fs::write(homes.codex.join("auth.json"), "{}").unwrap();
+    put(homes.codex.join("auth.json"), "{}");
 
-    homes
-        .write(&Blocks::default(), &dir.join("person"))
-        .unwrap();
+    write(&homes, &Blocks::default(), &dir);
 
     for home in [&homes.claude, &homes.codex] {
         assert!(!home.join("skills/review").exists());
@@ -160,20 +167,16 @@ fn t3_runs_claude_code_and_codex_in_the_homes_and_keeps_its_other_settings() {
 fn a_tampered_skill_list_never_removes_folders_outside_the_skills() {
     let dir = Dir::new();
     let homes = Homes::under(&dir.join("meta"));
-    homes
-        .write(&Blocks::default(), &dir.join("person"))
-        .unwrap();
+    write(&homes, &Blocks::default(), &dir);
     let (relative, absolute) = (dir.join("meta/harness/keep"), dir.join("absolute"));
     for folder in [&relative, &absolute] {
         std::fs::create_dir_all(folder).unwrap();
     }
     let names = serde_json::to_string(&["../../keep", &absolute.to_string_lossy(), ".."]).unwrap();
     for home in [&homes.claude, &homes.codex] {
-        std::fs::write(home.join(".meta-harness-skills.json"), &names).unwrap();
+        put(home.join(".meta-harness-skills.json"), &names);
     }
-    homes
-        .write(&Blocks::default(), &dir.join("person"))
-        .unwrap();
+    write(&homes, &Blocks::default(), &dir);
     assert!(relative.is_dir() && absolute.is_dir());
 }
 
@@ -181,15 +184,12 @@ fn a_tampered_skill_list_never_removes_folders_outside_the_skills() {
 fn a_damaged_skill_list_stops_the_write_before_any_skill_or_the_list_changes() {
     let dir = Dir::new();
     let homes = Homes::under(&dir.join("meta"));
-    let blocks = Blocks {
-        skills: BTreeMap::from([(
-            "review".to_owned(),
-            BTreeMap::from([("SKILL.md".to_owned(), "---\nname: review\n---\n".to_owned())]),
-        )]),
-        ..Blocks::default()
-    };
-    homes.write(&blocks, &dir.join("person")).unwrap();
-    std::fs::write(homes.codex.join(".meta-harness-skills.json"), "not a list").unwrap();
+    write(
+        &homes,
+        &skill("review", &[("SKILL.md", "---\nname: review\n---\n")]),
+        &dir,
+    );
+    put(homes.codex.join(".meta-harness-skills.json"), "not a list");
 
     assert!(
         homes
@@ -201,6 +201,16 @@ fn a_damaged_skill_list_stops_the_write_before_any_skill_or_the_list_changes() {
         "not a list"
     );
     assert!(homes.codex.join("skills/review/SKILL.md").exists());
+}
+
+#[test]
+fn a_skill_left_half_written_by_a_failed_write_is_removed_by_the_next_write() {
+    let dir = Dir::new();
+    let homes = Homes::under(&dir.join("meta"));
+    let broken = skill("review", &[("a", "a file"), ("a/b", "under a file")]);
+    assert!(homes.write(&broken, &dir.join("person")).is_err());
+    write(&homes, &Blocks::default(), &dir);
+    assert!(!homes.claude.join("skills/review").exists());
 }
 
 fn listing(root: &Path) -> Vec<PathBuf> {
@@ -225,8 +235,7 @@ fn a_linked_harness_home_or_skills_folder_is_replaced_and_nothing_outside_change
     for link in ["harness", "home", "skills"] {
         let dir = Dir::new();
         let external = dir.join("external");
-        std::fs::create_dir_all(external.join("example")).unwrap();
-        std::fs::write(external.join("example/sentinel"), "keep").unwrap();
+        put(external.join("example/sentinel"), "keep");
         let before = listing(&external);
         let homes = Homes::under(&dir.join("meta"));
         let harness = homes.claude.parent().unwrap().to_path_buf();
@@ -242,15 +251,8 @@ fn a_linked_harness_home_or_skills_folder_is_replaced_and_nothing_outside_change
                 std::os::unix::fs::symlink(&external, homes.claude.join("skills")).unwrap();
             }
         }
-        let example = BTreeMap::from([(
-            "SKILL.md".to_owned(),
-            "---\nname: example\n---\n".to_owned(),
-        )]);
-        let blocks = Blocks {
-            skills: BTreeMap::from([("example".to_owned(), example)]),
-            ..Blocks::default()
-        };
-        homes.write(&blocks, &dir.join("person")).unwrap();
+        let blocks = skill("example", &[("SKILL.md", "---\nname: example\n---\n")]);
+        write(&homes, &blocks, &dir);
 
         assert_eq!(listing(&external), before, "link={link}");
         let real_folder = |path: PathBuf| std::fs::symlink_metadata(path).is_ok_and(|m| m.is_dir());
@@ -266,28 +268,6 @@ fn a_linked_harness_home_or_skills_folder_is_replaced_and_nothing_outside_change
     }
 }
 
-#[test]
-fn a_skill_file_named_like_a_temporary_file_is_written_whole() {
-    let dir = Dir::new();
-    let homes = Homes::under(&dir.join("meta"));
-    let files = BTreeMap::from([
-        ("a.meta-harness-tmp".to_owned(), "kept".to_owned()),
-        ("a.txt".to_owned(), "text".to_owned()),
-    ]);
-    let blocks = Blocks {
-        skills: BTreeMap::from([("example".to_owned(), files)]),
-        ..Blocks::default()
-    };
-    homes.write(&blocks, &dir.join("person")).unwrap();
-    for home in [&homes.claude, &homes.codex] {
-        assert_eq!(
-            read(&home.join("skills/example/a.meta-harness-tmp")),
-            "kept"
-        );
-        assert_eq!(read(&home.join("skills/example/a.txt")), "text");
-    }
-}
-
 #[cfg(unix)]
 #[test]
 fn a_link_planted_at_the_temporary_name_is_never_written_through() {
@@ -295,11 +275,11 @@ fn a_link_planted_at_the_temporary_name_is_never_written_through() {
     let homes = Homes::under(&dir.join("meta"));
     std::fs::create_dir_all(&homes.codex).unwrap();
     let sentinel = dir.join("outside");
-    std::fs::write(&sentinel, "keep").unwrap();
+    put(&sentinel, "keep");
     let planted = homes.codex.join(".AGENTS.md.meta-harness-tmp");
     std::os::unix::fs::symlink(&sentinel, planted).unwrap();
 
-    homes.write(&blocks(), &dir.join("person")).unwrap();
+    write(&homes, &blocks(), &dir);
 
     assert_eq!(read(&sentinel), "keep");
     assert_eq!(

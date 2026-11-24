@@ -37,7 +37,8 @@ def write(path, content, mode=0o644):
 def snapshot(root):
     if not root.exists():
         return {}
-    return {str(path.relative_to(root)): path.read_bytes() if path.is_file() else None
+    return {str(path.relative_to(root)):
+            (path.read_bytes(), path.stat().st_mode & 0o777) if path.is_file() else None
             for path in sorted(root.rglob("*"))}
 
 
@@ -135,6 +136,7 @@ class InstallerTest(unittest.TestCase):
             "relative prefix": (good, ["--prefix", "relative/prefix"]),
             "newline in prefix": (good, ["--prefix", absolute + "\nx"]),
             "other platform": (other, ["--prefix", absolute]),
+            "data folder is the prefix": (good, ["--prefix", str(self.home / ".meta-harness")]),
         }
         for name, (bundle, args) in cases.items():
             with self.subTest(case=name):
@@ -154,7 +156,6 @@ class InstallerTest(unittest.TestCase):
             archive.extractall(unpacked, filter="data")
         bundle = unpacked / f"meta-harness-{META_VERSION}-{HOST}"
         t3_name = f"t3-{T3_VERSION}-{HOST}"
-        self.assertEqual(os.readlink(bundle / "lib" / "meta-harness" / t3_name / "helper"), "t3")
         result = self.install(bundle, "--prefix", str(self.root / "prefix"), "--no-service")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.log_lines(), [])

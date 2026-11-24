@@ -5,7 +5,7 @@ use rusqlite::{Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use crate::config::failed;
+use crate::store::failed;
 use crate::util::hex;
 
 pub(crate) use links::Links;
@@ -87,10 +87,14 @@ impl Access {
     }
 }
 
-pub(crate) fn new_token() -> String {
-    let mut bytes = [0u8; 32];
+pub(crate) fn random<const N: usize>() -> [u8; N] {
+    let mut bytes = [0u8; N];
     getrandom::fill(&mut bytes).expect("the operating system provides random bytes");
-    hex(&bytes)
+    bytes
+}
+
+pub(crate) fn new_token() -> String {
+    hex(&random::<32>())
 }
 
 fn digest(text: &str) -> String {

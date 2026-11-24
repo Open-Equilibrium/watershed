@@ -206,7 +206,7 @@ impl Git {
         }
     }
 
-    pub(crate) async fn has_one_remote(&self) -> Result<bool, String> {
+    pub(crate) async fn one_remote(&self) -> Result<Option<String>, String> {
         let mut cursor = 0;
         let mut names = std::collections::BTreeSet::new();
         loop {
@@ -225,11 +225,11 @@ impl Git {
                     .filter_map(|r| r["remoteName"].as_str().map(str::to_owned)),
             );
             if names.len() > 1 {
-                return Ok(false);
+                return Ok(None);
             }
             match result["nextCursor"].as_u64() {
                 Some(next) => cursor = next,
-                None => return Ok(names.len() == 1),
+                None => return Ok(names.pop_first()),
             }
         }
     }
@@ -336,7 +336,10 @@ impl Git {
         let mut stream = self.client.action("git.runStackedAction", payload).await?;
         let (sender, receiver) = mpsc::channel(64);
         tokio::spawn(async move {
-            while let Some(event) = stream.recv().await {
+            while let Some(event) = tokio::select! {
+                event = stream.recv() => event,
+                () = sender.closed() => return,
+            } {
                 let progress = match event["kind"].as_str() {
                     Some("phase_started") => GitProgress::Phase(text(&event["label"])),
                     Some("hook_started") => GitProgress::Hook(text(&event["hookName"])),
@@ -477,7 +480,7 @@ impl Git {
     }
 }
 
-fn text(value: &Value) -> String {
+pub(crate) fn text(value: &Value) -> String {
     value.as_str().unwrap_or_default().to_owned()
 }
 

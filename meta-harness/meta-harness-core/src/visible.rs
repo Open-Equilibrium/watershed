@@ -10,14 +10,11 @@ pub fn visible_name(name: &str) -> String {
 
 pub fn visible_lines(text: &str) -> String {
     let mut shown = String::with_capacity(text.len());
-    for (index, line) in text.split('\n').enumerate() {
-        if index > 0 {
-            shown.push('\n');
-        }
-        match line.strip_suffix('\r') {
-            Some(line) => {
-                push_written_out(&mut shown, line, hides);
-                shown.push('\r');
+    for line in text.split_inclusive('\n') {
+        match line.strip_suffix("\r\n") {
+            Some(body) => {
+                push_written_out(&mut shown, body, hides);
+                shown.push_str("\r\n");
             }
             None => push_written_out(&mut shown, line, hides),
         }

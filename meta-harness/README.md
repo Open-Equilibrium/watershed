@@ -36,7 +36,7 @@ cargo run -p meta-harness-cli -- status
 
 ## Remote access and host links
 
-- `meta remote on [--port N]` listens on this computer's Tailscale addresses, on port 3774 by default, across restarts; `meta remote off` stops it and ends its connections; `meta remote status` shows it, and says so while the port cannot be bound yet (it is tried every 30 seconds). Turn it on before `meta invite --host`.
+- `meta remote on [--port N]` listens on this computer's Tailscale addresses, on port 3774 by default, across restarts; `meta remote off` stops it and ends its connections; `meta remote status` shows it. If the port is busy when the service starts, `meta remote status` says it is not listening yet and the port is tried again every 30 seconds; `meta remote on --port N` with a busy port fails at once and changes nothing. Turn it on before `meta invite --host`.
 - `meta invite --device` or `meta invite --host [--access LEVEL]` prints a pairing code, valid for five minutes and one use, with the addresses to pair with. A host's `LEVEL` is the highest level its agents get here, `auto` by default.
 - `meta host agents on|off` accepts agents from other hosts here; it is off until turned on.
 - `meta host add ADDRESS CODE [--access LEVEL]` links the host at ADDRESS; `LEVEL` is `read-only`, `approval-required`, `auto-accept-edits`, `auto` or `full-access`, and defaults to the level the other host invited. The other host refuses a higher one.

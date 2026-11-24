@@ -2,7 +2,7 @@ mod cli;
 mod client;
 mod live;
 mod projection;
-mod server;
+pub(crate) mod server;
 
 pub use live::Watch;
 
@@ -42,20 +42,5 @@ pub(crate) fn iso(ms: u64) -> String {
 }
 
 pub(crate) fn millis(value: &Value) -> Option<u64> {
-    let (date, time) = value.as_str()?.strip_suffix('Z')?.split_once('T')?;
-    let mut d = date.split('-').map(|p| p.parse::<i64>().ok());
-    let (y, m, day) = (d.next()??, d.next()??, d.next()??);
-    let (y, m) = if m <= 2 { (y - 1, m + 9) } else { (y, m - 3) };
-    let era = y.div_euclid(400);
-    let yoe = y - era * 400;
-    let doe = yoe * 365 + yoe / 4 - yoe / 100 + (153 * m + 2) / 5 + day - 1;
-    let days = era * 146_097 + doe - 719_468;
-    let mut t = time.split(':');
-    let (h, min) = (
-        t.next()?.parse::<i64>().ok()?,
-        t.next()?.parse::<i64>().ok()?,
-    );
-    let secs: f64 = t.next()?.parse().ok()?;
-    let ms = ((days * 24 + h) * 60 + min) * 60_000 + (secs * 1000.0).round() as i64;
-    u64::try_from(ms).ok()
+    u64::try_from(crate::util::rfc3339_millis(value.as_str()?)?).ok()
 }

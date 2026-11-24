@@ -1,13 +1,10 @@
-use std::time::Duration;
-
 use serde_json::{Value, json};
-use tokio_tungstenite::tungstenite::Message;
 
-use super::fake_t3::{Fake, chunk, ok};
+use super::fake_t3::{chunk, ok};
 use super::thread::{follow_answering, projection};
-use crate::thread::{Automation, LocalServer, Pace, RunStatus, ScheduleKind, Thread};
+use super::within;
+use crate::thread::{Automation, LocalServer, Pace, RunStatus, ScheduleKind};
 
-const WAIT: Duration = Duration::from_secs(10);
 const SERVERS: &str = "subscribeDiscoveredLocalServers";
 const TASKS: &str = "scheduledTasks.subscribe";
 
@@ -25,15 +22,9 @@ fn discovered() -> Value {
     })
 }
 
-async fn thread_with(
-    answer: impl Fn(&str, &Value, &str) -> Vec<Message> + Send + 'static,
-) -> (Fake, Thread) {
-    follow_answering(projection(json!({})), 1, answer).await
-}
-
 #[tokio::test(flavor = "multi_thread")]
 async fn the_servers_of_a_thread_are_watched_and_one_can_be_stopped() {
-    let (fake, thread) = thread_with(|tag, _, id| match tag {
+    let (fake, thread) = follow_answering(projection(json!({})), 1, |tag, _, id| match tag {
         SERVERS => vec![chunk(id, vec![discovered()])],
         _ => vec![ok(id, json!({}))],
     })
@@ -65,8 +56,10 @@ async fn the_servers_of_a_thread_are_watched_and_one_can_be_stopped() {
         SERVERS,
         vec![json!({"servers": [], "scannedAt": "2026-11-15T10:01:00.000Z"})],
     );
-    let emptied = tokio::time::timeout(WAIT, servers.changed()).await.unwrap();
-    assert_eq!(emptied, Some(Vec::new()));
+    assert_eq!(
+        within("the servers change", servers.changed()).await,
+        Some(Vec::new())
+    );
 
     thread.stop_server(4242, 5173).await.unwrap();
     assert_eq!(
@@ -96,7 +89,7 @@ fn tasks() -> Value {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn the_automations_of_a_thread_show_their_schedule_and_state_and_can_be_run_or_paused() {
-    let (fake, thread) = thread_with(|tag, _, id| match tag {
+    let (fake, thread) = follow_answering(projection(json!({})), 1, |tag, _, id| match tag {
         TASKS => vec![chunk(id, vec![tasks()])],
         _ => vec![ok(id, json!({"task": {}}))],
     })
@@ -222,7 +215,7 @@ async fn the_usage_limits_of_the_thread_provider_show_remaining_room_pace_and_no
 
 #[tokio::test(flavor = "multi_thread")]
 async fn a_moved_session_pauses_its_enabled_scheduled_tasks_and_no_others() {
-    let (fake, thread) = thread_with(|tag, _, id| match tag {
+    let (fake, thread) = follow_answering(projection(json!({})), 1, |tag, _, id| match tag {
         TASKS => vec![chunk(
             id,
             vec![json!({"tasks": [

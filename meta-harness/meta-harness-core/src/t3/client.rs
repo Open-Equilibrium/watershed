@@ -23,6 +23,8 @@ const RETRY_DELAYS: [Duration; 3] = [
     Duration::from_secs(1),
 ];
 
+const FIRST_WAIT: Duration = Duration::from_secs(10);
+
 const LOST_CALL: &str = "T3 closed the connection before it answered; the call was not sent again";
 
 type Socket = WebSocketStream<MaybeTlsStream<TcpStream>>;
@@ -54,6 +56,8 @@ struct Item {
 #[derive(Default)]
 struct State {
     out: Option<mpsc::UnboundedSender<Message>>,
+    serving: Option<tokio::task::AbortHandle>,
+    keeper: Option<tokio::task::AbortHandle>,
     waiters: HashMap<String, Waiter>,
     closed: bool,
     stopping: bool,
@@ -119,7 +123,8 @@ impl Client {
         let socket = open(origin, &issue).await?;
         let link: Link = Arc::default();
         let served = install(&link, socket);
-        tokio::spawn(keep(link.clone(), origin.to_owned(), issue, served));
+        let keeper = tokio::spawn(keep(link.clone(), origin.to_owned(), issue, served));
+        lock(&link).keeper = Some(keeper.abort_handle());
         Ok(Self {
             link,
             next: Arc::new(AtomicU64::new(1)),
@@ -166,6 +171,20 @@ impl Client {
         self.open_stream(tag, payload, true)
     }
 
+    pub async fn first(&self, tag: &str) -> Result<Option<Value>, String> {
+        let mut stream = self.stream(tag, json!({})).await?;
+        Ok(tokio::time::timeout(FIRST_WAIT, stream.recv())
+            .await
+            .ok()
+            .flatten())
+    }
+
+    pub async fn dispatch(&self, command: Value) -> Result<(), String> {
+        self.command("orchestration.dispatchCommand", command)
+            .await
+            .map(|_| ())
+    }
+
     pub async fn action(&self, tag: &str, payload: Value) -> Result<Subscription, String> {
         self.open_stream(tag, payload, false)
     }
@@ -193,7 +212,16 @@ impl Client {
     }
 
     pub fn close(&self) {
-        lock(&self.link).stopping = true;
+        let mut state = lock(&self.link);
+        state.stopping = true;
+        if let Some(serving) = state.serving.take() {
+            serving.abort();
+        }
+        if let Some(keeper) = state.keeper.take() {
+            keeper.abort();
+            lose_connection(&mut state);
+            close_for_good(&mut state);
+        }
     }
 }
 
@@ -218,7 +246,7 @@ async fn reconnect(origin: &str, issue: &Issue, link: &Link) -> Option<Socket> {
             return None;
         }
         if let Ok(socket) = open(origin, issue).await {
-            return Some(socket);
+            return (!lock(link).stopping).then_some(socket);
         }
     }
     None
@@ -226,6 +254,7 @@ async fn reconnect(origin: &str, issue: &Issue, link: &Link) -> Option<Socket> {
 
 fn install(link: &Link, socket: Socket) -> JoinHandle<()> {
     let (out, outgoing) = mpsc::unbounded_channel();
+    let serving = tokio::spawn(serve(socket, outgoing, out.clone(), link.clone()));
     {
         let mut state = lock(link);
         for waiter in state.waiters.values() {
@@ -236,9 +265,14 @@ fn install(link: &Link, socket: Socket) -> JoinHandle<()> {
                 let _ = out.send(frame_message(frame));
             }
         }
-        state.out = Some(out.clone());
+        state.out = Some(out);
+        if state.stopping {
+            serving.abort();
+        } else {
+            state.serving = Some(serving.abort_handle());
+        }
     }
-    tokio::spawn(serve(socket, outgoing, out, link.clone()))
+    serving
 }
 
 fn lose_connection(state: &mut State) {
@@ -338,7 +372,7 @@ fn dispatch(link: &Link, ack: &mpsc::UnboundedSender<Message>, frame: Value) {
             let result = if frame["exit"]["_tag"] == "Success" {
                 Ok(frame["exit"]["value"].clone())
             } else {
-                Err(frame["exit"]["cause"].to_string())
+                Err(cause_text(&frame["exit"]["cause"]))
             };
             match lock(link).waiters.remove(request_id) {
                 Some(Waiter::Call(reply)) => {
@@ -374,6 +408,23 @@ async fn open(origin: &str, issue: &Issue) -> Result<Socket, String> {
         .map_err(|_| format!("connect {origin}/ws: it did not answer in time"))?
         .map_err(|e| format!("connect {origin}/ws: {e}"))?;
     Ok(socket)
+}
+
+fn cause_text(cause: &Value) -> String {
+    let causes = cause
+        .as_array()
+        .map_or(std::slice::from_ref(cause), Vec::as_slice);
+    causes
+        .iter()
+        .map(|cause| {
+            &cause[if cause["_tag"] == "Die" {
+                "defect"
+            } else {
+                "error"
+            }]
+        })
+        .find_map(|reason| reason["message"].as_str().or(reason.as_str()))
+        .map_or_else(|| cause.to_string(), str::to_owned)
 }
 
 fn request_frame(id: &str, tag: &str, payload: Value) -> Value {

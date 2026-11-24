@@ -1,9 +1,11 @@
+use std::cell::{Cell, RefCell};
 use std::collections::BTreeMap;
 
 use super::Dir;
 use crate::config::{
-    Action, Blocks, Change, Difference, Direction, McpServer, Proposed, Store, diff_blocks,
+    Action, Blocks, Change, Difference, Direction, McpServer, Proposed, diff_blocks,
 };
+use crate::store::Store;
 
 struct Fixture {
     store: Store,
@@ -34,18 +36,12 @@ fn instruction(name: &str, text: &str) -> Change {
 }
 
 fn skill(name: &str) -> Change {
-    Change::Skill {
-        name: name.to_owned(),
-        files: Some(BTreeMap::from([(
-            "SKILL.md".to_owned(),
-            "---\nname: x\n---\nDo it.".to_owned(),
-        )])),
-    }
+    skill_files(name, &[("SKILL.md", "---\nname: x\n---\nDo it.")])
 }
 
-fn skill_files(pairs: &[(&str, &str)]) -> Change {
+fn skill_files(name: &str, pairs: &[(&str, &str)]) -> Change {
     Change::Skill {
-        name: "s".to_owned(),
+        name: name.to_owned(),
         files: Some(
             pairs
                 .iter()
@@ -56,26 +52,32 @@ fn skill_files(pairs: &[(&str, &str)]) -> Change {
 }
 
 fn server(name: &str) -> Change {
+    command_server(
+        name,
+        "/usr/local/bin/docs-mcp",
+        &[("DOCS_ROOT", "/srv/docs")],
+    )
+}
+
+fn command_server(name: &str, command: &str, env: &[(&str, &str)]) -> Change {
     Change::McpServer {
         name: name.to_owned(),
         server: Some(McpServer::Command {
-            command: "/usr/local/bin/docs-mcp".to_owned(),
-            args: vec!["--stdio".to_owned()],
-            env: BTreeMap::from([("DOCS_ROOT".to_owned(), "/srv/docs".to_owned())]),
-        }),
-    }
-}
-
-fn command_server(command: &str, env: &[(&str, &str)]) -> Change {
-    Change::McpServer {
-        name: "m".to_owned(),
-        server: Some(McpServer::Command {
             command: command.to_owned(),
-            args: vec![],
+            args: vec!["--stdio".to_owned()],
             env: env
                 .iter()
                 .map(|(key, value)| ((*key).to_owned(), (*value).to_owned()))
                 .collect(),
+        }),
+    }
+}
+
+fn url_server(url: &str) -> Change {
+    Change::McpServer {
+        name: "m".to_owned(),
+        server: Some(McpServer::Url {
+            url: url.to_owned(),
         }),
     }
 }
@@ -101,15 +103,8 @@ fn a_proposal_takes_effect_only_once_approved_and_every_step_is_logged() {
         ],
     );
     assert_eq!(store.current().unwrap().blocks, Blocks::default());
-    assert_eq!(
-        store
-            .pending()
-            .unwrap()
-            .iter()
-            .map(|p| p.number)
-            .collect::<Vec<_>>(),
-        vec![number]
-    );
+    let pending: Vec<u64> = store.pending().unwrap().iter().map(|p| p.number).collect();
+    assert_eq!(pending, vec![number]);
 
     let current = store.approve("liquid", number, |_| Ok(())).unwrap();
     assert_eq!(current.revision, 1);
@@ -149,15 +144,9 @@ fn a_decided_or_unknown_proposal_cannot_be_decided_again() {
         );
         assert!(store.reject("cli", number).is_err(), "{number}");
     }
-    assert_eq!(store.current().unwrap().revision, 1);
-    assert!(
-        !store
-            .current()
-            .unwrap()
-            .blocks
-            .instructions
-            .contains_key("b")
-    );
+    let current = store.current().unwrap();
+    assert_eq!(current.revision, 1);
+    assert!(!current.blocks.instructions.contains_key("b"));
 }
 
 #[test]
@@ -222,31 +211,26 @@ fn an_invalid_change_is_refused_with_its_reason() {
         (instruction("a b", "x"), "name"),
         (instruction(&"n".repeat(65), "x"), "name"),
         (instruction("a", &big), "too large"),
-        (skill_files(&[("README.md", "x")]), "SKILL.md"),
+        (skill_files("s", &[("README.md", "x")]), "SKILL.md"),
         (
-            skill_files(&[("SKILL.md", "x"), ("../escape", "x")]),
+            skill_files("s", &[("SKILL.md", "x"), ("../escape", "x")]),
             "path",
         ),
-        (skill_files(&[("SKILL.md", "x"), ("/etc/x", "x")]), "path"),
         (
-            skill_files(&[("SKILL.md", "x"), ("x", "x"), ("x/y", "x")]),
+            skill_files("s", &[("SKILL.md", "x"), ("/etc/x", "x")]),
+            "path",
+        ),
+        (
+            skill_files("s", &[("SKILL.md", "x"), ("x", "x"), ("x/y", "x")]),
             "clash",
         ),
         (
-            skill_files(&[("SKILL.md", "x"), ("A/b", "x"), ("a", "x")]),
+            skill_files("s", &[("SKILL.md", "x"), ("A/b", "x"), ("a", "x")]),
             "clash",
         ),
-        (command_server("", &[]), "command"),
-        (command_server("x", &[("BAD KEY", "v")]), "variable"),
-        (
-            Change::McpServer {
-                name: "m".to_owned(),
-                server: Some(McpServer::Url {
-                    url: "file:///etc/passwd".to_owned(),
-                }),
-            },
-            "http",
-        ),
+        (command_server("m", "", &[]), "command"),
+        (command_server("m", "x", &[("BAD KEY", "v")]), "variable"),
+        (url_server("file:///etc/passwd"), "http"),
     ];
     for (change, reason) in cases {
         let error = fixture
@@ -263,35 +247,8 @@ fn an_invalid_change_is_refused_with_its_reason() {
 }
 
 #[test]
-fn a_revision_the_homes_cannot_take_is_not_approved() {
-    let fixture = Fixture::new();
-    let store = &fixture.store;
-    let number = propose(store, vec![instruction("a", "x")]);
-    let written = std::cell::RefCell::new(Vec::new());
-    let failed = store.approve("cli", number, |blocks| {
-        written
-            .borrow_mut()
-            .push(blocks.instructions.contains_key("a"));
-        if blocks.instructions.is_empty() {
-            Ok(())
-        } else {
-            Err("The disk is full.".to_owned())
-        }
-    });
-    assert_eq!(written.into_inner(), [true, false]);
-    assert_eq!(failed, Err("The disk is full.".to_owned()));
-    assert_eq!(store.current().unwrap().revision, 0);
-    assert_eq!(
-        store.pending().unwrap().len(),
-        1,
-        "it can be approved again"
-    );
-    assert_eq!(store.log().unwrap().len(), 1, "only the proposal is logged");
-}
-
-#[test]
 fn a_failure_after_the_homes_took_the_revision_puts_the_current_one_back() {
-    for fault in ["revision", "log", "commit"] {
+    for fault in ["revision", "log", "commit", "homes"] {
         let fixture = Fixture::new();
         let store = &fixture.store;
         let number = propose(store, vec![instruction("rules", "x")]);
@@ -300,6 +257,7 @@ fn a_failure_after_the_homes_took_the_revision_puts_the_current_one_back() {
             "commit" => raw
                 .execute_batch("BEGIN; SELECT count(*) FROM revision;")
                 .unwrap(),
+            "homes" => {}
             table => raw
                 .execute_batch(&format!(
                     "CREATE TRIGGER refuse BEFORE INSERT ON {table} \
@@ -308,17 +266,25 @@ fn a_failure_after_the_homes_took_the_revision_puts_the_current_one_back() {
                 .unwrap(),
         }
         let before = store.current().unwrap();
-        let written = std::cell::RefCell::new(Vec::new());
+        let written = RefCell::new(Vec::new());
         let result = store.approve("cli", number, |blocks| {
             written.borrow_mut().push(blocks.clone());
-            Ok(())
+            if fault == "homes" && !blocks.instructions.is_empty() {
+                Err("The disk is full.".to_owned())
+            } else {
+                Ok(())
+            }
         });
-        assert!(result.is_err(), "{fault}");
+        let error = result.expect_err(fault);
+        if fault == "homes" {
+            assert_eq!(error, "The disk is full.");
+        }
         let written = written.into_inner();
         assert_eq!(written.len(), 2, "{fault}");
         assert_eq!(written.last(), Some(&before.blocks), "{fault}");
         assert_eq!(store.current().unwrap(), before, "{fault}");
         assert_eq!(store.pending().unwrap().len(), 1, "{fault}");
+        assert_eq!(store.log().unwrap().len(), 1, "{fault}");
     }
 }
 
@@ -333,7 +299,7 @@ fn a_failed_rollback_leaves_the_homes_unreconciled_until_an_approval_writes_them
         "CREATE TRIGGER refuse BEFORE INSERT ON revision BEGIN SELECT RAISE(ABORT, 'refused'); END;",
     )
     .unwrap();
-    let calls = std::cell::Cell::new(0);
+    let calls = Cell::new(0);
     let failed = store.approve("cli", first, |_| {
         calls.set(calls.get() + 1);
         if calls.get() == 1 {
@@ -356,7 +322,7 @@ fn a_failed_rollback_leaves_the_homes_unreconciled_until_an_approval_writes_them
     assert!(refused.contains("the homes refuse writes"), "{refused}");
     assert!(!store.reconciled());
 
-    let written = std::cell::RefCell::new(Vec::new());
+    let written = RefCell::new(Vec::new());
     store
         .approve("cli", second, |blocks| {
             written.borrow_mut().push(blocks.clone());
@@ -380,7 +346,7 @@ fn a_revert_is_approved_while_the_homes_refuse_the_current_revision() {
     let revert = store
         .propose("cli", "back to the start", Proposed::Restore(0))
         .unwrap();
-    let written = std::cell::RefCell::new(Vec::new());
+    let written = RefCell::new(Vec::new());
     let approved = store
         .approve("cli", revert, |blocks| {
             written.borrow_mut().push(blocks.clone());
@@ -452,5 +418,61 @@ fn a_diff_names_each_change_with_its_direction_and_identical_blocks_need_none() 
                 },
             },
         ]
+    );
+}
+
+#[test]
+fn a_proposal_that_would_change_nothing_is_refused() {
+    let fixture = Fixture::new();
+    let store = &fixture.store;
+    let rules = propose(store, vec![instruction("rules", "x")]);
+    store.approve("cli", rules, |_| Ok(())).unwrap();
+    for changes in [
+        vec![],
+        vec![instruction("rules", "x")],
+        vec![Change::Instruction {
+            name: "ghost".to_owned(),
+            text: None,
+        }],
+        vec![Change::Skill {
+            name: "ghost".to_owned(),
+            files: None,
+        }],
+        vec![Change::McpServer {
+            name: "ghost".to_owned(),
+            server: None,
+        }],
+    ] {
+        let error = store
+            .propose("cli", "nothing", Proposed::Changes(changes.clone()))
+            .expect_err(&format!("{changes:?}"));
+        assert!(error.contains("would not change revision 1"), "{error}");
+    }
+    let error = store
+        .propose("cli", "back", Proposed::Restore(1))
+        .unwrap_err();
+    assert!(error.contains("would not change revision 1"), "{error}");
+    assert!(store.pending().unwrap().is_empty());
+}
+
+#[test]
+fn a_change_with_an_unknown_field_is_refused_instead_of_read_as_a_removal() {
+    for text in [
+        r#"{"instruction":{"name":"style","txt":"Be verbose."}}"#,
+        r#"{"instruction":{"name":"style","text":"Be verbose.","extra":1}}"#,
+        r#"{"skill":{"name":"review","files":null,"extra":1}}"#,
+        r#"{"mcp_server":{"name":"docs","server":{"url":"https://x","extra":1}}}"#,
+        r#"{"extra":1}"#,
+    ] {
+        assert!(serde_json::from_str::<Change>(text).is_err(), "{text}");
+    }
+    let removal: Change =
+        serde_json::from_str(r#"{"instruction":{"name":"style","text":null}}"#).unwrap();
+    assert_eq!(
+        removal,
+        Change::Instruction {
+            name: "style".to_owned(),
+            text: None
+        }
     );
 }

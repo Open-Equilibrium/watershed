@@ -5,8 +5,8 @@ use std::time::{Duration, Instant};
 use serde_json::{Value, json};
 
 use super::{Host, Project, StartThread, Workspace, text};
-use crate::config::now_ms;
 use crate::host_move::{self, Landing, MovePackage};
+use crate::store::now_ms;
 use crate::t3::{Client, fresh_id, iso};
 use crate::thread::{Thread, TurnStatus};
 use crate::util::until;
@@ -19,7 +19,6 @@ pub struct HostProject {
 }
 
 const REMOTE_WAIT: Duration = Duration::from_secs(2);
-const SHELL_WAIT: Duration = Duration::from_secs(10);
 const CLONE_WAIT: Duration = Duration::from_secs(30 * 60);
 const WORKTREE_WAIT: Duration = Duration::from_secs(60);
 const POLL: Duration = Duration::from_millis(100);
@@ -31,10 +30,8 @@ impl Host {
 
     pub async fn add_project(&self, root: &str) -> Result<HostProject, String> {
         self.project(Path::new(root)).await?;
-        projects(&self.client, Some(root))
+        listed(&self.client, root)
             .await?
-            .into_iter()
-            .find(|project| project.root == root)
             .ok_or_else(|| format!("T3 has no project at {root} after it was added."))
     }
 
@@ -59,19 +56,21 @@ impl Host {
             .await?;
         let root = text(&started["cwd"]);
         await_clone(&self.client, &id).await?;
-        projects(&self.client, Some(&root))
+        listed(&self.client, &root)
             .await?
-            .into_iter()
-            .find(|project| project.root == root)
             .ok_or_else(|| format!("T3 has no project at {root} after the clone."))
     }
 }
 
-fn tracking_reason(branch: &str, upstream: Option<&str>) -> Option<String> {
+pub(crate) fn tracking_reason(
+    branch: &str,
+    remote: &str,
+    upstream: Option<&str>,
+) -> Option<String> {
     let tracked = upstream
         .and_then(|upstream| upstream.strip_prefix("refs/remotes/"))
-        .and_then(|rest| rest.split_once('/'))
-        .map(|(_, tracked)| tracked);
+        .and_then(|rest| rest.strip_prefix(remote))
+        .and_then(|rest| rest.strip_prefix('/'));
     match upstream {
         None => Some(format!(
             "{branch} has no upstream branch, so it cannot be fast-forwarded to the moved session's pushed head."
@@ -104,6 +103,14 @@ impl Host {
 }
 
 impl Project {
+    fn git_at(&self, path: &Path) -> crate::Git {
+        crate::Git::new(
+            self.client.clone(),
+            path.to_string_lossy().into_owned(),
+            None,
+        )
+    }
+
     pub(crate) async fn landing(
         &self,
         branch: &str,
@@ -112,32 +119,32 @@ impl Project {
         let Some(local) = self.git().local_branch(branch).await? else {
             return Ok(Landing::NewWorktree);
         };
-        if !self.git().has_one_remote().await? {
+        let Some(remote) = self.git().one_remote().await? else {
             return Ok(Landing::Blocked {
                 reason: format!(
                     "This project has more than one Git remote, so the session cannot move onto {branch} here."
                 ),
             });
-        }
+        };
         let Some(checkout) = &local.worktree else {
-            return Ok(match tracking_reason(branch, local.upstream.as_deref()) {
-                Some(reason) => Landing::Blocked { reason },
-                None => Landing::Attach,
-            });
+            return Ok(
+                match tracking_reason(branch, &remote, local.upstream.as_deref()) {
+                    Some(reason) => Landing::Blocked { reason },
+                    None => Landing::Attach,
+                },
+            );
         };
         let path = checkout.to_string_lossy().into_owned();
         let in_use = self.threads().await?.iter().any(|thread| {
             !sealed.contains(&thread.id)
                 && thread.worktree.as_deref().unwrap_or(Path::new(&self.root)) == checkout.as_path()
         });
-        let status = crate::Git::new(self.client.clone(), path.clone(), None)
-            .status()
-            .await?;
+        let status = self.git_at(checkout).status().await?;
         let reason = if in_use {
             format!(
                 "{branch} is checked out at {path} by a session that has not moved, so the session cannot move there."
             )
-        } else if let Some(reason) = tracking_reason(branch, local.upstream.as_deref()) {
+        } else if let Some(reason) = tracking_reason(branch, &remote, local.upstream.as_deref()) {
             reason
         } else if !status.changes.is_empty() {
             format!(
@@ -190,24 +197,12 @@ impl Project {
         };
         if let Workspace::Worktree { path } = &workspace {
             if attached {
-                let status = crate::Git::new(
-                    self.client.clone(),
-                    path.to_string_lossy().into_owned(),
-                    None,
-                )
-                .status()
-                .await?;
+                let status = self.git_at(path).status().await?;
                 if status.ahead > 0 {
                     return Err(unpushed_reason(branch));
                 }
             }
-            let pulled = crate::Git::new(
-                self.client.clone(),
-                path.to_string_lossy().into_owned(),
-                None,
-            )
-            .pull()
-            .await;
+            let pulled = self.git_at(path).pull().await;
             if let Err(error) = pulled {
                 return Err(format!(
                     "{branch} could not be fast-forwarded to the moved session's pushed head, so the session did not move: {error}"
@@ -245,7 +240,8 @@ impl Project {
     }
 
     pub(crate) async fn discard_id(&self, thread: &str) -> Result<(), String> {
-        self.dispatch(json!({"type": "thread.delete", "threadId": thread}))
+        self.client
+            .dispatch(json!({"type": "thread.delete", "threadId": thread}))
             .await
     }
 }
@@ -307,22 +303,23 @@ pub(crate) async fn projects(
 }
 
 pub(crate) async fn remote_url(client: &Client, root: &str) -> Result<Option<String>, String> {
-    Ok(projects(client, Some(root))
+    Ok(listed(client, root)
         .await?
-        .into_iter()
-        .find(|project| project.root == root)
         .and_then(|project| project.remote_url))
 }
 
+async fn listed(client: &Client, root: &str) -> Result<Option<HostProject>, String> {
+    Ok(projects(client, Some(root))
+        .await?
+        .into_iter()
+        .find(|project| project.root == root))
+}
+
 async fn read_projects(client: &Client) -> Result<Vec<HostProject>, String> {
-    let snapshot = tokio::time::timeout(SHELL_WAIT, async {
-        let mut shell = client
-            .stream("orchestration.subscribeShell", json!({}))
-            .await?;
-        shell.recv().await.ok_or("T3 sent no projects".to_owned())
-    })
-    .await
-    .unwrap_or_else(|_| Err("T3 sent no projects in time.".to_owned()))?;
+    let snapshot = client
+        .first("orchestration.subscribeShell")
+        .await?
+        .ok_or("T3 sent no projects")?;
     Ok(snapshot["snapshot"]["projects"]
         .as_array()
         .into_iter()

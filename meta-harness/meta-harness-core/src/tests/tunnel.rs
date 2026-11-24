@@ -6,7 +6,7 @@ use futures_util::stream::{Pending, pending};
 use http_body_util::{Full, StreamBody};
 use hyper::body::{Bytes, Frame};
 use hyper::{Request, StatusCode};
-use serde_json::json;
+use serde_json::{Value, json};
 use tokio::sync::RwLock;
 use tokio_tungstenite::WebSocketStream;
 use tokio_tungstenite::tungstenite::protocol::Role;
@@ -17,13 +17,15 @@ use crate::tunnel::{checked, client_name_of, form_field, forward, relay};
 const OWNER: &str = "host-1a2b";
 const CLIENT_ID: &str = "eyJ2IjoxLCJuIjoiaG9zdC0xYTJiIiwiciI6W119.signature";
 
+fn body(value: Value) -> Vec<u8> {
+    value.to_string().into_bytes()
+}
+
 fn decision(access: &str) -> Vec<u8> {
-    json!({
+    body(json!({
         "authorization": {"client_id": CLIENT_ID},
         "decision": {"_tag": "pairing-code", "access": access, "code": "CODE"},
-    })
-    .to_string()
-    .into_bytes()
+    }))
 }
 
 async fn passes(body: Vec<u8>, level: Access) -> Result<(), StatusCode> {
@@ -33,10 +35,6 @@ async fn passes(body: Vec<u8>, level: Access) -> Result<(), StatusCode> {
     checked(request, OWNER, level).await.map(|_| ())
 }
 
-fn body(value: serde_json::Value) -> Vec<u8> {
-    value.to_string().into_bytes()
-}
-
 #[tokio::test]
 async fn a_decision_passes_only_within_the_level_its_host_was_invited_at() {
     let deny = json!({"authorization": {"client_id": CLIENT_ID}, "decision": {"_tag": "deny"}});
@@ -44,17 +42,10 @@ async fn a_decision_passes_only_within_the_level_its_host_was_invited_at() {
         "decision": {"_tag": "pairing-code", "code": "CODE"}});
     let session = json!({"authorization": {"client_id": CLIENT_ID},
         "decision": {"_tag": "browser-session", "csrfToken": "token"}});
+    let refused = Err(StatusCode::FORBIDDEN);
     let cases = [
-        (
-            decision("auto"),
-            Access::ApprovalRequired,
-            Err(StatusCode::FORBIDDEN),
-        ),
-        (
-            decision("full-access"),
-            Access::ApprovalRequired,
-            Err(StatusCode::FORBIDDEN),
-        ),
+        (decision("auto"), Access::ApprovalRequired, refused),
+        (decision("full-access"), Access::ApprovalRequired, refused),
         (
             decision("approval-required"),
             Access::ApprovalRequired,
@@ -67,49 +58,27 @@ async fn a_decision_passes_only_within_the_level_its_host_was_invited_at() {
                 json!({"decision": {"_tag": "pairing-code", "access": "read-only", "code": "CODE"}}),
             ),
             Access::ApprovalRequired,
-            Err(StatusCode::FORBIDDEN),
+            refused,
         ),
-        (body(no_level), Access::Auto, Err(StatusCode::FORBIDDEN)),
-        (body(session), Access::Auto, Err(StatusCode::FORBIDDEN)),
+        (body(no_level), Access::Auto, refused),
+        (body(session), Access::Auto, refused),
         (body(deny), Access::Auto, Ok(())),
+        (b"not json".to_vec(), Access::Auto, refused),
+        (decision("root"), Access::Auto, refused),
+        (
+            vec![b' '; 64 * 1024 + 1],
+            Access::Auto,
+            Err(StatusCode::PAYLOAD_TOO_LARGE),
+        ),
     ];
     for (request, level, expected) in cases {
         assert_eq!(passes(request, level).await, expected);
     }
 }
 
-#[tokio::test]
-async fn a_decision_the_tunnel_cannot_read_is_refused() {
-    let invited = Access::Auto;
-    assert_eq!(
-        passes(b"not json".to_vec(), invited).await,
-        Err(StatusCode::FORBIDDEN)
-    );
-    assert_eq!(
-        passes(decision("root"), invited).await,
-        Err(StatusCode::FORBIDDEN)
-    );
-    let large = vec![b' '; 64 * 1024 + 1];
-    assert_eq!(
-        passes(large, invited).await,
-        Err(StatusCode::PAYLOAD_TOO_LARGE)
-    );
-}
-
-#[tokio::test(start_paused = true)]
-async fn a_relay_ends_when_its_peer_goes_silent() {
-    let (socket_end, _held) = tokio::io::duplex(1024);
-    let socket = WebSocketStream::from_raw_socket(socket_end, Role::Client, None).await;
-    let (tcp, _tcp_far) = tokio::io::duplex(1024);
-    tokio::time::timeout(Duration::from_secs(600), relay(tcp, socket))
-        .await
-        .expect("the relay ends once its peer has been silent");
-}
-
 #[test]
 fn a_client_id_names_the_pairing_it_was_registered_for() {
-    let client_id = "eyJ2IjoxLCJuIjoiaG9zdC0xYTJiIiwiciI6W119.signature";
-    assert_eq!(client_name_of(client_id).as_deref(), Some("host-1a2b"));
+    assert_eq!(client_name_of(CLIENT_ID).as_deref(), Some("host-1a2b"));
     assert_eq!(client_name_of("no-signature"), None);
     assert_eq!(
         client_name_of("eyJ2IjoxLCJuIjoiaG9zdC0xYTJiIiwiciI6W119.a.b"),
@@ -167,7 +136,14 @@ fn a_token_form_names_one_client_id_however_it_is_encoded() {
 }
 
 #[tokio::test(start_paused = true)]
-async fn a_relay_ends_when_its_local_end_stops_reading() {
+async fn a_relay_ends_when_its_peer_goes_silent_or_its_local_end_stops_reading() {
+    let (socket_end, _held) = tokio::io::duplex(1024);
+    let socket = WebSocketStream::from_raw_socket(socket_end, Role::Client, None).await;
+    let (tcp, _tcp_far) = tokio::io::duplex(1024);
+    tokio::time::timeout(Duration::from_secs(600), relay(tcp, socket))
+        .await
+        .expect("the relay ends once its peer has been silent");
+
     let (socket_end, far_end) = tokio::io::duplex(1024);
     let socket = WebSocketStream::from_raw_socket(socket_end, Role::Client, None).await;
     let mut peer = WebSocketStream::from_raw_socket(far_end, Role::Server, None).await;

@@ -3,8 +3,8 @@ use std::collections::HashSet;
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 
-use crate::config::{count, failed, sql};
 use crate::handoff::HANDOFF_BYTES;
+use crate::store::{count, failed, sql};
 use crate::{ChatItem, ModelChoice, Permissions};
 
 pub(crate) const SCHEMA: &str = "
@@ -76,11 +76,8 @@ pub struct MoveCheck {
     pub branch: Option<String>,
     pub remote_url: Option<String>,
     pub blocked: Option<String>,
-    #[serde(default)]
     pub moved: bool,
-    #[serde(default)]
     pub moving: Option<Moving>,
-    #[serde(default)]
     pub agent: Option<crate::agents::AgentMoveFacts>,
 }
 
@@ -96,10 +93,8 @@ pub struct MovePackage {
     pub handoff: String,
     pub transcript: Vec<ChatItem>,
     pub transcript_capped: bool,
-    #[serde(default)]
     pub queued: Vec<String>,
     pub transfer: String,
-    #[serde(default)]
     pub agent: Option<Box<crate::agents::AgentCarry>>,
 }
 
@@ -224,11 +219,18 @@ pub(crate) fn carries_credential(remote: &str) -> bool {
     let Some((scheme, rest)) = remote.split_once("://") else {
         return false;
     };
-    let authority = rest.split('/').next().unwrap_or_default();
+    let authority = rest
+        .trim_start_matches('/')
+        .split('/')
+        .next()
+        .unwrap_or_default();
     let Some((userinfo, _host)) = authority.rsplit_once('@') else {
         return false;
     };
-    let web = matches!(scheme.to_ascii_lowercase().as_str(), "http" | "https");
+    let web = matches!(
+        scheme.to_ascii_lowercase().as_str(),
+        "http" | "https" | "ftp" | "ftps"
+    );
     userinfo.contains(':') || (web && !userinfo.is_empty())
 }
 
@@ -285,38 +287,27 @@ pub(crate) fn state(db: &Connection, thread: &str) -> Result<Option<State>, Stri
 }
 
 pub(crate) fn open_move(db: &Connection, thread: &str) -> Result<Option<Moving>, String> {
-    let row: Option<(String, String, String, String, String, i64)> = db
-        .query_row(
-            "SELECT transfer, state, target_address, target_name, target_environment, since_ms \
-             FROM moved_thread WHERE thread = ?1 AND state IN ('preparing', 'handed')",
-            [thread],
-            |row| {
-                Ok((
-                    row.get(0)?,
-                    row.get(1)?,
-                    row.get(2)?,
-                    row.get(3)?,
-                    row.get(4)?,
-                    row.get(5)?,
-                ))
-            },
-        )
-        .optional()
-        .map_err(failed)?;
-    Ok(row.map(
-        |(transfer, state, target_address, target_name, target_environment, since)| Moving {
-            transfer,
-            phase: if state == "handed" {
-                MovePhase::Handed
-            } else {
-                MovePhase::Preparing
-            },
-            target_address,
-            target_name,
-            target_environment,
-            since_ms: count(since),
+    db.query_row(
+        "SELECT transfer, state, target_address, target_name, target_environment, since_ms \
+         FROM moved_thread WHERE thread = ?1 AND state IN ('preparing', 'handed')",
+        [thread],
+        |row| {
+            Ok(Moving {
+                transfer: row.get(0)?,
+                phase: if row.get::<_, String>(1)? == "handed" {
+                    MovePhase::Handed
+                } else {
+                    MovePhase::Preparing
+                },
+                target_address: row.get(2)?,
+                target_name: row.get(3)?,
+                target_environment: row.get(4)?,
+                since_ms: count(row.get(5)?),
+            })
         },
-    ))
+    )
+    .optional()
+    .map_err(failed)
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]

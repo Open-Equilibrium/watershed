@@ -109,11 +109,13 @@ impl Thread {
             let marks = self.marks();
             open()?;
             self.push(action, message).await?;
-            self.git().status().await?;
-            if self
-                .turns()
-                .iter()
-                .any(|turn| matches!(turn.status, TurnStatus::Queued | TurnStatus::Running))
+            let pushed = self.git().status().await?;
+            if pushed.branch.as_deref() != Some(branch.as_str())
+                || (commit && !pushed.changes.is_empty())
+                || self
+                    .turns()
+                    .iter()
+                    .any(|turn| matches!(turn.status, TurnStatus::Queued | TurnStatus::Running))
                 || self.marks() != marks
             {
                 return Err(RACED.to_owned());

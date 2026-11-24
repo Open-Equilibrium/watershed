@@ -12,6 +12,7 @@ mod platform;
 pub mod remote;
 mod service;
 mod statistics;
+mod store;
 mod t3;
 mod thread;
 mod tunnel;
@@ -45,6 +46,7 @@ pub use host_move::{
     Arrival, Harness, Landing, MoveCheck, MoveFinish, MovePackage, MovePhase, MoveRecord, Moving,
 };
 pub use hosts::{Access, ClientInfo, ClientKind, DEFAULT_REMOTE_PORT, HostList, LinkedHostInfo};
+pub use platform::write_atomic;
 pub use service::{CONNECTION_FILE, Service, ServiceConfig, default_home};
 pub use statistics::{ModelUsage, Statistics, ToolCalls, TurnStatistics};
 pub use t3::{Watch, t3_version};
@@ -53,6 +55,7 @@ pub use thread::{
     RunStatus, Schedule, ScheduleKind, Snapshot, Thread, ThreadEvent, Turn, TurnFile, TurnStatus,
     UsageLimits, UsageWindow,
 };
+pub use util::rfc3339_millis;
 pub use visible::{visible, visible_lines, visible_name};
 
 #[cfg(test)]

@@ -9,18 +9,8 @@ use tokio::sync::{Notify, mpsc};
 use tokio_tungstenite::accept_async;
 use tokio_tungstenite::tungstenite::Message;
 
-const WAIT: std::time::Duration = std::time::Duration::from_secs(10);
-
-async fn until(expected: String, done: impl Fn() -> bool) {
-    let polls = async {
-        while !done() {
-            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
-        }
-    };
-    if tokio::time::timeout(WAIT, polls).await.is_err() {
-        panic!("timed out after {WAIT:?} waiting for {expected}");
-    }
-}
+use super::until;
+use crate::t3::Client;
 
 pub fn frame(value: Value) -> Message {
     Message::Text(value.to_string().into())
@@ -56,6 +46,7 @@ pub struct Fake {
     pub origin: String,
     log: Arc<Mutex<Log>>,
     accepted: Arc<AtomicUsize>,
+    hung_up: Arc<AtomicUsize>,
     out: mpsc::UnboundedSender<Out>,
     stop: Arc<Notify>,
 }
@@ -68,9 +59,11 @@ impl Fake {
         let origin = format!("http://{}", listener.local_addr().unwrap());
         let log: Arc<Mutex<Log>> = Arc::default();
         let accepted: Arc<AtomicUsize> = Arc::default();
+        let hung_up: Arc<AtomicUsize> = Arc::default();
         let (out, mut outgoing) = mpsc::unbounded_channel();
         let stop = Arc::new(Notify::new());
         let (shared, counter, stop_task) = (log.clone(), accepted.clone(), stop.clone());
+        let hung_up_task = hung_up.clone();
         tokio::spawn(async move {
             let mut handle_open = true;
             'connections: loop {
@@ -135,15 +128,23 @@ impl Fake {
                         },
                     }
                 }
+                hung_up_task.fetch_add(1, Ordering::SeqCst);
             }
         });
         Self {
             origin,
             log,
             accepted,
+            hung_up,
             out,
             stop,
         }
+    }
+
+    pub async fn client(&self) -> Client {
+        Client::connect(&self.origin, || Box::pin(async { Ok("token".to_owned()) }))
+            .await
+            .unwrap()
     }
 
     pub fn push(&self, tag: &str, values: Vec<Value>) {
@@ -189,6 +190,13 @@ impl Fake {
 
     pub fn connections(&self) -> usize {
         self.accepted.load(Ordering::SeqCst)
+    }
+
+    pub async fn hung_up(&self, count: usize) {
+        until(format!("{count} hang-ups"), || {
+            self.hung_up.load(Ordering::SeqCst) >= count
+        })
+        .await;
     }
 
     pub async fn accepted(&self, count: usize) {

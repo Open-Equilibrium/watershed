@@ -4,6 +4,7 @@ use serde_json::{Value, json};
 
 pub(crate) mod projects;
 
+use crate::git::text;
 use crate::host_move::Harness;
 use crate::t3::{Client, Server};
 use crate::thread::Thread;
@@ -47,30 +48,36 @@ impl Host {
         self.origin.trim_start_matches("http://")
     }
 
+    async fn config(&self) -> Result<Value, String> {
+        self.client.call("server.getConfig", json!({})).await
+    }
+
+    async fn update_settings(&self, patch: Value) -> Result<(), String> {
+        self.client
+            .call("server.updateSettings", json!({"patch": patch}))
+            .await
+            .map(|_| ())
+    }
+
     pub(crate) async fn linked_environments(&self) -> Result<bool, String> {
-        let config = self.client.call("server.getConfig", json!({})).await?;
+        let config = self.config().await?;
         Ok(config["settings"]["linkedEnvironmentsEnabled"]
             .as_bool()
             .unwrap_or(false))
     }
 
     pub(crate) async fn set_linked_environments(&self, on: bool) -> Result<(), String> {
-        self.client
-            .call(
-                "server.updateSettings",
-                json!({"patch": {"linkedEnvironmentsEnabled": on}}),
-            )
+        self.update_settings(json!({"linkedEnvironmentsEnabled": on}))
             .await
-            .map(|_| ())
     }
 
     pub async fn project(&self, root: &Path) -> Result<Project, String> {
         let root = root.to_string_lossy().into_owned();
-        let mut shell = self
+        let snapshot = self
             .client
-            .stream("orchestration.subscribeShell", json!({}))
-            .await?;
-        let snapshot = shell.recv().await.ok_or("T3 sent no projects")?;
+            .first("orchestration.subscribeShell")
+            .await?
+            .ok_or("T3 sent no projects")?;
         let existing = snapshot["snapshot"]["projects"]
             .as_array()
             .into_iter()
@@ -107,7 +114,7 @@ impl Host {
     }
 
     pub async fn providers(&self) -> Result<Vec<Provider>, String> {
-        let config = self.client.call("server.getConfig", json!({})).await?;
+        let config = self.config().await?;
         Ok(config["providers"]
             .as_array()
             .into_iter()
@@ -155,7 +162,7 @@ impl Host {
     }
 
     pub async fn environment_name(&self) -> Result<String, String> {
-        let config = self.client.call("server.getConfig", json!({})).await?;
+        let config = self.config().await?;
         Ok(config["environment"]["label"]
             .as_str()
             .unwrap_or_default()
@@ -163,18 +170,12 @@ impl Host {
     }
 
     pub(crate) async fn scheduled_tasks(&self) -> Result<Value, String> {
-        let mut stream = self
-            .client
-            .stream("scheduledTasks.subscribe", json!({}))
-            .await?;
-        stream
-            .recv()
-            .await
-            .ok_or_else(|| "T3 sent no routines".to_owned())
+        let list = self.client.first("scheduledTasks.subscribe").await?;
+        list.ok_or_else(|| "T3 sent no routines".to_owned())
     }
 
     pub async fn environment_id(&self) -> Result<String, String> {
-        let config = self.client.call("server.getConfig", json!({})).await?;
+        let config = self.config().await?;
         match config["environment"]["environmentId"].as_str() {
             Some(id) if !id.is_empty() => Ok(id.to_owned()),
             _ => Err("T3 reports no environment id.".to_owned()),
@@ -182,7 +183,7 @@ impl Host {
     }
 
     pub async fn environment_machine(&self) -> Result<String, String> {
-        let config = self.client.call("server.getConfig", json!({})).await?;
+        let config = self.config().await?;
         Ok(config["settings"]["environmentIcon"]
             .as_str()
             .or_else(|| config["environment"]["platform"]["machine"].as_str())
@@ -191,38 +192,28 @@ impl Host {
     }
 
     pub async fn writer_model(&self) -> Result<Option<ModelChoice>, String> {
-        let config = self.client.call("server.getConfig", json!({})).await?;
+        let config = self.config().await?;
         Ok(ModelChoice::from_t3(
             &config["settings"]["textGenerationModelSelection"],
         ))
     }
 
     pub async fn set_writer_model(&self, choice: &ModelChoice) -> Result<(), String> {
-        self.client
-            .call(
-                "server.updateSettings",
-                json!({"patch": {
-                    "textGenerationModelSelection": choice.to_t3(),
-                    "sourceControlWriterModelSelection": null,
-                }}),
-            )
-            .await
-            .map(|_| ())
+        self.update_settings(json!({
+            "textGenerationModelSelection": choice.to_t3(),
+            "sourceControlWriterModelSelection": null,
+        }))
+        .await
     }
 
     pub(crate) async fn provider_instances(&self) -> Result<Value, String> {
-        let config = self.client.call("server.getConfig", json!({})).await?;
+        let config = self.config().await?;
         Ok(config["settings"]["providerInstances"].clone())
     }
 
     pub(crate) async fn set_provider_instances(&self, instances: Value) -> Result<(), String> {
-        self.client
-            .call(
-                "server.updateSettings",
-                json!({"patch": {"providerInstances": instances}}),
-            )
+        self.update_settings(json!({"providerInstances": instances}))
             .await
-            .map(|_| ())
     }
 
     pub async fn shutdown(&self) {
@@ -304,13 +295,9 @@ pub struct ThreadSummary {
     pub worktree: Option<PathBuf>,
     pub running: bool,
     pub archived: bool,
-    #[serde(default)]
     pub harness: Option<Harness>,
-    #[serde(default)]
     pub harness_known: bool,
-    #[serde(default)]
     pub moving: Option<crate::host_move::Moving>,
-    #[serde(default)]
     pub visited_ms: Option<u64>,
 }
 
@@ -358,7 +345,6 @@ pub struct StartThread {
     pub model: ModelChoice,
     pub workspace: Workspace,
     pub permissions: Permissions,
-    #[serde(default)]
     pub message_id: Option<String>,
 }
 
@@ -372,10 +358,6 @@ pub struct Project {
 impl Project {
     pub async fn start(&self, start: StartThread) -> Result<Thread, String> {
         let title = start.text.lines().next().unwrap_or_default().to_owned();
-        self.launch(start, title).await
-    }
-
-    pub(crate) async fn launch(&self, start: StartThread, title: String) -> Result<Thread, String> {
         self.launch_as(crate::t3::fresh_id("thread"), start, title)
             .await
     }
@@ -422,11 +404,11 @@ impl Project {
     }
 
     pub async fn threads(&self) -> Result<Vec<ThreadSummary>, String> {
-        let mut shell = self
+        let snapshot = self
             .client
-            .stream("orchestration.subscribeShell", json!({}))
-            .await?;
-        let snapshot = shell.recv().await.ok_or("T3 sent no threads")?;
+            .first("orchestration.subscribeShell")
+            .await?
+            .ok_or("T3 sent no threads")?;
         let mut threads: Vec<ThreadSummary> = snapshot["snapshot"]["threads"]
             .as_array()
             .into_iter()
@@ -469,7 +451,8 @@ impl Project {
     }
 
     pub async fn delete(&self, thread: &ThreadSummary, worktree: bool) -> Result<(), String> {
-        self.dispatch(json!({"type": "thread.delete", "threadId": thread.id}))
+        self.client
+            .dispatch(json!({"type": "thread.delete", "threadId": thread.id}))
             .await?;
         match (worktree, &thread.worktree) {
             (true, Some(path)) => self.remove_worktree(path).await,
@@ -493,24 +476,14 @@ impl Project {
         } else {
             "thread.unarchive"
         };
-        self.dispatch(json!({"type": kind, "threadId": thread}))
-            .await
-    }
-
-    async fn dispatch(&self, command: Value) -> Result<(), String> {
         self.client
-            .command("orchestration.dispatchCommand", command)
+            .dispatch(json!({"type": kind, "threadId": thread}))
             .await
-            .map(|_| ())
     }
 
     pub async fn open(&self, id: &str) -> Result<Thread, String> {
         Thread::follow(self.client.clone(), id.to_owned(), self.root.clone()).await
     }
-}
-
-fn text(value: &Value) -> String {
-    value.as_str().unwrap_or_default().to_owned()
 }
 
 pub(crate) fn write_settings(home: &Path, agents: &[AcpAgent]) -> Result<(), String> {
@@ -550,10 +523,8 @@ pub(crate) fn write_settings(home: &Path, agents: &[AcpAgent]) -> Result<(), Str
         });
     }
     std::fs::create_dir_all(&dir).map_err(|e| format!("Could not create T3's data folder: {e}"))?;
-    let temporary = dir.join("settings.json.tmp");
-    std::fs::write(&temporary, settings.to_string())
-        .map_err(|e| format!("Could not write T3's settings: {e}"))?;
-    std::fs::rename(&temporary, &file).map_err(|e| format!("Could not write T3's settings: {e}"))
+    crate::platform::write_atomic(&file, settings.to_string().as_bytes(), true)
+        .map_err(|e| format!("Could not write T3's settings: {e}"))
 }
 
 fn initial_message(start: &StartThread) -> Value {

@@ -41,15 +41,14 @@ M2 delivers Meta-Harness as a **self-contained, host-scoped headless control pla
 - Persistent agents (ADR-0283): sharing with Can use and Can edit once the Liquid account exists.
 - Host links through the Liquid account and an end-to-end relay (ADR-0285); Tailscale carries them until then (ADR-0299).
 - Moving a session whose host is offline, through the account's sync (ADR-0284, ADR-0289); until then a session moves only while both hosts answer (ADR-0308).
+- `meta host add` asks for the pairing code, and T3 gets it through stdin once T3 reads it there (ADR-0325); a refused move removes the clean worktree it created (ADR-0326).
+- Left from the Meta-Harness review gate: a tunnel relay that ends on a TCP half-close; uninstall on Windows when the installation and the temporary folder lie on different volumes; a child that starts its own session escaping T3's process group at stop and the `flow acp` probe's at timeout; install and uninstall running at once on one prefix; a Windows contract check that the ACP agent ends with the service.
 - API/protocol surface for Liquid and BYOA: session registry, live event and transcript streams, artifact/log/handoff queries, config read/write proposals, agent schedule/trigger control, answers to a harness's own approvals and questions, revert.
 - Central configuration for Flow Agent, which receives only its global authority and explicit Flows rather than a project-local config layer; device-local Runtime bindings remain owned by the execution host. Liquid edits the configuration across devices after sync and approved mockups.
 - Control plane: session registry, routing, task state, attention state and agent schedule/trigger skeleton.
 - Reference scenario for schedules: a scheduled agent keeps a news feed as a database page in Liquid and changes it only with the approval its Workspace Role requires, as `disler/pi-durable-news-agent` does with its own app.
-- Host-local Meta-Harness agent executor that rejects cross-host agent-process control (on T3 Code: ADR-0280 to ADR-0291).
-- Adapters: at least one external CLI adapter.
-- Orchestration tools for agents: T3 Code's own, across hosts through its peer links (ADR-0253, ADR-0288, [V-Spec](docs/concept/V-Spec_MetaHarness.html#orchestration)): an agent starts, messages, reads, steers and stops subagents of any harness and model, on other agent hosts too, and hosts link through the Liquid account (ADR-0285); Claude Code joins Codex as a T3 provider.
+- Orchestration tools for agents: T3 Code's own, across hosts through its peer links (ADR-0253, ADR-0288, [V-Spec](docs/concept/V-Spec_MetaHarness.html#orchestration)): an agent starts, messages, reads, steers and stops subagents of any harness and model, on other agent hosts too, and hosts link through the Liquid account (ADR-0285).
 - Event/transcript ingestion from agents; artifact/log/handoff indexing (logs, structured summaries, host-provided diffs, handoff packs, checkpoints).
-- **No rich standalone GUI**; Meta-Harness ships as CLI plus login service (ADR-0286).
 
 **DoD:** monitor, steer and configure at least two different CLI agents on one agent host from one control surface, with both represented through one normalized session/event model; reject attempts to claim or control a process on another host; run without Liquid; expose the public API/protocol over both connections; integrate Flow Agent through its public runtime surfaces (not its internals); resolve shared config without duplicated per-agent config directories for the same capability; require approval plus an audit record for every sensitive config change; and let a session on one host start, message, steer and stop a subagent of another harness on another agent host through the orchestration tools.
 
@@ -66,6 +65,7 @@ The macOS Liquid app runs its agent sessions on a pinned T3 Code server through 
 - Say in the Diff panel exactly what it covers (ADR-0222), copying T3 Code's wording where it has one.
 - Project scripts in the session card, once Liquid has a terminal (ADR-0295).
 - Android follows with host links (ADR-0285).
+- A stream from another host says why it ended, and Liquid shows it (ADR-0327).
 
 #### M3a — Local Workspace foundation
 
