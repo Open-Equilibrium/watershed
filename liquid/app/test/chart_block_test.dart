@@ -119,15 +119,15 @@ void main() {
     );
   });
 
-  testWidgets('a line chart of one point asks for a second', (tester) async {
+  Future<void> lineChartOf(WidgetTester tester, String title) async {
     await kit.show(tester, [
-      const CalculationPart([
+      CalculationPart(const [
         BridgeLineSetup(
           label: 'Rent',
           formula: '900',
           style: BridgeLineStyle.plain,
         ),
-      ], title: 'Budget'),
+      ], title: title),
       const ChartPart(barCount, [BridgeChartPoint(label: 'Rent', value: 900)]),
     ]);
     final views = kit.fake.views[kit.page]!;
@@ -145,7 +145,18 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
+  }
+
+  testWidgets('a line chart of one point asks for a second', (tester) async {
+    await lineChartOf(tester, 'Budget');
     expect(inChart(find.text('from Budget')), findsOneWidget);
     expect(inChart(find.text('A line needs two points')), findsOneWidget);
+  });
+
+  testWidgets('a Chart from an untitled Calculation says from Untitled', (
+    tester,
+  ) async {
+    await lineChartOf(tester, '');
+    expect(inChart(find.text('from Untitled')), findsOneWidget);
   });
 }

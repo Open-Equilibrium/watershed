@@ -366,7 +366,8 @@ class _ChartBlockState extends State<ChartBlock> {
                   behavior: HitTestBehavior.opaque,
                   onTap: _togglePanel,
                   child: Text(switch (chart?.source) {
-                    final source? => 'from $source',
+                    final source? =>
+                      'from ${source.isEmpty ? untitled : source}',
                     null => 'Choose data',
                   }, style: faint),
                 ),
