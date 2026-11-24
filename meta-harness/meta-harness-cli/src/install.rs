@@ -52,6 +52,22 @@ pub fn install_files(bundle: &Path, prefix: &Path, platform: &str) -> Result<Pat
         std::fs::create_dir_all(folder)
             .map_err(|e| format!("Could not create {}: {e}", folder.display()))?;
     }
+    let lock_file = lib.join(".install.lock");
+    let lock = std::fs::OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(false)
+        .open(&lock_file)
+        .map_err(|e| format!("Could not open {}: {e}", lock_file.display()))?;
+    lock.try_lock().map_err(|error| match error {
+        std::fs::TryLockError::WouldBlock => format!(
+            "Another Meta-Harness installation runs in {}; wait for it to finish, then install again.",
+            prefix.display()
+        ),
+        std::fs::TryLockError::Error(error) => {
+            format!("Could not lock {}: {error}", lock_file.display())
+        }
+    })?;
     let name = t3_source.file_name().unwrap_or_default();
     let stage = lib.join(format!(".{}.install", name.to_string_lossy()));
     let _ = std::fs::remove_dir_all(&stage);
@@ -176,6 +192,15 @@ mod tests {
                 .unwrap_err()
                 .contains("not other-x64")
         );
+        let lock = std::fs::File::create(prefix.join("lib/meta-harness/.install.lock")).unwrap();
+        lock.lock().unwrap();
+        let busy = install_files(&bundle, &prefix, "test-x64").unwrap_err();
+        assert!(busy.contains("Another"), "{busy}");
+        assert_eq!(
+            std::fs::read_to_string(prefix.join("bin/meta")).unwrap(),
+            "old meta"
+        );
+        drop(lock);
         let program = install_files(&bundle, &prefix, "test-x64").unwrap();
 
         assert_eq!(std::fs::read_to_string(&program).unwrap(), "new meta");
