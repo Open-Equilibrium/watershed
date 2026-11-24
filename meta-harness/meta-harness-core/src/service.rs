@@ -99,7 +99,8 @@ struct Shared {
     remote: std::sync::Mutex<listener::Remote>,
     remote_serial: tokio::sync::Mutex<()>,
     links: Links,
-    handshakes: Arc<tokio::sync::Semaphore>,
+    local_handshakes: Arc<tokio::sync::Semaphore>,
+    remote_handshakes: Arc<tokio::sync::Semaphore>,
     sign_ins: Arc<tokio::sync::RwLock<()>>,
     moves: tokio::sync::RwLock<()>,
     transfers: transfers::TransferLocks,
@@ -175,7 +176,8 @@ impl Service {
             remote: std::sync::Mutex::new(listener::Remote::default()),
             remote_serial: tokio::sync::Mutex::default(),
             links,
-            handshakes: Arc::new(tokio::sync::Semaphore::new(HANDSHAKES)),
+            local_handshakes: Arc::new(tokio::sync::Semaphore::new(HANDSHAKES)),
+            remote_handshakes: Arc::new(tokio::sync::Semaphore::new(HANDSHAKES)),
             sign_ins: Arc::new(tokio::sync::RwLock::new(())),
             moves: tokio::sync::RwLock::default(),
             transfers: transfers::TransferLocks::default(),
@@ -294,10 +296,11 @@ async fn accept(
     ends: tokio::sync::watch::Receiver<bool>,
 ) {
     crate::util::accept_each(listener, move |socket| {
-        let slot = match kind {
-            Listener::Local => Ok(None),
-            Listener::Remote => shared.handshakes.clone().try_acquire_owned().map(Some),
+        let gate = match kind {
+            Listener::Local => &shared.local_handshakes,
+            Listener::Remote => &shared.remote_handshakes,
         };
+        let slot = gate.clone().try_acquire_owned();
         let (shared, ends) = (shared.clone(), ends.clone());
         async move {
             if let Ok(slot) = slot {
@@ -314,7 +317,7 @@ async fn serve(
     socket: TcpStream,
     listener: Listener,
     ends: tokio::sync::watch::Receiver<bool>,
-    slot: Option<tokio::sync::OwnedSemaphorePermit>,
+    slot: tokio::sync::OwnedSemaphorePermit,
 ) {
     let mut client = String::new();
     let mut admission = None;

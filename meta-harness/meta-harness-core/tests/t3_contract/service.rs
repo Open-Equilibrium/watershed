@@ -305,6 +305,25 @@ async fn the_service_refuses_a_client_that_names_no_api_version_or_another() {
     service.stop().await;
 }
 
+#[tokio::test(flavor = "multi_thread")]
+async fn the_local_listener_holds_at_most_32_handshakes_and_closes_the_rest() {
+    let (dir, _repo, _) = fixture();
+    let (service, _host) = start_service(&dir.path().join("meta")).await;
+    let address = service.url.trim_start_matches("ws://").to_owned();
+    let idle =
+        futures_util::future::join_all((0..32).map(|_| tokio::net::TcpStream::connect(&address)))
+            .await;
+    let mut extra = tokio::net::TcpStream::connect(&address).await.unwrap();
+    let mut byte = [0u8; 1];
+    let closed = tokio::time::timeout(Duration::from_secs(5), extra.read(&mut byte))
+        .await
+        .expect("closed without waiting for a handshake")
+        .unwrap();
+    assert_eq!(closed, 0, "the extra connection is closed");
+    drop(idle);
+    service.stop().await;
+}
+
 async fn open_client(
     service: &Service,
 ) -> tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>> {
