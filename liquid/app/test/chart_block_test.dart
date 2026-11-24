@@ -104,6 +104,44 @@ void main() {
     semantics.dispose();
   });
 
+  testWidgets('a Chart setting chosen before the chart reloads keeps the '
+      'earlier one', (tester) async {
+    await kit.show(tester, [
+      TablePart(expenses),
+      const ChartPart(barCount, [BridgeChartPoint(label: 'Home', value: 1)]),
+    ]);
+    final views = kit.fake.views[kit.page]!;
+    await kit.workspace.apply(
+      mutation(
+        BridgeMutationKind.setChart,
+        page: kit.page,
+        block: views.last.block,
+        chart: BridgeChartSetup(
+          kind: BridgeChartKind.bar,
+          table: views.first.block,
+          value: BridgeChartValue.count,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tap(tester, find.byKey(const Key('chart data')));
+    kit.fake.deferredKinds = {BridgeQueryKind.chart};
+    kit.fake.deferred = [];
+    await tap(tester, find.byKey(const Key('chart Group by')));
+    await tap(tester, find.text('Category').last);
+    await tap(tester, find.byKey(const Key('chart kind')));
+    await tap(tester, find.text('Pie'));
+    kit.fake.deferredKinds = {};
+    for (final release in [...kit.fake.deferred!]) {
+      release.complete();
+    }
+    await tester.pumpAndSettle();
+    expect(
+      (lastSet().kind, lastSet().group),
+      (BridgeChartKind.pie, 'category'),
+    );
+  });
+
   testWidgets('the Chart data panel stays beside the sidebar at the minimum '
       'width', (tester) async {
     await kit.show(tester, [

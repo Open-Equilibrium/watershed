@@ -223,36 +223,39 @@ class _ChartBlockState extends State<ChartBlock> {
     }
   }
 
-  void _set(BridgeChartSetup setup) {
-    unawaited(
-      widget.views
-          .write(
-            mutation(
-              BridgeMutationKind.setChart,
-              page: _page,
-              block: _block,
-              chart: setup,
-            ),
-            [_block],
-          )
-          .then((_) {}, onError: (Object _) {}),
-    );
+  Future<void> _writes = Future.value();
+
+  void _set(BridgeChartSetup Function(BridgeChartSetup stored) edit) {
+    final run = _writes.then((_) async {
+      final stored = await _state.read(
+        query(BridgeQueryKind.chart, page: _page, block: _block),
+      );
+      await widget.views.write(
+        mutation(
+          BridgeMutationKind.setChart,
+          page: _page,
+          block: _block,
+          chart: edit(stored.chart?.setup ?? _defaultSetup),
+        ),
+        [_block],
+      );
+    });
+    _writes = run.then<void>((_) {}, onError: (Object _) {});
   }
 
-  BridgeChartSetup get _setup =>
-      _chart?.setup ??
-      const BridgeChartSetup(
-        kind: BridgeChartKind.bar,
-        value: BridgeChartValue.count,
-      );
+  static const _defaultSetup = BridgeChartSetup(
+    kind: BridgeChartKind.bar,
+    value: BridgeChartValue.count,
+  );
 
-  BridgeChartSetup _with({
+  BridgeChartSetup get _setup => _chart?.setup ?? _defaultSetup;
+
+  BridgeChartSetup Function(BridgeChartSetup) _with({
     BridgeChartKind? kind,
     (String?, String?, String?, String?)? source,
     (String?,)? group,
     (BridgeChartValue, String?)? value,
-  }) {
-    final setup = _setup;
+  }) => (setup) {
     final (table, page, block, file) =
         source ?? (setup.table, setup.page, setup.block, setup.source);
     final (measure, field) = value ?? (setup.value, setup.field);
@@ -266,7 +269,7 @@ class _ChartBlockState extends State<ChartBlock> {
       value: measure,
       field: field,
     );
-  }
+  };
 
   void _togglePanel() {
     if (_panel.isShowing) {
