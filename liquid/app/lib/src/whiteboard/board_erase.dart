@@ -29,21 +29,28 @@ extension _BoardErase on BoardSurfaceState {
       final source = board.cache.bounds(element);
       final sx = source.width == 0 ? 1.0 : element.w / source.width;
       final sy = source.height == 0 ? 1.0 : element.h / source.height;
-      final local = unturned(element, at);
-      final drawn = Offset(
-        source.left + (local.dx - element.x) / sx,
-        source.top + (local.dy - element.y) / sy,
+      InkPoint toBoard(InkPoint point) => InkPoint(
+        element.x + (point.x - source.left) * sx,
+        element.y + (point.y - source.top) * sy,
+        point.pressure,
       );
-      final scale = math.max(sx.abs(), sy.abs());
-      final half = inkWidth(element.pen, element.width) / 2;
+      InkPoint toSource(InkPoint point) => InkPoint(
+        source.left + (point.x - element.x) / sx,
+        source.top + (point.y - element.y) / sy,
+        point.pressure,
+      );
       final pieces = eraseInside(
-        board.cache.points(element),
-        drawn,
-        radius / (scale == 0 ? 1 : scale),
-        halfWidth: half,
+        [for (final point in board.cache.points(element)) toBoard(point)],
+        unturned(element, at),
+        radius,
+        halfWidth:
+            inkWidth(element.pen, element.width) /
+            2 *
+            math.max(sx.abs(), sy.abs()),
       );
       _taken(element);
-      for (final piece in pieces) {
+      for (final boardPiece in pieces) {
+        final piece = [for (final point in boardPiece) toSource(point)];
         final bounds = pointsBounds(piece);
         final unturnedFrame = Rect.fromLTWH(
           element.x + (bounds.left - source.left) * sx,

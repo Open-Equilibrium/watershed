@@ -568,6 +568,18 @@ void main() {
     },
   );
 
+  testWidgets('a partial erase cuts a stretched stroke where the circle is', (
+    tester,
+  ) async {
+    await showFocused(tester, [
+      stroke(across(100), frame: const Rect.fromLTWH(100, 100, 100, 0)),
+    ]);
+    await key(tester, LogicalKeyboardKey.keyE);
+    await draw(tester, [const Offset(208, 100), const Offset(208, 101)]);
+    final piece = lastEdit().add.single;
+    expect(piece.x + piece.w, lessThan(197), reason: 'cut 12 board px short');
+  });
+
   testWidgets('⋯ › Delete removes the Whiteboard', (tester) async {
     await kit.show(tester, [
       const TextPart('Intro'),
