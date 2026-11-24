@@ -117,4 +117,14 @@ index 0..2
       ],
     );
   });
+
+  test('the width bound covers a plain line that no sample includes', () {
+    final lines = [
+      for (var index = 0; index < 8; index++)
+        DiffLine(DiffKind.added, '\u200B' * (990 + index)),
+      DiffLine(DiffKind.added, 'x' * 900),
+    ];
+
+    expect(widestLines(lines).columns, greaterThanOrEqualTo(900));
+  });
 }

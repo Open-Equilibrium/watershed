@@ -45,7 +45,7 @@ class _DiffViewState extends State<DiffView> {
   BridgeFileChange? _selected;
   List<DiffLine> _lines = const [];
 
-  List<String> _widest = const [];
+  ({List<String> texts, int columns}) _widest = (texts: const [], columns: 0);
 
   String? _note;
   String? _shownPath;
@@ -111,7 +111,7 @@ class _DiffViewState extends State<DiffView> {
       _selected = change;
       if (change?.path != _shownPath || _comparison != _shownComparison) {
         _lines = const [];
-        _widest = const [];
+        _widest = (texts: const [], columns: 0);
         _note = null;
       }
     });

@@ -28,7 +28,7 @@ class PatchPane extends StatelessWidget {
   final BridgeFileChange? change;
   final List<DiffLine> lines;
 
-  final List<String> widest;
+  final ({List<String> texts, int columns}) widest;
 
   final String? note;
   final DiffSettings settings;
@@ -144,10 +144,13 @@ class PatchPane extends StatelessWidget {
     final scaler = MediaQuery.textScalerOf(context);
     final split = settings.layout == DiffLayout.split;
     final code =
-        widest.fold(
-          0.0,
-          (wide, text) =>
-              math.max(wide, measureText(text, style, scaler).width),
+        math.max(
+          widest.texts.fold(
+            0.0,
+            (wide, text) =>
+                math.max(wide, measureText(text, style, scaler).width),
+          ),
+          widest.columns * measureText('0', style, scaler).width,
         ) +
         WsMetrics.space6;
     final rows = split ? splitRows(lines) : const <SplitRow>[];
