@@ -343,6 +343,13 @@ impl<'w, S: Store> Values<'w, S> {
             block.as_str().to_string(),
             lines[at].id.clone(),
         );
+        let source = lines[at].setup.formula.trim();
+        self.evaluated(key, source, || {
+            Context::Line(page.clone(), block.clone(), Rc::clone(lines), at)
+        })
+    }
+
+    fn evaluated(&mut self, key: Key, source: &str, context: impl FnOnce() -> Context) -> Value {
         if let Some(value) = self.memo.get(&key) {
             return value.clone();
         }
@@ -358,15 +365,11 @@ impl<'w, S: Store> Values<'w, S> {
         }
         self.path.push(key.clone());
         let cuts = self.cuts;
-        let source = lines[at].setup.formula.trim();
-        let value = if source.is_empty() {
+        let value = if source.trim().is_empty() {
             Value::Blank
         } else {
             match Formula::parse(source) {
-                Ok(formula) => self.deeper(
-                    &formula,
-                    Context::Line(page.clone(), block.clone(), Rc::clone(lines), at),
-                ),
+                Ok(formula) => self.deeper(&formula, context()),
                 Err(_) => Value::Error(crate::Failure::Name),
             }
         };
@@ -458,39 +461,9 @@ impl<'w, S: Store> Values<'w, S> {
             row.as_str().to_string(),
             field.id.as_str().to_string(),
         );
-        if let Some(value) = self.memo.get(&key) {
-            return value.clone();
-        }
-        if self.cut.get(&key).is_some_and(|depth| self.depth >= *depth) {
-            self.cuts += 1;
-            return MISSING;
-        }
-        if !self.visiting.insert(key.clone()) {
-            self.cuts += 1;
-            let from = self.path.iter().rposition(|on| *on == key).unwrap_or(0);
-            self.cyclic.extend(self.path[from..].iter().cloned());
-            return MISSING;
-        }
-        self.path.push(key.clone());
-        let cuts = self.cuts;
-        let value = match Formula::parse(&field.formula) {
-            _ if field.formula.trim().is_empty() => Value::Blank,
-            Ok(formula) => self.deeper(&formula, Context::Row(table.clone(), row.clone())),
-            Err(_) => Value::Error(crate::Failure::Name),
-        };
-        self.visiting.remove(&key);
-        self.path.pop();
-        let value = if self.cyclic.contains(&key) {
-            MISSING
-        } else {
-            value
-        };
-        if self.cuts == cuts {
-            self.memo.insert(key, value.clone());
-        } else {
-            self.cut.insert(key, self.depth);
-        }
-        value
+        self.evaluated(key, &field.formula, || {
+            Context::Row(table.clone(), row.clone())
+        })
     }
 
     fn column(&mut self, table: &str, field: &str) -> Operand {
