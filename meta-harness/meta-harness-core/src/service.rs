@@ -28,7 +28,7 @@ use crate::host_move;
 use crate::hosts::{self, Links};
 
 use crate::util::IDLE;
-use crate::{AcpAgent, Host, HostConfig, Project, Thread, tunnel};
+use crate::{AcpAgent, Host, HostConfig, Project, Thread, Watch, tunnel};
 use admit::{Admission, Caller, Listener, admit, header, revoked};
 
 pub const CONNECTION_FILE: &str = "connection.json";
@@ -508,6 +508,14 @@ fn to(value: impl Serialize) -> Result<Value, String> {
     serde_json::to_value(value).map_err(|e| e.to_string())
 }
 
+fn watch_items<T: Clone + Serialize + Send + Sync + 'static>(
+    watch: Watch<T>,
+) -> impl futures_util::Stream<Item = Result<Value, String>> + Send {
+    unfold(watch, |mut watch| async move {
+        Some((to(watch.changed().await?), watch))
+    })
+}
+
 struct Session {
     shared: Arc<Shared>,
     client: String,
@@ -790,19 +798,11 @@ impl Session {
             }
             Stream::Servers { root, id: thread } => {
                 let watch = self.thread(&root, &thread).await?.servers().await?;
-                let first = to(watch.current())?;
-                let items = unfold(watch, |mut watch| async move {
-                    Some((to(watch.changed().await?), watch))
-                });
-                answer(out, id, first, items).await;
+                answer(out, id, to(watch.current())?, watch_items(watch)).await;
             }
             Stream::Automations { root, id: thread } => {
                 let watch = self.thread(&root, &thread).await?.automations().await?;
-                let first = to(watch.current())?;
-                let items = unfold(watch, |mut watch| async move {
-                    Some((to(watch.changed().await?), watch))
-                });
-                answer(out, id, first, items).await;
+                answer(out, id, to(watch.current())?, watch_items(watch)).await;
             }
             Stream::LineageChanges { root, id: thread } => {
                 let changes = self.thread(&root, &thread).await?.lineage_changes().await?;
