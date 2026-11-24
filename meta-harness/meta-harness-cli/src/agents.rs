@@ -2,7 +2,7 @@ use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use meta_harness_core::{
-    ModelChoice, NewAgent, NewRoutine, Permissions, Schedule, ScheduleKind, remote,
+    ModelChoice, NewAgent, NewRoutine, Permissions, Schedule, ScheduleKind, remote, rfc3339_millis,
 };
 
 use crate::{USAGE, print};
@@ -236,77 +236,16 @@ fn time_of_day(text: &str) -> Result<(), String> {
 fn future_instant(text: &str) -> Result<(), String> {
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map_or(0, |elapsed| elapsed.as_secs());
-    match unix_seconds(text) {
-        Some(at) if at > i64::try_from(now).unwrap_or(i64::MAX) => Ok(()),
+        .map_or(0, |elapsed| {
+            i64::try_from(elapsed.as_millis()).unwrap_or(i64::MAX)
+        });
+    match rfc3339_millis(text) {
+        Some(at) if at > now => Ok(()),
         Some(_) => Err(format!("{text:?} is not later than now.")),
         None => Err(format!(
             "{text:?} is no date and time with an offset, such as 2026-12-01T07:30:00+01:00."
         )),
     }
-}
-
-fn unix_seconds(text: &str) -> Option<i64> {
-    let (date, time) = text.split_once('T')?;
-    let (clock, zone) = time.split_at_checked(8)?;
-    let [year, month, day] = date.split('-').collect::<Vec<_>>()[..] else {
-        return None;
-    };
-    let [hour, minute, second] = clock.split(':').collect::<Vec<_>>()[..] else {
-        return None;
-    };
-    let (year, month, day) = (field(year, 4)?, field(month, 2)?, field(day, 2)?);
-    let (hour, minute, second) = (field(hour, 2)?, field(minute, 2)?, field(second, 2)?);
-    if !(1..=12).contains(&month)
-        || !(1..=days_in_month(year, month)).contains(&day)
-        || hour > 23
-        || minute > 59
-        || second > 59
-    {
-        return None;
-    }
-    let offset = match zone {
-        "Z" => 0,
-        _ => {
-            let (sign, hours_minutes) = zone.split_at_checked(1)?;
-            let (hours, minutes) = hours_minutes.split_once(':')?;
-            let (hours, minutes) = (field(hours, 2)?, field(minutes, 2)?);
-            if hours > 23 || minutes > 59 {
-                return None;
-            }
-            let seconds = hours * 3600 + minutes * 60;
-            match sign {
-                "+" => seconds,
-                "-" => -seconds,
-                _ => return None,
-            }
-        }
-    };
-    Some(days_from_civil(year, month, day) * 86_400 + hour * 3600 + minute * 60 + second - offset)
-}
-
-fn field(text: &str, width: usize) -> Option<i64> {
-    (text.len() == width && text.bytes().all(|b| b.is_ascii_digit()))
-        .then(|| text.parse().ok())
-        .flatten()
-}
-
-fn days_in_month(year: i64, month: i64) -> i64 {
-    match month {
-        2 if year % 4 == 0 && (year % 100 != 0 || year % 400 == 0) => 29,
-        2 => 28,
-        4 | 6 | 9 | 11 => 30,
-        _ => 31,
-    }
-}
-
-fn days_from_civil(year: i64, month: i64, day: i64) -> i64 {
-    let year = if month <= 2 { year - 1 } else { year };
-    let era = year.div_euclid(400);
-    let year_of_era = year - era * 400;
-    let day_of_year = (153 * ((month + 9) % 12) + 2) / 5 + day - 1;
-    let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
-    era * 146_097 + day_of_era - 719_468
 }
 
 fn weekdays(list: &str) -> Result<Vec<u8>, String> {
@@ -327,7 +266,7 @@ fn weekdays(list: &str) -> Result<Vec<u8>, String> {
 mod tests {
     use meta_harness_core::{Permissions, ScheduleKind};
 
-    use super::{new_agent, routine, unix_seconds};
+    use super::{new_agent, rfc3339_millis, routine};
 
     #[test]
     fn an_agent_needs_a_project_and_a_model_and_asks_for_approval_by_default() {
@@ -456,8 +395,14 @@ mod tests {
             let once = routine(&["--once", right, "--prompt", "Once."]).unwrap();
             assert_eq!(once.schedule.run_at.as_deref(), Some(right));
         }
-        assert_eq!(unix_seconds("1970-01-01T00:00:00Z"), Some(0));
-        assert_eq!(unix_seconds("2000-03-01T00:00:00Z"), Some(951_868_800));
-        assert_eq!(unix_seconds("2000-03-01T01:00:00+01:00"), Some(951_868_800));
+        assert_eq!(rfc3339_millis("1970-01-01T00:00:00Z"), Some(0));
+        assert_eq!(
+            rfc3339_millis("2000-03-01T00:00:00Z"),
+            Some(951_868_800_000)
+        );
+        assert_eq!(
+            rfc3339_millis("2000-03-01T01:00:00+01:00"),
+            Some(951_868_800_000)
+        );
     }
 }

@@ -54,6 +54,7 @@ pub use thread::{
     RunStatus, Schedule, ScheduleKind, Snapshot, Thread, ThreadEvent, Turn, TurnFile, TurnStatus,
     UsageLimits, UsageWindow,
 };
+pub use util::rfc3339_millis;
 pub use visible::{visible, visible_lines, visible_name};
 
 #[cfg(test)]
