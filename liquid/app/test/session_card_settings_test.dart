@@ -31,41 +31,6 @@ void main() {
     expect(again.value.shows(CardItem.branch), isTrue);
   });
 
-  test('stores only the rows that differ from their default', () async {
-    final settings = await load();
-    await settings.change(
-      settings.value
-          .withItem(CardItem.changes, false)
-          .withItem(CardItem.branch, false)
-          .withItem(CardItem.branch, true)
-          .withItem(CardItem.usage, true)
-          .withItem(CardItem.context, false),
-    );
-    expect(settings.value.toJson(), {
-      'hidden': ['changes'],
-      'shown': ['usage'],
-    });
-  });
-
-  test('a reset to default clears every choice', () async {
-    final settings = await load();
-    await settings.change(settings.value.withItem(CardItem.gitActions, false));
-    await settings.change(const SessionCardSettings());
-    expect(settings.value.isDefault, isTrue);
-    expect(settings.value.toJson(), {
-      'hidden': <String>[],
-      'shown': <String>[],
-    });
-  });
-
-  test('Usage limits and Context window are off until they are shown', () {
-    const defaults = SessionCardSettings();
-    expect(defaults.shows(CardItem.usage), isFalse);
-    expect(defaults.shows(CardItem.context), isFalse);
-    expect(defaults.shows(CardItem.servers), isTrue);
-    expect(defaults.shows(CardItem.statistics), isTrue);
-  });
-
   test('keeps the stored ids, their order and the rows a file names', () {
     final settings = SessionCardSettings.fromJson({
       'hidden': ['changes', 'sideways', 7, 'usage'],

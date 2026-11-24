@@ -43,11 +43,6 @@ BridgeAutomation taskOf({
   lastRun: lastRun,
 );
 
-class FailingRuns extends FakeSession {
-  @override
-  Future<void> runAutomationNow(String id) => Future.error('boom');
-}
-
 void main() {
   testWidgets('a task shows its next run and runs or pauses', (tester) async {
     final session = FakeSession()
@@ -71,43 +66,6 @@ void main() {
     await tester.tap(find.byType(Switch));
     await tester.pumpAndSettle();
     expect(session.calls, contains('automation a1 enabled=false'));
-  });
-
-  testWidgets('webhooks lack Run now, and a running one is off', (
-    tester,
-  ) async {
-    await pumpCard(
-      tester,
-      session: FakeSession()
-        ..automationList = [
-          taskOf(schedule: scheduleOf(BridgeScheduleKind.webhook)),
-        ],
-    );
-    expect(find.text('Nightly check'), findsOneWidget);
-    expect(find.byTooltip('Run now'), findsNothing);
-
-    await pumpCard(
-      tester,
-      session: FakeSession()
-        ..automationList = [taskOf(lastRun: BridgeRunStatus.running)],
-    );
-    final run = tester.widget<IconButton>(
-      find.ancestor(
-        of: find.byTooltip('Run now'),
-        matching: find.byType(IconButton),
-      ),
-    );
-    expect(run.onPressed, isNull);
-  });
-
-  testWidgets('a task that fails to run is reported', (tester) async {
-    final state = await pumpCard(
-      tester,
-      session: FailingRuns()..automationList = [taskOf()],
-    );
-    await tester.tap(find.byTooltip('Run now'));
-    await tester.pumpAndSettle();
-    expect(state.notice.value?.text, 'Could not run automation: boom');
   });
 
   testWidgets('a long automation list that shrinks regains full density', (

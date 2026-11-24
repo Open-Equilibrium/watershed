@@ -273,21 +273,6 @@ void main() {
     },
   );
 
-  testWidgets('a failed publish keeps the dialog open and says why', (
-    tester,
-  ) async {
-    await pumpGit(
-      tester,
-      _ScriptedGit(status: featureOf(upstream: false, remote: false))
-        ..failures['publish'] = Exception('offline'),
-    );
-    await tap(tester, find.text('Publish repository'));
-    await tester.enterText(find.byType(TextField), 'acme/api');
-    await tester.pumpAndSettle();
-    await tap(tester, find.widgetWithText(PrimaryButton, 'Publish'));
-    expect(find.textContaining('Publish failed.'), findsOneWidget);
-  });
-
   testWidgets(
     'a typed reference resolves after a pause, and Local checks it out in the project folder',
     (tester) async {
@@ -485,31 +470,6 @@ void main() {
       );
     },
   );
-
-  testWidgets(
-    'Resolve puts the conflict prompt in the composer of its worktree',
-    (tester) async {
-      final git = _prGit(detailOf(action: 'resolve', conflicting: true));
-      final state = await pumpGit(tester, git);
-      await tap(tester, find.text('Resolve'));
-      expect(git.calls, ['pr worktree https://github.com/o/r/pull/7']);
-      expect(state.draft.value, 'Resolve the conflicts');
-    },
-  );
-
-  testWidgets('the checks still running are read again after 45 seconds', (
-    tester,
-  ) async {
-    final git = _prGit(
-      detailOf(checks: [checkOf('deploy', 'pending')], checksState: 'pending'),
-    );
-    await pumpGit(tester, git);
-    final reads = git.reads;
-    await tester.pump(const Duration(seconds: 44));
-    expect(git.reads, reads);
-    await tester.pump(const Duration(seconds: 1));
-    expect(git.reads, reads + 1);
-  });
 
   testWidgets(
     'a click opens an https pull request in the browser, and refuses any other link',

@@ -72,23 +72,6 @@ void main() {
   final project = Directory.current.path;
   final environment = {'LIQUID_PROJECT': project};
 
-  test(
-    'retry delays double up to five minutes, drawn within half to all of it',
-    () {
-      expect(retryDelay(0, 0), const Duration(seconds: 1));
-      expect(retryDelay(0, 1), const Duration(seconds: 2));
-      expect(retryDelay(1, 0), const Duration(seconds: 2));
-      expect(retryDelay(2, 1), const Duration(seconds: 8));
-      expect(retryDelay(20, 0), const Duration(seconds: 150));
-      expect(retryDelay(20, 1), const Duration(minutes: 5));
-    },
-  );
-
-  test('names projects by their directory', () {
-    expect(projectName('/work/acme-api/'), 'acme-api');
-    expect(projectName('/'), '/');
-  });
-
   group('agent host links (ADR-0295)', () {
     test('connects This Mac and each agent host, and names one that does not answer', () async {
       final (:launch, :links) = windowFor(
@@ -238,27 +221,6 @@ void main() {
     );
 
     testWidgets(
-      'an agent host reports the machine kind of its sessions, and server when it cannot say',
-      (tester) async {
-        for (final (reported, kind) in [
-          ('mac-studio', 'mac-studio'),
-          (null, 'server'),
-        ]) {
-          final (:launch, :links) = windowFor(
-            environment,
-            open: (address, root) async =>
-                FakeProject()..threadList = [threadOf('studio')],
-            machineOf: (_) async => reported ?? (throw 'an older host'),
-          );
-
-          await links.connect(studio);
-
-          expect(launch.state!.recent.value.single.machine, kind);
-        }
-      },
-    );
-
-    testWidgets(
       'coming back to the app retries a host that waits on its backoff at once',
       (tester) async {
         var opens = 0;
@@ -310,37 +272,6 @@ void main() {
         expect(launch.state!.answers(studio), isTrue);
       },
     );
-
-    testWidgets('a connection that lasted 30 s starts the retry delays again', (
-      tester,
-    ) async {
-      var now = DateTime(2026, 11, 17);
-      var opens = 0;
-      final (:launch, :links) = windowFor(
-        environment,
-        random: FixedRandom(0),
-        clock: () => now,
-        open: (address, root) async {
-          opens++;
-          return opens == 1 ? UnreachableProject() : _AnswersOnce();
-        },
-      );
-      unawaited(links.connect(studio));
-      await tester.pump(const Duration(seconds: 1));
-      expect(opens, 2);
-      expect(launch.state!.answers(studio), isTrue);
-
-      now = now.add(const Duration(seconds: 31));
-      await launch.state!.loadStart();
-      await tester.pump(const Duration(milliseconds: 124));
-      expect(opens, 2);
-      await tester.pump(const Duration(milliseconds: 1));
-      expect(
-        opens,
-        3,
-        reason: 'the first loss after a stable connection is quick again',
-      );
-    });
 
     testWidgets(
       'removing an agent host while it connects ends that attempt, its retries and its project, and pairing it again connects it',

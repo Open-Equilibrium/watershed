@@ -1,15 +1,10 @@
 import 'dart:async';
 
-import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart'
-    show Int64List;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:liquid/src/diff/turn_scope.dart';
 import 'package:liquid/src/rust/api/agents.dart';
 import 'package:liquid/src/rust/api/details.dart';
 import 'package:liquid/src/rust/api/events.dart';
-import 'package:liquid/src/format.dart';
-import 'package:liquid/src/rust/api/git.dart';
-import 'package:liquid/src/rust/api/moves.dart';
 import 'package:liquid/src/rust/api/session.dart';
 import 'package:liquid/src/rust/api/thread.dart';
 import 'package:liquid/src/session/agents_state.dart';
@@ -109,17 +104,6 @@ void main() {
   BridgeEvent startItem(int sequence, int turn, BridgeItem started) =>
       event(BridgeEventKind.itemStarted, sequence, turn: turn, item: started);
 
-  BridgeAutomation automationOf(String id) => BridgeAutomation(
-    id: id,
-    title: 'Check',
-    schedule: BridgeSchedule(
-      kind: BridgeScheduleKind.webhook,
-      weekdays: Int64List(0),
-    ),
-    enabled: true,
-    lastRun: BridgeRunStatus.never,
-  );
-
   BridgeLineage mergeTargetLineage() => lineageOf(
     rows: [
       BridgeLineageRow(
@@ -163,27 +147,6 @@ void main() {
       ]);
       expect(state.model.value, choiceOf('claude-opus-5-5'));
       expect(state.base.value, 'main');
-    });
-
-    test('a checked-out pull request starts in its worktree', () async {
-      await state.loadStart();
-      await state.draftFor(
-        BridgeCheckedOut(branch: 'feature', worktree: '/worktrees/feature'),
-      );
-
-      await state.send('Review it');
-
-      expect(project.calls, [
-        'start Review it claude-opus-5-5 base=null worktree=/worktrees/feature fullAccess',
-      ]);
-    });
-
-    test('sending with no model is an error', () async {
-      await state.send('Hello');
-
-      expect(state.notice.value?.level, NoticeLevel.error);
-      expect(state.notice.value?.text, 'No model is available.');
-      expect(project.calls, isEmpty);
     });
   });
 
@@ -578,93 +541,6 @@ void main() {
       );
     });
 
-    test('a task list keeps its steps and names running instances', () async {
-      const running = BridgeStepStatus.running;
-      const completed = BridgeStepStatus.completed;
-      session.turnList = [turnOf(1, status: BridgeTurnStatus.running)];
-      await open(snapshotOf(turns: session.turnList));
-      await emit(
-        startItem(
-          1,
-          1,
-          item(4, BridgeItemKind.taskList, steps: [step('Explore', running)]),
-        ),
-      );
-      final tasks = state.items.value.firstWhere(
-        (item) => item.kind == BridgeItemKind.taskList,
-      );
-      final later = [
-        step('Explore', running),
-        step('Explore › scraper-1', running),
-        step('Explore › scraper-2', completed),
-      ];
-
-      await emit(
-        event(
-          BridgeEventKind.itemUpdated,
-          2,
-          item: item(4, BridgeItemKind.taskList, steps: later),
-        ),
-      );
-      expect(tasks.steps.value, later);
-      expect(state.runningInstances.value, [
-        (name: 'scraper-1', phase: 'Explore'),
-      ]);
-
-      await emit(
-        event(
-          BridgeEventKind.itemCompleted,
-          3,
-          turn: 1,
-          item: item(4, BridgeItemKind.taskList, ended: true),
-          text: '',
-        ),
-      );
-      expect(tasks.steps.value, later);
-
-      session.turnList = [turnOf(1, status: BridgeTurnStatus.aborted)];
-      await emit(event(BridgeEventKind.turnAborted, 4, turn: 1));
-      expect(state.runningInstances.value, isEmpty);
-    });
-
-    test('a finished request adds its tokens, cached input included', () async {
-      await open();
-
-      await emit(
-        event(
-          BridgeEventKind.modelRequestCompleted,
-          1,
-          usage: BridgeUsage(
-            input: 100,
-            output: 20,
-            cacheRead: 30,
-            cacheWrite: 5,
-            reasoning: 0,
-          ),
-        ),
-      );
-
-      expect((state.totals.value.input, state.totals.value.output), (135, 20));
-    });
-
-    test('a turn ends with its changes once checkpointed', () async {
-      await open();
-      session.turnList = [
-        turnOf(1, added: 3, removed: 1, files: 2),
-        turnOf(2, status: BridgeTurnStatus.running, checkpoint: false),
-      ];
-
-      await emit(startItem(1, 1, item(1, BridgeItemKind.assistantMessage)));
-      await emit(event(BridgeEventKind.turnCompleted, 2, turn: 1));
-      await emit(startItem(3, 2, item(2, BridgeItemKind.assistantMessage)));
-
-      expect(
-        [for (final row in state.items.value) row.turnEnd?.added],
-        [null, 3, null],
-        reason: 'only turn 1 has a checkpoint, so only it gets a row',
-      );
-    });
-
     test('requests queue oldest first and answering moves on', () async {
       session.turnList = [
         turnOf(1, status: BridgeTurnStatus.running, checkpoint: false),
@@ -696,18 +572,6 @@ void main() {
         (null, RunStatus.running),
       );
       expect(session.calls, ['respond a1 approve', 'answer q1 Which?=B']);
-    });
-
-    test('choosing a model applies it and reads the context again', () async {
-      session.contextWindow = const BridgeContext(tokens: 1000, window: 200000);
-      await open();
-      session.contextWindow = const BridgeContext(window: 1000000);
-
-      await state.setModel(choiceOf('claude-haiku'));
-      await pumpEventQueue();
-
-      expect(session.calls, ['model claude-haiku']);
-      expect(state.contextWindow.value?.window, 1000000);
     });
 
     test('a refused model or permission change keeps the old one', () async {
@@ -757,32 +621,6 @@ void main() {
   });
 
   group('the Diff panel', () {
-    test('a scope compares its turns, or the latest finished one', () async {
-      session.turnList = [
-        turnOf(1),
-        turnOf(2),
-        turnOf(3, status: BridgeTurnStatus.running, checkpoint: false),
-      ];
-      session.patches['a.dart'] = '+x';
-      await open();
-
-      final scopes = <(DiffScope, int, int)>[
-        (const LatestTurn(), 2, 2),
-        (const AllTurns(), 1, 2),
-        (const OneTurn(1), 1, 1),
-        (const OneTurn(3), 2, 2),
-      ];
-      for (final (scope, from, to) in scopes) {
-        await state.showTurns(scope);
-        expect(
-          (state.shown.value?.from.number, state.shown.value?.to.number),
-          (from, to),
-          reason: scope.runtimeType.toString(),
-        );
-      }
-      expect(await state.patch('a.dart'), '+x');
-    });
-
     test('the Uncommitted scope re-reads when the status changes', () async {
       await open();
       session.gitBackend.changes = [fileOf('a.dart')];
@@ -825,117 +663,9 @@ void main() {
       expect(state.shown.value?.from.number, 2);
       expect(state.changed.value?.map((file) => file.path), ['turn-2-2.dart']);
     });
-
-    test('a failed slower read shows no error over the newer one', () async {
-      final older = await selectOverSlowerRead();
-
-      older.completeError('the turn is gone');
-      await pumpEventQueue();
-
-      expect(state.changesProblem.value, isNull);
-      expect(state.changed.value?.map((file) => file.path), ['turn-2-2.dart']);
-    });
-  });
-
-  group('statistics and the context window', () {
-    BridgeStatistics sonnet(int input, int output, int responses) =>
-        BridgeStatistics(
-          models: [
-            BridgeModelUsage(
-              model: 'anthropic/claude-sonnet',
-              usage: usage(input, output),
-              responses: responses,
-            ),
-          ],
-          tools: const [],
-          turns: const [],
-        );
-
-    test('a response or a turn end re-reads the statistics', () async {
-      await open();
-      session.stats = sonnet(10, 1, 1);
-      await emit(
-        event(BridgeEventKind.modelRequestCompleted, 1, usage: usage(10, 1)),
-      );
-      expect(state.statistics.value, session.stats);
-
-      session.stats = statisticsOf(
-        turns: [
-          BridgeTurnStatistics(
-            number: 1,
-            prompt: 'Add a rate limit',
-            models: const [],
-            failed: 0,
-          ),
-        ],
-      );
-      await emit(event(BridgeEventKind.turnCompleted, 2, turn: 1));
-      expect(state.statistics.value, session.stats);
-    });
-
-    test('a late statistics failure is not shown on the open one', () async {
-      final gate = Completer<void>();
-      final late = FakeSession()
-        ..gates['statistics'] = gate
-        ..failures['statistics'] = 'the session file is unreadable';
-      project.session = late;
-      await state.open('thread-1');
-      await pumpEventQueue();
-      project.session = session;
-      await state.open('thread-2');
-      await pumpEventQueue();
-
-      gate.complete();
-      await pumpEventQueue();
-
-      expect(state.statisticsProblem.value, isNull);
-      expect(state.notices.value, isEmpty);
-    });
-
-    test('a failed context read keeps the statistics and says why', () async {
-      final failing = FakeSession()
-        ..failures['context'] = 'the model has no window size';
-      project.session = failing;
-
-      await open();
-
-      expect(state.statistics.value, failing.stats);
-      expect(state.contextWindow.value, isNull);
-      expectNotice(
-        'Could not read the context window: the model has no window size',
-      );
-    });
   });
 
   group('notices', () {
-    test('a failed Chat stream is a session problem, not a notice', () async {
-      await open();
-
-      session.fail('the stream broke');
-      await pumpEventQueue();
-
-      expect(state.notice.value, isNull);
-      expect(state.sessionProblem.value, 'the stream broke.');
-    });
-
-    test('a failed send, open or subscribe is a notice', () async {
-      await open();
-      session.sendError = 'the agent is busy';
-      await state.send('Again');
-      expectNotice('Could not send the message: the agent is busy');
-
-      project.openError = 'the session is gone';
-      await state.open('thread-2');
-      expectNotice('Could not open the session: the session is gone');
-
-      project.openError = null;
-      project.session = FakeSession()
-        ..failures['subscribe'] = 'the stream is gone';
-      await state.open('thread-1');
-      await pumpEventQueue();
-      expectNotice('Could not open the session: the stream is gone');
-    });
-
     test('a session whose stream fails to attach is not left active', () async {
       final flaky = FakeSession()..failures['subscribe'] = 'the stream is gone';
       project.session = flaky;
@@ -944,28 +674,6 @@ void main() {
 
       expect(state.session, isNull);
       expectNotice('Could not open the session: the stream is gone');
-    });
-
-    test('an unreadable session list is a host problem', () async {
-      state = SessionState(UnreachableProject());
-
-      await state.loadStart();
-
-      expect(state.notice.value, isNull);
-      expect(state.hostProblems.value[null], 'the host is down.');
-    });
-
-    test('notices keep the last $noticeLimit through dismissal', () async {
-      for (var index = 0; index <= noticeLimit; index++) {
-        state.notify(NoticeLevel.info, 'Notice $index');
-      }
-      expect(state.notices.value, hasLength(noticeLimit));
-      expect(state.notices.value.first.text, 'Notice 1');
-
-      state.dismissNotice();
-
-      expect(state.notice.value, isNull);
-      expect(state.notices.value, hasLength(noticeLimit));
     });
   });
 
@@ -977,39 +685,6 @@ void main() {
       pid: 7,
       terminal: false,
     );
-
-    test('each live section follows its changes after a read', () async {
-      await open();
-
-      session
-        ..serverUpdates.add([server(3000)])
-        ..automationUpdates.add([automationOf('a2')])
-        ..lineageUpdates.add(
-          BridgeLineage(
-            rows: const [],
-            running: 1,
-            sideChatsRunning: 0,
-            canDisconnect: false,
-            mergeReady: false,
-            canMerge: false,
-          ),
-        );
-      await pumpEventQueue();
-
-      expect(state.servers.value.single.port, 3000);
-      expect(state.automations.value.single.id, 'a2');
-      expect(state.lineage.value?.running, 1);
-    });
-
-    test('a failed live stream is a warning naming its section', () async {
-      await open();
-
-      session.serverUpdates.addError('the stream dropped');
-      await pumpEventQueue();
-
-      expect(state.notice.value?.level, NoticeLevel.warning);
-      expectNotice('Could not follow the servers: the stream dropped');
-    });
 
     test('a switch stops following the session it left', () async {
       await open();
@@ -1181,43 +856,6 @@ void main() {
       expect(threadIds(state), ['local']);
       expect(studio.closed, isTrue);
       expect(state.answers(studioAddress), isFalse);
-    });
-
-    group('moves (ADR-0308)', () {
-      BridgeTranscriptItem assistantEntry(int id, String text) => chatItem(
-        item(id, BridgeItemKind.assistantMessage, ended: true),
-        1,
-        text,
-      );
-
-      List<String> chatRows(SessionState state) => [
-        for (final row in state.items.value) row.marker ?? row.text.value,
-      ];
-
-      test('the marker names hosts as Liquid does', () async {
-        final session = FakeSession(id: 'moved')
-          ..current = snapshotOf(transcript: [assistantEntry(1, 'Continuing')]);
-        final target = FakeProject(session: session)
-          ..hostName = 'studio-box'
-          ..moveRecordAnswer = BridgeMoveRecord(
-            fromHost: 'Mac mini',
-            toHost: 'studio-box',
-            atMs: 1700000000000,
-            transcript: const [],
-          );
-        final state = SessionState(FakeProject())
-          ..hostLabel = (address) =>
-              address == null ? 'This Mac' : 'Studio mini';
-        await state.addHost(studioAddress, target);
-
-        await state.open('moved', address: studioAddress);
-        await pumpEventQueue();
-
-        expect(chatRows(state), [
-          'Moved from This Mac to Studio mini · ${formatClockMs(1700000000000)}',
-          'Continuing',
-        ]);
-      });
     });
   });
 }

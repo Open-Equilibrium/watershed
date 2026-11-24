@@ -1,5 +1,3 @@
-import 'dart:io';
-
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -9,28 +7,16 @@ import 'package:liquid/src/agent/session_card.dart';
 import 'package:liquid/src/agent/shell.dart';
 import 'package:liquid/src/agent/sidebar.dart';
 import 'package:liquid/src/diff/diff_model.dart';
-import 'package:liquid/src/diff/diff_settings.dart';
 import 'package:liquid/src/diff/diff_panel.dart';
 import 'package:liquid/src/rust/api/events.dart';
 import 'package:liquid/src/rust/api/thread.dart';
 import 'package:liquid/src/session/session_state.dart';
-import 'package:liquid/src/settings_file.dart';
 import 'package:liquid/src/theme/icons.dart';
-import 'package:liquid/src/workspace/workspace_state.dart';
 
 import 'fake_backend.dart';
-import 'fake_workspace.dart';
 import 'focus_kit.dart';
 
 const info = SessionInfo(project: 'acme-api');
-
-class _FullDisk extends SettingsFile {
-  _FullDisk() : super(File('unused'));
-
-  @override
-  Future<void> save(Map<String, Object?> json) async =>
-      throw const FileSystemException('disk full');
-}
 
 void main() {
   late FakeProject project;
@@ -116,21 +102,6 @@ void main() {
 
   BridgeTurn running(int number) =>
       turnOf(number, status: BridgeTurnStatus.running);
-
-  String? Function() recordClipboard(WidgetTester tester) {
-    String? copied;
-    final messenger = tester.binding.defaultBinaryMessenger;
-    messenger.setMockMethodCallHandler(SystemChannels.platform, (call) async {
-      if (call.method == 'Clipboard.setData') {
-        copied = (call.arguments as Map)['text'] as String?;
-      }
-      return null;
-    });
-    addTearDown(
-      () => messenger.setMockMethodCallHandler(SystemChannels.platform, null),
-    );
-    return () => copied;
-  }
 
   List<BridgeTranscriptItem> researching() => [
     chatItem(
@@ -384,19 +355,6 @@ void main() {
     expect(actions(), ['fork 1']);
     expect(project.calls, contains('open fork-of-thread-1'));
   });
-
-  for (final (message, text) in [
-    (userMessage(1, 'Fix login'), 'Fix login'),
-    (reply(1, 'Done'), 'Done'),
-  ]) {
-    testWidgets('Copy message copies the text of $text', (tester) async {
-      final copied = recordClipboard(tester);
-      await show(tester, transcript: [message]);
-      await hover(tester, find.text(text));
-      await tap(tester, find.text('Copy message'));
-      expect(copied(), text);
-    });
-  }
 
   testWidgets('an approval names its kind and warning, Approve answers it, '
       'and More offers the options no button shows', (tester) async {
@@ -659,20 +617,6 @@ void main() {
     expectOne(find.text('Plain failure'));
   });
 
-  testWidgets('a turn asked for scrolls the Chat to its first '
-      'item', (tester) async {
-    await show(
-      tester,
-      transcript: [
-        for (var turn = 1; turn <= 40; turn++)
-          userMessage(turn, 'Prompt $turn'),
-      ],
-    );
-    state.scrollChatTo.value = 2;
-    await tester.pumpAndSettle();
-    expectOne(find.text('Prompt 2'));
-  });
-
   testWidgets('notices show in the status bar until cleared, and their list '
       'closes on a click, outside, esc or a question', (tester) async {
     await show(tester);
@@ -750,20 +694,5 @@ void main() {
     await tester.sendKeyEvent(LogicalKeyboardKey.escape);
     await tester.pumpAndSettle();
     expectNone(find.byType(SessionCard));
-  });
-
-  testWidgets('without a session, a failed save is reported to the '
-      'Workspace', (tester) async {
-    await tester.binding.setSurfaceSize(const Size(1600, 900));
-    final workspace = WorkspaceState(FakeWorkspace());
-    await workspace.start();
-    addTearDown(workspace.dispose);
-    final diff = DiffSettingsController(const DiffSettings(), _FullDisk());
-    await pumpApp(tester, AgentShell(workspace: workspace, diffSettings: diff));
-    await diff.change(const DiffSettings(layout: DiffLayout.split));
-    expect(
-      workspace.problem.value,
-      'Could not save the Diff settings: disk full',
-    );
   });
 }

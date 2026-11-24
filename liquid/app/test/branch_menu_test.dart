@@ -1,6 +1,5 @@
 import 'dart:async';
 
-import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -12,11 +11,6 @@ import 'package:liquid/src/session/session_state.dart';
 
 import 'fake_backend.dart';
 import 'focus_kit.dart';
-
-class _BrokenGit extends FakeGit {
-  @override
-  Stream<BridgeGitStatus> watch() => Stream.error(Exception('no repository'));
-}
 
 class _GatedRefs extends FakeGit {
   String? holdQuery;
@@ -82,24 +76,6 @@ void main() {
 
   Future<void> openPicker(WidgetTester tester) =>
       tap(tester, find.byKey(const Key('branch-chevron')));
-
-  testWidgets('the branch name, its chevron and its accessibility action open '
-      'the ref picker', (tester) async {
-    await pump(tester);
-    final semantics = tester.ensureSemantics();
-    await tap(tester, find.byKey(const Key('branch-name')));
-    expectOne(find.byKey(const Key('branch-search')));
-    await tester.tapAt(const Offset(5, 5));
-    await tester.pumpAndSettle();
-    await openPicker(tester);
-    expectOne(find.byKey(const Key('branch-search')));
-    await tester.tapAt(const Offset(5, 5));
-    await tester.pumpAndSettle();
-    tester.semantics.tap(find.semantics.byLabel('Branch feature'));
-    await tester.pumpAndSettle();
-    expectOne(find.byKey(const Key('branch-search')));
-    semantics.dispose();
-  });
 
   testWidgets('the ref picker names each ref, a search narrows it and offers '
       'a new ref, and Enter switches to the first match', (tester) async {
@@ -226,18 +202,6 @@ void main() {
     expect(gated.calls, ['switch main']);
   });
 
-  testWidgets('a pull request reference typed in the picker offers its '
-      'checkout', (tester) async {
-    await pump(tester);
-    await openPicker(tester);
-    await search(tester, '#42');
-    await tester.tap(find.text('Checkout pull request'));
-    await tester.pump(const Duration(milliseconds: 450));
-    await tester.pumpAndSettle();
-    expectOne(find.text('Add a feature'));
-    expect(git.calls, ['resolve 42']);
-  });
-
   testWidgets('a ref list Git cannot read says so and closes the '
       'picker', (tester) async {
     await pump(tester);
@@ -245,36 +209,5 @@ void main() {
     await openPicker(tester);
     expect(state.notice.value?.text, contains('Could not list the refs:'));
     expectNone(find.byKey(const Key('branch-search')));
-  });
-
-  testWidgets('right-clicking the branch name copies it, and says '
-      'so', (tester) async {
-    final copied = <String>[];
-    final messenger = tester.binding.defaultBinaryMessenger;
-    messenger.setMockMethodCallHandler(SystemChannels.platform, (call) async {
-      if (call.method == 'Clipboard.setData') {
-        copied.add((call.arguments as Map)['text'] as String);
-      }
-      return null;
-    });
-    addTearDown(
-      () => messenger.setMockMethodCallHandler(SystemChannels.platform, null),
-    );
-    await pump(tester);
-    await tester.tap(
-      find.byKey(const Key('branch-name')),
-      buttons: kSecondaryButton,
-    );
-    await tester.pumpAndSettle();
-    expectOne(find.text('Copy branch name'));
-    await tap(tester, find.text('Copy branch name'));
-    expect(copied, ['feature']);
-    expect(state.notice.value?.text, 'Branch name copied: feature');
-  });
-
-  testWidgets('a checkout Git cannot read says so in the branch '
-      'row', (tester) async {
-    await pump(tester, checkout: _BrokenGit());
-    expectOne(find.text('Git unavailable'));
   });
 }

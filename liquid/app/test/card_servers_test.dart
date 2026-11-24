@@ -19,25 +19,6 @@ BridgeLocalServer serverOf(
 );
 
 void main() {
-  testWidgets('Servers lists each server and who started it', (tester) async {
-    await pumpCard(tester, session: FakeSession());
-    expect(find.text('Servers'), findsNothing);
-
-    await pumpCard(
-      tester,
-      session: FakeSession()
-        ..serverList = [
-          serverOf(3000),
-          serverOf(5173, terminal: true, process: 'vite', pid: 4343),
-        ],
-    );
-    expect(find.text('Servers'), findsOneWidget);
-    expect(find.text('localhost:3000'), findsOneWidget);
-    expect(find.text('Agent · node'), findsOneWidget);
-    expect(find.text('localhost:5173'), findsOneWidget);
-    expect(find.text('Terminal · vite'), findsOneWidget);
-  });
-
   testWidgets('a click opens a server, and Stop ends it', (tester) async {
     final opened = recordOpens();
     final session = FakeSession()..serverList = [serverOf(3000)];

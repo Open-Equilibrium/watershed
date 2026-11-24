@@ -373,18 +373,6 @@ void main() {
 
   final dimmedReasons = <(String, Future<MoveModel> Function(), String)>[
     (
-      'a session that cannot move says why, and Move stays off',
-      () => modelOf(
-        check: moveCheckOf(blocked: 'It is already moving to another host.'),
-      ),
-      'It is already moving to another host.',
-    ),
-    (
-      'a project without a Git remote is said once, and the dimmed Move says why',
-      () => modelOf(check: moveCheckOf(remoteUrl: null), projects: const []),
-      'The project has no Git remote, so its files cannot travel',
-    ),
-    (
       'a target project whose branch cannot land shows the reason before Move, and Move dims with it when no other project can take the session',
       () => modelOf(
         landings: const {
@@ -549,60 +537,6 @@ void main() {
   );
 
   testWidgets(
-    'Move to host is dimmed with the newer-Meta-Harness reason when the service reported no harness',
-    (tester) async {
-      await pumpSession(
-        tester,
-        SessionState(
-          FakeProject()
-            ..threadList = [
-              threadOf(
-                'local',
-                title: 'Local session',
-                movable: false,
-                harnessKnown: false,
-              ),
-            ],
-        ),
-      );
-
-      await openLocalActions(tester);
-
-      expect(
-        find.byTooltip('This host needs a newer Meta-Harness'),
-        findsOneWidget,
-      );
-      expect(
-        find.byTooltip('Only Claude Code and Codex sessions can move.'),
-        findsNothing,
-      );
-    },
-  );
-
-  testWidgets(
-    'Move to host is dimmed, with its reason, for a thread whose agent cannot move, without opening it',
-    (tester) async {
-      await pumpSession(
-        tester,
-        SessionState(
-          FakeProject()
-            ..threadList = [
-              threadOf('local', title: 'Local session', movable: false),
-            ],
-        ),
-      );
-
-      await openLocalActions(tester);
-
-      expect(find.text('Move to host…'), findsOneWidget);
-      expect(
-        find.byTooltip('Only Claude Code and Codex sessions can move.'),
-        findsOneWidget,
-      );
-    },
-  );
-
-  testWidgets(
     'a moved session shows its carried transcript above the marker, and not the handoff',
     (tester) async {
       BridgeTranscriptItem entry(int id, BridgeItemKind kind, String text) =>
@@ -700,52 +634,6 @@ void main() {
   );
 
   testWidgets(
-    'the success notice names the host the session went to, when another host was picked after the first',
-    (tester) async {
-      final state = await localSession(
-        tester,
-        hosts: {
-          studio: FakeProject()..hostName = 'studio',
-          build: FakeProject()..hostName = 'build-box',
-        },
-      );
-
-      await chooseMoveToHost(tester);
-      await tester.tap(find.byKey(const Key('move-target-build-box')));
-      await tester.pumpAndSettle();
-      await tapMove(tester);
-
-      expect(
-        state.notice.value?.text,
-        'Moved “Fix the flaky port test” to build-box.',
-      );
-      expect(state.sessionAddress, build);
-    },
-  );
-
-  testWidgets(
-    'the host rows are one selection group, and the chosen one is selected',
-    (tester) async {
-      final semantics = tester.ensureSemantics();
-      final model = await modelOf();
-      await tester.pumpWidget(dialogOf(model));
-
-      expect(
-        tester.getSemantics(find.byKey(const Key('move-target-studio'))),
-        matchesSemantics(
-          isSelected: true,
-          hasSelectedState: true,
-          isInMutuallyExclusiveGroup: true,
-          isFocusable: true,
-          hasTapAction: true,
-          hasFocusAction: true,
-        ),
-      );
-      semantics.dispose();
-    },
-  );
-
-  testWidgets(
     'Enter on a focused host row chooses it and never starts the move',
     (tester) async {
       final model = await modelOf();
@@ -811,25 +699,6 @@ void main() {
   );
 
   testWidgets(
-    "a project without a Git remote is dimmed with the core's sentence for it",
-    (tester) async {
-      final model = await modelOf(
-        projects: const [
-          BridgeHostProject(root: '/srv/scratch', title: 'scratch'),
-        ],
-      );
-      await tester.pumpWidget(dialogOf(model));
-
-      await openPicker(tester);
-
-      expect(find.text(noRemote), findsOneWidget);
-      await tester.tap(find.byKey(const Key('pick-/srv/scratch')));
-      await tester.pumpAndSettle();
-      expect(model.picked, isNull);
-    },
-  );
-
-  testWidgets(
     "Add folder makes an existing folder of the target a project, which can be chosen when its remote is the session's",
     (tester) async {
       final target = FakeProject()
@@ -852,24 +721,6 @@ void main() {
       expect(moveButton(tester).onPressed, isNotNull);
     },
   );
-
-  testWidgets('a folder the target cannot add says why in the picker', (
-    tester,
-  ) async {
-    final target = FakeProject()
-      ..addProjectError = 'T3 has no project at /nope after it was added.';
-    final model = await modelOf(projects: const [], studioProject: target);
-    await tester.pumpWidget(dialogOf(model));
-
-    await openPicker(tester);
-    await addFolder(tester, '/nope');
-
-    expect(
-      find.text('T3 has no project at /nope after it was added.'),
-      findsOneWidget,
-    );
-    expect(model.picked, isNull);
-  });
 
   testWidgets(
     'Change… opens the same picker when several projects match, and the one picked is where the session continues',

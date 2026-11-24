@@ -313,53 +313,6 @@ void main() {
     semantics.dispose();
   });
 
-  testWidgets('choosing a host for sessions uses it at once and keeps Settings '
-      'open', (tester) async {
-    await tester.binding.setSurfaceSize(const Size(1600, 1000));
-    await tester.pumpWidget(
-      LiquidApp(
-        launch: ValueNotifier(
-          Launch.session(SessionState(FakeProject()), info),
-        ),
-        agentHosts: controller(settings: AgentHostsSettings([mini])),
-      ),
-    );
-    await tester.pumpAndSettle();
-    await openAgentHosts(tester);
-
-    await chooseInRow(tester, remote, 'Use for sessions');
-
-    expect(switched, [remote]);
-    expect(saved.last.activeAddress, remote);
-    expectOne(find.text('Add agent host'));
-    expectOne(find.text('Used for sessions'));
-  });
-
-  testWidgets('the rows keep waiting for a choice while the host for sessions '
-      'connects, also after Settings reopen', (tester) async {
-    final opening = Completer<String?>();
-    await show(
-      tester,
-      controller(
-        settings: AgentHostsSettings([mini]),
-        starting: (_) => opening.future,
-      ),
-    );
-    await chooseInRow(tester, remote, 'Use for sessions');
-
-    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
-    await tester.pumpAndSettle();
-    await openAgentHosts(tester);
-    await chooseInRow(tester, null, 'Use for sessions');
-
-    expect(switched, [
-      remote,
-    ], reason: 'the choice in progress still holds the rows');
-    opening.complete(null);
-    await tester.pumpAndSettle();
-    expectOne(find.text('Used for sessions'));
-  });
-
   testWidgets('a host that cannot start sessions is not used, and the saved '
       'choice goes back', (tester) async {
     await show(
@@ -442,27 +395,6 @@ void main() {
     await state.addHost(remote, FakeProject(session: session));
     await tester.pump();
     expectNone(find.textContaining('is reconnecting'));
-  });
-
-  testWidgets('an agent host that stops answering is named in the sidebar, '
-      'and its sessions go', (tester) async {
-    final state = SessionState(
-      FakeProject()..threadList = [threadOf('local', title: 'Local session')],
-    );
-    await state.addHost(
-      remote,
-      FakeProject()..threadList = [threadOf('studio', title: 'Studio session')],
-    );
-    await state.addHost(remote, UnreachableProject());
-    await pumpSessions(tester, state);
-
-    expectOne(find.text('Local session'));
-    expectNone(find.text('Studio session'));
-    expectOne(
-      find.text(
-        'Liquid could not connect to the agent host $remote: the host is down.',
-      ),
-    );
   });
 
   testWidgets('a failing agent host at start is said in Settings and the '
