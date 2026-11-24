@@ -306,6 +306,42 @@ async fn the_service_refuses_a_client_that_names_no_api_version_or_another() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn a_start_that_fails_leaves_no_remote_listener_and_the_folder_free() {
+    let (dir, _repo, _) = fixture();
+    let home = dir.path().join("meta");
+    let (service, host) = start_service(&home).await;
+    let port = remote_on_free(&host).await;
+    drop(host);
+    service.stop().await;
+    db(&home)
+        .execute(
+            "INSERT INTO peer (name, address, token, access, tunnel_port, linked_ms, client) \
+             VALUES ('bad', 'ws://127.0.0.1:1', 'token', 'unknown', 1, NULL, 'client')",
+            [],
+        )
+        .unwrap();
+    let failed = Service::start_with_remote(
+        service_config(&home),
+        Some(vec![std::net::Ipv4Addr::LOCALHOST.into()]),
+    )
+    .await;
+    assert!(
+        failed.is_err(),
+        "a linked host with an unknown access level"
+    );
+    assert!(
+        std::net::TcpStream::connect(("127.0.0.1", port)).is_err(),
+        "nothing listens after the failed start"
+    );
+    db(&home)
+        .execute("DELETE FROM peer WHERE name = 'bad'", [])
+        .unwrap();
+    let (service, _host) = start_service(&home).await;
+    assert!(std::net::TcpStream::connect(("127.0.0.1", port)).is_ok());
+    service.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn the_local_listener_holds_at_most_32_handshakes_and_closes_the_rest() {
     let (dir, _repo, _) = fixture();
     let (service, _host) = start_service(&dir.path().join("meta")).await;

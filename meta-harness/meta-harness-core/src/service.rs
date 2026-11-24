@@ -183,12 +183,12 @@ impl Service {
             transfers: transfers::TransferLocks::default(),
         });
         let remembered = hosts::remote_port(&shared.store.db())?;
+        shared.links.start_tunnels(&shared.store).await?;
         if let Some(port) = remembered
             && let Err(error) = listener::start(&shared, port).await
         {
             eprintln!("meta: remote access is not listening yet: {error}");
         }
-        shared.links.start_tunnels(&shared.store).await?;
         let accept = tokio::spawn(accept(
             listener,
             shared.clone(),
