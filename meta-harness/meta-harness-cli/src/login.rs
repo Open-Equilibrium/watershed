@@ -352,6 +352,7 @@ fn not_loaded(failure: &str) -> bool {
         "Could not find specified service",
         "cannot find the file specified",
         "is not running",
+        "is not currently running",
     ]
     .iter()
     .any(|phrase| failure.contains(phrase))

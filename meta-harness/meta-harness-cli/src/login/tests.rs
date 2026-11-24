@@ -339,12 +339,13 @@ fn a_failed_first_windows_task_install_deletes_the_task_it_created() {
 }
 
 #[test]
-fn launchd_and_systemd_saying_the_service_is_absent_count_as_not_loaded() {
+fn a_service_manager_saying_the_service_is_absent_or_stopped_counts_as_not_loaded() {
     for failure in [
         "Boot-out failed: 3: No such process",
         "Boot-out failed: 113: Could not find specified service",
         "Could not find service \"x\" in domain for user gui: 502",
         "Unit x.service not loaded.",
+        "ERROR: The task is not currently running.",
     ] {
         assert!(not_loaded(failure), "{failure}");
     }
