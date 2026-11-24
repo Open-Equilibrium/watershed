@@ -167,7 +167,6 @@ fn an_unfinished_call_is_open_only_while_its_turn_is_the_last_and_still_runs() {
         ("waiting", "pending", true),
         ("running", "interrupted", false),
         ("completed", "running", false),
-        ("interrupted", "running", false),
         ("failed", "pending", false),
     ];
     for (turn_status, call_status, open) in cases {

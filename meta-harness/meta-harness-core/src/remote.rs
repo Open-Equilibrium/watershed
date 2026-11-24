@@ -276,16 +276,6 @@ impl Host {
     }
 }
 
-#[cfg(test)]
-impl Host {
-    pub(crate) async fn waiting(&self) -> usize {
-        let slot = self.inner.link.lock().await;
-        slot.as_ref()
-            .and_then(|link| lock(&link.waiters).as_ref().map(HashMap::len))
-            .unwrap_or(0)
-    }
-}
-
 pub(crate) fn handshake(url: &str, headers: &[(&'static str, &str)]) -> Result<Request, String> {
     let version = api::API_VERSION.to_string();
     let mut request = url

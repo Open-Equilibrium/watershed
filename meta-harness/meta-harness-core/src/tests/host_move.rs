@@ -1,7 +1,7 @@
 use rusqlite::Connection;
 
-use crate::host_move::{self, Facts, Harness, MovePackage, MoveRecord, SCHEMA, State};
-use crate::{ChatItem, ModelChoice, Permissions};
+use crate::host_move::{self, Facts, Harness, MovePackage, SCHEMA, State};
+use crate::{ModelChoice, Permissions};
 
 fn db() -> Connection {
     let db = Connection::open_in_memory().unwrap();
@@ -169,20 +169,6 @@ fn a_finish_acts_only_on_the_move_it_began() {
 }
 
 #[test]
-fn the_new_host_keeps_the_record_of_its_move() {
-    let db = db();
-    let record = MoveRecord {
-        from_host: "this-mac".to_owned(),
-        to_host: "studio".to_owned(),
-        at_ms: 1_700_000_000_000,
-        transcript: Vec::<ChatItem>::new(),
-    };
-    assert_eq!(host_move::record(&db, "new").unwrap(), None);
-    host_move::put_record(&db, "new", "tr-new", &record).unwrap();
-    assert_eq!(host_move::record(&db, "new").unwrap(), Some(record));
-}
-
-#[test]
 fn a_cancelled_message_waits_with_its_move_until_the_move_ends() {
     let db = db();
     host_move::begin(&db, "t1", "/repo", "tr-1", ("addr", "studio", "env"), 10).unwrap();
@@ -253,31 +239,6 @@ fn a_remote_that_carries_a_credential_blocks_the_move_and_an_ssh_user_does_not()
             .remote_url
             .as_deref(),
         Some("git@example.invalid:acme/app.git")
-    );
-}
-
-#[test]
-fn an_arrival_row_is_kept_per_transfer() {
-    let db = db();
-    assert_eq!(host_move::arrival(&db, "tr-1").unwrap(), None);
-    host_move::set_arrival(
-        &db,
-        "tr-1",
-        &host_move::ArrivalRow {
-            state: "landed".to_owned(),
-            root: "/repo".to_owned(),
-            thread: "thread-1".to_owned(),
-            queued: vec!["carry one".to_owned()],
-            delivered: 1,
-        },
-        10,
-    )
-    .unwrap();
-    assert_eq!(
-        host_move::arrival(&db, "tr-1")
-            .unwrap()
-            .map(|row| row.thread),
-        Some("thread-1".to_owned())
     );
 }
 

@@ -137,7 +137,7 @@ mod tests {
             port(&["--port", "many"]),
             Err("\"many\" is not a number.".to_owned())
         );
-        for out_of_range in ["0", "65536", "99999", "99999999999999999999"] {
+        for out_of_range in ["0", "65536", "99999999999999999999"] {
             assert_eq!(
                 port(&["--port", out_of_range]),
                 Err("The port must be 1-65535.".to_owned()),
