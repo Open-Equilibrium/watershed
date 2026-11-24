@@ -316,6 +316,25 @@ void main() {
     },
   );
 
+  test(
+    'a checkout that never opened is disposed without unhandled errors',
+    () async {
+      final errors = <Object>[];
+      await runZonedGuarded(() async {
+        final state = GitState(
+          RustGitBackend(
+            Future<GitCheckout>.error(StateError('no repository')),
+          ),
+          onError: (_, _) {},
+        );
+        await pumpEventQueue();
+        state.dispose();
+        await pumpEventQueue();
+      }, (error, _) => errors.add(error));
+      expect(errors, isEmpty);
+    },
+  );
+
   test('a checkout whose status cannot be watched reports that Git status is unavailable', () async {
     final state = gitState(WatchFailingGit());
     await pumpEventQueue();

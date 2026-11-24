@@ -582,7 +582,7 @@ class RustGitBackend implements GitBackend {
   @override
   Stream<BridgeGitStatus> watch() => stopOnCancel(
     Stream.fromFuture(_git).asyncExpand((git) => git.watch()),
-    () async => (await _git).watchStop(),
+    () => _git.then((git) => git.watchStop(), onError: (Object _) {}),
   );
   @override
   Future<BridgeRefs> refs(
@@ -676,7 +676,8 @@ class RustGitBackend implements GitBackend {
   Future<BridgeCheckedOut> pullRequestWorktree(String url) async =>
       (await _git).pullRequestWorktree(url: url);
   @override
-  void close() => unawaited(_git.then((git) => git.dispose()));
+  void close() =>
+      unawaited(_git.then((git) => git.dispose(), onError: (Object _) {}));
 }
 
 Stream<T> stopOnCancel<T>(Stream<T> changes, Future<void> Function() stop) {
