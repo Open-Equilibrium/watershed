@@ -96,6 +96,70 @@
         <p><strong>Recommendation:</strong> C, because it closes the gap without slowing every open.</p>
         <p><strong>Acceptance criterion:</strong> an entry planted right after the folder is created makes creation fail, and the shared-workspace concurrency test passes 50 of 50 runs on macOS.</p>
       </details>
+      <details id="d-117" class="decision wide">
+        <summary><h3>D-117 - Pairing Codes On A Command Line</h3></summary>
+        <p><strong>Status:</strong> Open; found by Clawpatch in the Meta-Harness review gate. <code>meta-harness-core/src/t3/cli.rs</code> runs <code>t3 environment link URL --pairing-code CODE</code>, and a person runs <code>meta host add ADDRESS CODE</code>.</p>
+        <p><strong>Problem:</strong> Arguments of a running program are visible to every local user through the process list, and a shell may keep the second one in its history. A pairing code is single-use and expires within minutes, so a reader must use it first; on a computer used by one person nobody else can read it.</p>
+        <p><strong>Question:</strong> Should pairing codes stay off command lines?</p>
+        <div class="dia">
+          <div class="opt rec"><h4>A: Ask T3 for stdin <span class="tag">Recommended</span></h4>
+            <div class="b t3">T3 reads the code from stdin or an environment variable</div>
+            <div class="b ws"><code>meta host add ADDRESS</code> asks for the code; <code>-</code> reads it from stdin</div>
+            <ul><li>Pro: no code on any command line.</li><li>Con: T3 needs an upstream change first; until then its link stays as it is.</li></ul>
+          </div>
+          <div class="opt"><h4>B: Only <code>meta host add</code></h4>
+            <div class="b ws"><code>meta host add</code> asks for the code; the T3 call is unchanged</div>
+            <ul><li>Pro: no upstream change; closes the shell history case.</li><li>Con: the code still shows in the process list while T3 links.</li></ul>
+          </div>
+          <div class="opt"><h4>C: Accept the risk</h4>
+            <div class="b h">Record it in SECURITY.md</div>
+            <ul><li>Pro: no work; the code is short-lived and single-use.</li><li>Con: a local user who watches the process list can link first.</li></ul>
+          </div>
+        </div>
+        <p><strong>Recommendation:</strong> A, B until T3 offers stdin.</p>
+        <p><strong>Acceptance criterion:</strong> no pairing code appears in <code>ps</code> output or in the arguments of any process Meta-Harness starts.</p>
+      </details>
+      <details id="d-118" class="decision wide">
+        <summary><h3>D-118 - A Worktree Left Behind By A Refused Move</h3></summary>
+        <p><strong>Status:</strong> Open; found by Clawpatch in the Meta-Harness review gate. <code>meta-harness-core/src/host/projects.rs</code> attaches a worktree for a local branch before it checks that the branch is pushed and that the move may land.</p>
+        <p><strong>Problem:</strong> When one of those checks refuses, the new worktree stays behind without a thread. It holds no work of the person, but such worktrees pile up. The V-Spec says "A move never removes a checkout", so Meta-Harness does not remove it.</p>
+        <p><strong>Question:</strong> May a move remove a worktree it created itself?</p>
+        <div class="dia">
+          <div class="opt"><h4>A: Keep the rule</h4>
+            <div class="b ws">The refusal names the worktree's folder</div>
+            <ul><li>Pro: the rule stays absolute.</li><li>Con: the person removes it in T3 by hand.</li></ul>
+          </div>
+          <div class="opt rec"><h4>B: Remove only its own <span class="tag">Recommended</span></h4>
+            <div class="b t3">T3 removes the worktree, without force</div>
+            <div class="a">only if this move created it, it is clean, has no thread and the move failed before launch</div>
+            <ul><li>Pro: nothing piles up; T3 refuses if anything changed in it.</li><li>Con: the V-Spec rule gets an exception and an ADR.</li></ul>
+          </div>
+          <div class="opt"><h4>C: Check before creating</h4>
+            <div class="b ws">Refuse an unpushed branch before the worktree exists</div>
+            <ul><li>Pro: no exception to the rule.</li><li>Con: a later refusal, such as a failed pull, still leaves one.</li></ul>
+          </div>
+        </div>
+        <p><strong>Recommendation:</strong> B.</p>
+        <p><strong>Acceptance criterion:</strong> after a refused move onto an unpushed local branch, the target has the same worktrees as before, and a worktree with any change is never removed.</p>
+      </details>
+      <details id="d-119" class="decision wide">
+        <summary><h3>D-119 - Why A Remote Stream Ended</h3></summary>
+        <p><strong>Status:</strong> Open; found by Clawpatch in the Meta-Harness review gate. A stream from another host (<code>meta-harness-core/src/remote.rs</code>) that fails after it started, loses its connection or falls behind ends like a finished stream, so Liquid cannot tell the person that something went wrong.</p>
+        <p><strong>Question:</strong> Should a stream say why it ended?</p>
+        <div class="dia">
+          <div class="opt rec"><h4>A: Say it and show it <span class="tag">Recommended</span></h4>
+            <div class="b ws">Each remote stream keeps its failure and offers <code>failure()</code></div>
+            <div class="b ws">Liquid shows it where the stream's data is shown</div>
+            <ul><li>Pro: the person learns that a session, list or watch stopped updating.</li><li>Con: about 70 lines and their tests in Meta-Harness, plus a Liquid change.</li></ul>
+          </div>
+          <div class="opt"><h4>B: Leave it</h4>
+            <div class="b h">A failed stream ends like a finished one</div>
+            <ul><li>Pro: no work.</li><li>Con: a view may silently stop updating.</li></ul>
+          </div>
+        </div>
+        <p><strong>Recommendation:</strong> A, in the Liquid slice that shows remote sessions, so the API lands together with its first user.</p>
+        <p><strong>Acceptance criterion:</strong> when another host sends an error after a stream started, Liquid shows that error, and a normal end shows none.</p>
+      </details>
     </div>
   </section>
 
