@@ -175,6 +175,7 @@ pub(crate) struct Links {
     t3_home: PathBuf,
     tunnels: Mutex<HashMap<String, JoinHandle<()>>>,
     serial: tokio::sync::Mutex<()>,
+    pairing: tokio::sync::Semaphore,
 }
 
 impl Links {
@@ -185,6 +186,7 @@ impl Links {
             t3_home,
             tunnels: Mutex::default(),
             serial: tokio::sync::Mutex::default(),
+            pairing: tokio::sync::Semaphore::new(1),
         }
     }
 
@@ -370,6 +372,9 @@ impl Links {
     }
 
     pub(crate) async fn pairing_code(&self, access: Access) -> Result<String, String> {
+        let _slot = self.pairing.try_acquire().map_err(|_| {
+            "Another pairing code is still being made; try again in a moment.".to_owned()
+        })?;
         t3::pairing_code(&self.t3, &self.t3_home, access).await
     }
 
@@ -420,7 +425,10 @@ impl Links {
 
 #[cfg(test)]
 mod tests {
-    use super::{RELINK_AFTER_MS, is_due};
+    use std::sync::Arc;
+
+    use super::{Access, Links, RELINK_AFTER_MS, is_due};
+    use crate::util::until;
 
     #[test]
     fn a_link_is_made_again_only_once_it_is_older_than_25_days() {
@@ -428,5 +436,38 @@ mod tests {
         assert!(is_due(None, now));
         assert!(!is_due(Some(now - RELINK_AFTER_MS), now));
         assert!(is_due(Some(now - RELINK_AFTER_MS - 1), now));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_pairing_code_is_made_one_at_a_time_and_a_second_request_is_refused_meanwhile() {
+        use std::os::unix::fs::PermissionsExt;
+        use std::time::Duration;
+        let dir = std::env::temp_dir().join(format!("links-pairing-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let binary = dir.join("t3");
+        std::fs::write(
+            &binary,
+            "#!/bin/sh\n: > \"$T3CODE_HOME/started\"\nsleep 1\nprintf '{\"credential\":\"CODE\"}'\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let links = Arc::new(Links::new("host".to_owned(), binary, dir.clone()));
+        let first = tokio::spawn({
+            let links = links.clone();
+            async move { links.pairing_code(Access::ReadOnly).await }
+        });
+        assert!(
+            until(Duration::from_secs(10), Duration::from_millis(10), || {
+                dir.join("started").exists()
+            })
+            .await,
+            "T3 started the first pairing code"
+        );
+        let refused = links.pairing_code(Access::ReadOnly).await;
+        assert!(refused.is_err(), "{refused:?}");
+        assert_eq!(first.await.unwrap(), Ok("CODE".to_owned()));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
