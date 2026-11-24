@@ -591,6 +591,28 @@ void main() {
     expect(tester.getSize(find.byKey(const Key('whiteboard text'))).width, 240);
   });
 
+  testWidgets('a text box\'s frame grows with its size', (tester) async {
+    await showFocused(tester, [
+      newElement(
+        BridgeElementKind.text,
+        frame: const Rect.fromLTWH(100, 100, 240, 30),
+        color: BridgeInkColor.text,
+        width: 0,
+        text: 'Lisbon',
+      ),
+    ]);
+    await key(tester, LogicalKeyboardKey.keyL);
+    await draw(tester, [
+      const Offset(80, 80),
+      const Offset(400, 80),
+      const Offset(400, 160),
+      const Offset(80, 160),
+      const Offset(80, 85),
+    ]);
+    await tap(tester, find.byKey(const ValueKey('width 2')));
+    expect(stored().single.h, greaterThanOrEqualTo(28 * 1.25));
+  });
+
   testWidgets('⋯ › Delete removes the Whiteboard', (tester) async {
     await kit.show(tester, [
       const TextPart('Intro'),

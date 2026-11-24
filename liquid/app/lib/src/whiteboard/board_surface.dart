@@ -319,19 +319,12 @@ class BoardSurfaceState extends State<BoardSurface> {
     if (element == null) return;
     setState(() => _text = null);
     final text = _typed.text.trimRight();
-    final measure = TextPainter(
-      text: TextSpan(
-        text: text,
-        style: BoardPainter.textStyle(
-          element.width,
-          const Color(0xFF000000),
-          board.handDrawn,
-        ),
-      ),
-      textDirection: TextDirection.ltr,
-    )..layout(maxWidth: math.max(1, element.w));
-    final height = measure.height;
-    measure.dispose();
+    final height = BoardPainter.textHeight(
+      text,
+      element.w,
+      element.width,
+      board.handDrawn,
+    );
     final frame = Rect.fromLTWH(element.x, element.y, element.w, height);
     if (element.id == null) {
       if (text.isEmpty) return;
