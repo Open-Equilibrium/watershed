@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -204,5 +206,36 @@ void main() {
     );
     await tester.pumpAndSettle();
     expectOne(inBlock(find.text('200.2')));
+  });
+
+  testWidgets('leaving an unchanged literal line keeps it as written', (
+    tester,
+  ) async {
+    await kit.show(tester, [
+      CalculationPart([setup('Note', '"=1+2"')]),
+    ]);
+    await tap(tester, find.byKey(const ValueKey('value line 0')));
+    expect(valueText(tester), '=1+2');
+    FocusManager.instance.primaryFocus?.unfocus();
+    await tester.pumpAndSettle();
+    expect(linesOf(0).single.formula, '"=1+2"');
+  });
+
+  testWidgets('enter then leaving a changed line saves it once', (
+    tester,
+  ) async {
+    await kit.show(tester, [
+      CalculationPart([setup('Note', '')]),
+    ]);
+    kit.fake.gate = Completer<void>();
+    kit.fake.gatedKinds = {BridgeMutationKind.setLine};
+    await tap(tester, find.byKey(const ValueKey('value line 0')));
+    await type(tester, '420');
+    await key(tester, LogicalKeyboardKey.enter);
+    FocusManager.instance.primaryFocus?.unfocus();
+    await tester.pumpAndSettle();
+    kit.fake.gate!.complete();
+    await tester.pumpAndSettle();
+    expect(kit.applied(BridgeMutationKind.setLine), hasLength(1));
   });
 }
