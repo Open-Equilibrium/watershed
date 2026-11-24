@@ -514,7 +514,6 @@ class BoardSurfaceState extends State<BoardSurface> {
     return Positioned(
       left: at.dx,
       top: at.dy,
-      width: element.w * board.zoom,
       child: Transform.scale(
         scale: board.zoom,
         alignment: Alignment.topLeft,

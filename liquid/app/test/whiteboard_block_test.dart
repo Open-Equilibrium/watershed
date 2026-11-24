@@ -580,6 +580,17 @@ void main() {
     expect(piece.x + piece.w, lessThan(197), reason: 'cut 12 board px short');
   });
 
+  testWidgets('a text box is laid out at its own width at any zoom', (
+    tester,
+  ) async {
+    await showFocused(tester);
+    kit.boardOf(tester).zoomBy(2, Offset.zero);
+    await tester.pumpAndSettle();
+    await key(tester, LogicalKeyboardKey.keyT);
+    await clickAt(tester, const Offset(120, 120));
+    expect(tester.getSize(find.byKey(const Key('whiteboard text'))).width, 240);
+  });
+
   testWidgets('⋯ › Delete removes the Whiteboard', (tester) async {
     await kit.show(tester, [
       const TextPart('Intro'),
