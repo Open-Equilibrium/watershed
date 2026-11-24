@@ -426,6 +426,23 @@ fn a_failed_replacement_bootstraps_the_previous_agent_again() {
 
 #[cfg(unix)]
 #[test]
+fn a_systemd_unit_whose_file_is_gone_is_stopped_by_name() {
+    let dir = Dir::new();
+    let manager = Manager::systemd(&dir.0.join("config"));
+    let mut ran = Vec::new();
+    let result = manager.uninstall(|step| {
+        ran.push(step.args.join(" "));
+        Err("Unit meta-harness.service not loaded.".to_owned())
+    });
+    assert!(result.is_ok(), "{result:?}");
+    assert_eq!(ran, ["--user stop meta-harness.service"]);
+    let result = manager
+        .uninstall(|_| Err("Failed to stop meta-harness.service: Access denied.".to_owned()));
+    assert!(result.is_err(), "{result:?}");
+}
+
+#[cfg(unix)]
+#[test]
 fn a_reinstall_replaces_the_service_file_whole_for_a_reader_that_has_it_open() {
     use std::io::Read;
     let dir = Dir::new();

@@ -113,6 +113,7 @@ pub struct Manager {
     home_of: fn(&str) -> Option<String>,
     start: Vec<Step>,
     stop: Vec<Step>,
+    stop_without_file: Vec<Step>,
     restore: Vec<Step>,
     restart: Vec<Step>,
 }
@@ -135,6 +136,7 @@ impl Manager {
                 step("launchctl", &["bootstrap", &domain, &plist], true),
             ],
             stop: vec![step("launchctl", &["bootout", &target], false)],
+            stop_without_file: vec![step("launchctl", &["bootout", &target], false)],
             restore: Vec::new(),
             restart: vec![step("launchctl", &["bootstrap", &domain, &plist], true)],
             file,
@@ -157,6 +159,7 @@ impl Manager {
                 &["--user", "disable", "--now", UNIT],
                 false,
             )],
+            stop_without_file: vec![step("systemctl", &["--user", "stop", UNIT], false)],
             restore: vec![step("systemctl", &["--user", "daemon-reload"], false)],
             restart: vec![step("systemctl", &["--user", "restart", UNIT], true)],
         }
@@ -177,6 +180,10 @@ impl Manager {
             home_of: task_home,
             start: vec![step("schtasks", &["/End", "/TN", TASK], false), create, run],
             stop: vec![
+                step("schtasks", &["/End", "/TN", TASK], false),
+                step("schtasks", &["/Delete", "/TN", TASK, "/F"], false),
+            ],
+            stop_without_file: vec![
                 step("schtasks", &["/End", "/TN", TASK], false),
                 step("schtasks", &["/Delete", "/TN", TASK, "/F"], false),
             ],
@@ -313,8 +320,13 @@ impl Manager {
         &self,
         mut run: impl FnMut(&Step) -> Result<(), String>,
     ) -> Result<Vec<String>, String> {
+        let stop = if self.file.exists() {
+            &self.stop
+        } else {
+            &self.stop_without_file
+        };
         let mut failures = Vec::new();
-        for step in &self.stop {
+        for step in stop {
             if let Err(failure) = run(step) {
                 if !not_loaded(&failure) {
                     return Err(format!(
