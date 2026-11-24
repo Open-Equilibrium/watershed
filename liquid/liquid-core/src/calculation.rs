@@ -413,7 +413,9 @@ impl<'w, S: Store> Values<'w, S> {
             .references()
             .map(|reference| match reference.ids() {
                 [table, field] => {
-                    let database = self.workspace.database(&BlockId::parse(table)?).ok()??;
+                    let table = BlockId::parse(table)?;
+                    self.uses.insert(Used::Table(table.clone()));
+                    let database = self.workspace.database(&table).ok()??;
                     let field = database.fields.iter().find(|f| f.id.as_str() == field)?;
                     Some(format!("{}.{}", database.name, field.name))
                 }

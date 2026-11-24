@@ -1155,3 +1155,22 @@ fn a_total_and_a_chart_average_keep_the_mean_of_huge_values() {
         [("Expenses".to_string(), 1e308)]
     );
 }
+
+#[test]
+fn a_calculation_uses_the_table_named_in_an_inactive_branch() {
+    let mut home = Home::new();
+    let (table, amount, page) = (home.table.clone(), home.amount.clone(), home.page.clone());
+    let report = home.calculation(&page);
+    let first = home.first_line(&page, &report);
+    home.set_line(
+        &page,
+        &report,
+        &first,
+        line(
+            "Guard",
+            &format!("IF(FALSE, SUM({{{table}.{amount}}}), 0)"),
+            LineStyle::Plain,
+        ),
+    );
+    assert_eq!(home.calc(&page, &report).uses, [Used::Table(table)]);
+}
