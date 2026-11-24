@@ -590,6 +590,34 @@ fn deleting_a_table_s_earlier_versions_keeps_the_page_s_own() {
 }
 
 #[test]
+fn deleting_a_page_for_good_keeps_the_history_of_the_pages_and_sources_under_it() {
+    let mut budget = Budget::new();
+    let page = budget.page.clone();
+    let area = budget.workspace.areas().unwrap()[0].id.clone();
+    let child = budget
+        .edit(Mutation::CreatePage {
+            area: area.clone(),
+            parent: Some(page.clone()),
+            title: "Packing list".into(),
+        })
+        .action;
+    let source = budget
+        .edit(Mutation::AddSource {
+            area,
+            parent: Some(page.clone()),
+            name: "list.txt".into(),
+            kind: liquid_core::SourceKind::File,
+        })
+        .action;
+    budget
+        .workspace
+        .purge(&owner(), &Purge::Page(page))
+        .unwrap();
+    assert!(!budget.entry_of(&child).purged);
+    assert!(!budget.entry_of(&source).purged);
+}
+
+#[test]
 fn deleting_earlier_versions_drops_the_files_only_they_still_showed() {
     let mut budget = Budget::new();
     let page = budget.page.clone();
