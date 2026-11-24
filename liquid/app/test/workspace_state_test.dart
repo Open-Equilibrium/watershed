@@ -54,6 +54,16 @@ void expectNoRepeats(List<List<String?>> shown) {
   }
 }
 
+class _GatedUndo extends FakeWorkspace {
+  Completer<void>? gate;
+
+  @override
+  Future<bool> undo() async {
+    await gate?.future;
+    return super.undo();
+  }
+}
+
 void main() {
   test('a new Workspace starts with the area Private and one blank Page, open, and a restart opens its first Page', () async {
     final fake = FakeWorkspace();
@@ -135,6 +145,23 @@ void main() {
     await pumpEventQueue();
     expect(state.pageWork(page), isNull);
     await state.drain();
+  });
+
+  test('draining waits for an undo that is still running', () async {
+    final fake = _GatedUndo();
+    final state = WorkspaceState(fake);
+    await state.start();
+    await pumpEventQueue();
+    fake.gate = Completer<void>();
+    unawaited(state.undo());
+    var drained = false;
+    unawaited(state.drain().then((_) => drained = true));
+    await pumpEventQueue();
+    expect(drained, isFalse);
+    fake.gate!.complete();
+    await pumpEventQueue();
+    expect(drained, isTrue);
+    expect(fake.undos, 1);
   });
 
   test('disposing closes every subscription', () async {
