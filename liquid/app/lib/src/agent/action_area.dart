@@ -278,9 +278,12 @@ class _ComposerState extends State<Composer> {
     if (text.isEmpty) return;
     final draft = widget.controller.value;
     widget.onSent();
-    final editing = _editing;
+    final target = _editing;
+    final editing = widget.state.queued.value
+        .where((turn) => turn.number == target?.number)
+        .firstOrNull;
+    if (target != null) setState(() => _editing = null);
     if (editing != null) {
-      setState(() => _editing = null);
       unawaited(widget.state.editQueued(editing, text));
     } else {
       unawaited(_deliver(text, steer: steer, draft: draft));

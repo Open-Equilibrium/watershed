@@ -286,6 +286,28 @@ void main() {
     expect(actions().last, 'cancel 2');
   });
 
+  testWidgets('a queued message that starts while it is edited is sent as a '
+      'new message', (tester) async {
+    await show(
+      tester,
+      transcript: [userMessage(1, 'Run the build')],
+      turns: [
+        running(1),
+        turnOf(2, status: BridgeTurnStatus.queued, prompt: 'Add a test'),
+      ],
+    );
+    await tap(tester, find.text('Edit'));
+    project.session.turnList = [running(1), running(2)];
+    await emit(
+      tester,
+      (seq) => event(BridgeEventKind.turnStarted, seq, turn: 2),
+    );
+    await typeInComposer(tester, 'Add a fix');
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+    expect(actions().last, 'steer Add a fix');
+  });
+
   testWidgets('Edit from here rewinds the chat and returns the prompt, and '
       'Revert files too also undoes the turn’s files', (tester) async {
     await show(
