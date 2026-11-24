@@ -218,20 +218,17 @@ fn a_moving_agent_carries_its_memory_files_and_refuses_unsafe_paths() {
     #[cfg(unix)]
     assert_eq!(mode(&target.join("days/raw.bin")), 0o600);
 
+    let carried = |path: &str| agents::CarriedFile {
+        path: path.to_owned(),
+        bytes: String::new(),
+    };
     for unsafe_path in ["../escape.md", "/etc/passwd", ""] {
-        let file = agents::CarriedFile {
-            path: unsafe_path.to_owned(),
-            bytes: String::new(),
-        };
         assert!(
-            agents::unpack(&target, &[file]).is_err(),
+            agents::unpack(&target, &[carried(unsafe_path)]).is_err(),
             "{unsafe_path:?} is refused"
         );
     }
-    let twice = agents::CarriedFile {
-        path: "days/raw.bin".to_owned(),
-        bytes: String::new(),
-    };
+    let twice = carried("days/raw.bin");
     assert!(
         agents::unpack(&home.join("twice"), &[twice.clone(), twice]).is_err(),
         "a path listed twice is refused"

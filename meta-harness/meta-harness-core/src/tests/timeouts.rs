@@ -9,11 +9,9 @@ const GUARD: Duration = Duration::from_secs(600);
 #[cfg(unix)]
 #[tokio::test(start_paused = true)]
 async fn a_t3_command_that_never_finishes_gives_up() {
-    use std::os::unix::fs::PermissionsExt;
     let dir = super::Dir::new();
     let script = dir.join("t3");
-    std::fs::write(&script, "#!/bin/sh\nsleep 600\n").unwrap();
-    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+    super::executable(&script, "#!/bin/sh\nsleep 600\n");
     let answer = tokio::time::timeout(GUARD, crate::t3::links(&script, &dir))
         .await
         .expect("the command gives up");

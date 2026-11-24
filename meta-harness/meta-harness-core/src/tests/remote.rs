@@ -5,6 +5,7 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::TcpListener;
 use tokio_tungstenite::tungstenite::Message;
 
+use super::{Dir, put, within};
 use crate::remote::{Host, connection_lost};
 
 #[tokio::test(flavor = "multi_thread")]
@@ -22,9 +23,8 @@ async fn dropping_the_last_handle_closes_the_connection_to_the_service() {
     });
     let host = Host::connect_to(&url, "token", "test").await.unwrap();
     drop(host);
-    tokio::time::timeout(Duration::from_secs(10), service)
+    within("the service sees the connection end", service)
         .await
-        .expect("the service sees the connection end")
         .unwrap();
 }
 
@@ -111,16 +111,15 @@ async fn a_refused_connection_says_why_and_is_not_retried() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn a_connection_file_whose_token_is_refused_says_to_restart_meta_harness() {
-    let home = crate::tests::Dir::new();
+    let home = Dir::new();
     let url = refusing_peer(
         b"HTTP/1.1 401 Unauthorized\r\ncontent-length: 0\r\nconnection: close\r\n\r\n",
     )
     .await;
-    std::fs::write(
+    put(
         home.join(crate::service::CONNECTION_FILE),
         serde_json::json!({"url": url, "token": "token"}).to_string(),
-    )
-    .unwrap();
+    );
     let error = Host::connect(&home, "test")
         .await
         .err()

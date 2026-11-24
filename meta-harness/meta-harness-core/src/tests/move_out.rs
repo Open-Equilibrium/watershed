@@ -5,7 +5,7 @@ use serde_json::{Value, json};
 use tokio_tungstenite::tungstenite::Message;
 
 use super::fake_t3::{Fake, chunk, ok};
-use super::thread::{follow_answering, projection};
+use super::thread::{attach, follow_answering, projection};
 use crate::host_move::{Departure, Harness, Movable};
 use crate::thread::move_out::Saving;
 use crate::{ModelChoice, Permissions, Thread};
@@ -64,14 +64,15 @@ async fn live_thread(
         }
     })
     .await;
-    let thread = Thread::follow(
-        fake.client().await,
-        "thread-1".to_owned(),
-        "/repo".to_owned(),
-    )
-    .await
-    .unwrap();
+    let thread = attach(&fake).await;
     (fake, thread)
+}
+
+async fn idle_thread(runs: Value) -> (Fake, Thread) {
+    follow_answering(projection(json!({"runs": runs})), 1, |_, _, id| {
+        vec![ok(id, json!({}))]
+    })
+    .await
 }
 
 async fn moving(thread: &Thread) -> Result<crate::MovePackage, String> {
@@ -91,12 +92,7 @@ async fn moving(thread: &Thread) -> Result<crate::MovePackage, String> {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn a_message_being_prepared_refuses_the_move_and_any_other_lets_it_go_on() {
-    let (fake, thread) = follow_answering(
-        projection(json!({"runs": [run("run-2", 2, "preparing")]})),
-        1,
-        |_, _, id| vec![ok(id, json!({}))],
-    )
-    .await;
+    let (fake, thread) = idle_thread(json!([run("run-2", 2, "preparing")])).await;
     let refused = thread.settle_preparing(LIMIT).await.unwrap_err();
     assert_eq!(
         refused,
@@ -107,23 +103,13 @@ async fn a_message_being_prepared_refuses_the_move_and_any_other_lets_it_go_on()
         "nothing is cancelled or stopped"
     );
 
-    let (_fake, thread) = follow_answering(
-        projection(json!({"runs": [run("run-2", 2, "queued")]})),
-        1,
-        |_, _, id| vec![ok(id, json!({}))],
-    )
-    .await;
+    let (_fake, thread) = idle_thread(json!([run("run-2", 2, "queued")])).await;
     thread.settle_preparing(LIMIT).await.unwrap();
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn a_move_that_ended_takes_no_further_step_after_it_ended() {
-    let (fake, thread) = follow_answering(
-        projection(json!({"runs": [run("run-2", 2, "running")]})),
-        1,
-        |_, _, id| vec![ok(id, json!({}))],
-    )
-    .await;
+    let (fake, thread) = idle_thread(json!([run("run-2", 2, "running")])).await;
     let departure = Departure {
         transfer: "tr-1",
         from_host: "host-a",

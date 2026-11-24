@@ -1,19 +1,21 @@
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use serde_json::{Value, json};
 use tokio::sync::mpsc;
+use tokio_tungstenite::tungstenite::Message;
 
 use super::fake_t3::{Fake, chunk, ok};
+use super::{until, within};
 use crate::event::{
     AgentEvent, ApprovalOption, ItemDetail, ItemId, ItemKind, ItemStatus, PendingRequest, Question,
     Request, RequestId, StepStatus, TaskStep, TurnId, Usage,
 };
 use crate::thread::{ChatItem, Snapshot, Thread, ThreadEvent, TurnStatus};
 use crate::{ModelChoice, Permissions};
-use tokio_tungstenite::tungstenite::Message;
 
-const WAIT: Duration = Duration::from_secs(10);
 const SUBSCRIBE: &str = "orchestration.subscribeThread";
 const COMMAND: &str = "orchestration.dispatchCommand";
 
@@ -43,6 +45,16 @@ fn run(id: &str, ordinal: u64, status: &str, message: &str) -> Value {
     })
 }
 
+pub(super) async fn attach(fake: &Fake) -> Thread {
+    Thread::follow(
+        fake.client().await,
+        "thread-1".to_owned(),
+        "/repo".to_owned(),
+    )
+    .await
+    .unwrap()
+}
+
 pub(super) async fn follow(projection: Value, sequence: u64) -> (Fake, Thread) {
     follow_answering(projection, sequence, |_, _, id| vec![ok(id, json!({}))]).await
 }
@@ -59,10 +71,7 @@ pub(super) async fn follow_answering(
         _ => answer(tag, payload, id),
     })
     .await;
-    let client = fake.client().await;
-    let thread = Thread::follow(client, "thread-1".to_owned(), "/repo".to_owned())
-        .await
-        .unwrap();
+    let thread = attach(&fake).await;
     (fake, thread)
 }
 
@@ -70,7 +79,7 @@ pub(super) fn event(sequence: u64, kind: &str, payload: Value) -> Value {
     json!({"kind": "event", "sequence": sequence, "event": {"type": kind, "payload": payload}})
 }
 
-async fn until(
+async fn until_sequence(
     fake: &Fake,
     events: &mut mpsc::Receiver<ThreadEvent>,
     sequence: u64,
@@ -85,9 +94,8 @@ async fn until(
     );
     let mut seen = Vec::new();
     loop {
-        let next = tokio::time::timeout(WAIT, events.recv())
+        let next = within("the event", events.recv())
             .await
-            .expect("the event arrives")
             .expect("the thread still follows");
         if next.sequence == sequence {
             return seen;
@@ -353,7 +361,7 @@ async fn a_task_list_starts_once_and_reports_each_change_of_its_steps() {
             event(8, "turn-item.updated", tasks("completed", done)),
         ],
     );
-    let seen = until(&fake, &mut events, 9).await;
+    let seen = until_sequence(&fake, &mut events, 9).await;
 
     assert_eq!(
         seen,
@@ -458,7 +466,7 @@ async fn live_changes_become_the_agent_events_liquid_shows() {
             event(31, "run.updated", json!({"id": "r2", "ordinal": 2, "status": "completed"})),
         ],
     );
-    let seen = until(&fake, &mut events, 32).await;
+    let seen = until_sequence(&fake, &mut events, 32).await;
     let request = PendingRequest {
         id: RequestId("req-9".to_owned()),
         turn: TurnId(2),
@@ -480,6 +488,26 @@ async fn live_changes_become_the_agent_events_liquid_shows() {
         cache_write: 10,
         reasoning: 5,
     };
+    let started = |id: &str, kind: ItemKind, detail: ItemDetail| AgentEvent::ItemStarted {
+        turn: TurnId(2),
+        item: item(id),
+        kind,
+        detail,
+    };
+    let delta = |id: &str, text: &str| AgentEvent::ContentDelta {
+        item: item(id),
+        delta: text.to_owned(),
+    };
+    let completed = |id: &str, kind: ItemKind, text: &str, duration_ms: Option<u64>| {
+        AgentEvent::ItemCompleted {
+            turn: TurnId(2),
+            item: item(id),
+            kind,
+            text: text.to_owned(),
+            status: ItemStatus::Completed,
+            duration_ms,
+        }
+    };
     assert_eq!(
         seen,
         vec![
@@ -490,53 +518,26 @@ async fn live_changes_become_the_agent_events_liquid_shows() {
             },
             AgentEvent::TurnStarted { turn: TurnId(2) },
             AgentEvent::TurnsChanged,
-            AgentEvent::ItemStarted {
-                turn: TurnId(2),
-                item: item("c1"),
-                kind: ItemKind::CommandExecution,
-                detail: ItemDetail::Tool {
+            started(
+                "c1",
+                ItemKind::CommandExecution,
+                ItemDetail::Tool {
                     name: "bash".to_owned(),
                     target: "npm test".to_owned()
                 }
-            },
-            AgentEvent::ContentDelta {
-                item: item("c1"),
-                delta: "line one\nline two".to_owned()
-            },
-            AgentEvent::ContentDelta {
-                item: item("c1"),
-                delta: "\nok".to_owned()
-            },
-            AgentEvent::ItemCompleted {
-                turn: TurnId(2),
-                item: item("c1"),
-                kind: ItemKind::CommandExecution,
-                text: "line one\nline two\nok".to_owned(),
-                status: ItemStatus::Completed,
-                duration_ms: Some(3000)
-            },
-            AgentEvent::ItemStarted {
-                turn: TurnId(2),
-                item: item("a1"),
-                kind: ItemKind::AssistantMessage,
-                detail: ItemDetail::None
-            },
-            AgentEvent::ContentDelta {
-                item: item("a1"),
-                delta: "Hi".to_owned()
-            },
-            AgentEvent::ContentDelta {
-                item: item("a1"),
-                delta: " there".to_owned()
-            },
-            AgentEvent::ItemCompleted {
-                turn: TurnId(2),
-                item: item("a1"),
-                kind: ItemKind::AssistantMessage,
-                text: "Hi there".to_owned(),
-                status: ItemStatus::Completed,
-                duration_ms: None
-            },
+            ),
+            delta("c1", "line one\nline two"),
+            delta("c1", "\nok"),
+            completed(
+                "c1",
+                ItemKind::CommandExecution,
+                "line one\nline two\nok",
+                Some(3000)
+            ),
+            started("a1", ItemKind::AssistantMessage, ItemDetail::None),
+            delta("a1", "Hi"),
+            delta("a1", " there"),
+            completed("a1", ItemKind::AssistantMessage, "Hi there", None),
             AgentEvent::RequestOpened { request },
             AgentEvent::RequestResolved {
                 request: RequestId("req-9".to_owned())
@@ -707,7 +708,7 @@ async fn settings_branch_and_context_reach_t3_and_show_in_the_thread() {
         "runtimeMode": "approval-required",
         "modelSelection": {"instanceId": "scripted", "model": "other", "options": [{"id": "effort", "value": "high"}]},
     }))]);
-    until(&fake, &mut events, 3).await;
+    until_sequence(&fake, &mut events, 3).await;
     assert_eq!(thread.model(), Some(model));
     assert_eq!(
         thread.record()["thread"]["runtimeMode"],
@@ -773,20 +774,11 @@ async fn a_thread_restarts_from_the_snapshot_t3_sends_on_a_new_connection() {
         _ => vec![ok(id, json!({}))],
     })
     .await;
-    let thread = Thread::follow(
-        fake.client().await,
-        "thread-1".to_owned(),
-        "/repo".to_owned(),
-    )
-    .await
-    .unwrap();
+    let thread = attach(&fake).await;
     let (first, mut events) = thread.subscribe();
     assert_eq!(first.sequence, 1);
     fake.drop_connection();
-    let ended = tokio::time::timeout(WAIT, events.recv())
-        .await
-        .expect("the subscriber ends");
-    assert!(ended.is_none());
+    assert!(within("the subscriber ends", events.recv()).await.is_none());
     let (restarted, mut events) = thread.subscribe();
     assert_eq!(restarted.sequence, 10);
     assert_eq!(
@@ -809,7 +801,7 @@ async fn a_thread_restarts_from_the_snapshot_t3_sends_on_a_new_connection() {
         ],
     );
     assert_eq!(
-        until(&fake, &mut events, 12).await,
+        until_sequence(&fake, &mut events, 12).await,
         vec![AgentEvent::TurnCompleted {
             turn: TurnId(2),
             checkpoint: Some("2".to_owned()),
@@ -819,8 +811,7 @@ async fn a_thread_restarts_from_the_snapshot_t3_sends_on_a_new_connection() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn a_late_branch_answer_keeps_the_newer_branch_t3_already_sent() {
-    let stream = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
-    let seen = stream.clone();
+    let seen = Arc::new(Mutex::new(String::new()));
     let snapshot =
         json!({"kind": "snapshot", "snapshotSequence": 1, "projection": projection(json!({}))});
     let fake = Fake::start(move |tag, _, id| match tag {
@@ -842,22 +833,13 @@ async fn a_late_branch_answer_keeps_the_newer_branch_t3_already_sent() {
         ],
     })
     .await;
-    let thread = Thread::follow(
-        fake.client().await,
-        "thread-1".to_owned(),
-        "/repo".to_owned(),
-    )
-    .await
-    .unwrap();
+    let thread = attach(&fake).await;
     thread.set_branch("older", None).await.unwrap();
-    let newer = Some(std::path::PathBuf::from("/worktrees/newer"));
-    tokio::time::timeout(Duration::from_secs(5), async {
-        while thread.worktree() != newer {
-            tokio::time::sleep(Duration::from_millis(5)).await;
-        }
+    let newer = Some(PathBuf::from("/worktrees/newer"));
+    until("the newer worktree stays".to_owned(), || {
+        thread.worktree() == newer
     })
-    .await
-    .expect("the newer worktree stays");
+    .await;
     tokio::time::sleep(Duration::from_millis(50)).await;
     assert_eq!(thread.worktree(), newer);
 }
@@ -922,9 +904,7 @@ async fn dropping_a_followed_thread_interrupts_its_stream_on_t3() {
     let (fake, thread) = follow(projection(json!({})), 1).await;
     let id = fake.request_id(SUBSCRIBE);
     drop(thread);
-    tokio::time::timeout(WAIT, fake.interrupted(&id))
-        .await
-        .expect("T3 receives the interrupt");
+    fake.interrupted(&id).await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -932,13 +912,15 @@ async fn subscribers_end_when_t3_ends_the_thread_stream() {
     let (fake, thread) = follow(projection(json!({})), 1).await;
     let (_, mut events) = thread.subscribe();
     fake.close();
-    let ended = tokio::time::timeout(WAIT, events.recv())
-        .await
-        .expect("the subscription ends");
-    assert!(ended.is_none());
+    assert!(
+        within("the subscription ends", events.recv())
+            .await
+            .is_none()
+    );
     let (_, mut later) = thread.subscribe();
-    let ended = tokio::time::timeout(WAIT, later.recv())
-        .await
-        .expect("a later subscription ends too");
-    assert!(ended.is_none());
+    assert!(
+        within("a later subscription ends too", later.recv())
+            .await
+            .is_none()
+    );
 }

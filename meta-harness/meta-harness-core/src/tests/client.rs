@@ -4,20 +4,12 @@ use serde_json::json;
 use tokio_tungstenite::tungstenite::Message;
 
 use super::fake_t3::{Fake, fail, frame, ok};
+use super::{until, within};
 use crate::t3::{Client, Failure};
 
-const WAIT: Duration = Duration::from_secs(10);
-
 async fn reconnected(fake: &Fake, client: &Client) {
-    let reconnect = async {
-        fake.accepted(2).await;
-        while !client.connected() {
-            tokio::time::sleep(Duration::from_millis(5)).await;
-        }
-    };
-    tokio::time::timeout(WAIT, reconnect)
-        .await
-        .expect("the client reconnects");
+    fake.accepted(2).await;
+    until("the client reconnects".to_owned(), || client.connected()).await;
 }
 
 fn spawn_call(
@@ -64,18 +56,20 @@ async fn a_call_waiting_for_t3_fails_when_the_connection_closes_and_later_calls_
     let fake = Fake::start(|_, _, _| Vec::new()).await;
     let client = fake.client().await;
     let call = spawn_call(&client, "x");
-    tokio::time::timeout(WAIT, fake.received("x", 1))
-        .await
-        .unwrap();
+    fake.received("x", 1).await;
     fake.close();
-    let answer = tokio::time::timeout(WAIT, call).await.unwrap().unwrap();
+    let answer = within("the call fails", call).await.unwrap();
     assert!(answer.is_err());
 
     tokio::time::sleep(Duration::from_millis(200)).await;
-    let answer = tokio::time::timeout(WAIT, client.call("x", json!({}))).await;
-    assert!(answer.expect("the call ends").is_err());
-    let opened = tokio::time::timeout(WAIT, client.stream("subscribe", json!({}))).await;
-    assert!(opened.expect("the stream opens or fails").is_err());
+    let answer = within("the call ends", client.call("x", json!({}))).await;
+    assert!(answer.is_err());
+    let opened = within(
+        "the stream opens or fails",
+        client.stream("subscribe", json!({})),
+    )
+    .await;
+    assert!(opened.is_err());
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -87,9 +81,7 @@ async fn a_dropped_stream_or_call_is_interrupted_or_forgotten_on_t3() {
     let id = fake.request_id("subscribe");
     assert_eq!(client.waiting(), 1);
     drop(items);
-    tokio::time::timeout(WAIT, fake.interrupted(&id))
-        .await
-        .expect("T3 receives the interrupt");
+    fake.interrupted(&id).await;
     assert_eq!(client.waiting(), 0);
 
     let call = spawn_call(&client, "slow");
@@ -112,11 +104,9 @@ async fn a_call_in_flight_when_t3_drops_the_connection_fails_and_is_not_sent_aga
     .await;
     let client = fake.client().await;
     let call = spawn_call(&client, "x");
-    tokio::time::timeout(WAIT, fake.received("x", 1))
-        .await
-        .unwrap();
+    fake.received("x", 1).await;
     fake.drop_connection();
-    let answer = tokio::time::timeout(WAIT, call).await.unwrap().unwrap();
+    let answer = within("the call ends", call).await.unwrap();
     assert!(answer.is_err());
     reconnected(&fake, &client).await;
     assert_eq!(client.call("x", json!({"retry": true})).await, Ok(json!(7)));
@@ -141,9 +131,7 @@ async fn a_chunk_is_acknowledged_only_once_its_last_item_is_taken() {
         tokio::time::sleep(Duration::from_millis(200)).await;
         assert_eq!(fake.acks(&id), 0, "action: {action}");
         assert_eq!(items.recv().await, Some(json!("two")));
-        tokio::time::timeout(WAIT, fake.acked(&id, 1))
-            .await
-            .expect("T3 receives the acknowledgement");
+        fake.acked(&id, 1).await;
     }
 }
 
@@ -161,9 +149,7 @@ async fn an_open_stream_survives_a_reconnect_and_is_acknowledged_and_interrupted
     assert_eq!(items.recv().await, Some(json!("one")));
     fake.acked(&id, 1).await;
     fake.drop_connection();
-    tokio::time::timeout(WAIT, fake.received("subscribe", 2))
-        .await
-        .expect("the stream is sent again");
+    fake.received("subscribe", 2).await;
     assert_eq!(fake.request_id("subscribe"), id);
     assert_eq!(
         fake.payloads("subscribe"),
@@ -173,9 +159,7 @@ async fn an_open_stream_survives_a_reconnect_and_is_acknowledged_and_interrupted
     assert_eq!(items.recv().await, Some(json!("two")));
     fake.acked(&id, 2).await;
     drop(items);
-    tokio::time::timeout(WAIT, fake.interrupted(&id))
-        .await
-        .expect("T3 receives the interrupt on the new connection");
+    fake.interrupted(&id).await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -188,17 +172,8 @@ async fn closing_a_client_hangs_up_on_a_healthy_t3_and_ends_its_requests() {
     client.close();
     drop(client);
     fake.hung_up(1).await;
-    assert!(
-        tokio::time::timeout(WAIT, items.recv())
-            .await
-            .expect("the stream ends")
-            .is_none()
-    );
-    tokio::time::timeout(WAIT, pending)
-        .await
-        .expect("the call ends")
-        .unwrap()
-        .unwrap_err();
+    assert!(within("the stream ends", items.recv()).await.is_none());
+    within("the call ends", pending).await.unwrap().unwrap_err();
     assert_eq!(fake.connections(), 1, "a closed client does not reconnect");
 }
 
@@ -210,10 +185,7 @@ async fn a_closed_client_or_one_whose_t3_stays_gone_ends_its_streams_for_good() 
     fake.received("subscribe", 1).await;
     client.close();
     fake.drop_connection();
-    let ended = tokio::time::timeout(WAIT, items.recv())
-        .await
-        .expect("the stream ends");
-    assert!(ended.is_none());
+    assert!(within("the stream ends", items.recv()).await.is_none());
     assert_eq!(fake.connections(), 1, "a closed client does not reconnect");
 
     let fake = Fake::start(|_, _, _| Vec::new()).await;
@@ -221,10 +193,11 @@ async fn a_closed_client_or_one_whose_t3_stays_gone_ends_its_streams_for_good() 
     let mut items = client.stream("subscribe", json!({})).await.unwrap();
     fake.received("subscribe", 1).await;
     fake.close();
-    let ended = tokio::time::timeout(WAIT, items.recv())
-        .await
-        .expect("the stream ends once the retries failed");
-    assert!(ended.is_none());
+    assert!(
+        within("the stream ends once the retries failed", items.recv())
+            .await
+            .is_none()
+    );
     assert!(client.call("x", json!({})).await.is_err());
 }
 
@@ -254,9 +227,9 @@ async fn an_action_that_loses_its_connection_records_why_it_ended() {
     fake.push("subscribe", vec![json!("one")]);
     assert_eq!(action.recv().await, Some(json!("one")));
     fake.drop_connection();
-    let ended = tokio::time::timeout(WAIT, action.recv())
-        .await
-        .expect("the action ends with its connection");
-    assert_eq!(ended, None);
+    assert_eq!(
+        within("the action ends with its connection", action.recv()).await,
+        None
+    );
     assert_eq!(action.failure(), Some(Failure::ConnectionLost));
 }

@@ -1,12 +1,10 @@
-use std::time::Duration;
-
 use serde_json::{Value, json};
 
 use super::fake_t3::{chunk, ok};
 use super::thread::{follow_answering, projection};
+use super::within;
 use crate::thread::{Automation, LocalServer, Pace, RunStatus, ScheduleKind};
 
-const WAIT: Duration = Duration::from_secs(10);
 const SERVERS: &str = "subscribeDiscoveredLocalServers";
 const TASKS: &str = "scheduledTasks.subscribe";
 
@@ -58,8 +56,10 @@ async fn the_servers_of_a_thread_are_watched_and_one_can_be_stopped() {
         SERVERS,
         vec![json!({"servers": [], "scannedAt": "2026-11-15T10:01:00.000Z"})],
     );
-    let emptied = tokio::time::timeout(WAIT, servers.changed()).await.unwrap();
-    assert_eq!(emptied, Some(Vec::new()));
+    assert_eq!(
+        within("the servers change", servers.changed()).await,
+        Some(Vec::new())
+    );
 
     thread.stop_server(4242, 5173).await.unwrap();
     assert_eq!(

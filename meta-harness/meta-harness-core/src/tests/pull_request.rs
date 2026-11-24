@@ -3,9 +3,9 @@ use std::path::PathBuf;
 use serde_json::{Value, json};
 use tokio_tungstenite::tungstenite::Message;
 
-use super::fake_t3::{chunk, ok};
+use super::fake_t3::{Fake, chunk, ok};
 use super::git::checkout_in;
-use crate::git::{LineCount, PullRequestCheck, PullRequestDetail};
+use crate::git::{Git, LineCount, PullRequestCheck, PullRequestDetail};
 
 const CWD: &str = "/repo";
 const URL: &str = "https://github.com/owner/repo/pull/42";
@@ -74,6 +74,10 @@ fn replies(
     }
 }
 
+async fn card(pull: Value, identity: Value) -> (Fake, Git) {
+    checkout_in(replies(pull, identity), Some("thread-1")).await
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn the_card_reads_the_pull_request_its_checks_and_the_action_it_offers() {
     let checks = json!([
@@ -89,7 +93,7 @@ async fn the_card_reads_the_pull_request_its_checks_and_the_action_it_offers() {
         &["merge", "ready"],
         &checks,
     );
-    let (fake, git) = checkout_in(replies(pull, github()), Some("thread-1")).await;
+    let (fake, git) = card(pull, github()).await;
     assert_eq!(
         git.pull_request(42).await.unwrap(),
         PullRequestDetail {
@@ -195,7 +199,7 @@ async fn the_card_offers_the_action_t3_offers_for_the_state_checks_and_permissio
         ),
     ];
     for (case, pull, action) in cases {
-        let (_, git) = checkout_in(replies(pull, github()), Some("thread-1")).await;
+        let (_, git) = card(pull, github()).await;
         let read = git.pull_request(42).await.unwrap();
         assert_eq!(read.action.as_deref(), action, "{case}");
     }
@@ -211,7 +215,7 @@ async fn a_merge_uses_the_merge_method_the_card_selects_and_names_the_pull_reque
         &["merge"],
         &json!([]),
     );
-    let (fake, git) = checkout_in(replies(pull, github()), Some("thread-1")).await;
+    let (fake, git) = card(pull, github()).await;
     git.run_pull_request_action(42, "merge", Some("squash"))
         .await
         .unwrap();
@@ -227,7 +231,7 @@ async fn a_merge_uses_the_merge_method_the_card_selects_and_names_the_pull_reque
 #[tokio::test(flavor = "multi_thread")]
 async fn a_fix_or_resolve_checks_the_pull_request_out_in_a_worktree_for_a_new_thread() {
     let pull = detail("open", false, "conflicting", &[], &[], &json!([]));
-    let (fake, git) = checkout_in(replies(pull, github()), Some("thread-1")).await;
+    let (fake, git) = card(pull, github()).await;
     assert_eq!(
         git.pull_request_worktree(URL).await.unwrap(),
         ("feature".to_owned(), Some(PathBuf::from("/wt/feature")))
@@ -241,7 +245,7 @@ async fn a_fix_or_resolve_checks_the_pull_request_out_in_a_worktree_for_a_new_th
 #[tokio::test(flavor = "multi_thread")]
 async fn a_project_without_a_repository_is_not_asked_about_its_pull_requests() {
     let pull = detail("open", false, "mergeable", &[], &[], &json!([]));
-    let (fake, git) = checkout_in(replies(pull, Value::Null), Some("thread-1")).await;
+    let (fake, git) = card(pull, Value::Null).await;
     assert!(git.pull_request(42).await.is_err());
     assert!(fake.payloads("pullRequests.detail").is_empty());
 }
