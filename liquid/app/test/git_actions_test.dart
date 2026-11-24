@@ -17,17 +17,8 @@ import 'fake_backend.dart';
 import 'focus_kit.dart';
 
 class _ScriptedGit extends FakeGit {
-  _ScriptedGit({
-    super.status,
-    this.resolveError,
-    this.checkOutError,
-    this.publishError,
-  });
+  _ScriptedGit({super.status});
 
-  final Object? resolveError;
-  final Object? checkOutError;
-  final Object? publishError;
-  Object? actionError;
   int reads = 0;
   bool gated = false;
   final progress = StreamController<BridgeGitProgress>();
@@ -46,41 +37,6 @@ class _ScriptedGit extends FakeGit {
           files: files,
           featureBranch: featureBranch,
         );
-
-  @override
-  Future<BridgeResolvedPullRequest> resolvePullRequest(String reference) async {
-    if (resolveError case final error?) throw error;
-    return super.resolvePullRequest(reference);
-  }
-
-  @override
-  Future<BridgeCheckedOut> checkOutPullRequest(
-    String reference, {
-    required bool worktree,
-  }) async {
-    if (checkOutError case final error?) throw error;
-    return super.checkOutPullRequest(reference, worktree: worktree);
-  }
-
-  @override
-  Future<void> publish(
-    String provider,
-    String repository, {
-    required bool public,
-  }) async {
-    if (publishError case final error?) throw error;
-    return super.publish(provider, repository, public: public);
-  }
-
-  @override
-  Future<void> runPullRequestAction(
-    int number,
-    String action, {
-    String? mergeMethod,
-  }) async {
-    if (actionError case final error?) throw error;
-    return super.runPullRequestAction(number, action, mergeMethod: mergeMethod);
-  }
 
   @override
   Future<BridgePullRequestDetail> pullRequest(int number) {
@@ -322,10 +278,8 @@ void main() {
   ) async {
     await pumpGit(
       tester,
-      _ScriptedGit(
-        status: featureOf(upstream: false, remote: false),
-        publishError: Exception('offline'),
-      ),
+      _ScriptedGit(status: featureOf(upstream: false, remote: false))
+        ..failures['publish'] = Exception('offline'),
     );
     await tap(tester, find.text('Publish repository'));
     await tester.enterText(find.byType(TextField), 'acme/api');
@@ -375,7 +329,7 @@ void main() {
     (tester) async {
       await pumpCheckout(
         tester,
-        _ScriptedGit(resolveError: Exception('offline')),
+        (FakeGit()..failures['resolvePullRequest'] = Exception('offline')),
         reference: '42',
       );
       expect(
@@ -394,7 +348,7 @@ void main() {
   ) async {
     await pumpCheckout(
       tester,
-      _ScriptedGit(checkOutError: Exception('locked')),
+      (FakeGit()..failures['checkOutPullRequest'] = Exception('locked')),
       reference: '42',
     );
     await tap(tester, find.widgetWithText(SecondaryButton, 'Local'));
@@ -475,7 +429,7 @@ void main() {
     await tap(tester, find.widgetWithText(PrimaryButton, 'Merge'));
     expect(git.calls, ['pr 7 merge merge=squash']);
 
-    git.actionError = Exception('host refused');
+    git.failures['runPullRequestAction'] = Exception('host refused');
     await tap(tester, find.text('Merge'));
     await tap(tester, find.widgetWithText(PrimaryButton, 'Merge'));
     expect(

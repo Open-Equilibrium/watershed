@@ -17,76 +17,6 @@ import 'package:liquid/src/session/session_state.dart';
 
 import 'fake_backend.dart';
 
-class GatedSession extends FakeSession {
-  Completer<void>? gate;
-  Completer<void>? titleGate;
-  Completer<void>? permissionsGate;
-
-  @override
-  Future<void> setPermissions(BridgePermissions permissions) async {
-    await permissionsGate?.future;
-    await super.setPermissions(permissions);
-  }
-
-  Completer<void>? modelGate;
-
-  @override
-  Future<void> setModel(BridgeModelChoice model) async {
-    await modelGate?.future;
-    await super.setModel(model);
-  }
-
-  @override
-  Future<String> title() async {
-    await titleGate?.future;
-    return super.title();
-  }
-
-  @override
-  Future<void> confirmApplied(int applied) async {
-    await gate?.future;
-    await super.confirmApplied(applied);
-  }
-
-  @override
-  Future<void> setBranch(String branch, {String? worktree}) async {
-    await gate?.future;
-    await super.setBranch(branch, worktree: worktree);
-  }
-
-  @override
-  Future<void> mergeBack() async {
-    await gate?.future;
-    await super.mergeBack();
-  }
-}
-
-class FailingSession extends FakeSession {
-  Completer<void>? statisticsGate;
-  Object? statisticsError;
-  Object? contextError;
-  Object? subscribeError;
-
-  @override
-  Future<BridgeStatistics> statistics() async {
-    await statisticsGate?.future;
-    if (statisticsError case final error?) throw error;
-    return super.statistics();
-  }
-
-  @override
-  Future<BridgeContext?> context() async {
-    if (contextError case final error?) throw error;
-    return super.context();
-  }
-
-  @override
-  Future<BridgeSubscription> subscribe() async {
-    if (subscribeError case final error?) throw error;
-    return super.subscribe();
-  }
-}
-
 class MovingSession extends FakeSession {
   final moved = FakeGit();
 
@@ -100,7 +30,6 @@ class MovingSession extends FakeSession {
 class DelayedReads extends FakeSession {
   final turnReads = <Completer<List<BridgeTurn>>>[];
   bool gateTurns = false;
-  Completer<void>? titleGate;
   Completer<BridgeSnapshot>? snapshotGate;
 
   @override
@@ -109,12 +38,6 @@ class DelayedReads extends FakeSession {
     final read = Completer<List<BridgeTurn>>();
     turnReads.add(read);
     return read.future;
-  }
-
-  @override
-  Future<String> title() async {
-    await titleGate?.future;
-    return super.title();
   }
 
   @override
@@ -267,8 +190,8 @@ void main() {
   group('a session', () {
     test('a switch while the title is read keeps the new title', () async {
       final gate = Completer<void>();
-      project.session = GatedSession()
-        ..titleGate = gate
+      project.session = FakeSession()
+        ..gates['title'] = gate
         ..sessionTitle = 'Old title'
         ..chosen = choiceOf('old-model');
       unawaited(state.open('thread-1'));
@@ -448,12 +371,13 @@ void main() {
     test('a title read after a switch cannot replace the new title', () async {
       final first = DelayedReads()..sessionTitle = 'First';
       await switchTo(first);
-      first.titleGate = Completer<void>();
+      final titleGate = Completer<void>();
+      first.gates['title'] = titleGate;
       first.emit(event(BridgeEventKind.turnCompleted, 1, turn: 1));
       await pumpEventQueue();
 
       await switchTo(FakeSession(id: 'thread-2')..sessionTitle = 'Second');
-      first.titleGate!.complete();
+      titleGate.complete();
       await pumpEventQueue();
 
       expect(state.sessionTitle.value, 'Second');
@@ -486,7 +410,7 @@ void main() {
 
     test('a model change that finishes after a switch leaves the new session alone', () async {
       final gate = Completer<void>();
-      await switchTo(GatedSession()..modelGate = gate);
+      await switchTo(FakeSession()..gates['setModel'] = gate);
       unawaited(state.setModel(choiceOf('claude-haiku')));
       await pumpEventQueue();
 
@@ -500,7 +424,7 @@ void main() {
 
     test('a permission change that finishes after a switch leaves the new session alone', () async {
       final gate = Completer<void>();
-      await switchTo(GatedSession()..permissionsGate = gate);
+      await switchTo(FakeSession()..gates['setPermissions'] = gate);
       unawaited(state.setPermissions(BridgePermissions.supervised));
       await pumpEventQueue();
 
@@ -516,7 +440,7 @@ void main() {
       'an agent created after the Chat moved does not open over it',
       () async {
         final gate = Completer<void>();
-        final hosted = GatedAgents(startGate: gate.future);
+        final hosted = FakeProject()..gates['agentStart'] = gate;
         final moving = SessionState(hosted);
         addTearDown(moving.dispose);
         moving.model.value = choiceOf('claude-opus-5-5');
@@ -537,7 +461,8 @@ void main() {
       'an agent found after the Chat moved is not selected for the new thread',
       () async {
         final gate = Completer<void>();
-        final hosted = GatedAgents(listGate: gate.future)
+        final hosted = FakeProject()
+          ..gates['agents'] = gate
           ..agentList = [agentOf('news-bot', thread: 'thread-1')];
         final moving = SessionState(hosted);
         addTearDown(moving.dispose);
@@ -556,7 +481,7 @@ void main() {
 
     testWidgets('mention polling resumes after one read fails', (tester) async {
       final session = FakeSession();
-      final project = FlakyMentions(session)
+      final project = FakeProject(session: session)
         ..mentionList = [
           BridgeMention(
             agent: 'agent-news-bot',
@@ -574,7 +499,7 @@ void main() {
       await moving.open('thread-1');
       await tester.pump();
 
-      project.failNext = true;
+      project.failures['agentMentions'] = StateError('the host blinked');
       await tester.pump(mentionPoll);
       project.mentionList = [
         BridgeMention(
@@ -604,7 +529,7 @@ void main() {
 
     test('a pending confirmation never blocks the next (ADR-0272)', () async {
       final gate = Completer<void>();
-      final first = GatedSession()..gate = gate;
+      final first = FakeSession()..gates['confirmApplied'] = gate;
       project.session = first;
       await open();
       first.emit(textDelta(1, 'x'));
@@ -817,7 +742,7 @@ void main() {
 
     test('a switch during setBranch keeps Git on its session', () async {
       final gate = Completer<void>();
-      project.session = GatedSession()..gate = gate;
+      project.session = FakeSession()..gates['setBranch'] = gate;
       await open();
       unawaited(state.setBranch('feature'));
       await pumpEventQueue();
@@ -950,9 +875,9 @@ void main() {
 
     test('a late statistics failure is not shown on the open one', () async {
       final gate = Completer<void>();
-      final late = FailingSession()
-        ..statisticsGate = gate
-        ..statisticsError = 'the session file is unreadable';
+      final late = FakeSession()
+        ..gates['statistics'] = gate
+        ..failures['statistics'] = 'the session file is unreadable';
       project.session = late;
       await state.open('thread-1');
       await pumpEventQueue();
@@ -968,8 +893,8 @@ void main() {
     });
 
     test('a failed context read keeps the statistics and says why', () async {
-      final failing = FailingSession()
-        ..contextError = 'the model has no window size';
+      final failing = FakeSession()
+        ..failures['context'] = 'the model has no window size';
       project.session = failing;
 
       await open();
@@ -1004,14 +929,15 @@ void main() {
       expectNotice('Could not open the session: the session is gone');
 
       project.openError = null;
-      project.session = FailingSession()..subscribeError = 'the stream is gone';
+      project.session = FakeSession()
+        ..failures['subscribe'] = 'the stream is gone';
       await state.open('thread-1');
       await pumpEventQueue();
       expectNotice('Could not open the session: the stream is gone');
     });
 
     test('a session whose stream fails to attach is not left active', () async {
-      final flaky = FailingSession()..subscribeError = 'the stream is gone';
+      final flaky = FakeSession()..failures['subscribe'] = 'the stream is gone';
       project.session = flaky;
       await state.open('thread-1');
       await pumpEventQueue();
@@ -1109,8 +1035,8 @@ void main() {
 
     test('a switch during a merge back keeps the chosen session', () async {
       final gate = Completer<void>();
-      project.session = GatedSession()
-        ..gate = gate
+      project.session = FakeSession()
+        ..gates['mergeBack'] = gate
         ..family = mergeTargetLineage();
       await open();
       unawaited(state.mergeBack());
@@ -1187,7 +1113,9 @@ void main() {
     test('a late listing does not hide a newer listing\'s hosts', () async {
       final gate = Completer<void>();
       final state = SessionState(
-        LateFirstListing(gate.future)..threadList = [threadOf('local')],
+        FakeProject()
+          ..gates['threads'] = gate
+          ..threadList = [threadOf('local')],
       );
 
       final earlier = state.loadStart();
@@ -1202,7 +1130,9 @@ void main() {
       'a failed listing of a replaced host cannot close its replacement',
       () async {
         final gate = Completer<void>();
-        final replaced = FailingListing(gate.future);
+        final replaced = FakeProject()
+          ..gates['threads'] = gate
+          ..failures['threads'] = StateError('the listing is gone');
         final state = SessionState(FakeProject());
         unawaited(state.addHost(studioAddress, replaced));
         await pumpEventQueue();
@@ -1219,7 +1149,8 @@ void main() {
 
     test('providers of a host no longer selected are not shown', () async {
       final gate = Completer<void>();
-      final studio = GatedProviders(gate.future)
+      final studio = FakeProject()
+        ..gates['providers'] = gate
         ..providerList = [
           BridgeProvider(
             instance: 'studio',
@@ -1294,86 +1225,3 @@ void main() {
 List<String> threadIds(SessionState state) => [
   for (final listed in state.recent.value) listed.thread.id,
 ];
-
-class FlakyMentions extends FakeProject {
-  FlakyMentions(FakeSession session) : super(session: session);
-
-  bool failNext = false;
-
-  @override
-  Future<List<BridgeMention>> agentMentions(String thread) async {
-    if (failNext) {
-      failNext = false;
-      throw StateError('the host blinked');
-    }
-    return super.agentMentions(thread);
-  }
-}
-
-class GatedAgents extends FakeProject {
-  GatedAgents({this.startGate, this.listGate});
-
-  final Future<void>? startGate;
-  final Future<void>? listGate;
-  bool _listed = false;
-
-  @override
-  Future<List<BridgeAgent>> agents() async {
-    if (!_listed) {
-      _listed = true;
-      await listGate;
-    }
-    return super.agents();
-  }
-
-  @override
-  Future<BridgeAgent> agentStart(
-    BridgeModelChoice model,
-    BridgePermissions permissions,
-    String request,
-  ) async {
-    await startGate;
-    return super.agentStart(model, permissions, request);
-  }
-}
-
-class FailingListing extends FakeProject {
-  FailingListing(this.gate);
-
-  final Future<void> gate;
-
-  @override
-  Future<List<BridgeThreadSummary>> threads() async {
-    await gate;
-    throw StateError('the listing is gone');
-  }
-}
-
-class GatedProviders extends FakeProject {
-  GatedProviders(this.gate);
-
-  final Future<void> gate;
-  bool _first = true;
-
-  @override
-  Future<List<BridgeProvider>> providers() async {
-    if (_first) {
-      _first = false;
-      await gate;
-    }
-    return providerList;
-  }
-}
-
-class LateFirstListing extends FakeProject {
-  LateFirstListing(this.gate);
-
-  final Future<void> gate;
-  int _listings = 0;
-
-  @override
-  Future<List<BridgeThreadSummary>> threads() async {
-    if (_listings++ == 0) await gate;
-    return threadList;
-  }
-}

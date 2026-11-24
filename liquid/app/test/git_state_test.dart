@@ -52,21 +52,6 @@ class SteppedGit extends FakeGit {
   }
 }
 
-class PullFailingGit extends FakeGit {
-  @override
-  Future<(String, String)> pull() => Future.error('offline');
-}
-
-class InitFailingGit extends FakeGit {
-  @override
-  Future<void> init() => Future.error('no permission');
-}
-
-class WatchFailingGit extends FakeGit {
-  @override
-  Stream<BridgeGitStatus> watch() => Stream.error('gone');
-}
-
 void main() {
   late List<String> errors;
 
@@ -305,13 +290,14 @@ void main() {
       expect(git.calls, ['pull']);
       expect(state.result.value, (title: 'Pulled', description: 'Up to date'));
       expect(state.running.value, isNull);
-      await gitState(PullFailingGit()).pull();
+      await gitState(FakeGit()..failures['pull'] = 'offline').pull();
       expect(errors, ['Pull failed: offline']);
 
       await state.initialize();
       expect(git.calls, ['pull', 'init']);
       expect(state.running.value, isNull);
-      await gitState(InitFailingGit()).initialize();
+      await gitState(FakeGit()..failures['init'] = 'no permission')
+          .initialize();
       expect(errors.last, 'Git initialization failed: no permission');
     },
   );
@@ -336,7 +322,7 @@ void main() {
   );
 
   test('a checkout whose status cannot be watched reports that Git status is unavailable', () async {
-    final state = gitState(WatchFailingGit());
+    final state = gitState(FakeGit()..failures['watch'] = 'gone');
     await pumpEventQueue();
 
     expect(state.problem.value, 'Git status is unavailable.');
