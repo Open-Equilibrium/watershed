@@ -249,39 +249,48 @@ fn table_points<S: Store>(
         .group
         .as_ref()
         .and_then(|group| database.fields.iter().find(|field| field.id == *group));
-    let mut labels: Vec<String> = match group {
-        None => vec![database.name.clone()],
-        Some(field) if field.kind == FieldKind::Checkbox => vec!["No".into(), "Yes".into()],
+    let mut buckets: Vec<(Option<Cell>, String)> = match group {
+        None => vec![(None, database.name.clone())],
+        Some(field) if field.kind == FieldKind::Checkbox => vec![
+            (Some(Cell::Checkbox(false)), "No".into()),
+            (Some(Cell::Checkbox(true)), "Yes".into()),
+        ],
         Some(field) => field
             .options
             .iter()
-            .map(|option| option.name.clone())
+            .map(|option| (Some(Cell::Select(option.id.clone())), option.name.clone()))
             .collect(),
     };
-    let mut sums: Vec<(f64, usize)> = vec![(0.0, 0); labels.len()];
-    let mut held = vec![0usize; labels.len()];
+    let average = matches!(setup.value, ChartValue::Average(_));
+    let mut sums: Vec<(f64, usize)> = vec![(0.0, 0); buckets.len()];
+    let mut held = vec![0usize; buckets.len()];
     for row in &rows {
-        let label = match group {
-            None => database.name.clone(),
+        let (key, label) = match group {
+            None => (None, database.name.clone()),
             Some(field) => match row.cell(&field.id) {
-                Some(Cell::Checkbox(true)) => "Yes".into(),
-                _ if field.kind == FieldKind::Checkbox => "No".into(),
-                Some(Cell::Select(option)) => field
-                    .options
-                    .iter()
-                    .find(|known| known.id == *option)
-                    .map_or_else(String::new, |known| known.name.clone()),
-                Some(Cell::Text(text)) => text.clone(),
-                _ => String::new(),
+                Some(Cell::Checkbox(true)) => (Some(Cell::Checkbox(true)), "Yes".into()),
+                _ if field.kind == FieldKind::Checkbox => {
+                    (Some(Cell::Checkbox(false)), "No".into())
+                }
+                Some(Cell::Select(option)) => (
+                    Some(Cell::Select(option.clone())),
+                    field
+                        .options
+                        .iter()
+                        .find(|known| known.id == *option)
+                        .map_or_else(String::new, |known| known.name.clone()),
+                ),
+                Some(Cell::Text(text)) => (Some(Cell::Text(text.clone())), text.clone()),
+                _ => (None, String::new()),
             },
         };
-        let at = match labels.iter().position(|known| *known == label) {
+        let at = match buckets.iter().position(|(known, _)| *known == key) {
             Some(at) => at,
-            None if labels.len() < MAX_CHART_POINTS + MAX_OPTIONS => {
-                labels.push(label);
+            None if buckets.len() < MAX_CHART_POINTS + MAX_OPTIONS => {
+                buckets.push((key, label));
                 sums.push((0.0, 0));
                 held.push(0);
-                labels.len() - 1
+                buckets.len() - 1
             }
             None => continue,
         };
@@ -291,27 +300,33 @@ fn table_points<S: Store>(
             ChartValue::Sum(field) | ChartValue::Average(field) => number(row, field),
         };
         if let Some(number) = number {
-            sums[at].0 += number;
-            sums[at].1 += 1;
+            accumulate(&mut sums[at], number, average);
         }
     }
-    Ok(labels
+    Ok(buckets
         .into_iter()
         .zip(sums)
         .zip(held)
-        .filter(|((_, (sum, _)), held)| *held > 0 && sum.is_finite())
-        .map(|((label, (sum, count)), _)| ChartPoint {
+        .filter(|((_, (value, _)), held)| *held > 0 && value.is_finite())
+        .map(|(((_, label), (value, _)), _)| ChartPoint {
             label: if label.is_empty() {
                 "Empty".into()
             } else {
                 label
             },
-            value: match setup.value {
-                ChartValue::Average(_) if count > 0 => sum / count as f64,
-                _ => sum,
-            },
+            value,
         })
         .collect())
+}
+
+fn accumulate(total: &mut (f64, usize), number: f64, average: bool) {
+    total.1 += 1;
+    if average {
+        let count = total.1 as f64;
+        total.0 += number / count - total.0 / count;
+    } else {
+        total.0 += number;
+    }
 }
 
 fn number(row: &crate::Row, field: &FieldId) -> Option<f64> {
@@ -338,6 +353,7 @@ fn source_points(name: &str, table: &SourceTable, setup: &ChartSetup) -> Vec<Cha
             None => return Vec::new(),
         },
     };
+    let average = matches!(setup.value, ChartValue::Average(_));
     let mut labels: Vec<String> = Vec::new();
     let mut sums: Vec<(f64, usize)> = Vec::new();
     for row in &table.rows {
@@ -356,23 +372,19 @@ fn source_points(name: &str, table: &SourceTable, setup: &ChartSetup) -> Vec<Cha
             Some(at) => crate::source::number(&row[at], table.comma),
         };
         if let Some(number) = number {
-            sums[slot].0 += number;
-            sums[slot].1 += 1;
+            accumulate(&mut sums[slot], number, average);
         }
     }
     let mut points: Vec<ChartPoint> = labels
         .into_iter()
         .zip(sums)
-        .map(|(label, (sum, count))| ChartPoint {
+        .map(|(label, (value, _))| ChartPoint {
             label: if label.is_empty() {
                 "Empty".into()
             } else {
                 label
             },
-            value: match setup.value {
-                ChartValue::Average(_) if count > 0 => sum / count as f64,
-                _ => sum,
-            },
+            value,
         })
         .collect();
     let dated = |label: &str| {

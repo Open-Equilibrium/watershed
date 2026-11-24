@@ -1070,3 +1070,88 @@ fn a_duplicated_table_keeps_its_formulas_and_overflow_is_an_error() {
     let points = home.workspace.chart(&page, &chart).unwrap().unwrap().points;
     assert!(points.iter().all(|point| point.value.is_finite()));
 }
+
+#[test]
+fn a_chart_keeps_select_options_with_the_same_name_apart() {
+    let mut home = Home::new();
+    let (table, page) = (home.table.clone(), home.page.clone());
+    let kind = home.field("Kind", FieldKind::Select);
+    let mut options = Vec::new();
+    for _ in 0..2 {
+        let Created::Option(option) = created(
+            &mut home.workspace,
+            Mutation::AddOption {
+                block: table.clone(),
+                field: kind.clone(),
+                name: "Other".into(),
+                color: 0,
+            },
+        ) else {
+            panic!("an option")
+        };
+        options.push(option);
+    }
+    let rows = home
+        .workspace
+        .rows(&table, &query(Vec::new()))
+        .unwrap()
+        .rows;
+    for (row, option) in rows.iter().zip(options) {
+        home.set_cell(&row.id, &kind, Cell::Select(option));
+    }
+    let chart = home.chart(&page);
+    home.set_chart(
+        &page,
+        &chart,
+        ChartSetup {
+            source: Some(ChartSource::Table(table)),
+            group: Some(kind),
+            value: ChartValue::Count,
+            ..ChartSetup::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(
+        home.points(&page, &chart).1,
+        [("Other".to_string(), 1.0), ("Other".to_string(), 1.0)]
+    );
+}
+
+#[test]
+fn a_total_and_a_chart_average_keep_the_mean_of_huge_values() {
+    let mut home = Home::new();
+    let (table, amount, page) = (home.table.clone(), home.amount.clone(), home.page.clone());
+    let rows = home
+        .workspace
+        .rows(&table, &query(Vec::new()))
+        .unwrap()
+        .rows;
+    for row in &rows {
+        home.set_cell(&row.id, &amount, Cell::Number(1e308));
+    }
+    let average = FieldTotal {
+        field: amount.clone(),
+        total: Total::Average,
+    };
+    let totals = home
+        .workspace
+        .rows(&table, &query(vec![average]))
+        .unwrap()
+        .totals;
+    assert_eq!(totals[0].1.to_string(), "1E+308");
+    let chart = home.chart(&page);
+    home.set_chart(
+        &page,
+        &chart,
+        ChartSetup {
+            source: Some(ChartSource::Table(table)),
+            value: ChartValue::Average(amount),
+            ..ChartSetup::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(
+        home.points(&page, &chart).1,
+        [("Expenses".to_string(), 1e308)]
+    );
+}
