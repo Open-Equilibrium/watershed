@@ -264,6 +264,15 @@ impl Thread {
             .map(turn_status)
     }
 
+    pub(crate) fn queued_turn(&self, id: &str) -> Option<u64> {
+        self.state()
+            .projection
+            .runs
+            .iter()
+            .find(|run| run["userMessageId"] == id && run["status"] == "queued")
+            .and_then(|run| run["ordinal"].as_u64())
+    }
+
     pub(crate) async fn requeue_once(&self, id: &str, text: &str) -> Result<(), String> {
         if self.state().projection.prompts().contains_key(id) {
             return Ok(());
