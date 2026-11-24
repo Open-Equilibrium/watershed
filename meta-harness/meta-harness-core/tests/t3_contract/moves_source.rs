@@ -431,3 +431,46 @@ async fn a_moving_session_stays_listed_with_its_open_move_until_it_is_released()
         .expect("a released session can be deleted");
     service.stop().await;
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_departure_with_another_sessions_preparing_transfer_changes_no_session() {
+    let dir = tempdir::Dir::new();
+    let (origin, url) = shared_remote(dir.path());
+    let repo = clone_project(dir.path(), &origin, &url, "a");
+    let home = dir.path().join("host-a");
+    let (service, host) = start_codex(&home).await;
+    let project = host.project(&repo).await.unwrap();
+    let owner = appended(&project).await;
+    let id = owner.id().to_owned();
+    hold_turn(&owner).await;
+    send_queued(&owner, "append one").await;
+    let preparing = transfer();
+    move_out(&owner, &preparing, Some("Append")).await.unwrap();
+    service.stop().await;
+    db(&home)
+        .execute("UPDATE moved_thread SET state = 'preparing'", [])
+        .unwrap();
+
+    let (service, host) = start_codex(&home).await;
+    let project = host.project(&repo).await.unwrap();
+    let owner = project.open(&id).await.unwrap();
+    let matching = appended(&project).await;
+    hold_turn(&matching).await;
+    send_queued(&matching, "append two").await;
+    let absent = appended(&project).await;
+    for other in [&matching, &absent] {
+        let refused = move_out(other, &preparing, Some("Append"))
+            .await
+            .unwrap_err();
+        assert!(refused.contains("another session"), "{refused}");
+    }
+    let turns = matching.turns().await.unwrap();
+    assert!(
+        turns
+            .iter()
+            .any(|t| t.prompt == "append two" && t.status == TurnStatus::Queued)
+    );
+    release(&owner, &preparing).await;
+    ran(&owner, "append one").await;
+    service.stop().await;
+}
