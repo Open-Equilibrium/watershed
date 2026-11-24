@@ -167,7 +167,8 @@ class AgentsState {
         _poll = Timer(mentionPoll, () => unawaited(readMentions()));
       }
     } on Object catch (_) {
-      if (_state.session?.id == thread && mentions.value.any((m) => !m.answered)) {
+      if (_state.session?.id == thread &&
+          mentions.value.any((m) => !m.answered)) {
         _poll?.cancel();
         _poll = Timer(mentionPoll, () => unawaited(readMentions()));
       }
