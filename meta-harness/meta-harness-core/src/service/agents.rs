@@ -97,22 +97,7 @@ pub(super) async fn call(shared: &Arc<Shared>, call: AgentsCall) -> Result<Value
             shared.agents.start(shared, &agent.id);
             to(agent)
         }
-        AgentsCall::Remove(name) => {
-            let agent = named(shared, &name)?;
-            for id in [Some(&agent.thread), agent.previous.as_ref()]
-                .into_iter()
-                .flatten()
-            {
-                if let Some(thread) = existing(shared, &agent.root, id).await? {
-                    for routine in thread.automations().await?.current() {
-                        thread.remove_routine(&routine.id).await?;
-                    }
-                }
-            }
-            agents::remove(&shared.store.db(), &agent.id)?;
-            shared.agents.stop(&agent.id);
-            to(agent.memory)
-        }
+        AgentsCall::Remove(name) => remove_agent(shared, &name).await,
         AgentsCall::Routines(name) => {
             let agent = named(shared, &name)?;
             match existing(shared, &agent.root, &agent.thread).await? {
@@ -157,29 +142,7 @@ pub(super) async fn call(shared: &Arc<Shared>, call: AgentsCall) -> Result<Value
             rename,
             model,
             permissions,
-        } => {
-            let agent = named(shared, &name)?;
-            if let Some(rename) = rename {
-                rename_to(shared, &agent, &rename).await?;
-            }
-            if model.is_some() || permissions.is_some() {
-                let model = model.unwrap_or_else(|| agent.model.clone());
-                let permissions = permissions.unwrap_or(agent.permissions);
-                agents::set_model(&shared.store.db(), &agent.id, &model, permissions)?;
-                if let Some(thread) = existing(shared, &agent.root, &agent.thread).await? {
-                    thread.set_model(&model).await?;
-                    thread.set_permissions(permissions).await?;
-                    thread.retune_routines(&model, permissions).await?;
-                }
-                absorb(shared, &agent, |seen| {
-                    for task in &mut seen.routines {
-                        task["modelSelection"] = model.to_t3();
-                        task["runtimeMode"] = json!(permissions.mode());
-                    }
-                })?;
-            }
-            to(named(shared, &agent.id)?)
-        }
+        } => update_agent(shared, &name, rename, model, permissions).await,
         AgentsCall::Instructions(name) => to(agents::instructions(&named(shared, &name)?)?),
         AgentsCall::SetInstructions { name, text } => {
             let agent = named(shared, &name)?;
@@ -205,31 +168,85 @@ pub(super) async fn call(shared: &Arc<Shared>, call: AgentsCall) -> Result<Value
             root,
             thread,
             text,
-        } => {
-            let agent = named(shared, &name)?;
-            let target = current(shared, &agent).await?;
-            let source = shared
-                .host
-                .project(Path::new(&root))
-                .await?
-                .open(&thread)
-                .await?;
-            let label = label(&source.title());
-            let context_id = crate::t3::fresh_id("ctx");
-            let message = crate::t3::fresh_id("msg");
-            let context = json!({"version": 1, "records": [{
-                "version": 1, "contextId": context_id, "label": label, "kind": "thread",
-                "environmentId": shared.host.environment_id().await?,
-                "threadId": thread, "title": label,
-            }]});
-            let sent =
-                format!("Mentioned in [{label}](t3-context://v1/thread/{context_id}): {text}");
-            target.post_with_context(&message, &sent, context).await?;
-            agents::add_mention(&shared.store.db(), &agent, &thread, &message, &text)?;
-            to(message)
-        }
+        } => send_mention(shared, &name, &root, &thread, &text).await,
         AgentsCall::Mentions(thread) => mentions(shared, &thread).await,
     }
+}
+
+async fn remove_agent(shared: &Shared, name: &str) -> Result<Value, String> {
+    let agent = named(shared, name)?;
+    for id in [Some(&agent.thread), agent.previous.as_ref()]
+        .into_iter()
+        .flatten()
+    {
+        if let Some(thread) = existing(shared, &agent.root, id).await? {
+            for routine in thread.automations().await?.current() {
+                thread.remove_routine(&routine.id).await?;
+            }
+        }
+    }
+    agents::remove(&shared.store.db(), &agent.id)?;
+    shared.agents.stop(&agent.id);
+    to(agent.memory)
+}
+
+async fn update_agent(
+    shared: &Shared,
+    name: &str,
+    rename: Option<String>,
+    model: Option<crate::ModelChoice>,
+    permissions: Option<crate::Permissions>,
+) -> Result<Value, String> {
+    let agent = named(shared, name)?;
+    if let Some(rename) = rename {
+        rename_to(shared, &agent, &rename).await?;
+    }
+    if model.is_some() || permissions.is_some() {
+        let model = model.unwrap_or_else(|| agent.model.clone());
+        let permissions = permissions.unwrap_or(agent.permissions);
+        agents::set_model(&shared.store.db(), &agent.id, &model, permissions)?;
+        if let Some(thread) = existing(shared, &agent.root, &agent.thread).await? {
+            thread.set_model(&model).await?;
+            thread.set_permissions(permissions).await?;
+            thread.retune_routines(&model, permissions).await?;
+        }
+        absorb(shared, &agent, |seen| {
+            for task in &mut seen.routines {
+                task["modelSelection"] = model.to_t3();
+                task["runtimeMode"] = json!(permissions.mode());
+            }
+        })?;
+    }
+    to(named(shared, &agent.id)?)
+}
+
+async fn send_mention(
+    shared: &Shared,
+    name: &str,
+    root: &str,
+    thread: &str,
+    text: &str,
+) -> Result<Value, String> {
+    let agent = named(shared, name)?;
+    let target = current(shared, &agent).await?;
+    let source = shared
+        .host
+        .project(Path::new(root))
+        .await?
+        .open(thread)
+        .await?;
+    let label = label(&source.title());
+    let context_id = crate::t3::fresh_id("ctx");
+    let message = crate::t3::fresh_id("msg");
+    let context = json!({"version": 1, "records": [{
+        "version": 1, "contextId": context_id, "label": label, "kind": "thread",
+        "environmentId": shared.host.environment_id().await?,
+        "threadId": thread, "title": label,
+    }]});
+    let sent = format!("Mentioned in [{label}](t3-context://v1/thread/{context_id}): {text}");
+    target.post_with_context(&message, &sent, context).await?;
+    agents::add_mention(&shared.store.db(), &agent, thread, &message, text)?;
+    to(message)
 }
 
 async fn mentions(shared: &Shared, source: &str) -> Result<Value, String> {

@@ -98,61 +98,7 @@ pub(crate) fn derive(
         copy
     });
 
-    let mut edges: Vec<Edge> = Vec::new();
-    for shell in threads.iter().copied().chain(selected.as_ref()) {
-        let Some(parent) = parent_of(shell) else {
-            continue;
-        };
-        let kind = if shell["lineage"]["relationshipToParent"] == "subagent" {
-            Kind::Subagent
-        } else {
-            Kind::Fork
-        };
-        add_edge(
-            &mut edges,
-            Edge {
-                source: parent,
-                target: id_of(shell),
-                kind,
-                status: status_of(shell),
-            },
-        );
-    }
-    for subagent in &projection.subagents {
-        let Some(child) = subagent["childThreadId"].as_str() else {
-            continue;
-        };
-        let status = subagent_status(subagent, nodes.get(child).copied());
-        add_edge(
-            &mut edges,
-            Edge {
-                source: current.to_owned(),
-                target: child.to_owned(),
-                kind: Kind::Subagent,
-                status,
-            },
-        );
-    }
-    for transfer in &projection.context_transfers {
-        let (Some(source), Some(target)) = (
-            transfer["sourceThreadId"].as_str(),
-            transfer["targetThreadId"].as_str(),
-        ) else {
-            continue;
-        };
-        if source != target {
-            add_edge(
-                &mut edges,
-                Edge {
-                    source: source.to_owned(),
-                    target: target.to_owned(),
-                    kind: Kind::Transfer,
-                    status: str_of(&transfer["status"]),
-                },
-            );
-        }
-    }
-
+    let edges = edges(projection, current, &threads, selected.as_ref(), &nodes);
     let mut seen: HashSet<String> = HashSet::new();
     let mut rows: Vec<(String, Edge)> = Vec::new();
     for edge in &edges {
@@ -250,30 +196,7 @@ pub(crate) fn derive(
         } else {
             Group::Active
         };
-        let (started_ms, ended_ms, stop_subagent) = match (&agent, agent_record) {
-            (Some(agent), Some(record)) => {
-                let started = millis(&agent["startedAt"]);
-                let completed = millis(&agent["completedAt"]);
-                let active = work_active(agent["status"].as_str());
-                let timed = started.is_some() && (active || completed.is_some());
-                let native = record["origin"] == "provider_native"
-                    && record["driver"] == "claudeAgent"
-                    && !record["runId"].is_null()
-                    && record["nativeTaskRef"]["strength"] == "strong"
-                    && !record["nativeTaskRef"]["nativeId"].is_null()
-                    && work_active(record["status"].as_str());
-                let stoppable =
-                    (record["origin"] == "app_owned" || native) && started.is_some() && active;
-                (
-                    timed.then_some(started).flatten(),
-                    timed.then_some(completed).flatten().filter(|_| !active),
-                    stoppable
-                        .then(|| record["id"].as_str().map(str::to_owned))
-                        .flatten(),
-                )
-            }
-            _ => (None, None, None),
-        };
+        let (started_ms, ended_ms, stop_subagent) = span(agent.as_ref().zip(agent_record));
         let row = LineageRow {
             thread: id.clone(),
             relation,
@@ -324,6 +247,97 @@ pub(crate) fn derive(
         can_merge: merge_target.is_some() && merge_run.is_some(),
     };
     Derived { lineage, unlisted }
+}
+
+fn edges(
+    projection: &Projection,
+    current: &str,
+    threads: &[&Value],
+    selected: Option<&Value>,
+    nodes: &HashMap<&str, &Value>,
+) -> Vec<Edge> {
+    let mut edges: Vec<Edge> = Vec::new();
+    for shell in threads.iter().copied().chain(selected) {
+        let Some(parent) = parent_of(shell) else {
+            continue;
+        };
+        let kind = if shell["lineage"]["relationshipToParent"] == "subagent" {
+            Kind::Subagent
+        } else {
+            Kind::Fork
+        };
+        add_edge(
+            &mut edges,
+            Edge {
+                source: parent,
+                target: id_of(shell),
+                kind,
+                status: status_of(shell),
+            },
+        );
+    }
+    for subagent in &projection.subagents {
+        let Some(child) = subagent["childThreadId"].as_str() else {
+            continue;
+        };
+        let status = subagent_status(subagent, nodes.get(child).copied());
+        add_edge(
+            &mut edges,
+            Edge {
+                source: current.to_owned(),
+                target: child.to_owned(),
+                kind: Kind::Subagent,
+                status,
+            },
+        );
+    }
+    for transfer in &projection.context_transfers {
+        let (Some(source), Some(target)) = (
+            transfer["sourceThreadId"].as_str(),
+            transfer["targetThreadId"].as_str(),
+        ) else {
+            continue;
+        };
+        if source != target {
+            add_edge(
+                &mut edges,
+                Edge {
+                    source: source.to_owned(),
+                    target: target.to_owned(),
+                    kind: Kind::Transfer,
+                    status: str_of(&transfer["status"]),
+                },
+            );
+        }
+    }
+    edges
+}
+
+fn span(pair: Option<(&Value, &Value)>) -> (Option<u64>, Option<u64>, Option<String>) {
+    match pair {
+        Some((agent, record)) => {
+            let started = millis(&agent["startedAt"]);
+            let completed = millis(&agent["completedAt"]);
+            let active = work_active(agent["status"].as_str());
+            let timed = started.is_some() && (active || completed.is_some());
+            let native = record["origin"] == "provider_native"
+                && record["driver"] == "claudeAgent"
+                && !record["runId"].is_null()
+                && record["nativeTaskRef"]["strength"] == "strong"
+                && !record["nativeTaskRef"]["nativeId"].is_null()
+                && work_active(record["status"].as_str());
+            let stoppable =
+                (record["origin"] == "app_owned" || native) && started.is_some() && active;
+            (
+                timed.then_some(started).flatten(),
+                timed.then_some(completed).flatten().filter(|_| !active),
+                stoppable
+                    .then(|| record["id"].as_str().map(str::to_owned))
+                    .flatten(),
+            )
+        }
+        None => (None, None, None),
+    }
 }
 
 fn add_edge(edges: &mut Vec<Edge>, mut edge: Edge) {
