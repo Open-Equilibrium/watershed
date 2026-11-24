@@ -348,6 +348,20 @@ impl<S: Store> Workspace<S> {
         kept: &[RoleId],
     ) -> Result<Written, Error> {
         self.table_doc(table)?;
+        for role in self.roles()? {
+            let others = role
+                .setup
+                .grants
+                .iter()
+                .filter(|grant| grant.target != Target::Table(table.clone()))
+                .count();
+            if kept.contains(&role.id)
+                && role.template != Some(Template::CanManage)
+                && others >= MAX_GRANTS
+            {
+                return Err(Error::TooMany);
+            }
+        }
         self.set_protected(table, false)?;
         let mut snapshots = Vec::new();
         for role in self.roles()? {

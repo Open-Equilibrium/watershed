@@ -5,8 +5,8 @@ mod common;
 use common::*;
 use liquid_core::{
     Allows, Applied, AreaId, AutomationId, AutomationSetup, BlockId, Capability, Cell, Created,
-    Error, FieldId, FieldKind, Grant, MAX_ROLE_NAME, Mutation, Permission, Place, RoleId,
-    RoleSetup, Step, Target, Template, Trigger,
+    Error, FieldId, FieldKind, Grant, MAX_GRANTS, MAX_ROLE_NAME, Mutation, Permission, Place,
+    RoleId, RoleSetup, Step, Target, Template, Trigger,
 };
 
 const READ: Allows = Allows {
@@ -287,4 +287,26 @@ fn templates_and_assigned_roles_hold_and_setups_name_what_exists() {
     let long_name = "x".repeat(MAX_ROLE_NAME + 1);
     let refused = budget.role(&long_name, Vec::new()).unwrap_err();
     assert_eq!(refused, Error::TooLong);
+}
+
+#[test]
+fn protecting_a_table_is_refused_when_a_kept_role_is_at_the_grant_limit() {
+    let mut budget = Budget::new();
+    let grant = Grant {
+        target: Target::Area(budget.area.clone()),
+        allows: READ,
+    };
+    let full = budget.role("Full", vec![grant; MAX_GRANTS]).unwrap();
+    let expenses = budget.expenses.clone();
+    let refused = budget.protect(&expenses, vec![full.clone()]).unwrap_err();
+    assert_eq!(refused, Error::TooMany);
+    assert!(!budget.protected(&expenses));
+    let kept = budget
+        .workspace
+        .roles()
+        .unwrap()
+        .into_iter()
+        .find(|role| role.id == full)
+        .unwrap();
+    assert_eq!(kept.setup.grants.len(), MAX_GRANTS);
 }
