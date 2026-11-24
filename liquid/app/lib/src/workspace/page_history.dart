@@ -68,6 +68,7 @@ class _PageHistoryDialogState extends State<PageHistoryDialog> {
 
   Future<void> _close(WorkspaceState? preview) async {
     if (preview == null) return;
+    await WidgetsBinding.instance.endOfFrame;
     await preview.dispose();
     preview.workspace.dispose();
   }

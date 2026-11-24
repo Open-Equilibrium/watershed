@@ -38,6 +38,18 @@ Future<void> tap(WidgetTester tester, Finder finder) async {
 Finder inHistory(Finder finder) =>
     find.descendant(of: find.byKey(const Key('history')), matching: finder);
 
+class _Watch extends FakeWorkspace {
+  _Watch(this.onDispose);
+
+  final void Function()? onDispose;
+
+  @override
+  void dispose() {
+    onDispose?.call();
+    super.dispose();
+  }
+}
+
 void main() {
   testWidgets('History lists the Workspace\'s entries by day and reverts '
       'one after asking', (tester) async {
@@ -164,6 +176,48 @@ void main() {
     );
     await tap(tester, find.text('Delete earlier versions'));
     expect(kit.fake.purged.single, (kit.page, null));
+  });
+
+  testWidgets('picking another Page history version disposes the old preview '
+      'only after its Page has left the screen', (tester) async {
+    final kit = PageKit();
+    await kit.show(tester, const [TextPart('October')]);
+    final now = DateTime.now().millisecondsSinceEpoch;
+    kit.fake.versionsOf[kit.page] = [
+      BridgeVersion(after: 'v2', at: now, actor: you, savePoint: false),
+      BridgeVersion(after: 'v1', at: now - 600000, actor: you, savePoint: true),
+    ];
+    final juneText = find.descendant(
+      of: find.byKey(const Key('page history')),
+      matching: find.text('June'),
+    );
+    bool? juneShown;
+    FakeWorkspace copy(String text, [void Function()? onDispose]) =>
+        _Watch(onDispose)
+          ..areas.addAll(kit.fake.areas)
+          ..pages.addAll(kit.fake.pages)
+          ..views.addAll(kit.fake.views)
+          ..texts.addAll({
+            for (final block in kit.fake.texts.keys) block: text,
+          });
+    kit.fake.versionAt['v2'] = copy(
+      'June',
+      () => juneShown = juneText.evaluate().isNotEmpty,
+    );
+    kit.fake.versionAt['v1'] = copy('May');
+    await tap(tester, find.byTooltip('Page history'));
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.pumpAndSettle();
+
+    await tester.runAsync(() => tester.tap(find.text('Save point')));
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 600)),
+    );
+    await tester.pumpAndSettle();
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 600)),
+    );
+    expect(juneShown, isFalse);
   });
 
   testWidgets('a deleted Table\'s entry deletes it for good after asking, and '
