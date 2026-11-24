@@ -428,8 +428,7 @@ class MoveModel extends ChangeNotifier {
         matches.firstOrNull;
   }
 
-  String? get chosenRoot =>
-      (_picked ?? (_useProject ? null : _preferredMatch))?.root;
+  String? get chosenRoot => (_picked ?? _preferredMatch)?.root;
 
   BridgeLanding? landingOf(String root) => _landings[root];
 
@@ -587,10 +586,8 @@ class MoveModel extends ChangeNotifier {
       uncommitted: check.uncommittedFiles,
       running: check.running,
       commit: _commit,
-      root: chosenRoot ?? (_useProject ? '' : _clonePath),
-      cloneRemote: !_useProject && picked == null && matches.isEmpty
-          ? check.remoteUrl
-          : null,
+      root: chosenRoot ?? _clonePath,
+      cloneRemote: picked == null && matches.isEmpty ? check.remoteUrl : null,
       bringing: _bringConfiguration && differences.isNotEmpty
           ? _configuration
           : null,
@@ -605,9 +602,6 @@ class MoveModel extends ChangeNotifier {
     if (check.blocked case final blocked?) return blocked;
     if (_picked == null && matching.isEmpty && check.remoteUrl == null) {
       return noRemoteFilesReason;
-    }
-    if (_useProject && _picked == null) {
-      return 'Choose a project on ${_selected!.candidate.name}.';
     }
     final root = plan?.root;
     if (root != null && _blocked(root)) {

@@ -825,8 +825,8 @@ void main() {
       expect(model.picked, isNull);
       expect(
         moveButton(tester).onPressed,
-        isNull,
-        reason: 'Move waits for a project to be chosen',
+        isNotNull,
+        reason: 'Move stays available',
       );
     },
   );
@@ -916,19 +916,18 @@ void main() {
     },
   );
 
-  testWidgets(
-    'Use a project with no project picked keeps Move off and never clones',
-    (tester) async {
-      final model = await modelOf(projects: const []);
-      await tester.pumpWidget(dialogOf(model));
+  testWidgets('Use a project with no project picked moves as Clone to', (
+    tester,
+  ) async {
+    final model = await modelOf(projects: const []);
+    await tester.pumpWidget(dialogOf(model));
 
-      await tester.tap(find.text('Use a project'));
-      await tester.pump();
+    await tester.tap(find.text('Use a project'));
+    await tester.pump();
 
-      expect(model.plan?.cloneRemote, isNull);
-      expect(moveButton(tester).onPressed, isNull);
-    },
-  );
+    expect(model.plan?.cloneRemote, 'git@github.com:acme/api.git');
+    expect(moveButton(tester).onPressed, isNotNull);
+  });
 
   test(
     'a folder added to a project whose landing is blocked keeps Move off',
