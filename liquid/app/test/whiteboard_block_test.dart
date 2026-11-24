@@ -524,6 +524,30 @@ void main() {
     expect(frameOf(stored().single).top, 110);
   });
 
+  testWidgets('a horizontal line grabs by its middle, so a drag moves it', (
+    tester,
+  ) async {
+    await showFocused(tester, [
+      newElement(
+        BridgeElementKind.shape,
+        frame: const Rect.fromLTWH(100, 100, 200, 0),
+        color: BridgeInkColor.data1,
+        width: 1,
+        shape: BridgeShape.line,
+      ),
+    ]);
+    await key(tester, LogicalKeyboardKey.keyL);
+    await draw(tester, [
+      const Offset(80, 80),
+      const Offset(320, 80),
+      const Offset(320, 120),
+      const Offset(80, 120),
+      const Offset(80, 85),
+    ]);
+    await draw(tester, [const Offset(200, 100), const Offset(200, 140)]);
+    expect(frameOf(stored().single).top, 140);
+  });
+
   testWidgets('⋯ › Delete removes the Whiteboard', (tester) async {
     await kit.show(tester, [
       const TextPart('Intro'),

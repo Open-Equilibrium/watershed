@@ -145,6 +145,18 @@ extension _BoardSelect on BoardSurfaceState {
     unawaited(board.edit(change: changes));
   }
 
+  bool _within((List<Offset>, double) box, Offset at) {
+    final (corners, rotation) = box;
+    final center = Offset.lerp(corners[0], corners[2], 0.5)!;
+    final frame = Rect.fromPoints(
+      _rotateAround(corners[0], center, -rotation),
+      _rotateAround(corners[2], center, -rotation),
+    );
+    return frame
+        .inflate(4 / board.zoom)
+        .contains(_rotateAround(at, center, -rotation));
+  }
+
   bool _grab(Offset view, Offset at) {
     final box = selectionBox(board);
     if (box != null) {
@@ -163,7 +175,7 @@ extension _BoardSelect on BoardSurfaceState {
           return true;
         }
       }
-      if (lassoEncloses(box.$1, at)) {
+      if (_within(box, at)) {
         _drag = _Drag.move;
         return true;
       }
