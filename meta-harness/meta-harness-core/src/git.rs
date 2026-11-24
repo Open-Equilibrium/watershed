@@ -336,7 +336,10 @@ impl Git {
         let mut stream = self.client.action("git.runStackedAction", payload).await?;
         let (sender, receiver) = mpsc::channel(64);
         tokio::spawn(async move {
-            while let Some(event) = stream.recv().await {
+            while let Some(event) = tokio::select! {
+                event = stream.recv() => event,
+                () = sender.closed() => return,
+            } {
                 let progress = match event["kind"].as_str() {
                     Some("phase_started") => GitProgress::Phase(text(&event["label"])),
                     Some("hook_started") => GitProgress::Hook(text(&event["hookName"])),

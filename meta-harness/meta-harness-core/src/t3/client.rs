@@ -57,6 +57,7 @@ struct Item {
 struct State {
     out: Option<mpsc::UnboundedSender<Message>>,
     serving: Option<tokio::task::AbortHandle>,
+    keeper: Option<tokio::task::AbortHandle>,
     waiters: HashMap<String, Waiter>,
     closed: bool,
     stopping: bool,
@@ -122,7 +123,8 @@ impl Client {
         let socket = open(origin, &issue).await?;
         let link: Link = Arc::default();
         let served = install(&link, socket);
-        tokio::spawn(keep(link.clone(), origin.to_owned(), issue, served));
+        let keeper = tokio::spawn(keep(link.clone(), origin.to_owned(), issue, served));
+        lock(&link).keeper = Some(keeper.abort_handle());
         Ok(Self {
             link,
             next: Arc::new(AtomicU64::new(1)),
@@ -214,6 +216,11 @@ impl Client {
         state.stopping = true;
         if let Some(serving) = state.serving.take() {
             serving.abort();
+        }
+        if let Some(keeper) = state.keeper.take() {
+            keeper.abort();
+            lose_connection(&mut state);
+            close_for_good(&mut state);
         }
     }
 }

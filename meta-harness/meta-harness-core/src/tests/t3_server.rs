@@ -50,15 +50,27 @@ async fn a_server_that_ends_during_its_start_is_started_again() {
 async fn a_token_issue_that_never_ends_is_killed_at_its_wait() {
     let dir = Dir::new();
     let binary = dir.join("t3");
-    executable(&binary, "#!/bin/sh\nexec sleep 60\n");
+    executable(
+        &binary,
+        "#!/bin/sh\necho $$ > \"$T3CODE_HOME/pid\"\nexec sleep 60\n",
+    );
 
     let started = std::time::Instant::now();
-    let result = issue(binary, dir.to_path_buf(), Duration::from_millis(200)).await;
+    let result = issue(binary, dir.to_path_buf(), Duration::from_secs(1)).await;
     assert!(result.is_err(), "{result:?}");
     assert!(
         started.elapsed() < Duration::from_secs(10),
         "{:?}",
         started.elapsed()
+    );
+    let pid = std::fs::read_to_string(dir.join("pid")).unwrap();
+    let issuer = rustix::process::Pid::from_raw(pid.trim().parse().unwrap()).unwrap();
+    assert!(
+        crate::util::until(Duration::from_secs(5), Duration::from_millis(50), || {
+            rustix::process::test_kill_process(issuer).is_err()
+        })
+        .await,
+        "a token issue outlives its wait"
     );
 }
 

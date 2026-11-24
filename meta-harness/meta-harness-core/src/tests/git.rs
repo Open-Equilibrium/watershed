@@ -294,6 +294,16 @@ async fn every_stacked_action_is_sent_under_its_t3_name() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn dropping_an_idle_action_stops_its_t3_subscription_without_another_event() {
+    let (fake, git) = checkout(|_, _, _| Vec::new()).await;
+    let receiver = git.run(request(GitAction::Commit, None)).await.unwrap();
+    fake.received("git.runStackedAction", 1).await;
+    let id = fake.request_id("git.runStackedAction");
+    drop(receiver);
+    fake.interrupted(&id).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn a_stacked_action_reports_its_phases_hooks_and_result() {
     let (fake, git) = checkout_in(|_, _, _| Vec::new(), Some("thread-1")).await;
     let receiver = git
