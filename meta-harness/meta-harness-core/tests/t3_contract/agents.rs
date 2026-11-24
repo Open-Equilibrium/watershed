@@ -225,6 +225,62 @@ async fn an_agent_made_by_chat_names_itself_logs_its_changes_and_answers_a_menti
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn a_held_rename_applies_only_to_the_name_it_was_made_against() {
+    let (_dir, repo, home) = fixture();
+    let (service, host) = start_service(&home).await;
+    let created = host
+        .agent_create(NewAgent {
+            name: Some("news-bot".to_owned()),
+            root: repo.to_string_lossy().into_owned(),
+            model: start("", Workspace::Checkout, Permissions::FullAccess).model,
+            permissions: Permissions::FullAccess,
+            instructions: "Keep the news page current.".to_owned(),
+            request: None,
+        })
+        .await
+        .unwrap();
+    let project = host.project(&repo).await.unwrap();
+    let thread = project.open(&created.thread).await.unwrap();
+    wait(&thread, completed(1)).await;
+    let routine = host
+        .agent_routine_add("news-bot", every_hour("Rename", "rename"))
+        .await
+        .unwrap();
+
+    thread.run_automation_now(&routine.id).await.unwrap();
+    let stale = settle(&host, "the held rename waits", |host| async move {
+        host.agent_changes("news-bot")
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|c| c.kind == AgentChangeKind::Name && c.held)
+    })
+    .await;
+    host.agent_update("news-bot", Some("news-room".to_owned()), None, None)
+        .await
+        .unwrap();
+    assert!(
+        host.agent_apply("news-room", stale.id).await.is_err(),
+        "a held rename does not overwrite a newer rename"
+    );
+    assert_eq!(host.agents().await.unwrap()[0].name, "news-room");
+
+    thread.run_automation_now(&routine.id).await.unwrap();
+    let stale = stale.id;
+    let current = settle(&host, "the next rename waits", move |host| async move {
+        host.agent_changes("news-room")
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|c| c.kind == AgentChangeKind::Name && c.held && c.id > stale)
+    })
+    .await;
+    host.agent_apply("news-room", current.id).await.unwrap();
+    assert_eq!(host.agents().await.unwrap()[0].name, "news-desk");
+    service.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn an_agent_moves_to_another_host_with_its_memory_and_routines() {
     let pair = Pair::codex().await;
     let created = pair

@@ -486,7 +486,10 @@ async fn still(
 ) -> Result<bool, String> {
     let task = |text: &Option<String>| routine_json(text).ok().flatten();
     Ok(match change.kind {
-        AgentChangeKind::Name => true,
+        AgentChangeKind::Name => {
+            let current = agent.named.then_some(agent.name.as_str());
+            change.before.as_deref() == current || change.after.as_deref() == current
+        }
         AgentChangeKind::Instructions => {
             agents::instructions(agent)? == change.before.clone().unwrap_or_default()
         }
