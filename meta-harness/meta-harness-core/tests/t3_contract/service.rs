@@ -425,19 +425,22 @@ async fn a_client_that_stops_reading_is_disconnected_and_one_that_reads_gets_eve
             .await
             .unwrap();
     }
-    for id in [1u64, 2] {
+    let mut answered = Vec::new();
+    for _ in 0..2 {
         let Message::Text(text) = socket.next().await.unwrap().unwrap() else {
             panic!("a reply is text");
         };
         let reply: serde_json::Value = serde_json::from_str(&text).unwrap();
         assert!(
-            reply["id"] == id
-                && reply["error"].as_str().is_some_and(|error| {
-                    error.starts_with(meta_harness_core::api::UNKNOWN_REQUEST)
-                }),
+            reply["error"].as_str().is_some_and(|error| {
+                error.starts_with(meta_harness_core::api::UNKNOWN_REQUEST)
+            }),
             "{reply}"
         );
+        answered.push(reply["id"].as_u64().unwrap());
     }
+    answered.sort_unstable();
+    assert_eq!(answered, [1, 2]);
     for id in 3..=302u64 {
         let call = serde_json::json!({"id": id, "call": {"host": "status"}});
         socket

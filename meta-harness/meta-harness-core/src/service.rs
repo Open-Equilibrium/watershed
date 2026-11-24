@@ -41,8 +41,6 @@ const HANDSHAKES: usize = 32;
 
 const HANDSHAKE: std::time::Duration = std::time::Duration::from_secs(10);
 
-const REPLY_WAIT: std::time::Duration = std::time::Duration::from_secs(10);
-
 const REQUESTS: usize = 256;
 
 const REFUSED_CALL: &str = "This client may not make that call.";
@@ -393,8 +391,6 @@ async fn serve(
         threads: Mutex::default(),
     });
     let mut streams: HashMap<u64, AbortHandle> = HashMap::new();
-    let (stalled, mut stalls) = mpsc::channel::<()>(1);
-    let replying = Arc::new(tokio::sync::Semaphore::new(1));
     let requests = Arc::new(tokio::sync::Semaphore::new(REQUESTS));
     let mut ping = crate::util::pings();
     let mut heard = tokio::time::Instant::now();
@@ -403,7 +399,6 @@ async fn serve(
             frame = frames.next() => Some(frame),
             _ = stopping.wait_for(|stopped| *stopped) => break,
             () = revoked(&mut revocations, owner.as_deref()) => break,
-            _ = stalls.recv() => break,
             Some(_) = tasks.join_next() => continue,
             _ = ping.tick() => None,
         };
@@ -424,27 +419,15 @@ async fn serve(
                     .ok()
                     .and_then(|v| v["id"].as_u64());
                 if let Some(id) = id {
+                    let Ok(permit) = requests.clone().try_acquire_owned() else {
+                        break;
+                    };
                     let error = format!("{}: {error}", api::UNKNOWN_REQUEST);
-                    let reply = frame_of(&Reply::Error { id, error });
-                    match out.try_send(reply) {
-                        Ok(()) => {}
-                        Err(mpsc::error::TrySendError::Full(reply)) => {
-                            let Ok(permit) = replying.clone().try_acquire_owned() else {
-                                break;
-                            };
-                            let (out, stalled) = (out.clone(), stalled.clone());
-                            tasks.spawn(async move {
-                                let _permit = permit;
-                                if tokio::time::timeout(REPLY_WAIT, out.send(reply))
-                                    .await
-                                    .is_err()
-                                {
-                                    let _ = stalled.try_send(());
-                                }
-                            });
-                        }
-                        Err(mpsc::error::TrySendError::Closed(_)) => break,
-                    }
+                    let (out, reply) = (out.clone(), frame_of(&Reply::Error { id, error }));
+                    tasks.spawn(async move {
+                        let _permit = permit;
+                        let _ = out.send(reply).await;
+                    });
                 }
                 continue;
             }
