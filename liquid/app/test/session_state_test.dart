@@ -1062,6 +1062,48 @@ void main() {
       expect(threadIds(state), unorderedEquals(['local', 'studio']));
     });
 
+    test(
+      'a failed listing of a replaced host cannot close its replacement',
+      () async {
+        final gate = Completer<void>();
+        final replaced = FailingListing(gate.future);
+        final state = SessionState(FakeProject());
+        unawaited(state.addHost(studioAddress, replaced));
+        await pumpEventQueue();
+        final replacement = listing('studio');
+        await state.addHost(studioAddress, replacement);
+
+        gate.complete();
+        await pumpEventQueue();
+
+        expect(replacement.closed, isFalse);
+        expect(state.answers(studioAddress), isTrue);
+      },
+    );
+
+    test('providers of a host no longer selected are not shown', () async {
+      final gate = Completer<void>();
+      final studio = GatedProviders(gate.future)
+        ..providerList = [
+          BridgeProvider(
+            instance: 'studio',
+            name: 'Studio',
+            available: true,
+            models: [modelOf('studio-model', 'Studio model')],
+          ),
+        ];
+      final state = SessionState(FakeProject());
+      await state.addHost(studioAddress, studio);
+      unawaited(state.startOn(studioAddress));
+      await pumpEventQueue();
+
+      await state.startOn(null);
+      gate.complete();
+      await pumpEventQueue();
+
+      expect(state.providers.value.map((p) => p.instance), ['claudeAgent']);
+    });
+
     test('removing a host drops its sessions and releases it', () async {
       final studio = listing('studio');
       final state = SessionState(listing('local'));
@@ -1116,6 +1158,34 @@ void main() {
 List<String> threadIds(SessionState state) => [
   for (final listed in state.recent.value) listed.thread.id,
 ];
+
+class FailingListing extends FakeProject {
+  FailingListing(this.gate);
+
+  final Future<void> gate;
+
+  @override
+  Future<List<BridgeThreadSummary>> threads() async {
+    await gate;
+    throw StateError('the listing is gone');
+  }
+}
+
+class GatedProviders extends FakeProject {
+  GatedProviders(this.gate);
+
+  final Future<void> gate;
+  bool _first = true;
+
+  @override
+  Future<List<BridgeProvider>> providers() async {
+    if (_first) {
+      _first = false;
+      await gate;
+    }
+    return providerList;
+  }
+}
 
 class LateFirstListing extends FakeProject {
   LateFirstListing(this.gate);

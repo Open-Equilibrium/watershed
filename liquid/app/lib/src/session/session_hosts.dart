@@ -65,8 +65,11 @@ extension SessionHosts on SessionState {
     try {
       final view = _viewProject;
       if (view != null) {
-        providers.value = await view.providers();
-        model.value ??= _firstModel(providers.value);
+        final listed = await view.providers();
+        if (identical(view, _viewProject)) {
+          providers.value = listed;
+          model.value ??= _firstModel(listed);
+        }
       }
       final start = project;
       if (base.value == null && start != null) {
@@ -96,7 +99,9 @@ extension SessionHosts on SessionState {
           ),
       ];
     } on Object catch (error) {
-      failHost(address, hostProblem(address, error));
+      if (identical(_agents[address], host)) {
+        failHost(address, hostProblem(address, error));
+      }
       return const [];
     }
   }
