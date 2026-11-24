@@ -179,6 +179,46 @@ void main() {
     expect(kit.fake.purged.single, (kit.page, null));
   });
 
+  testWidgets('Restore waits until the chosen version is shown', (
+    tester,
+  ) async {
+    final kit = PageKit();
+    await kit.show(tester, const [TextPart('October')]);
+    final now = DateTime.now().millisecondsSinceEpoch;
+    kit.fake.versionsOf[kit.page] = [
+      BridgeVersion(after: 'v2', at: now, actor: you, savePoint: false),
+      BridgeVersion(after: 'v1', at: now - 600000, actor: you, savePoint: true),
+    ];
+    kit.fake.versionAt['v1'] = FakeWorkspace()
+      ..areas.addAll(kit.fake.areas)
+      ..pages.addAll(kit.fake.pages)
+      ..views.addAll(kit.fake.views)
+      ..texts.addAll({for (final block in kit.fake.texts.keys) block: 'May'});
+    await tap(tester, find.byTooltip('Page history'));
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Save point'));
+    await tester.pump();
+    await tester.tap(find.text('Restore version'));
+    await tester.pump();
+    expect(kit.fake.restored, isEmpty);
+
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.pumpAndSettle();
+    expect(
+      find.descendant(
+        of: find.byKey(const Key('page history')),
+        matching: find.text('May'),
+      ),
+      findsOneWidget,
+    );
+    await tester.tap(find.text('Restore version'));
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.pumpAndSettle();
+    expect(kit.fake.restored.single, (kit.page, 'v1'));
+  });
+
   testWidgets('picking another Page history version disposes the old preview '
       'only after its Page has left the screen', (tester) async {
     final kit = PageKit();

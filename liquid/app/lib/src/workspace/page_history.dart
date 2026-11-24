@@ -36,6 +36,7 @@ class _PageHistoryDialogState extends State<PageHistoryDialog> {
   List<BridgeVersion> _versions = const [];
   BridgeVersion? _chosen;
   WorkspaceState? _preview;
+  BridgeVersion? _loaded;
   int _reads = 0;
 
   WorkspaceState get _state => widget.state;
@@ -99,7 +100,10 @@ class _PageHistoryDialogState extends State<PageHistoryDialog> {
         return;
       }
       final old = _preview;
-      setState(() => _preview = preview);
+      setState(() {
+        _preview = preview;
+        _loaded = version;
+      });
       await _close(old);
     } on Object catch (error) {
       _state.readFailed(error);
@@ -258,7 +262,7 @@ class _PageHistoryDialogState extends State<PageHistoryDialog> {
               ),
               PrimaryButton(
                 label: 'Restore version',
-                onPressed: chosen == null || current
+                onPressed: chosen == null || current || chosen != _loaded
                     ? null
                     : () => unawaited(_restore(chosen)),
               ),
