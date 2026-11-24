@@ -152,15 +152,16 @@ impl Sqlite {
 }
 
 fn index_actions(transaction: &rusqlite::Transaction<'_>) -> Result<(), Error> {
-    let actions: Vec<(i64, String)> = transaction
+    let mut query = transaction
         .prepare("SELECT seq, record FROM actions")
-        .and_then(|mut query| {
-            query
-                .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
-                .collect()
+        .map_err(failed)?;
+    let rows = query
+        .query_map([], |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
         })
         .map_err(failed)?;
-    for (seq, record) in actions {
+    for row in rows {
+        let (seq, record) = row.map_err(failed)?;
         let action: Action = serde_json::from_str(&record).map_err(failed)?;
         index_documents(transaction, seq, &action)?;
     }
