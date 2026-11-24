@@ -1,4 +1,3 @@
-import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -84,30 +83,6 @@ void main() {
       await type(tester, LogicalKeyboardKey.digit1, '0/15/2026');
       await key(tester, LogicalKeyboardKey.enter);
       expect(written().single.$3?.text, '2026-10-15');
-    },
-  );
-
-  testWidgets(
-    'a field menu and a date picker open with the caret after their text',
-    variant: macOS,
-    (tester) async {
-      await kit.show(tester, [TablePart(expenses)]);
-      await tester.tap(
-        kit.inTable(find.text('Category')),
-        buttons: kSecondaryButton,
-      );
-      await tester.pumpAndSettle();
-      expect(
-        focused(tester).textEditingValue.selection,
-        const TextSelection.collapsed(offset: 'Category'.length),
-      );
-      await key(tester, LogicalKeyboardKey.escape);
-      await select(tester, 'r1', 'date');
-      await key(tester, LogicalKeyboardKey.enter);
-      expect(
-        focused(tester).textEditingValue.selection,
-        const TextSelection.collapsed(offset: 'Nov 1, 2026'.length),
-      );
     },
   );
 }

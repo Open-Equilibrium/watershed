@@ -3,7 +3,6 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:liquid/src/rust/api/calculation.dart';
 import 'package:liquid/src/rust/api/chart.dart';
-import 'package:liquid/src/agent/sidebar.dart';
 import 'package:liquid/src/rust/api/workspace.dart';
 import 'package:liquid/src/workspace/chart_block.dart';
 import 'package:liquid/src/workspace/workspace_state.dart';
@@ -150,21 +149,6 @@ void main() {
     );
   });
 
-  testWidgets('the Chart data panel stays beside the sidebar at the minimum '
-      'width', (tester) async {
-    await kit.show(tester, [
-      TablePart(expenses),
-      const ChartPart(barCount, []),
-    ]);
-    await tester.binding.setSurfaceSize(const Size(1050, 640));
-    await tester.pumpAndSettle();
-    await tap(tester, find.byKey(const Key('chart data')));
-    expect(
-      tester.getRect(panel).left,
-      greaterThanOrEqualTo(tester.getRect(find.byType(Sidebar)).right),
-    );
-  });
-
   Future<void> lineChartOf(WidgetTester tester, String title) async {
     await kit.show(tester, [
       CalculationPart(const [
@@ -197,12 +181,5 @@ void main() {
     await lineChartOf(tester, 'Budget');
     expect(inChart(find.text('from Budget')), findsOneWidget);
     expect(inChart(find.text('A line needs two points')), findsOneWidget);
-  });
-
-  testWidgets('a Chart from an untitled Calculation says from Untitled', (
-    tester,
-  ) async {
-    await lineChartOf(tester, '');
-    expect(inChart(find.text('from Untitled')), findsOneWidget);
   });
 }

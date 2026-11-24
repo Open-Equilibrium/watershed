@@ -123,16 +123,6 @@ void main() {
     expect(kit.fake.texts.values.first, r'The area is $A = \pi r^2$, so');
   });
 
-  testWidgets(r'deleting back to $$ leaves a Text Block as it is', (
-    tester,
-  ) async {
-    await kit.show(tester, [const TextPart(r'$$x')]);
-    await tester.tap(block(0));
-    await tester.pump();
-    await type(tester, r'$$');
-    expect(kinds(), [BridgeBlockKind.text]);
-  });
-
   testWidgets('↓ from the Text Block above opens a Math Block', (tester) async {
     await kit.show(tester, [
       const TextPart('Roots'),

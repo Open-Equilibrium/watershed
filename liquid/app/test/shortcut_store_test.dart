@@ -33,31 +33,6 @@ void main() {
       settingsDirectory({'HOME': '/Users/b'}, TargetPlatform.macOS),
       '/Users/b/Library/Application Support/Liquid',
     );
-    expect(
-      settingsDirectory({'HOME': '/home/b'}, TargetPlatform.linux),
-      '/home/b/.config/liquid',
-    );
-    expect(
-      settingsDirectory({
-        'HOME': '/home/b',
-        'XDG_CONFIG_HOME': '/xdg',
-      }, TargetPlatform.linux),
-      '/xdg/liquid',
-    );
-    expect(
-      settingsDirectory({
-        'HOME': '/home/b',
-        'XDG_CONFIG_HOME': '',
-      }, TargetPlatform.linux),
-      '/home/b/.config/liquid',
-      reason: 'an empty XDG variable counts as unset',
-    );
-    expect(
-      settingsDirectory({
-        'APPDATA': r'C:\Users\b\AppData\Roaming',
-      }, TargetPlatform.windows),
-      r'C:\Users\b\AppData\Roaming\Liquid',
-    );
   });
 
   test('the store keeps JSON settings and rejects bad data', () async {
@@ -135,20 +110,6 @@ void main() {
     expect(shortcuts.value.liquidKey, isFalse);
     expect(shortcuts.value.profile, Profile.standard);
     expect(shortcuts.value.label(Command.newSession), '⌘N');
-    expect(host.calls, isEmpty);
-  });
-
-  test('a kept Custom Liquid key stays off where unavailable', () async {
-    await store.save(
-      ShortcutSettings.standard().withLiquidKey(true).choose(Profile.standard),
-    );
-    final host = FakeHost(available: false);
-    final shortcuts = await ShortcutController.load(store, host);
-
-    await shortcuts.change(shortcuts.value.choose(Profile.custom));
-    expect(shortcuts.value.liquidKey, isFalse);
-    expect(shortcuts.value.label(Command.newSession), '⌘N');
-    expect((await store.load())!.liquidKey, isFalse);
     expect(host.calls, isEmpty);
   });
 

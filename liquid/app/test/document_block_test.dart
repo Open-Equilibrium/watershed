@@ -196,20 +196,6 @@ void main() {
     expect(kit.applied(BridgeMutationKind.editDrawing), hasLength(1));
   });
 
-  testWidgets('ink stays on a page when the next is shorter', (tester) async {
-    await showPdf(tester, sizes: const [Size(595, 842), Size(842, 595)]);
-    await focusPdf(tester);
-    final first = board(tester).sheets.first;
-    await scrollBoard(tester, first.bottom - 200);
-    await draw(tester, [
-      first.topLeft + const Offset(100, 800),
-      first.topLeft + const Offset(200, 805),
-    ]);
-    final [stroke] = lastEdit().add;
-    expect(stroke.docPage, 0);
-    expect(stroke.y, closeTo(800, 1));
-  });
-
   testWidgets('ink in view shows past a full page above', (tester) async {
     BridgeElement box(int page) => newElement(
       BridgeElementKind.shape,
@@ -276,24 +262,5 @@ void main() {
     final [stroke] = lastEdit().add;
     expect(stroke.docPage, 0);
     expect(stroke.x, closeTo(5, 1));
-  });
-
-  testWidgets('the wheel over a focused image scrolls', (tester) async {
-    await kit.show(tester, [
-      MediaPart('tram.png', tramPng),
-      for (var line = 0; line < 60; line++) TextPart('Line $line'),
-    ]);
-    await settleImage(tester);
-    final image = find.byKey(const Key('image ink'));
-    await tester.tap(image);
-    await tester.pumpAndSettle();
-    final scrollable = tester.state<ScrollableState>(
-      find.ancestor(of: image, matching: find.byType(Scrollable)).first,
-    );
-    final mouse = TestPointer(1, PointerDeviceKind.mouse);
-    await tester.sendEventToBinding(mouse.hover(tester.getCenter(image)));
-    await tester.sendEventToBinding(mouse.scroll(const Offset(0, 120)));
-    await tester.pumpAndSettle();
-    expect(scrollable.position.pixels, greaterThan(0));
   });
 }

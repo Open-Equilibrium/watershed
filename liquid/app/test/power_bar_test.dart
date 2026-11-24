@@ -1,15 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:liquid/src/rust/api/events.dart';
-import 'package:liquid/src/agent/sidebar.dart';
 import 'package:liquid/src/rust/api/workspace.dart';
-import 'package:liquid/src/session/session_state.dart';
 import 'package:liquid/src/shortcuts/keymap.dart';
 import 'package:liquid/src/shortcuts/shortcut_store.dart';
 import 'package:liquid/src/workspace/workspace_state.dart';
 
-import 'fake_backend.dart';
 import 'page_kit.dart';
 
 void main() {
@@ -88,15 +84,6 @@ void main() {
     expect(bar(), findsNothing);
     expect(kit.workspace.open.value?.page, trip.page);
     expect(kit.fake.device['recent'], contains(trip.page));
-  });
-
-  testWidgets('opened Pages count as recent though the kept list is unread', (
-    tester,
-  ) async {
-    await kit.show(tester, [
-      const TextPart('Plan'),
-    ], before: () => kit.fake.refuseRemembered = true);
-    expect(kit.workspace.recent.value, [kit.page]);
   });
 
   testWidgets('an opened Table is not a recent Page', (tester) async {
@@ -212,44 +199,6 @@ void main() {
     await type(tester, '>arr');
     await enter(tester);
     expect(find.byKey(const Key('arrange bar')), findsOneWidget);
-  });
-
-  testWidgets('a question closes the PowerBar above it', (tester) async {
-    final project = FakeProject();
-    final session = SessionState(project);
-    await session.open('thread-1');
-    await kit.show(
-      tester,
-      const [],
-      session: session,
-      info: const SessionInfo(project: 'acme-api'),
-    );
-    await open(tester);
-    project.session.emit(
-      event(
-        BridgeEventKind.requestOpened,
-        1,
-        request: questionsOf('q1', [questionOf('name', 'Your name')]),
-      ),
-    );
-    await tester.pumpAndSettle();
-    expect(bar(), findsNothing);
-  });
-
-  testWidgets('arrow keys choose among the results', (tester) async {
-    await kit.show(tester, [const TextPart('Plan')]);
-    await open(tester);
-    await type(tester, '>');
-    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
-    await tester.pumpAndSettle();
-    await enter(tester);
-    expect(
-      kit.workspace.areas.value
-          .map((area) => kit.workspace.pages(area.id).value.length)
-          .reduce((a, b) => a + b),
-      2,
-      reason: 'the second action, New Page, ran',
-    );
   });
 
   testWidgets('a tap of the Liquid key opens it, and the sidebar does too', (

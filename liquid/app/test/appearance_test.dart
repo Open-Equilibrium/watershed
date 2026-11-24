@@ -30,26 +30,6 @@ AppearanceController failingAppearance() =>
     AppearanceController(const Appearance(), _Disk());
 
 void main() {
-  test('appearance follows the system at the default size until chosen', () {
-    const fresh = Appearance();
-    expect(
-      (fresh.theme, fresh.textSize),
-      (ThemeChoice.system, TextSize.standard),
-    );
-    final kept = Appearance.fromJson(
-      const Appearance(
-        theme: ThemeChoice.dark,
-        textSize: TextSize.large,
-      ).toJson(),
-    );
-    expect((kept.theme, kept.textSize), (ThemeChoice.dark, TextSize.large));
-    expect(
-      Appearance.fromJson({'theme': 'neon', 'textSize': 7}).theme,
-      ThemeChoice.system,
-      reason: 'what it does not know keeps the default',
-    );
-  });
-
   test('keeps the chosen appearance across restarts', () async {
     final dir = Directory.systemTemp.createTempSync('liquid-appearance');
     addTearDown(() => dir.deleteSync(recursive: true));

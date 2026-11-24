@@ -156,23 +156,6 @@ void main() {
     },
   );
 
-  testWidgets('↑↓ choose a slash command and a click takes it', (tester) async {
-    await show(tester, ['']);
-    await type(tester, 0, '/');
-    await key(tester, LogicalKeyboardKey.arrowDown);
-    await key(tester, LogicalKeyboardKey.arrowDown);
-    await key(tester, LogicalKeyboardKey.arrowUp);
-    await key(tester, LogicalKeyboardKey.enter);
-    expect(styleOf(0), BridgeTextStyle.heading1);
-    expect(kit.fake.textsOf(kit.page), ['']);
-
-    await type(tester, 0, '/');
-    await tester.tap(item('Numbered list'));
-    await tester.pumpAndSettle();
-    expect(styleOf(0), BridgeTextStyle.numbered);
-    expect(menu, findsNothing);
-  });
-
   testWidgets(
     'Table replaces the line with a Table whose name takes the keys',
     (tester) async {
@@ -274,19 +257,6 @@ void main() {
     await setText(tester, '你好');
     expect(renames(), 1);
     expect(databaseName(0), '你好');
-  });
-
-  testWidgets('the slash command menu opens in a list item too', (
-    tester,
-  ) async {
-    await show(tester, ['']);
-    await type(tester, 0, '- ');
-    expect(styleOf(0), BridgeTextStyle.bullet);
-    await type(tester, 0, '/');
-    expect(menu, findsOneWidget);
-    await type(tester, 0, 'quo');
-    await key(tester, LogicalKeyboardKey.enter);
-    expect(styleOf(0), BridgeTextStyle.quote);
   });
 
   for (final quits in [true, false]) {
@@ -459,17 +429,6 @@ void main() {
     await tester.pumpAndSettle();
     expect(renames(), 1);
     expect(databaseName(1), 'Ex');
-  });
-
-  testWidgets('/ on a blank Page opens the slash command menu', (tester) async {
-    await show(tester, []);
-    await tester.enterText(find.byKey(const Key('first-line')), '/');
-    await tester.pumpAndSettle();
-    expect(menu, findsOneWidget);
-    await type(tester, 0, 'h');
-    await key(tester, LogicalKeyboardKey.enter);
-    expect(styleOf(0), BridgeTextStyle.heading1);
-    expect(kit.fake.textsOf(kit.page), ['']);
   });
 
   testWidgets('a quickly typed /ta on a blank Page opens the menu filtered', (

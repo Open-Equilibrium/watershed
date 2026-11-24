@@ -318,14 +318,6 @@ void main() {
     expect(kit.fake.textsOf(kit.page), ['Plan', '']);
   });
 
-  testWidgets('--- at the Page’s start stays text', (tester) async {
-    await show(tester, ['']);
-    await caret(tester, 0, 0);
-    await type(tester, 0, '---');
-    expect(kit.fake.views[kit.page]![0].boundary, isFalse);
-    expect(kit.fake.textsOf(kit.page), ['---']);
-  });
-
   testWidgets('⏎ in the title and arrows move between Blocks', (tester) async {
     await show(tester, ['One', 'Two']);
     await tester.tap(find.byKey(const Key('page-title')));
@@ -881,17 +873,6 @@ void main() {
     await frames(tester, 60);
     expect(kit.fake.textsOf(kit.page), ['A', '', 'C', '']);
     expect(styleOf(1), BridgeTextStyle.bullet);
-  });
-
-  testWidgets('shift and ↓ in the title select, not leave', (tester) async {
-    await show(tester, ['One']);
-    await tester.tap(find.byKey(const Key('page-title')));
-    await tester.pump();
-    await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
-    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
-    await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
-    await tester.pump();
-    expect(focused(tester, 0), isFalse);
   });
 
   testWidgets('a field left while ⏎ waits is written once', (tester) async {

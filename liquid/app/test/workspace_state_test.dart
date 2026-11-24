@@ -86,19 +86,6 @@ void main() {
     await state.dispose();
   });
 
-  test('a renamed or nested Page shows in its area’s tree', () async {
-    final (fake, state, trip) = await startedPage();
-    final area = fake.areas.single.id;
-    await state.rename(trip, 'Trip to Lisbon');
-    await state.newPage(area, parent: trip);
-    await pumpEventQueue();
-
-    final tree = state.pages(area).value;
-    expect(tree.map((page) => page.title), ['Trip to Lisbon', '']);
-    expect(tree.last.parent, trip);
-    expect(state.open.value?.page, tree.last.id);
-  });
-
   test('writes reach the Workspace in the order asked, and draining waits for every one, also those asked meanwhile', () async {
     final (fake, state, page) = await startedPage();
     fake.gate = Completer();

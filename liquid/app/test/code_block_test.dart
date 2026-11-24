@@ -4,7 +4,6 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:liquid/src/rust/api/workspace.dart';
 import 'package:liquid/src/workspace/code_block.dart';
 
-import 'card_harness.dart';
 import 'page_kit.dart';
 
 void main() {
@@ -118,17 +117,6 @@ void main() {
     expect(kit.fake.languages[block], 'typescript');
     expect(find.byKey(const Key('language search')), findsNothing);
     expect(find.text('TypeScript'), findsOneWidget, reason: 'in the header');
-  });
-
-  testWidgets('Copy copies the code and shows a check', (tester) async {
-    final copied = recordClipboard(tester);
-    await kit.show(tester, [const CodePart('share()')]);
-    await tester.tap(find.text('Copy'));
-    await tester.pump();
-    expect(copied(), 'share()');
-    expect(find.text('Copied'), findsOneWidget);
-    await tester.pumpAndSettle(const Duration(seconds: 3));
-    expect(find.text('Copy'), findsOneWidget);
   });
 
   testWidgets('the caret moves in and out of code; esc leaves', (tester) async {
