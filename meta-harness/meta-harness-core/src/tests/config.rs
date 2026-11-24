@@ -52,22 +52,19 @@ fn skill_files(name: &str, pairs: &[(&str, &str)]) -> Change {
 }
 
 fn server(name: &str) -> Change {
+    command_server(
+        name,
+        "/usr/local/bin/docs-mcp",
+        &[("DOCS_ROOT", "/srv/docs")],
+    )
+}
+
+fn command_server(name: &str, command: &str, env: &[(&str, &str)]) -> Change {
     Change::McpServer {
         name: name.to_owned(),
         server: Some(McpServer::Command {
-            command: "/usr/local/bin/docs-mcp".to_owned(),
-            args: vec!["--stdio".to_owned()],
-            env: BTreeMap::from([("DOCS_ROOT".to_owned(), "/srv/docs".to_owned())]),
-        }),
-    }
-}
-
-fn command_server(command: &str, env: &[(&str, &str)]) -> Change {
-    Change::McpServer {
-        name: "m".to_owned(),
-        server: Some(McpServer::Command {
             command: command.to_owned(),
-            args: vec![],
+            args: vec!["--stdio".to_owned()],
             env: env
                 .iter()
                 .map(|(key, value)| ((*key).to_owned(), (*value).to_owned()))
@@ -231,8 +228,8 @@ fn an_invalid_change_is_refused_with_its_reason() {
             skill_files("s", &[("SKILL.md", "x"), ("A/b", "x"), ("a", "x")]),
             "clash",
         ),
-        (command_server("", &[]), "command"),
-        (command_server("x", &[("BAD KEY", "v")]), "variable"),
+        (command_server("m", "", &[]), "command"),
+        (command_server("m", "x", &[("BAD KEY", "v")]), "variable"),
         (url_server("file:///etc/passwd"), "http"),
     ];
     for (change, reason) in cases {

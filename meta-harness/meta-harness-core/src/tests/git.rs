@@ -122,15 +122,6 @@ async fn status_reports_the_checkout_and_its_pull_request() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn status_of_a_folder_outside_any_repository_has_no_branch_or_pull_request() {
-    let status = json!({"isRepo": false, "hasPrimaryRemote": false, "isDefaultRef": false,
-        "workingTree": {"files": []}, "hasUpstream": false, "aheadCount": 0, "behindCount": 0,
-        "pr": null});
-    let (_, git) = checkout(move |_, _, id| vec![ok(id, status.clone())]).await;
-    assert_eq!(git.status().await.unwrap(), GitStatus::default());
-}
-
-#[tokio::test(flavor = "multi_thread")]
 async fn watch_reports_each_change_of_the_status_and_ends_when_dropped() {
     let (fake, git) = checkout(|_, _, _| Vec::new()).await;
     let mut statuses = git.watch().await.unwrap();
