@@ -509,6 +509,15 @@ void main() {
     expect(git.calls, isEmpty);
   });
 
+  testWidgets('a turn that starts before a pull request checkout is chosen '
+      'checks nothing out', (tester) async {
+    final git = _ScriptedGit(status: gitStatusOf());
+    final state = await pumpCheckout(tester, git, reference: '42');
+    state.status.value = RunStatus.running;
+    await tap(tester, find.widgetWithText(SecondaryButton, 'Local'));
+    expect(git.calls, ['resolve 42']);
+  });
+
   testWidgets(
     'Fix checks the pull request out in a worktree and opens the start page with the fix in the composer',
     (tester) async {

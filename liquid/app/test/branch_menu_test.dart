@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -14,6 +16,21 @@ import 'fake_backend.dart';
 class _BrokenGit extends FakeGit {
   @override
   Stream<BridgeGitStatus> watch() => Stream.error(Exception('no repository'));
+}
+
+class _GatedRefs extends FakeGit {
+  String? holdQuery;
+  Completer<void>? hold;
+
+  @override
+  Future<BridgeRefs> refs(
+    String query, {
+    int cursor = 0,
+    int limit = 50,
+  }) async {
+    if (query == holdQuery) await hold?.future;
+    return super.refs(query, cursor: cursor, limit: limit);
+  }
 }
 
 void expectOne(Finder finder) => expect(finder, findsOneWidget);
@@ -141,6 +158,31 @@ void main() {
     expect(git.calls, ['switch main']);
   });
 
+  testWidgets('a turn that starts during the confirmation stops the switch', (
+    tester,
+  ) async {
+    await pump(tester);
+    git.change(
+      gitStatusOf(
+        branch: 'feature',
+        defaultBranch: false,
+        changes: [fileOf('a.dart')],
+      ),
+    );
+    await tester.pumpAndSettle();
+    await openPicker(tester);
+    await tap(tester, find.text('main'));
+    expectOne(find.text('Switch to main?'));
+
+    state.status.value = RunStatus.running;
+    await tap(tester, find.widgetWithText(PrimaryButton, 'Switch branch'));
+    expect(git.calls, isEmpty);
+    expect(
+      state.notice.value?.text,
+      'Stop the current turn to switch worktrees.',
+    );
+  });
+
   testWidgets('a new name creates and checks out a ref, its spaces made '
       'dashes; Git refusing it says why', (tester) async {
     await pump(tester);
@@ -167,6 +209,27 @@ void main() {
     await tap(tester, find.text('main'));
     expect(git.calls, isEmpty);
     expectOne(find.byKey(const Key('branch-search')));
+  });
+
+  testWidgets('Enter waits for the refs of the query typed, and never picks '
+      'a ref of the previous query', (tester) async {
+    final gated = _GatedRefs()
+      ..holdQuery = 'main'
+      ..hold = Completer<void>();
+    await pump(tester, checkout: gated);
+    await openPicker(tester);
+
+    await search(tester, 'main');
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+    expect(gated.calls, isEmpty);
+    expectOne(find.byKey(const Key('branch-search')));
+
+    gated.hold!.complete();
+    await tester.pumpAndSettle();
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+    expect(gated.calls, ['switch main']);
   });
 
   testWidgets('a pull request reference typed in the picker offers its '

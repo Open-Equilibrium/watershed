@@ -10,6 +10,13 @@ import '../theme/tokens.g.dart';
 
 final _command = RegExp(r'^gh\s+pr\s+checkout\s+(\S+)$');
 final _number = RegExp(r'^#?(\d+)$');
+const stopFirstNotice = 'Stop the current turn to switch worktrees.';
+
+bool refusedWhileRunning(SessionState state) {
+  if (state.status.value == RunStatus.idle) return false;
+  state.notify(NoticeLevel.warning, stopFirstNotice);
+  return true;
+}
 
 String? pullRequestReference(String input) {
   final text = input.trim();
@@ -125,6 +132,10 @@ class _CheckoutPullRequestState extends State<_CheckoutPullRequest> {
     final reference = _reference;
     if (reference == null || !_ready) return;
     final state = widget.state;
+    if (refusedWhileRunning(state)) {
+      if (mounted) Navigator.of(context).pop();
+      return;
+    }
     final singular = terminologyFor(widget.status).singular;
     setState(() {
       _preparing = worktree ? 'worktree' : 'local';
