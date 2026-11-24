@@ -47,6 +47,14 @@ const otherRemoteProject = BridgeHostProject(
   remoteUrl: 'git@github.com:acme/shop.git',
 );
 
+class HeldProject extends FakeProject {
+  HeldProject() {
+    gates['moveIn'] = gate;
+  }
+
+  final gate = Completer<void>();
+}
+
 class ClosingProject extends HeldProject {
   @override
   Future<SessionBackend> moveIn(
@@ -55,19 +63,6 @@ class ClosingProject extends HeldProject {
   }) async {
     await gate.future;
     if (closed) throw 'the connection to the host is closed';
-    return super.moveIn(move, root: root);
-  }
-}
-
-class HeldProject extends FakeProject {
-  final gate = Completer<void>();
-
-  @override
-  Future<SessionBackend> moveIn(
-    CarriedMove move, {
-    required String root,
-  }) async {
-    await gate.future;
     return super.moveIn(move, root: root);
   }
 }
@@ -376,39 +371,42 @@ void main() {
     },
   );
 
-  testWidgets('a session that cannot move says why, and Move stays off', (
-    tester,
-  ) async {
-    final model = await modelOf(
-      check: moveCheckOf(blocked: 'It is already moving to another host.'),
-    );
-    await tester.pumpWidget(dialogOf(model));
-
-    expect(find.text('It is already moving to another host.'), findsOneWidget);
-    expect(moveButton(tester).onPressed, isNull);
-    expect(
-      find.byTooltip('It is already moving to another host.'),
-      findsOneWidget,
-      reason: 'the dimmed Move says why on hover',
-    );
-  });
-
-  testWidgets(
-    'a project without a Git remote is said once, and the dimmed Move says why',
-    (tester) async {
-      final model = await modelOf(
-        check: moveCheckOf(remoteUrl: null),
-        projects: const [],
-      );
+  final dimmedReasons = <(String, Future<MoveModel> Function(), String)>[
+    (
+      'a session that cannot move says why, and Move stays off',
+      () => modelOf(
+        check: moveCheckOf(blocked: 'It is already moving to another host.'),
+      ),
+      'It is already moving to another host.',
+    ),
+    (
+      'a project without a Git remote is said once, and the dimmed Move says why',
+      () => modelOf(check: moveCheckOf(remoteUrl: null), projects: const []),
+      'The project has no Git remote, so its files cannot travel',
+    ),
+    (
+      'a target project whose branch cannot land shows the reason before Move, and Move dims with it when no other project can take the session',
+      () => modelOf(
+        landings: const {
+          '/home/me/acme-api': BridgeLanding(
+            kind: BridgeLandingKind.blocked,
+            reason: landingBlocked,
+          ),
+        },
+      ),
+      landingBlocked,
+    ),
+  ];
+  for (final (name, build, reason) in dimmedReasons) {
+    testWidgets(name, (tester) async {
+      final model = await build();
       await tester.pumpWidget(dialogOf(model));
 
-      const sentence =
-          'The project has no Git remote, so its files cannot travel';
-      expect(find.text(sentence), findsOneWidget);
-      expect(find.byTooltip(sentence), findsOneWidget);
+      expect(find.text(reason), findsOneWidget);
+      expect(find.byTooltip(reason), findsOneWidget);
       expect(moveButton(tester).onPressed, isNull);
-    },
-  );
+    });
+  }
 
   testWidgets(
     'an agent host that predates moves is listed dimmed with its reason, and no host that can take the session says so',
@@ -450,25 +448,6 @@ void main() {
         'Moved “Fix the flaky port test” to studio.',
       );
       expect(state.notice.value?.level, NoticeLevel.info);
-    },
-  );
-
-  testWidgets(
-    'a target project whose branch cannot land shows the reason before Move, and Move dims with it when no other project can take the session',
-    (tester) async {
-      final model = await modelOf(
-        landings: const {
-          '/home/me/acme-api': BridgeLanding(
-            kind: BridgeLandingKind.blocked,
-            reason: landingBlocked,
-          ),
-        },
-      );
-      await tester.pumpWidget(dialogOf(model));
-
-      expect(find.text(landingBlocked), findsOneWidget);
-      expect(moveButton(tester).onPressed, isNull);
-      expect(find.byTooltip(landingBlocked), findsOneWidget);
     },
   );
 
@@ -1018,11 +997,9 @@ void main() {
 }
 
 class _SlowAddFolder extends FakeProject {
-  final gate = Completer<void>();
-
-  @override
-  Future<BridgeHostProject> addProject(String root) async {
-    await gate.future;
-    return super.addProject(root);
+  _SlowAddFolder() {
+    gates['addProject'] = gate;
   }
+
+  final gate = Completer<void>();
 }
