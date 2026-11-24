@@ -215,40 +215,86 @@ extension _TableBlockQuery on _TableBlockState {
     );
   }
 
+  void _clearSearch() {
+    writeText(_searchText, const TextEditingValue());
+    _searched('');
+  }
+
   Widget _searchField({required bool boxed}) {
     final ws = context.ws;
-    return Container(
-      height: 28,
-      padding: const EdgeInsets.symmetric(horizontal: WsMetrics.space3),
-      decoration: BoxDecoration(
-        border: Border.all(color: ws.borderStrong),
-        borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
-      ),
-      child: Row(
-        children: [
-          Icon(LucideIcons.search, size: 14, color: ws.textFaint),
-          const SizedBox(width: WsMetrics.space2),
-          Expanded(
-            child: TapRegion(
-              onTapOutside: (_) {
-                if (_searchText.text.isEmpty && !widget.fullPage) {
-                  _update(() => _searching = false);
-                }
-              },
-              child: TextField(
-                key: const Key('table search field'),
-                controller: _searchText,
-                focusNode: _searchFocus,
-                onChanged: _searched,
-                style: TextStyle(fontSize: WsMetrics.fsCompact, color: ws.text),
-                decoration: InputDecoration.collapsed(
-                  hintText: 'Search',
-                  hintStyle: TextStyle(color: ws.textFaint),
+    return Focus(
+      onKeyEvent: (_, event) {
+        if (event is! KeyDownEvent ||
+            event.logicalKey != LogicalKeyboardKey.escape) {
+          return KeyEventResult.ignored;
+        }
+        _clearSearch();
+        if (!widget.fullPage) _update(() => _searching = false);
+        return KeyEventResult.handled;
+      },
+      child: Container(
+        height: 28,
+        padding: const EdgeInsets.symmetric(horizontal: WsMetrics.space3),
+        decoration: BoxDecoration(
+          border: Border.all(color: ws.borderStrong),
+          borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
+        ),
+        child: Row(
+          children: [
+            Icon(LucideIcons.search, size: 14, color: ws.textFaint),
+            const SizedBox(width: WsMetrics.space2),
+            Expanded(
+              child: TapRegion(
+                onTapOutside: (_) {
+                  if (_searchText.text.isEmpty && !widget.fullPage) {
+                    _update(() => _searching = false);
+                  }
+                },
+                child: TextField(
+                  key: const Key('table search field'),
+                  controller: _searchText,
+                  focusNode: _searchFocus,
+                  onChanged: _searched,
+                  style: TextStyle(
+                    fontSize: WsMetrics.fsCompact,
+                    color: ws.text,
+                  ),
+                  decoration: InputDecoration.collapsed(
+                    hintText: 'Search',
+                    hintStyle: TextStyle(color: ws.textFaint),
+                  ),
                 ),
               ),
             ),
-          ),
-        ],
+            ListenableBuilder(
+              listenable: _searchText,
+              builder: (context, _) => _searchText.text.isEmpty
+                  ? const SizedBox.shrink()
+                  : Semantics(
+                      button: true,
+                      label: 'Clear search',
+                      child: GestureDetector(
+                        key: const Key('table search clear'),
+                        behavior: HitTestBehavior.opaque,
+                        onTap: () {
+                          _clearSearch();
+                          _searchFocus.requestFocus();
+                        },
+                        child: Padding(
+                          padding: const EdgeInsets.only(
+                            left: WsMetrics.space2,
+                          ),
+                          child: Icon(
+                            LucideIcons.x,
+                            size: 14,
+                            color: ws.textFaint,
+                          ),
+                        ),
+                      ),
+                    ),
+            ),
+          ],
+        ),
       ),
     );
   }

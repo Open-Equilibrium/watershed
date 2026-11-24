@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:liquid/src/rust/api/database.dart';
 import 'package:liquid/src/rust/api/workspace.dart';
@@ -89,6 +90,43 @@ void main() {
     expect(kit.inTable(find.text('2 of 3 rows')), findsOneWidget);
     expect(view().tabs.first.filter, isNull);
     expect(kit.applied(BridgeMutationKind.setTabFilter), isEmpty);
+  });
+
+  testWidgets('esc clears the search and closes the field', (tester) async {
+    await kit.show(tester, [TablePart(rows)]);
+    await tap(tester, find.byKey(const Key('table search')));
+    await tester.enterText(find.byKey(const Key('table search field')), 'hom');
+    await tester.pump(const Duration(milliseconds: 200));
+    await tester.pumpAndSettle();
+    expect(kit.inTable(find.text('2 of 3 rows')), findsOneWidget);
+    await key(tester, LogicalKeyboardKey.escape);
+    await tester.pump(const Duration(milliseconds: 200));
+    await tester.pumpAndSettle();
+    expect(kit.inTable(find.text('3 rows')), findsOneWidget);
+    expect(find.byKey(const Key('table search field')), findsNothing);
+    expect(find.byKey(const Key('table search')), findsOneWidget);
+  });
+
+  testWidgets('the × in the search field clears it and keeps the field', (
+    tester,
+  ) async {
+    await kit.show(tester, [TablePart(rows)]);
+    await tap(tester, find.byKey(const Key('table search')));
+    await tester.enterText(find.byKey(const Key('table search field')), 'hom');
+    await tester.pump(const Duration(milliseconds: 200));
+    await tester.pumpAndSettle();
+    await tap(tester, find.byKey(const Key('table search clear')));
+    await tester.pump(const Duration(milliseconds: 200));
+    await tester.pumpAndSettle();
+    expect(kit.inTable(find.text('3 rows')), findsOneWidget);
+    expect(
+      tester
+          .widget<TextField>(find.byKey(const Key('table search field')))
+          .controller!
+          .text,
+      isEmpty,
+    );
+    expect(find.byKey(const Key('table search clear')), findsNothing);
   });
 
   testWidgets('deleting a View while another shows the Table asks nothing', (
