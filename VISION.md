@@ -38,7 +38,7 @@ Watershed is a monorepo, **not** a monolith. The products share `core` libraries
 - **Meta-Harness** is a headless, host-scoped controller. It starts and controls only CLI agents on its own host, while authenticated clients and other agent hosts may reach its public API remotely, and it leaves each harness's behavior and governance unchanged (ADR-0252). Each instance materializes the agent configurations Liquid stores and edits (ADR-0225, ADR-0227) and owns its sessions, transcripts, agent schedules and AgentPulse metrics.
 - **Liquid** is a local-first workspace and app-building product. Every interactive client reads and writes its local replica. A central Sync Server coordinates replicas; an optional headless replica, on a server or a separate agent host, lets Automations, schedules and agents there use the same workspace action boundary while user devices are offline.
 
-Liquid is the only Watershed UI that controls agents. It projects one or more Meta-Harness instances into one experience while retaining each record's agent host, owner, freshness and command destination. A friendly location and session name hide infrastructure detail without inventing one global controller.
+Liquid is the only Watershed UI that controls agents. It projects one or more Meta-Harness instances into one experience while retaining each record's agent host, owner, freshness and command destination. A friendly agent host and session name hide infrastructure detail without inventing one global controller.
 
 ### Workspace sync plane
 
@@ -89,7 +89,7 @@ Cross-product implications:
 ## Integrated agent flow
 
 1. A user or developer selects an agent harness, that adapter's configuration and a friendly agent host in Liquid. Flow Agent requires an explicit Flow from its global authority; other harnesses use their documented selection model. The owning host resolves any device-local Runtime binding.
-2. Liquid calls the Meta-Harness that owns that location; a Meta-Harness schedule or event trigger may start the same run.
+2. Liquid calls the Meta-Harness that owns that agent host; a Meta-Harness schedule or event trigger may start the same run.
 3. Meta-Harness starts and supervises the agent process on its host.
 4. Liquid shows connection state, progress, transcript and a prompt/steering surface.
 5. The run uses its Role to propose or execute permitted project actions and Liquid actions. Every Liquid mutation crosses the permissioned mutation pipeline and enters History.
