@@ -1,5 +1,7 @@
 use std::path::{Path, PathBuf};
 
+use meta_harness_core::write_atomic;
+
 use crate::ignore_missing;
 
 pub const LABEL: &str = "io.github.open-equilibrium.meta-harness";
@@ -261,13 +263,13 @@ impl Manager {
         std::fs::create_dir_all(folder)
             .map_err(|e| format!("Could not create {}: {e}", folder.display()))?;
         let previous = self.read_service()?;
-        replace_file(&self.file, &self.encode(&(self.render)(plan)))
+        write_atomic(&self.file, &self.encode(&(self.render)(plan)), false)
             .map_err(|e| format!("Could not write {}: {e}", self.file.display()))?;
         let Err(error) = run_all(&self.start, &mut run) else {
             return Ok(());
         };
         let restored = match &previous {
-            Some(bytes) => replace_file(&self.file, bytes),
+            Some(bytes) => write_atomic(&self.file, bytes, false),
             None => ignore_missing(std::fs::remove_file(&self.file)),
         };
         Err(match restored {
@@ -353,45 +355,6 @@ fn not_loaded(failure: &str) -> bool {
     ]
     .iter()
     .any(|phrase| failure.contains(phrase))
-}
-
-fn replace_file(file: &Path, bytes: &[u8]) -> std::io::Result<()> {
-    use std::io::Write;
-    let name = file.file_name().unwrap_or_default().to_string_lossy();
-    let nanos = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_nanos();
-    let temporary = file.with_file_name(format!(".{name}.{}.{nanos}.tmp", std::process::id()));
-    let written = std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(&temporary)
-        .and_then(|mut file| {
-            file.write_all(bytes)?;
-            file.sync_all()
-        });
-    let result = written
-        .and_then(|()| std::fs::rename(&temporary, file))
-        .and_then(|()| sync_directory(file));
-    if result.is_err() {
-        let _ = std::fs::remove_file(&temporary);
-    }
-    result
-}
-
-#[cfg(unix)]
-fn sync_directory(file: &Path) -> std::io::Result<()> {
-    let dir = file
-        .parent()
-        .filter(|dir| !dir.as_os_str().is_empty())
-        .unwrap_or(Path::new("."));
-    std::fs::File::open(dir)?.sync_all()
-}
-
-#[cfg(not(unix))]
-fn sync_directory(_file: &Path) -> std::io::Result<()> {
-    Ok(())
 }
 
 fn run_all(

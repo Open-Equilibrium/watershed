@@ -284,3 +284,48 @@ mod windows {
         }
     }
 }
+
+pub fn write_atomic(path: &Path, bytes: &[u8], private: bool) -> std::io::Result<()> {
+    use std::io::Write;
+    let mut random = [0u8; 8];
+    getrandom::fill(&mut random).expect("the operating system provides random bytes");
+    let name = path.file_name().unwrap_or_default().to_string_lossy();
+    let temporary = path.with_file_name(format!(
+        ".{name}.{}.meta-harness-tmp",
+        crate::util::hex(&random)
+    ));
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::mode(&mut options, if private { 0o600 } else { 0o666 });
+    let result = options
+        .open(&temporary)
+        .and_then(|mut file| {
+            #[cfg(windows)]
+            if private {
+                owner_only(&temporary, false).map_err(std::io::Error::other)?;
+            }
+            file.write_all(bytes)?;
+            file.sync_all()
+        })
+        .and_then(|()| std::fs::rename(&temporary, path))
+        .and_then(|()| sync_folder(path));
+    if result.is_err() {
+        let _ = std::fs::remove_file(&temporary);
+    }
+    result
+}
+
+#[cfg(unix)]
+fn sync_folder(file: &Path) -> std::io::Result<()> {
+    let dir = file
+        .parent()
+        .filter(|dir| !dir.as_os_str().is_empty())
+        .unwrap_or(Path::new("."));
+    std::fs::File::open(dir)?.sync_all()
+}
+
+#[cfg(not(unix))]
+fn sync_folder(_file: &Path) -> std::io::Result<()> {
+    Ok(())
+}

@@ -216,34 +216,9 @@ fn real_folder(path: &Path) -> Result<(), String> {
 }
 
 fn write(path: &Path, text: &str) -> Result<(), String> {
-    use std::io::Write;
     let parent = path.parent().expect("a home file has a folder");
     std::fs::create_dir_all(parent).map_err(|e| failed(parent, &e))?;
-    let name = path
-        .file_name()
-        .expect("a home file has a name")
-        .to_string_lossy();
-    let mut bytes = [0u8; 8];
-    getrandom::fill(&mut bytes).expect("the operating system provides random bytes");
-    let temporary = parent.join(format!(
-        ".{name}.{}.meta-harness-tmp",
-        crate::util::hex(&bytes)
-    ));
-    let mut file = std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(&temporary)
-        .map_err(|e| failed(&temporary, &e))?;
-    let written = file
-        .write_all(text.as_bytes())
-        .map_err(|e| failed(&temporary, &e));
-    drop(file);
-    let result =
-        written.and_then(|()| std::fs::rename(&temporary, path).map_err(|e| failed(path, &e)));
-    if result.is_err() {
-        let _ = std::fs::remove_file(&temporary);
-    }
-    result
+    crate::platform::write_atomic(path, text.as_bytes(), false).map_err(|e| failed(path, &e))
 }
 
 fn remove(path: &Path) -> Result<(), String> {

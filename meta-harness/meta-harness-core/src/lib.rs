@@ -45,6 +45,7 @@ pub use host_move::{
     Arrival, Harness, Landing, MoveCheck, MoveFinish, MovePackage, MovePhase, MoveRecord, Moving,
 };
 pub use hosts::{Access, ClientInfo, ClientKind, DEFAULT_REMOTE_PORT, HostList, LinkedHostInfo};
+pub use platform::write_atomic;
 pub use service::{CONNECTION_FILE, Service, ServiceConfig, default_home};
 pub use statistics::{ModelUsage, Statistics, ToolCalls, TurnStatistics};
 pub use t3::{Watch, t3_version};
