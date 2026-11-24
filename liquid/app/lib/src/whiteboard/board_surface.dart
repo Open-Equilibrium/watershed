@@ -96,6 +96,10 @@ class BoardSurfaceState extends State<BoardSurface> {
   void dispose() {
     tools.removeListener(_toolsChanged);
     _hold?.cancel();
+    if (_held) {
+      _held = false;
+      board.release();
+    }
     _typed.dispose();
     _typing.dispose();
     super.dispose();

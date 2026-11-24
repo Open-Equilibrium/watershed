@@ -613,6 +613,41 @@ void main() {
     expect(stored().single.h, greaterThanOrEqualTo(28 * 1.25));
   });
 
+  testWidgets('leaving full screen mid-drag releases the board for reads', (
+    tester,
+  ) async {
+    await kit.show(tester, [const WhiteboardPart()]);
+    await hover(tester);
+    await tap(tester, find.byKey(const Key('whiteboard full screen')));
+    final canvas = find.descendant(
+      of: find.byKey(const Key('whiteboard full')),
+      matching: find.byKey(const Key('whiteboard canvas')),
+    );
+    final origin = tester.getTopLeft(canvas);
+    final gesture = await tester.startGesture(
+      origin + const Offset(120, 120),
+      kind: PointerDeviceKind.mouse,
+    );
+    addTearDown(gesture.removePointer);
+    await gesture.moveTo(origin + const Offset(160, 120));
+    await tap(tester, find.byKey(const Key('whiteboard done')));
+    final id = kit.fake.whiteboards.keys.single;
+    final drawing = kit.fake.whiteboards[id]!;
+    kit.fake.whiteboards[id] = BridgeDrawing(
+      style: drawing.style,
+      elements: [
+        ...drawing.elements,
+        copyElement(stroke(across(200)), id: 'added'),
+      ],
+    );
+    final shown = kit.boardOf(tester);
+    await shown.read();
+    await tester.pumpAndSettle();
+    expect([
+      for (final element in shown.elements) element.id,
+    ], contains('added'));
+  });
+
   testWidgets('⋯ › Delete removes the Whiteboard', (tester) async {
     await kit.show(tester, [
       const TextPart('Intro'),
