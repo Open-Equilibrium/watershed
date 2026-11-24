@@ -5,8 +5,8 @@ mod common;
 use common::*;
 use liquid_core::{
     Action, ActionId, Actor, Applied, AutomationSetup, BlockId, BlockKind, Cell, Changed, Created,
-    Entry, EntryQuery, Error, FieldId, FieldKind, Mutation, Operation, PageId, PersonId, Place,
-    Purge, RevertKind, RowId, RowQuery, Step, Trigger,
+    Entry, EntryQuery, Error, FieldId, FieldKind, Mutation, Operation, PageId, PersonId, Purge,
+    RevertKind, RowId, RowQuery, Step, Trigger,
 };
 
 struct Budget {
@@ -19,57 +19,10 @@ struct Budget {
 
 impl Budget {
     fn new() -> Self {
-        let mut workspace = workspace();
-        let Created::Area(area) = created(
-            &mut workspace,
-            Mutation::CreateArea {
-                name: "Private".into(),
-            },
-        ) else {
-            panic!("an area")
-        };
-        let Created::Page(page) = created(
-            &mut workspace,
-            Mutation::CreatePage {
-                area,
-                parent: None,
-                title: "Household budget".into(),
-            },
-        ) else {
-            panic!("a Page")
-        };
-        let Created::Block { block: text, .. } = created(
-            &mut workspace,
-            Mutation::AddTextBlock {
-                page: page.clone(),
-                after: None,
-                text: String::new(),
-            },
-        ) else {
-            panic!("a Block")
-        };
-        let Created::Block { block: table, .. } = created(
-            &mut workspace,
-            Mutation::AddDatabaseBlock {
-                page: page.clone(),
-                after: None,
-                name: "Expenses".into(),
-                layout: liquid_core::Layout::Table,
-            },
-        ) else {
-            panic!("a Table")
-        };
-        let Created::Field(amount) = created(
-            &mut workspace,
-            Mutation::AddField {
-                block: table.clone(),
-                place: Place::Last,
-                name: "Amount".into(),
-                kind: FieldKind::Number,
-            },
-        ) else {
-            panic!("a field")
-        };
+        let (mut workspace, _, page) = private_page("Household budget");
+        let (text, _) = text_block(&mut workspace, &page, "");
+        let (table, _) = table(&mut workspace, &page, "Expenses");
+        let amount = field(&mut workspace, &table, "Amount", FieldKind::Number);
         Self {
             workspace,
             page,
@@ -102,16 +55,7 @@ impl Budget {
     }
 
     fn row(&mut self) -> RowId {
-        let Created::Row(row) = created(
-            &mut self.workspace,
-            Mutation::AddRow {
-                block: self.table.clone(),
-                place: Place::Last,
-            },
-        ) else {
-            panic!("a row")
-        };
-        row
+        row(&mut self.workspace, &self.table)
     }
 
     fn set(&mut self, row: &RowId, value: f64) -> ActionId {
@@ -125,17 +69,8 @@ impl Budget {
     }
 
     fn amounts(&mut self) -> Vec<Cell> {
-        let all = RowQuery {
-            sort: None,
-            filter: None,
-            within: None,
-            start: 0,
-            limit: usize::MAX,
-            search: None,
-            totals: Vec::new(),
-        };
         self.workspace
-            .rows(&self.table, &all)
+            .rows(&self.table, &all())
             .unwrap()
             .rows
             .iter()
@@ -446,15 +381,7 @@ fn a_deleted_table_deleted_for_good_leaves_only_that_it_was() {
     budget.workspace.purge(&owner(), &live).unwrap();
     let records = serde_json::to_string(&budget.workspace.history(None, 100).unwrap()).unwrap();
     assert!(!records.contains("Expenses"));
-    let rows = RowQuery {
-        sort: None,
-        filter: None,
-        within: None,
-        start: 0,
-        limit: 1,
-        search: None,
-        totals: Vec::new(),
-    };
+    let rows = RowQuery { limit: 1, ..all() };
     assert!(budget.workspace.rows(&budget.table, &rows).is_err());
     let entries = budget.entries();
     assert_eq!(entries[0].title, "Deleted a Table for good");

@@ -9,21 +9,6 @@ use liquid_core::{
     Operation, OptionId, Origin, PersonId, Place, Request, RowId, Step, Trigger,
 };
 
-fn field(workspace: &mut Workspace, table: &BlockId, name: &str, kind: FieldKind) -> FieldId {
-    let Created::Field(field) = created(
-        workspace,
-        Mutation::AddField {
-            block: table.clone(),
-            place: Place::Last,
-            name: name.into(),
-            kind,
-        },
-    ) else {
-        panic!("a field")
-    };
-    field
-}
-
 fn setup(name: &str, trigger: Trigger, steps: Vec<Step>) -> AutomationSetup {
     AutomationSetup {
         name: name.into(),
@@ -61,14 +46,7 @@ struct Budget {
 impl Budget {
     fn new() -> Self {
         let mut workspace = workspace();
-        let Created::Area(area) = created(
-            &mut workspace,
-            Mutation::CreateArea {
-                name: "Private".into(),
-            },
-        ) else {
-            panic!("an area")
-        };
+        let area = area(&mut workspace, "Private");
         let table = |workspace: &mut Workspace, name: &str| {
             let Created::Table(table) = created(
                 workspace,

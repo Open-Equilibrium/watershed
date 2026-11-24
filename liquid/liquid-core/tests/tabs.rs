@@ -6,7 +6,7 @@ use common::*;
 use liquid_core::{
     Applied, BlockId, Cell, Created, Error, Field, FieldId, FieldKind, Filter, Group, Layout,
     MAX_DEVICE_KEY, MAX_DEVICE_VALUE, MAX_DEVICE_VALUES, MAX_TABS, Match, Mutation, OptionId,
-    PageId, Place, RowId, RowQuery, Rows, Sort, Tab, TabId, TabSetup, ViewId,
+    PageId, RowId, RowQuery, Rows, Sort, Tab, TabId, TabSetup, ViewId,
 };
 
 struct Home {
@@ -16,25 +16,7 @@ struct Home {
 
 impl Home {
     fn new() -> Self {
-        let mut workspace = workspace();
-        let Created::Area(area) = created(
-            &mut workspace,
-            Mutation::CreateArea {
-                name: "Private".into(),
-            },
-        ) else {
-            panic!("an area")
-        };
-        let Created::Page(page) = created(
-            &mut workspace,
-            Mutation::CreatePage {
-                area,
-                parent: None,
-                title: "Household budget".into(),
-            },
-        ) else {
-            panic!("a Page")
-        };
+        let (workspace, _, page) = private_page("Household budget");
         Self { workspace, page }
     }
 
@@ -79,47 +61,17 @@ impl Home {
     }
 
     fn field(&mut self, table: &BlockId, name: &str, kind: FieldKind) -> FieldId {
-        let add = Mutation::AddField {
-            block: table.clone(),
-            place: Place::Last,
-            name: name.into(),
-            kind,
-        };
-        let Created::Field(field) = created(&mut self.workspace, add) else {
-            panic!("a field")
-        };
-        field
+        field(&mut self.workspace, table, name, kind)
     }
 
     fn option(&mut self, table: &BlockId, field: &FieldId, name: &str) -> OptionId {
-        let add = Mutation::AddOption {
-            block: table.clone(),
-            field: field.clone(),
-            name: name.into(),
-            color: 0,
-        };
-        let Created::Option(option) = created(&mut self.workspace, add) else {
-            panic!("an option")
-        };
-        option
+        option(&mut self.workspace, table, field, name)
     }
 
     fn row(&mut self, table: &BlockId, cells: &[(&FieldId, Cell)]) -> RowId {
-        let add = Mutation::AddRow {
-            block: table.clone(),
-            place: Place::Last,
-        };
-        let Created::Row(row) = created(&mut self.workspace, add) else {
-            panic!("a row")
-        };
+        let row = row(&mut self.workspace, table);
         for (field, value) in cells {
-            self.edit(Mutation::SetCell {
-                block: table.clone(),
-                row: row.clone(),
-                field: (*field).clone(),
-                value: value.clone(),
-            })
-            .unwrap();
+            set_cell(&mut self.workspace, table, &row, field, value.clone());
         }
         row
     }

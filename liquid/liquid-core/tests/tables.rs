@@ -5,7 +5,7 @@ mod common;
 use common::*;
 use liquid_core::{
     Applied, AreaId, BlockId, Cell, Changed, Created, Error, FieldKind, Filter, Layout, Match,
-    Mutation, PageId, Place, RowId, RowQuery, Sort, TabSetup, View, ViewId,
+    Mutation, PageId, RowId, RowQuery, Sort, TabSetup, View, ViewId,
 };
 
 struct Home {
@@ -18,41 +18,9 @@ struct Home {
 
 impl Home {
     fn new() -> Self {
-        let mut workspace = workspace();
-        let Created::Area(area) = created(
-            &mut workspace,
-            Mutation::CreateArea {
-                name: "Private".into(),
-            },
-        ) else {
-            panic!("an area")
-        };
-        let page = |workspace: &mut Workspace, title: &str| {
-            let Created::Page(page) = created(
-                workspace,
-                Mutation::CreatePage {
-                    area: area.clone(),
-                    parent: None,
-                    title: title.into(),
-                },
-            ) else {
-                panic!("a Page")
-            };
-            page
-        };
-        let budget = page(&mut workspace, "Household budget");
-        let review = page(&mut workspace, "Monthly review");
-        let Created::Block { block: table, .. } = created(
-            &mut workspace,
-            Mutation::AddDatabaseBlock {
-                page: budget.clone(),
-                after: None,
-                name: "Expenses".into(),
-                layout: Layout::Table,
-            },
-        ) else {
-            panic!("a Table")
-        };
+        let (mut workspace, area, budget) = private_page("Household budget");
+        let review = page(&mut workspace, &area, "Monthly review");
+        let (table, _) = table(&mut workspace, &budget, "Expenses");
         Self {
             workspace,
             area,
@@ -71,25 +39,11 @@ impl Home {
     }
 
     fn field(&mut self, name: &str, kind: FieldKind) -> liquid_core::FieldId {
-        let Created::Field(field) = self.create(Mutation::AddField {
-            block: self.table.clone(),
-            place: Place::Last,
-            name: name.into(),
-            kind,
-        }) else {
-            panic!("a field")
-        };
-        field
+        field(&mut self.workspace, &self.table, name, kind)
     }
 
     fn row(&mut self) -> RowId {
-        let Created::Row(row) = self.create(Mutation::AddRow {
-            block: self.table.clone(),
-            place: Place::Last,
-        }) else {
-            panic!("a row")
-        };
-        row
+        row(&mut self.workspace, &self.table)
     }
 
     fn set_cell(&mut self, row: &RowId, field: &liquid_core::FieldId, value: Cell) -> Applied {

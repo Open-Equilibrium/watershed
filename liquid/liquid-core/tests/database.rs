@@ -17,36 +17,8 @@ struct Sheet {
 
 impl Sheet {
     fn new() -> Self {
-        let mut workspace = workspace();
-        let Created::Area(area) = created(
-            &mut workspace,
-            Mutation::CreateArea {
-                name: "Private".into(),
-            },
-        ) else {
-            panic!("an area")
-        };
-        let Created::Page(page) = created(
-            &mut workspace,
-            Mutation::CreatePage {
-                area,
-                parent: None,
-                title: "Household budget".into(),
-            },
-        ) else {
-            panic!("a Page")
-        };
-        let Created::Block { block, .. } = created(
-            &mut workspace,
-            Mutation::AddDatabaseBlock {
-                page: page.clone(),
-                after: None,
-                name: "Expenses".into(),
-                layout: liquid_core::Layout::Table,
-            },
-        ) else {
-            panic!("a Database Block")
-        };
+        let (mut workspace, _, page) = private_page("Household budget");
+        let (block, _) = table(&mut workspace, &page, "Expenses");
         Self {
             workspace,
             page,
@@ -67,18 +39,7 @@ impl Sheet {
     }
 
     fn field(&mut self, name: &str, kind: FieldKind) -> FieldId {
-        let Created::Field(field) = created(
-            &mut self.workspace,
-            Mutation::AddField {
-                block: self.block.clone(),
-                place: Place::Last,
-                name: name.into(),
-                kind,
-            },
-        ) else {
-            panic!("a field")
-        };
-        field
+        field(&mut self.workspace, &self.block, name, kind)
     }
 
     fn add_row(&mut self, place: Place<RowId>) -> RowId {
@@ -409,6 +370,18 @@ fn removed_rows_and_fields_disappear_and_renames_show() {
     }
     assert_eq!(sheet.ids(&all()), std::slice::from_ref(&second));
     assert_eq!(sheet.rows(&all()).rows[0].cell(&amount), None);
+    let filtered = RowQuery {
+        filter: Some(Filter {
+            field: amount.clone(),
+            matches: Match::NotEmpty,
+        }),
+        ..all()
+    };
+    assert_eq!(
+        sheet.rows(&filtered).count,
+        1,
+        "a removed field filters nothing"
+    );
     let database = sheet.database();
     assert_eq!(database.name, "Spending");
     assert_eq!(database.fields.len(), 1);
@@ -421,33 +394,6 @@ fn removed_rows_and_fields_disappear_and_renames_show() {
         sheet.set(&first, &name, Cell::Text("x".into())),
         Err(Error::NotFound)
     );
-}
-
-#[test]
-fn a_removed_field_no_longer_sorts_or_filters() {
-    let mut sheet = Sheet::new();
-    let amount = sheet.field("Amount", FieldKind::Number);
-    let name = sheet.name_field();
-    for label in ["a", "b"] {
-        let added = sheet.row(None);
-        sheet.set(&added, &name, Cell::Text(label.into())).unwrap();
-    }
-    apply(
-        &mut sheet.workspace,
-        Mutation::RemoveField {
-            block: sheet.block.clone(),
-            field: amount.clone(),
-        },
-    )
-    .unwrap();
-    let query = RowQuery {
-        filter: Some(Filter {
-            field: amount,
-            matches: Match::NotEmpty,
-        }),
-        ..all()
-    };
-    assert_eq!(sheet.rows(&query).count, 2);
 }
 
 #[test]
