@@ -757,3 +757,67 @@ fn two_replicas_that_each_add_a_tab_to_a_duplicated_table_keep_both() {
         .collect();
     assert_eq!(names.len(), 3, "{names:?}");
 }
+
+#[test]
+fn two_replicas_that_each_remove_a_different_tab_leave_the_view_one_tab() {
+    let mut workspace = Workspace::create(PersonId::new("benni"), MemoryStore::default()).unwrap();
+    let (_, page) = new_page(&mut workspace);
+    let Created::Block { view, .. } = created(
+        &mut workspace,
+        Mutation::AddDatabaseBlock {
+            page: page.clone(),
+            after: None,
+            name: "Bills".into(),
+            layout: crate::Layout::Table,
+        },
+    ) else {
+        panic!("a Table")
+    };
+    created(
+        &mut workspace,
+        Mutation::AddTab {
+            page: page.clone(),
+            view: view.clone(),
+            after: None,
+            setup: Box::new(crate::TabSetup::of(crate::Layout::Board)),
+        },
+    );
+    let document = Document::Page(page.clone());
+    let tabs: Vec<_> = workspace
+        .view(&page, &view)
+        .unwrap()
+        .unwrap()
+        .tabs
+        .into_iter()
+        .map(|tab| tab.id)
+        .collect();
+    let base = saved(&mut workspace, &document);
+    let mut replicas = Vec::new();
+    for tab in tabs {
+        replica_of(&mut workspace, &document, &base);
+        let remove = Mutation::RemoveTab {
+            page: page.clone(),
+            view: view.clone(),
+            tab,
+        };
+        apply(&mut workspace, remove).unwrap();
+        replicas.push(saved(&mut workspace, &document));
+    }
+    let mut both = merged(&replicas[0], &replicas[1]);
+    let entry = crate::model::live(&both, crate::model::VIEWS, view.as_str()).unwrap();
+    let read = crate::tab::read(&both, &entry, view.as_str());
+    assert_eq!(read.len(), 1, "{read:?}");
+    assert_eq!(read[0].id, crate::TabId::stored(view.as_str()));
+
+    let before = read[0].setup.clone();
+    let renamed = crate::TabSetup {
+        name: "All".into(),
+        ..before.clone()
+    };
+    crate::tab::keep(&mut both, &entry, view.as_str()).unwrap();
+    crate::tab::set(&mut both, &entry, &read[0].id, &before, &renamed).unwrap();
+    assert_eq!(
+        crate::tab::read(&both, &entry, view.as_str())[0].setup.name,
+        "All"
+    );
+}

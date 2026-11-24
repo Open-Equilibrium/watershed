@@ -80,25 +80,29 @@ pub struct Tab {
 }
 
 pub(crate) fn read(doc: &AutoCommit, view: &ObjId, id: &str) -> Vec<Tab> {
-    let Some(tabs) = model::child(doc, view, TABS) else {
-        return vec![stored_before_tabs(doc, view, id)];
-    };
-    model::sorted_in(doc, &tabs)
-        .into_iter()
-        .map(|entry| Tab {
-            id: TabId::stored(&entry.id),
-            setup: TabSetup {
-                name: entry.get(NAME).unwrap_or_default().to_string(),
-                layout: Layout::of(entry.get(LAYOUT)),
-                group: entry.get(GROUP).map(FieldId::stored),
-                date: entry.get(DATE).map(FieldId::stored),
-                sort: stored(entry.get(ROW_SORT)),
-                filter: stored(entry.get(ROW_FILTER)),
-                folded: stored(entry.get(FOLDED)).unwrap_or_default(),
-                totals: stored(entry.get(TOTALS)).unwrap_or_default(),
-            },
-        })
-        .collect()
+    let tabs: Vec<Tab> = model::child(doc, view, TABS).map_or_else(Vec::new, |tabs| {
+        model::sorted_in(doc, &tabs)
+            .into_iter()
+            .map(|entry| Tab {
+                id: TabId::stored(&entry.id),
+                setup: TabSetup {
+                    name: entry.get(NAME).unwrap_or_default().to_string(),
+                    layout: Layout::of(entry.get(LAYOUT)),
+                    group: entry.get(GROUP).map(FieldId::stored),
+                    date: entry.get(DATE).map(FieldId::stored),
+                    sort: stored(entry.get(ROW_SORT)),
+                    filter: stored(entry.get(ROW_FILTER)),
+                    folded: stored(entry.get(FOLDED)).unwrap_or_default(),
+                    totals: stored(entry.get(TOTALS)).unwrap_or_default(),
+                },
+            })
+            .collect()
+    });
+    if tabs.is_empty() {
+        vec![stored_before_tabs(doc, view, id)]
+    } else {
+        tabs
+    }
 }
 
 fn stored_before_tabs(doc: &AutoCommit, view: &ObjId, id: &str) -> Tab {
@@ -113,20 +117,27 @@ fn stored_before_tabs(doc: &AutoCommit, view: &ObjId, id: &str) -> Tab {
     }
 }
 
+fn tabs_map(doc: &mut AutoCommit, view: &ObjId) -> Result<ObjId, Error> {
+    match model::child(doc, view, TABS) {
+        Some(tabs) => Ok(tabs),
+        None => Ok(doc.put_object(view, TABS, ObjType::Map)?),
+    }
+}
+
 pub(crate) fn start(
     doc: &mut AutoCommit,
     view: &ObjId,
     id: &str,
     setup: &TabSetup,
 ) -> Result<(), Error> {
-    let tabs = doc.put_object(view, TABS, ObjType::Map)?;
+    let tabs = tabs_map(doc, view)?;
     let sort = model::sort_at(&[], Place::First)?;
     let entry = model::insert_in(doc, &tabs, id, &[(SORT, &sort)])?;
     write(doc, &entry, None, setup)
 }
 
 pub(crate) fn keep(doc: &mut AutoCommit, view: &ObjId, id: &str) -> Result<(), Error> {
-    if model::child(doc, view, TABS).is_some() {
+    if model::child(doc, view, TABS).is_some_and(|tabs| !model::sorted_in(doc, &tabs).is_empty()) {
         return Ok(());
     }
     let tab = stored_before_tabs(doc, view, id);
@@ -226,10 +237,7 @@ pub(crate) fn add(
     place: Place<&TabId>,
     setup: &TabSetup,
 ) -> Result<TabId, Error> {
-    let tabs = match model::child(doc, view, TABS) {
-        Some(tabs) => tabs,
-        None => doc.put_object(view, TABS, ObjType::Map)?,
-    };
+    let tabs = tabs_map(doc, view)?;
     let siblings = model::sorted_in(doc, &tabs);
     if siblings.len() >= MAX_TABS {
         return Err(Error::TooMany);
