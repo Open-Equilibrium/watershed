@@ -736,3 +736,24 @@ fn history_reaches_past_a_long_stretch_of_typing() {
             .any(|entry| entry.title == "Created the Page “Household budget”")
     );
 }
+
+#[test]
+fn a_purged_page_has_no_preview_at_an_undo_action() {
+    let mut budget = Budget::new();
+    budget.typed(0, "Rent");
+    let page = budget.page.clone();
+    let undone = budget.workspace.undo(&owner()).unwrap().unwrap().action;
+    budget.typed(0, "Mortgage");
+    budget
+        .workspace
+        .purge(&owner(), &Purge::Page(page.clone()))
+        .unwrap();
+    assert_eq!(
+        budget.workspace.restore(&owner(), &page, &undone).err(),
+        Some(Error::Purged)
+    );
+    assert_eq!(
+        budget.workspace.preview(&page, &undone).err(),
+        Some(Error::Purged)
+    );
+}

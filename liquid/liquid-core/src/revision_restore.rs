@@ -281,6 +281,7 @@ impl<S: Store> Workspace<S> {
                     }
                     then.save()
                 }
+                Some(_) if matches!(document, Document::Page(_)) => return Err(Error::Purged),
                 _ => doc.save(),
             };
             saved.push((document, bytes));
