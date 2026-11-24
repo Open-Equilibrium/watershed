@@ -133,6 +133,28 @@ void main() {
     expect(find.byKey(const Key('select picker')), findsOneWidget);
   });
 
+  testWidgets('an open typed day is kept on quit', (tester) async {
+    await kit.show(tester, [TablePart(expenses)]);
+    await open(tester, 'r1');
+    await type(tester, '2026-10-15');
+    await kit.workspace.drain();
+    await tester.pumpAndSettle();
+    expect(written(), [('r1', '2026-10-15')]);
+  });
+
+  testWidgets('an open non-day is reported on quit, not kept', (tester) async {
+    await kit.show(tester, [TablePart(expenses)]);
+    await open(tester, 'r2');
+    await type(tester, 'soon');
+    await kit.workspace.drain();
+    await tester.pumpAndSettle();
+    expect(
+      kit.workspace.problem.value,
+      '“soon” is no date. It was not kept, as the Table closed.',
+    );
+    expect(written(), isEmpty);
+  });
+
   testWidgets('a click outside writes a day, drops a non-day', (tester) async {
     await kit.show(tester, [TablePart(expenses)]);
     await open(tester, 'r1');

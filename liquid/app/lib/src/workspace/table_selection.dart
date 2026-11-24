@@ -442,6 +442,9 @@ class CellSelection extends ChangeNotifier {
   }
 
   void finish() {
+    if (picked?.kind == BridgeFieldKind.date && !enterDay(stay: false)) {
+      report('$error It was not kept, as the Table closed.');
+    }
     if (editing && !commit(stay: false)) {
       report('$error It was not kept, as the Table closed.');
     }
