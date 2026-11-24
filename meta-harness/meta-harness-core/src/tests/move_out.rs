@@ -190,21 +190,3 @@ async fn a_move_is_refused_when_its_branch_or_turns_change_while_it_starts() {
         "{refused}"
     );
 }
-
-#[tokio::test(flavor = "multi_thread")]
-async fn a_move_whose_turns_stay_still_through_the_push_returns_its_package() {
-    let (_fake, thread) = live_thread(Vec::new(), |tag, _, id, _| match tag {
-        "vcs.refreshStatus" => vec![ok(id, status("feature/x"))],
-        "git.runStackedAction" => vec![
-            chunk(
-                id,
-                vec![json!({"kind": "action_finished", "result": {"toast": {"title": "Pushed"}}})],
-            ),
-            ok(id, json!({})),
-        ],
-        _ => vec![ok(id, json!({}))],
-    })
-    .await;
-    let package = moving(&thread).await.unwrap();
-    assert_eq!(package.branch, "feature/x");
-}

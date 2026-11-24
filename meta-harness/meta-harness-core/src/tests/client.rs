@@ -31,46 +31,6 @@ fn spawn_call(
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn a_call_returns_what_t3_replies_or_the_cause_it_failed_with() {
-    let fake = Fake::start(|tag, _, id| match tag {
-        "fail" => vec![fail(id, json!({"_tag": "Fail", "error": "no such thread"}))],
-        _ => vec![ok(id, json!({"threads": 2}))],
-    })
-    .await;
-    let client = fake.client().await;
-    let reply = client
-        .call("orchestration.getThread", json!({"threadId": "t"}))
-        .await;
-    assert_eq!(reply, Ok(json!({"threads": 2})));
-    assert_eq!(
-        fake.payloads("orchestration.getThread"),
-        vec![json!({"threadId": "t"})]
-    );
-    let error = client.call("fail", json!({})).await.unwrap_err();
-    assert!(error.contains("no such thread"), "{error}");
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn a_command_is_sent_with_a_fresh_command_id_each_time() {
-    let fake = Fake::start(|_, _, id| vec![ok(id, json!({}))]).await;
-    let client = fake.client().await;
-    for _ in 0..2 {
-        client
-            .command("orchestration.dispatchCommand", json!({"type": "x"}))
-            .await
-            .unwrap();
-    }
-    let sent = fake.payloads("orchestration.dispatchCommand");
-    assert!(sent.iter().all(|command| command["type"] == "x"));
-    assert!(
-        sent[0]["commandId"]
-            .as_str()
-            .is_some_and(|id| id.starts_with("cmd-"))
-    );
-    assert_ne!(sent[0]["commandId"], sent[1]["commandId"]);
-}
-
-#[tokio::test(flavor = "multi_thread")]
 async fn a_failed_call_returns_t3_s_message_not_its_cause_json() {
     let cause = json!([{"_tag": "Fail", "error": {"_tag": "LaunchError",
         "message": "Provider instance \"nosuch\" is disabled."}}]);

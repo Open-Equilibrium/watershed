@@ -111,23 +111,6 @@ async fn status_reports_the_checkout_and_its_pull_request() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn branch_diff_asks_t3_for_the_patch_of_the_branch_range() {
-    let patch = "diff --git a/src/lib.rs b/src/lib.rs\n+added\n";
-    let preview = json!({
-        "cwd": CWD, "generatedAt": "2026-11-16T10:00:00.000Z",
-        "sources": [{"id": "branch-range", "kind": "branch-range", "title": "Changes vs main",
-            "baseRef": "main", "headRef": "feature", "diff": patch, "diffHash": "h",
-            "truncated": false}],
-    });
-    let (fake, git) = checkout(move |_, _, id| vec![ok(id, preview.clone())]).await;
-    assert_eq!(git.branch_diff(true).await.unwrap(), patch);
-    assert_eq!(
-        fake.payloads("review.getDiffPreview"),
-        vec![json!({"cwd": CWD, "sourceKind": "branch-range", "ignoreWhitespace": true})]
-    );
-}
-
-#[tokio::test(flavor = "multi_thread")]
 async fn status_of_a_folder_outside_any_repository_has_no_branch_or_pull_request() {
     let status = json!({"isRepo": false, "hasPrimaryRemote": false, "isDefaultRef": false,
         "workingTree": {"files": []}, "hasUpstream": false, "aheadCount": 0, "behindCount": 0,

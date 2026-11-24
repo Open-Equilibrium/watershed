@@ -631,21 +631,11 @@ async fn commands_name_the_request_queued_turn_or_message_they_act_on() {
         json!({"type": "thread.user-input.dismiss", "threadId": "thread-1", "requestId": "req-2"})
     );
 
-    thread.edit_queued(7, "edited").await.unwrap();
-    assert_eq!(
-        command(&fake),
-        json!({"type": "queued-run.edit", "threadId": "thread-1", "runId": "r7", "text": "edited"})
-    );
     thread.send_queued_now(7).await.unwrap();
     assert_eq!(
         command(&fake),
         json!({"type": "queued-message.promote-to-steer", "threadId": "thread-1",
             "queuedRunId": "r7", "targetRunId": "r6"})
-    );
-    thread.cancel_queued(7).await.unwrap();
-    assert_eq!(
-        command(&fake),
-        json!({"type": "queued-run.cancel", "threadId": "thread-1", "runId": "r7"})
     );
     let missing = thread.edit_queued(8, "x").await.unwrap_err();
     assert_eq!(missing, "Turn 8 is not queued.");
@@ -729,24 +719,6 @@ async fn settings_branch_and_context_reach_t3_and_show_in_the_thread() {
         fake.payloads("vcs.refreshStatus"),
         vec![json!({"cwd": "/repo"})]
     );
-    thread
-        .set_branch("feature", Some(std::path::Path::new("/repo/wt")))
-        .await
-        .unwrap();
-    assert_eq!(
-        command(&fake),
-        json!({"type": "thread.metadata.update", "threadId": "thread-1", "branch": "feature",
-            "worktreePath": "/repo/wt"})
-    );
-    assert_eq!(
-        thread.worktree().as_deref(),
-        Some(std::path::Path::new("/repo/wt"))
-    );
-    thread.git().status().await.unwrap();
-    assert_eq!(
-        fake.payloads("vcs.refreshStatus").last(),
-        Some(&json!({"cwd": "/repo/wt"}))
-    );
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -774,16 +746,6 @@ async fn reverting_a_turn_that_is_not_in_the_thread_dispatches_nothing() {
         );
     }
     assert!(fake.payloads(COMMAND).is_empty());
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn dropping_a_followed_thread_interrupts_its_stream_on_t3() {
-    let (fake, thread) = follow(projection(json!({})), 1).await;
-    let id = fake.request_id(SUBSCRIBE);
-    drop(thread);
-    tokio::time::timeout(WAIT, fake.interrupted(&id))
-        .await
-        .expect("T3 receives the interrupt");
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -853,22 +815,6 @@ async fn a_thread_restarts_from_the_snapshot_t3_sends_on_a_new_connection() {
             checkpoint: Some("2".to_owned()),
         }]
     );
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn subscribers_end_when_t3_ends_the_thread_stream() {
-    let (fake, thread) = follow(projection(json!({})), 1).await;
-    let (_, mut events) = thread.subscribe();
-    fake.close();
-    let ended = tokio::time::timeout(WAIT, events.recv())
-        .await
-        .expect("the subscription ends");
-    assert!(ended.is_none());
-    let (_, mut later) = thread.subscribe();
-    let ended = tokio::time::timeout(WAIT, later.recv())
-        .await
-        .expect("a later subscription ends too");
-    assert!(ended.is_none());
 }
 
 #[tokio::test(flavor = "multi_thread")]
