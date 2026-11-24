@@ -135,7 +135,8 @@ bool sameFilter(BridgeFilter? a, BridgeFilter? b) {
       x?.kind == y?.kind &&
       x?.text == y?.text &&
       x?.number == y?.number &&
-      x?.checked == y?.checked;
+      x?.checked == y?.checked &&
+      a.until == b.until;
 }
 
 String? filterLabel(
@@ -588,7 +589,12 @@ class _FilterMenuState extends State<FilterMenu> {
   void didUpdateWidget(FilterMenu old) {
     super.didUpdateWidget(old);
     final filter = widget.filter;
-    if (filter != null &&
+    if (filter == null && old.filter != null) {
+      setState(() {
+        _show('');
+        _refused = false;
+      });
+    } else if (filter != null &&
         !sameFilter(filter, old.filter) &&
         !sameFilter(filter, _built())) {
       setState(_load);

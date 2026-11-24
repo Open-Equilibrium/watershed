@@ -165,6 +165,55 @@ void main() {
     expect(find.text('1 of 4 rows'), findsOneWidget);
   });
 
+  testWidgets('a filter removed elsewhere is not restored on close', (
+    tester,
+  ) async {
+    await kit.show(tester, [TablePart(rows)]);
+    await tap(tester, filterButton);
+    await typeValue(tester, 'ren');
+    await kit.workspace.apply(
+      mutation(
+        BridgeMutationKind.setTabFilter,
+        page: kit.page,
+        view: view().id,
+        tab: view().tabs.first.id,
+      ),
+    );
+    await tester.pumpAndSettle();
+    final writes = kit.applied(BridgeMutationKind.setTabFilter).length;
+    await tester.tapAt(Offset.zero);
+    await tester.pumpAndSettle();
+    expect(view().tabs.first.filter, isNull);
+    expect(kit.applied(BridgeMutationKind.setTabFilter), hasLength(writes));
+  });
+
+  testWidgets(
+    'a date range whose end changes shows the rows in the new range',
+    (tester) async {
+      await kit.show(tester, [TablePart(rows)]);
+      Future<void> range(String until) => kit.workspace.apply(
+        mutation(
+          BridgeMutationKind.setTabFilter,
+          page: kit.page,
+          view: view().id,
+          tab: view().tabs.first.id,
+          filter: BridgeFilter(
+            field: 'date',
+            matches: BridgeMatch.between,
+            value: cell(BridgeCellKind.date, text: '2026-10-01'),
+            until: until,
+          ),
+        ),
+      );
+      await range('2026-10-29');
+      await tester.pumpAndSettle();
+      expect(names(tester), ['Rent']);
+      await range('2026-10-31');
+      await tester.pumpAndSettle();
+      expect(names(tester), ['Electricity', 'Rent']);
+    },
+  );
+
   testWidgets('a sort set elsewhere shows here, and Sort reopens until esc', (
     tester,
   ) async {
