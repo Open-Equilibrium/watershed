@@ -1,3 +1,5 @@
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 use serde_json::json;
@@ -259,4 +261,46 @@ async fn an_action_that_loses_its_connection_records_why_it_ended() {
         .expect("the action ends with its connection");
     assert_eq!(ended, None);
     assert_eq!(action.failure(), Some(Failure::ConnectionLost));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn close_ends_a_subscription_and_drops_a_reconnect_waiting_on_a_token() {
+    let fake = Fake::start(|_, _, _| Vec::new()).await;
+    let (issued, probe) = (Arc::new(AtomicUsize::new(0)), Arc::new(()));
+    let (counter, weak) = (issued.clone(), Arc::downgrade(&probe));
+    let client = Client::connect(&fake.origin, move || {
+        let first = counter.fetch_add(1, Ordering::SeqCst) == 0;
+        let pin = weak.upgrade();
+        Box::pin(async move {
+            let _pin = pin;
+            if !first {
+                std::future::pending::<()>().await;
+            }
+            Ok("token".to_owned())
+        })
+    })
+    .await
+    .unwrap();
+    let mut items = client.stream("subscribe", json!({})).await.unwrap();
+    fake.received("subscribe", 1).await;
+    fake.drop_connection();
+    tokio::time::timeout(WAIT, async {
+        while issued.load(Ordering::SeqCst) < 2 {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .expect("the client starts a reconnect");
+    client.close();
+    let ended = tokio::time::timeout(WAIT, items.recv())
+        .await
+        .expect("the subscription ends without waiting for the token");
+    assert_eq!(ended, None);
+    tokio::time::timeout(WAIT, async {
+        while Arc::strong_count(&probe) > 1 {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .expect("the pending token request is dropped");
 }
