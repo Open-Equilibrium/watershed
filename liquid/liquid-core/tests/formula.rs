@@ -10,6 +10,8 @@ const AMOUNT: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.bbbbbbbbbbbbbbbbbbbbbbbbb
 const CATEGORY: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.cccccccccccccccccccccccccccccccc";
 const LEFT: &str = "dddddddddddddddddddddddddddddddd";
 const LONG: &str = "ffffffffffffffffffffffffffffffff";
+const NUMBER_TEXT: &str = "0123456789abcdef0123456789abcdef";
+const TEXT_ROW: &str = "fedcba9876543210fedcba9876543210";
 
 struct Sheet(HashMap<String, Operand>);
 
@@ -25,6 +27,8 @@ impl Sheet {
             (CATEGORY.into(), Operand::Range(categories.into())),
             (LEFT.into(), Operand::Value(n(715.5))),
             (LONG.into(), long),
+            (NUMBER_TEXT.into(), Operand::Value(t("10"))),
+            (TEXT_ROW.into(), Operand::Range(vec![t("10")].into())),
         ]))
     }
 }
@@ -38,11 +42,18 @@ impl Resolve for Sheet {
 }
 
 fn expand(source: &str) -> String {
-    [("$A", AMOUNT), ("$C", CATEGORY), ("$L", LEFT), ("$X", LONG)]
-        .iter()
-        .fold(source.to_string(), |s, (key, id)| {
-            s.replace(key, &format!("{{{id}}}"))
-        })
+    [
+        ("$A", AMOUNT),
+        ("$C", CATEGORY),
+        ("$L", LEFT),
+        ("$X", LONG),
+        ("$N", NUMBER_TEXT),
+        ("$R", TEXT_ROW),
+    ]
+    .iter()
+    .fold(source.to_string(), |s, (key, id)| {
+        s.replace(key, &format!("{{{id}}}"))
+    })
 }
 
 fn shown(source: &str) -> String {
@@ -136,6 +147,23 @@ fn excel_functions_read_references_and_ranges() {
         ("$X & $X", "#VALUE!"),
         ("CONCAT($X, $X)", "#VALUE!"),
         ("LEN($X & \"x\")", "16385"),
+    ] {
+        assert_eq!(shown(source), expected, "{source}");
+    }
+}
+
+#[test]
+fn a_text_reference_is_not_a_number_in_aggregates_but_a_literal_is() {
+    for (source, expected) in [
+        ("SUM(\"10\")", "10"),
+        ("SUM($N)", "0"),
+        ("SUM($R)", "0"),
+        ("COUNT(\"10\")", "1"),
+        ("COUNT($N)", "0"),
+        ("COUNT($R)", "0"),
+        ("PRODUCT($C)", "0"),
+        ("AVERAGE(1e308, 1e308)", "1E+308"),
+        ("AVERAGE(1e308, -1e308)", "0"),
     ] {
         assert_eq!(shown(source), expected, "{source}");
     }
