@@ -429,17 +429,17 @@ const emptyCell = BridgeCell(
   files: [],
 );
 
-BridgeCell checkboxCell(bool checked) => BridgeCell(
-  kind: BridgeCellKind.checkbox,
-  number: 0,
-  checked: checked,
-  files: const [],
-);
+BridgeCell checkboxCell(bool checked) =>
+    _cell(BridgeCellKind.checkbox, checked: checked);
 
-BridgeCell selectCell(String option) => BridgeCell(
-  kind: BridgeCellKind.select,
-  text: option,
-  number: 0,
-  checked: false,
-  files: const [],
-);
+BridgeCell selectCell(String option) =>
+    _cell(BridgeCellKind.select, text: option);
+
+BridgeCell _cell(BridgeCellKind kind, {String? text, bool checked = false}) =>
+    BridgeCell(
+      kind: kind,
+      text: text,
+      number: 0,
+      checked: checked,
+      files: const [],
+    );

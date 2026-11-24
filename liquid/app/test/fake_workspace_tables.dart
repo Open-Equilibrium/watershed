@@ -33,12 +33,7 @@ extension _FakeTables on FakeWorkspace {
         String? created;
         if (mutation.kind == BridgeMutationKind.addTab) {
           final tab = withTabId(mutation.tabs.first, created = _id());
-          tabs.insert(
-            mutation.after == null
-                ? 0
-                : tabs.indexWhere((tab) => tab.id == mutation.after) + 1,
-            tab,
-          );
+          _insertAfter(tabs, tab, mutation.after, idOf: (tab) => tab.id);
         } else if (index < 0) {
           throw 'not found';
         } else if (mutation.kind == BridgeMutationKind.removeTab) {
@@ -46,12 +41,7 @@ extension _FakeTables on FakeWorkspace {
           tabs.removeAt(index);
         } else if (mutation.kind == BridgeMutationKind.moveTab) {
           final moved = tabs.removeAt(index);
-          tabs.insert(
-            mutation.after == null
-                ? 0
-                : tabs.indexWhere((tab) => tab.id == mutation.after) + 1,
-            moved,
-          );
+          _insertAfter(tabs, moved, mutation.after, idOf: (tab) => tab.id);
         } else {
           final tab = tabs[index];
           tabs[index] = changedTab(
@@ -97,13 +87,12 @@ extension _FakeTables on FakeWorkspace {
           throw 'not found';
         }
         final row = BridgeRow(id: _id(), cells: const [], computed: const []);
-        table.insert(
-          mutation.last
-              ? table.length
-              : mutation.after == null
-              ? 0
-              : table.indexWhere((row) => row.id == mutation.after) + 1,
+        _insertAfter(
+          table,
           row,
+          mutation.after,
+          last: mutation.last,
+          idOf: (row) => row.id,
         );
         _changed(_tableResource(mutation.block));
         return _done(row: row.id);
@@ -112,13 +101,12 @@ extension _FakeTables on FakeWorkspace {
         final at = table.indexWhere((row) => row.id == mutation.row);
         if (at < 0) throw 'not found';
         final moved = table.removeAt(at);
-        table.insert(
-          mutation.last
-              ? table.length
-              : mutation.after == null
-              ? 0
-              : table.indexWhere((row) => row.id == mutation.after) + 1,
+        _insertAfter(
+          table,
           moved,
+          mutation.after,
+          last: mutation.last,
+          idOf: (row) => row.id,
         );
         _changed(_tableResource(mutation.block));
         return _done();
@@ -143,13 +131,12 @@ extension _FakeTables on FakeWorkspace {
           options: const [],
           formula: '',
         );
-        fields.insert(
-          mutation.last
-              ? fields.length
-              : mutation.after == null
-              ? 0
-              : fields.indexWhere((field) => field.id == mutation.after) + 1,
+        _insertAfter(
+          fields,
           field,
+          mutation.after,
+          last: mutation.last,
+          idOf: (field) => field.id,
         );
         _setFields(mutation.block, fields);
         _changed(_tableResource(mutation.block));
@@ -190,13 +177,7 @@ extension _FakeTables on FakeWorkspace {
         _setFields(mutation.block, [
           for (final field in database.fields)
             field.id == mutation.field
-                ? BridgeField(
-                    id: field.id,
-                    name: field.name,
-                    kind: field.kind,
-                    options: [...field.options, option],
-                    formula: '',
-                  )
+                ? changedField(field, options: [...field.options, option])
                 : field,
         ]);
         _changed(_tableResource(mutation.block));
@@ -214,13 +195,7 @@ extension _FakeTables on FakeWorkspace {
         _setFields(mutation.block, [
           for (final known in database.fields)
             known.id == field.id
-                ? BridgeField(
-                    id: field.id,
-                    name: field.name,
-                    kind: field.kind,
-                    options: field.options,
-                    formula: mutation.text!,
-                  )
+                ? changedField(field, formula: mutation.text!)
                 : known,
         ]);
         _changed(_tableResource(mutation.block));
@@ -236,13 +211,7 @@ extension _FakeTables on FakeWorkspace {
             if (field.id != mutation.field)
               field
             else if (rename)
-              BridgeField(
-                id: field.id,
-                name: mutation.text!,
-                kind: field.kind,
-                options: field.options,
-                formula: field.formula,
-              ),
+              changedField(field, name: mutation.text!),
         ]);
         if (!rename) {
           rows[mutation.block!] = [
@@ -466,6 +435,34 @@ BridgeTab tabOf(
 );
 
 BridgeTab withTabId(BridgeTab tab, String id) => changedTab(tab, id: id);
+
+BridgeField changedField(
+  BridgeField field, {
+  String? name,
+  List<BridgeOption>? options,
+  String? formula,
+}) => BridgeField(
+  id: field.id,
+  name: name ?? field.name,
+  kind: field.kind,
+  options: options ?? field.options,
+  formula: formula ?? field.formula,
+);
+
+void _insertAfter<T>(
+  List<T> list,
+  T item,
+  String? after, {
+  bool last = false,
+  required String Function(T) idOf,
+}) => list.insert(
+  last
+      ? list.length
+      : after == null
+      ? 0
+      : list.indexWhere((known) => idOf(known) == after) + 1,
+  item,
+);
 
 BridgeTab changedTab(
   BridgeTab tab, {

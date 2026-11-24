@@ -345,6 +345,22 @@ class PageKit {
 
   Iterable<BridgeMutation> applied(BridgeMutationKind kind) =>
       fake.applied.where((applied) => applied.kind == kind);
+
+  List<String> get texts => fake.textsOf(page);
+
+  String blockAt(int index) => fake.views[page]![index].block;
+
+  Future<void> applyOn(
+    WidgetTester tester,
+    BridgeMutationKind kind, {
+    int at = 0,
+    BridgeTextStyle style = BridgeTextStyle.paragraph,
+  }) async {
+    await workspace.apply(
+      mutation(kind, page: page, block: blockAt(at), style: style),
+    );
+    await tester.pumpAndSettle();
+  }
 }
 
 Finder block(int index) => find.descendant(
