@@ -2,8 +2,6 @@ mod agents;
 mod hosts;
 mod install;
 mod login;
-#[cfg(test)]
-mod testing;
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -536,3 +534,6 @@ mod tests {
         assert_eq!(missing(&["config", "approve", "1"]), None);
     }
 }
+
+#[cfg(test)]
+mod testing;
