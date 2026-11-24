@@ -106,6 +106,18 @@ void main() {
     await mouse.removePointer();
   });
 
+  testWidgets('an undated row opened from No date stays open on a reload', (
+    tester,
+  ) async {
+    await calendar(tester, [namedRow(3)]);
+    await tap(tester, find.text('No date · 1'));
+    await tap(tester, textIn(dayList, 'Row 3'));
+    expect(find.byKey(const Key('row popover')), findsOneWidget);
+    kit.fake.putRows(kit.page, kit.fake.rows.keys.single, [namedRow(3)]);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('row popover')), findsOneWidget);
+  });
+
   testWidgets('a month with more rows than it reads says so', (tester) async {
     await calendar(tester, [
       for (var number = 1; number <= 1001; number++)

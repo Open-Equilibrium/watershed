@@ -119,7 +119,7 @@ class _CalendarLayoutState extends State<CalendarLayout> {
       final undated = await data.read(
         within(
           BridgeFilter(field: date.id, matches: BridgeMatch.empty),
-          _listed == '' ? _rowsRead : 0,
+          _listed == '' || _open != null ? _rowsRead : 0,
         ),
       );
       if (!mounted || read != _reads) return;
