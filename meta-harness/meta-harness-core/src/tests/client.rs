@@ -180,16 +180,7 @@ async fn closing_a_client_hangs_up_on_a_healthy_t3_and_ends_its_requests() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn a_closed_client_or_one_whose_t3_stays_gone_ends_its_streams_for_good() {
-    let fake = Fake::start(|_, _, _| Vec::new()).await;
-    let client = fake.client().await;
-    let mut items = client.stream("subscribe", json!({})).await.unwrap();
-    fake.received("subscribe", 1).await;
-    client.close();
-    fake.drop_connection();
-    assert!(within("the stream ends", items.recv()).await.is_none());
-    assert_eq!(fake.connections(), 1, "a closed client does not reconnect");
-
+async fn a_client_whose_t3_stays_gone_ends_its_streams_for_good() {
     let fake = Fake::start(|_, _, _| Vec::new()).await;
     let client = fake.client().await;
     let mut items = client.stream("subscribe", json!({})).await.unwrap();

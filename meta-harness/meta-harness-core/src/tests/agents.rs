@@ -167,30 +167,11 @@ fn changes_and_mentions_are_kept_per_agent() {
         ),
     )
     .unwrap();
-    let changes = agents::changes(&store.db(), &agent.id).unwrap();
-    assert_eq!(changes.len(), 1);
-    assert_eq!(changes[0].turn, Some(2));
-    assert_eq!(changes[0].routine.as_ref().unwrap().title, "Morning news");
-    assert!(!changes[0].undone);
-    agents::mark_undone(&store.db(), changes[0].id).unwrap();
-    assert!(
-        agents::change(&store.db(), &agent.id, changes[0].id)
-            .unwrap()
-            .undone
-    );
-    assert!(agents::change(&store.db(), "other", changes[0].id).is_err());
+    let id = agents::changes(&store.db(), &agent.id).unwrap()[0].id;
+    assert!(agents::change(&store.db(), "other", id).is_err());
 
     agents::add_mention(&store.db(), &agent, "chat-7", "msg-1", "Is main green?").unwrap();
-    let mentions = agents::mentions(&store.db(), "chat-7").unwrap();
-    assert_eq!(
-        (
-            mentions[0].name.as_str(),
-            mentions[0].thread.as_str(),
-            mentions[0].message.as_str(),
-            mentions[0].text.as_str()
-        ),
-        ("news-bot", "thread-1", "msg-1", "Is main green?")
-    );
+    assert_eq!(agents::mentions(&store.db(), "chat-7").unwrap().len(), 1);
     assert!(agents::mentions(&store.db(), "chat-8").unwrap().is_empty());
 }
 

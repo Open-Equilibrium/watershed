@@ -257,15 +257,9 @@ async fn revoking_a_client_closes_the_connections_it_has_open() {
     assert_eq!(&answer, b"HTTP/1.1 200");
 
     b.revoke_client("phone").await.unwrap();
-    let host = b
-        .hosts()
+    b.revoke_client(&host_client_names(b).await[0])
         .await
-        .unwrap()
-        .clients
-        .into_iter()
-        .find(|client| client.kind == ClientKind::Host)
         .unwrap();
-    b.revoke_client(&host.name).await.unwrap();
     assert!(
         device.status().await.is_err(),
         "the device's connection ended"

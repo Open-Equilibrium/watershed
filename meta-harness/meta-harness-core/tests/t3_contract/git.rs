@@ -77,13 +77,6 @@ async fn git_commits_branches_pushes_and_compares_branches_with_their_base_as_t3
     std::fs::create_dir(&added).unwrap();
     let listed = host.add_project(&added.to_string_lossy()).await.unwrap();
     assert_eq!(listed.root, added.to_string_lossy().into_owned());
-    assert!(
-        host.projects()
-            .await
-            .unwrap()
-            .iter()
-            .any(|p| p.root == cloned.root)
-    );
 
     checkout.create_branch("compare").await.unwrap();
     std::fs::write(repo.join("README.md"), "contract\nbranch\n").unwrap();

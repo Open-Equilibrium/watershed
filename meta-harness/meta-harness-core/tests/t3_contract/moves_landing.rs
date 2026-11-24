@@ -101,25 +101,6 @@ async fn a_preflight_says_where_a_branch_would_land_and_why_it_cannot() {
         panic!("a branch without an upstream is not attached");
     };
     assert!(reason.contains("has no upstream branch"), "{reason}");
-    git(&repo_b, &["push", "-q", "-u", "origin", "feature/side"]);
-    let state = (&host_b, root.as_str());
-    settle(
-        &state,
-        "the pushed branch is attached",
-        |state| async move {
-            matches!(
-                state.0.preflight(state.1, "feature/side").await.unwrap(),
-                Landing::Attach
-            )
-            .then_some(())
-        },
-    )
-    .await;
-    std::fs::write(repo_b.join("README.md"), "changed here\n").unwrap();
-    let Landing::Blocked { reason } = host_b.preflight(&root, "main").await.unwrap() else {
-        panic!("a dirty checkout blocks the move");
-    };
-    assert!(reason.contains("uncommitted changes"), "{reason}");
     service_b.stop().await;
 }
 

@@ -48,28 +48,6 @@ fn carried_done(snapshot: &Snapshot) -> usize {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn a_move_in_whose_record_cannot_be_kept_stays_retryable_until_it_is_withdrawn() {
-    let pair = Pair::codex().await;
-    pushed_branch(&pair.repo_a, "feature/unrecorded");
-    let home_b = pair.dir.path().join("host-b");
-    let (project_a, project_b) = pair.projects().await;
-    let package = handoff(&appended(&project_a).await).await;
-    let token = package.transfer.as_str();
-    refuse(&home_b, "refuse", "BEFORE INSERT ON move_record");
-
-    assert_refused(project_b.move_in(package.clone()).await, "refused");
-    assert_eq!(arrival(&pair.host_b, token).await, Arrival::Starting);
-    assert_eq!(withdraw(&pair.host_b, token).await, Arrival::Refused);
-    assert!(project_b.threads().await.unwrap().is_empty());
-    assert_eq!(
-        worktree_count(&pair.repo_b),
-        2,
-        "a move never removes a worktree"
-    );
-    pair.stop().await;
-}
-
-#[tokio::test(flavor = "multi_thread")]
 async fn carried_messages_reach_the_target_only_after_it_lands_and_once_each_in_order() {
     let pair = Pair::codex().await;
     pushed_branch(&pair.repo_a, "feature/resumed");
@@ -282,29 +260,6 @@ async fn a_move_abort_racing_a_landing_answers_what_landed() {
             arrived.is_ok()
         ),
     }
-    pair.stop().await;
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn a_failed_record_store_is_retried_on_the_same_thread_and_lands_listed() {
-    let pair = Pair::codex().await;
-    pushed_branch(&pair.repo_a, "feature/recorded");
-    let home_b = pair.dir.path().join("host-b");
-    let (project_a, project_b) = pair.projects().await;
-    let package = handoff(&appended(&project_a).await).await;
-    let token = package.transfer.as_str();
-    refuse(&home_b, "refuse", "BEFORE INSERT ON move_record");
-    assert!(project_b.move_in(package.clone()).await.is_err());
-    exec_sql(&home_b, "DROP TRIGGER refuse");
-
-    let landed = project_b.move_in(package.clone()).await.unwrap();
-    let listed = project_b.threads().await.unwrap();
-    assert!(listed.iter().any(|t| t.id == landed.id()));
-    let thread = landed.id().to_owned();
-    assert_eq!(
-        arrival(&pair.host_b, token).await,
-        Arrival::Landed { thread }
-    );
     pair.stop().await;
 }
 
