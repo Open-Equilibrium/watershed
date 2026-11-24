@@ -13,14 +13,6 @@ String formatDuration(int ms) {
   return '${seconds ~/ 60}m ${two(seconds % 60)}s';
 }
 
-String formatCount(int count) => count.toString().replaceAllMapped(
-  RegExp(r'\B(?=(\d{3})+(?!\d))'),
-  (_) => ',',
-);
-
-String formatCost(int microUsd) =>
-    '\$${(microUsd / 1e6).toStringAsFixed(microUsd < 10000 ? 3 : 2)}';
-
 String formatTokens(int count) {
   if (count < 1000) return '$count';
   if (count < 999500) return '${(count / 1000).toStringAsPrecision(3)} k';
