@@ -5,6 +5,7 @@ use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use crate::config::json;
 use crate::store::{failed, now_ms, sql};
 use crate::{ModelChoice, Permissions};
 
@@ -295,9 +296,7 @@ pub(crate) fn of_thread(
     home: &Path,
     thread: &str,
 ) -> Result<Option<Agent>, String> {
-    Ok(list(db, home)?
-        .into_iter()
-        .find(|agent| agent.thread == thread))
+    single(db, home, "thread = ?1", thread)
 }
 
 pub(crate) fn memory(home: &Path, id: &str) -> PathBuf {
@@ -381,8 +380,8 @@ pub(crate) fn create(
             name,
             named,
             new.root,
-            to_json(&new.model)?,
-            to_json(&new.permissions)?,
+            json(&new.model),
+            json(&new.permissions),
             new.request,
             thread,
             text,
@@ -414,8 +413,12 @@ pub(crate) fn list(db: &Connection, home: &Path) -> Result<Vec<Agent>, String> {
 }
 
 pub(crate) fn get(db: &Connection, home: &Path, key: &str) -> Result<Option<Agent>, String> {
+    single(db, home, "id = ?1 OR name = ?1", key)
+}
+
+fn single(db: &Connection, home: &Path, filter: &str, key: &str) -> Result<Option<Agent>, String> {
     db.query_row(
-        &format!("SELECT {COLUMNS} FROM agent_profile WHERE id = ?1 OR name = ?1"),
+        &format!("SELECT {COLUMNS} FROM agent_profile WHERE {filter}"),
         [key],
         |row| row_of(row, home),
     )
@@ -483,7 +486,7 @@ pub(crate) fn set_model(
         db,
         id,
         "UPDATE agent_profile SET model = ?2, permissions = ?3 WHERE id = ?1",
-        params![id, to_json(model)?, to_json(&permissions)?],
+        params![id, json(model), json(&permissions)],
     )
 }
 
@@ -526,7 +529,7 @@ pub(crate) fn set_seen(db: &Connection, id: &str, seen: &Snapshot) -> Result<(),
         db,
         id,
         "UPDATE agent_profile SET seen_instructions = ?2, seen_routines = ?3 WHERE id = ?1",
-        params![id, seen.instructions, to_json(&seen.routines)?],
+        params![id, seen.instructions, json(&seen.routines)],
     )
 }
 
@@ -610,7 +613,7 @@ pub(crate) fn record(
             id,
             thread,
             turn.map(sql),
-            to_json(&kind)?,
+            json(&kind),
             before,
             after,
             sql(now_ms()),
@@ -645,15 +648,16 @@ pub(crate) fn change(db: &Connection, id: &str, change: i64) -> Result<AgentChan
 }
 
 pub(crate) fn mark_applied(db: &Connection, change: i64) -> Result<(), String> {
-    db.execute("UPDATE agent_change SET held = 0 WHERE id = ?1", [change])
-        .map_err(failed)
-        .map(|_| ())
+    mark(db, change, "held = 0")
 }
 
 pub(crate) fn mark_undone(db: &Connection, change: i64) -> Result<(), String> {
-    db.execute("UPDATE agent_change SET undone = 1 WHERE id = ?1", [change])
-        .map_err(failed)
-        .map(|_| ())
+    mark(db, change, "undone = 1")
+}
+
+fn mark(db: &Connection, change: i64, set: &str) -> Result<(), String> {
+    let sql = format!("UPDATE agent_change SET {set} WHERE id = ?1");
+    update(db, &change.to_string(), &sql, [change])
 }
 
 pub(crate) fn add_mention(
@@ -766,10 +770,6 @@ fn found(changed: usize, id: &str) -> Result<(), String> {
     } else {
         Ok(())
     }
-}
-
-fn to_json(value: &impl Serialize) -> Result<String, String> {
-    serde_json::to_string(value).map_err(|e| e.to_string())
 }
 
 fn change_of(row: &rusqlite::Row<'_>) -> rusqlite::Result<Result<AgentChange, String>> {
