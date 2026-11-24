@@ -1,3 +1,4 @@
+use std::cell::{Cell, RefCell};
 use std::collections::BTreeMap;
 
 use super::Dir;
@@ -35,18 +36,12 @@ fn instruction(name: &str, text: &str) -> Change {
 }
 
 fn skill(name: &str) -> Change {
-    Change::Skill {
-        name: name.to_owned(),
-        files: Some(BTreeMap::from([(
-            "SKILL.md".to_owned(),
-            "---\nname: x\n---\nDo it.".to_owned(),
-        )])),
-    }
+    skill_files(name, &[("SKILL.md", "---\nname: x\n---\nDo it.")])
 }
 
-fn skill_files(pairs: &[(&str, &str)]) -> Change {
+fn skill_files(name: &str, pairs: &[(&str, &str)]) -> Change {
     Change::Skill {
-        name: "s".to_owned(),
+        name: name.to_owned(),
         files: Some(
             pairs
                 .iter()
@@ -81,6 +76,15 @@ fn command_server(command: &str, env: &[(&str, &str)]) -> Change {
     }
 }
 
+fn url_server(url: &str) -> Change {
+    Change::McpServer {
+        name: "m".to_owned(),
+        server: Some(McpServer::Url {
+            url: url.to_owned(),
+        }),
+    }
+}
+
 fn propose(store: &Store, changes: Vec<Change>) -> u64 {
     store
         .propose("cli", "change", Proposed::Changes(changes))
@@ -102,15 +106,8 @@ fn a_proposal_takes_effect_only_once_approved_and_every_step_is_logged() {
         ],
     );
     assert_eq!(store.current().unwrap().blocks, Blocks::default());
-    assert_eq!(
-        store
-            .pending()
-            .unwrap()
-            .iter()
-            .map(|p| p.number)
-            .collect::<Vec<_>>(),
-        vec![number]
-    );
+    let pending: Vec<u64> = store.pending().unwrap().iter().map(|p| p.number).collect();
+    assert_eq!(pending, vec![number]);
 
     let current = store.approve("liquid", number, |_| Ok(())).unwrap();
     assert_eq!(current.revision, 1);
@@ -150,15 +147,9 @@ fn a_decided_or_unknown_proposal_cannot_be_decided_again() {
         );
         assert!(store.reject("cli", number).is_err(), "{number}");
     }
-    assert_eq!(store.current().unwrap().revision, 1);
-    assert!(
-        !store
-            .current()
-            .unwrap()
-            .blocks
-            .instructions
-            .contains_key("b")
-    );
+    let current = store.current().unwrap();
+    assert_eq!(current.revision, 1);
+    assert!(!current.blocks.instructions.contains_key("b"));
 }
 
 #[test]
@@ -223,31 +214,26 @@ fn an_invalid_change_is_refused_with_its_reason() {
         (instruction("a b", "x"), "name"),
         (instruction(&"n".repeat(65), "x"), "name"),
         (instruction("a", &big), "too large"),
-        (skill_files(&[("README.md", "x")]), "SKILL.md"),
+        (skill_files("s", &[("README.md", "x")]), "SKILL.md"),
         (
-            skill_files(&[("SKILL.md", "x"), ("../escape", "x")]),
+            skill_files("s", &[("SKILL.md", "x"), ("../escape", "x")]),
             "path",
         ),
-        (skill_files(&[("SKILL.md", "x"), ("/etc/x", "x")]), "path"),
         (
-            skill_files(&[("SKILL.md", "x"), ("x", "x"), ("x/y", "x")]),
+            skill_files("s", &[("SKILL.md", "x"), ("/etc/x", "x")]),
+            "path",
+        ),
+        (
+            skill_files("s", &[("SKILL.md", "x"), ("x", "x"), ("x/y", "x")]),
             "clash",
         ),
         (
-            skill_files(&[("SKILL.md", "x"), ("A/b", "x"), ("a", "x")]),
+            skill_files("s", &[("SKILL.md", "x"), ("A/b", "x"), ("a", "x")]),
             "clash",
         ),
         (command_server("", &[]), "command"),
         (command_server("x", &[("BAD KEY", "v")]), "variable"),
-        (
-            Change::McpServer {
-                name: "m".to_owned(),
-                server: Some(McpServer::Url {
-                    url: "file:///etc/passwd".to_owned(),
-                }),
-            },
-            "http",
-        ),
+        (url_server("file:///etc/passwd"), "http"),
     ];
     for (change, reason) in cases {
         let error = fixture
@@ -268,7 +254,7 @@ fn a_revision_the_homes_cannot_take_is_not_approved() {
     let fixture = Fixture::new();
     let store = &fixture.store;
     let number = propose(store, vec![instruction("a", "x")]);
-    let written = std::cell::RefCell::new(Vec::new());
+    let written = RefCell::new(Vec::new());
     let failed = store.approve("cli", number, |blocks| {
         written
             .borrow_mut()
@@ -309,7 +295,7 @@ fn a_failure_after_the_homes_took_the_revision_puts_the_current_one_back() {
                 .unwrap(),
         }
         let before = store.current().unwrap();
-        let written = std::cell::RefCell::new(Vec::new());
+        let written = RefCell::new(Vec::new());
         let result = store.approve("cli", number, |blocks| {
             written.borrow_mut().push(blocks.clone());
             Ok(())
@@ -334,7 +320,7 @@ fn a_failed_rollback_leaves_the_homes_unreconciled_until_an_approval_writes_them
         "CREATE TRIGGER refuse BEFORE INSERT ON revision BEGIN SELECT RAISE(ABORT, 'refused'); END;",
     )
     .unwrap();
-    let calls = std::cell::Cell::new(0);
+    let calls = Cell::new(0);
     let failed = store.approve("cli", first, |_| {
         calls.set(calls.get() + 1);
         if calls.get() == 1 {
@@ -357,7 +343,7 @@ fn a_failed_rollback_leaves_the_homes_unreconciled_until_an_approval_writes_them
     assert!(refused.contains("the homes refuse writes"), "{refused}");
     assert!(!store.reconciled());
 
-    let written = std::cell::RefCell::new(Vec::new());
+    let written = RefCell::new(Vec::new());
     store
         .approve("cli", second, |blocks| {
             written.borrow_mut().push(blocks.clone());
@@ -381,7 +367,7 @@ fn a_revert_is_approved_while_the_homes_refuse_the_current_revision() {
     let revert = store
         .propose("cli", "back to the start", Proposed::Restore(0))
         .unwrap();
-    let written = std::cell::RefCell::new(Vec::new());
+    let written = RefCell::new(Vec::new());
     let approved = store
         .approve("cli", revert, |blocks| {
             written.borrow_mut().push(blocks.clone());
