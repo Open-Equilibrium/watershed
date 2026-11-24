@@ -77,7 +77,6 @@ impl MemoryStore {
                 .into_iter()
                 .map(|(document, bytes)| (document, vec![bytes]))
                 .collect(),
-            version: crate::INDEX_VERSION,
             ..Self::default()
         }
     }

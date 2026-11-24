@@ -3,7 +3,10 @@
 mod common;
 
 use common::*;
-use liquid_core::{AreaId, BlockId, Created, Error, Found, Hit, Layout, Mutation, PageId, ViewId};
+use liquid_core::{
+    AreaId, BlockId, Created, Document, Error, Found, Hit, Layout, MemoryStore, Mutation, PageId,
+    Store, ViewId,
+};
 
 struct Home {
     workspace: Workspace,
@@ -128,4 +131,25 @@ fn edits_renames_and_removals_keep_the_index_current() {
     home.edit(Mutation::RemoveView { page: trip, view })
         .unwrap();
     assert!(home.ids("alfama", Found::Text).is_empty());
+}
+
+#[test]
+fn a_workspace_held_as_a_version_finds_its_pages_once_opened() {
+    let mut home = Home::new();
+    let trip = home.page("Trip to Lisbon");
+    let documents = [
+        Document::Workspace,
+        Document::Area(home.area.clone()),
+        Document::Page(trip.clone()),
+    ];
+    let mut store = home.workspace.into_store();
+    let held = documents.map(|document| {
+        let bytes = store.chunks(&document).unwrap().concat();
+        (document, bytes)
+    });
+    let mut opened = Workspace::open(MemoryStore::holding(held.to_vec())).unwrap();
+    assert_eq!(
+        opened.search("lisbon", Found::Page, 10).unwrap()[0].id,
+        trip.to_string()
+    );
 }
