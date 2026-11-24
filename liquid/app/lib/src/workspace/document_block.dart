@@ -62,6 +62,7 @@ class _DocumentBlockState extends State<DocumentBlock> {
     } on Object catch (error) {
       if (mounted) {
         state.report('Liquid could not show “${widget.media.name}”: $error');
+        widget.onUnreadable();
       }
     }
   }

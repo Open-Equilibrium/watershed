@@ -145,6 +145,19 @@ void main() {
     expect(find.text('3 / 3'), findsOneWidget);
   });
 
+  testWidgets('a PDF that fails to open is shown as its file, not as loading', (
+    tester,
+  ) async {
+    PdfPages.opener = (_) async => throw PlatformException(code: 'boom');
+    await kit.show(tester, [
+      const TextPart('The flat, signed:'),
+      const MediaPart('Rental agreement.pdf', [37, 80, 68, 70]),
+    ], pdfRenderer: true);
+    expect(find.byKey(const Key('document loading')), findsNothing);
+    expect(find.textContaining('Liquid could not show'), findsOneWidget);
+    expect(find.text('Rental agreement.pdf'), findsOneWidget);
+  });
+
   testWidgets('ink lands on the page it is drawn on', (tester) async {
     await showPdf(tester);
     await focusPdf(tester);
