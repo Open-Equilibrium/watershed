@@ -158,6 +158,10 @@ pub(crate) fn completed(n: usize) -> impl Fn(&Snapshot) -> bool {
     }
 }
 
+pub(crate) fn says(transcript: &[ChatItem], text: &str) -> bool {
+    transcript.iter().any(|item| item.text == text)
+}
+
 pub(crate) fn every_hour(title: &str, prompt: &str) -> NewRoutine {
     NewRoutine {
         title: title.to_owned(),
@@ -250,6 +254,11 @@ pub(crate) fn pushed_branch(repo: &Path, name: &str) {
     git(repo, &["push", "-q", "-u", "origin", name]);
 }
 
+pub(crate) fn local_from_origin(repo: &Path, name: &str) {
+    git(repo, &["fetch", "-q", "origin"]);
+    git(repo, &["branch", name, &format!("origin/{name}")]);
+}
+
 pub(crate) async fn settle<'a, A, T, F, Fut>(arg: &'a A, what: &str, mut step: F) -> T
 where
     F: FnMut(&'a A) -> Fut,
@@ -312,14 +321,8 @@ pub(crate) fn clone_project(dir: &Path, origin: &Path, url: &str, name: &str) ->
     let repo = dir.join(name);
     git(dir, &["clone", "-q", &origin.to_string_lossy(), name]);
     git(&repo, &["remote", "set-url", "origin", url]);
-    git(
-        &repo,
-        &[
-            "config",
-            "core.sshCommand",
-            &dir.join("fake-ssh").to_string_lossy(),
-        ],
-    );
+    let ssh = dir.join("fake-ssh").to_string_lossy().into_owned();
+    git(&repo, &["config", "core.sshCommand", &ssh]);
     git(&repo, &["config", "user.name", "Contract"]);
     git(&repo, &["config", "user.email", "contract@example.invalid"]);
     repo
@@ -346,6 +349,13 @@ pub(crate) fn codex_start(text: &str) -> StartThread {
     let mut thread = start(text, Workspace::Checkout, Permissions::FullAccess);
     thread.model.instance = "codex".to_owned();
     thread
+}
+
+pub(crate) async fn codex_host(dir: &tempdir::Dir) -> (PathBuf, Service, remote::Host) {
+    let (origin, url) = shared_remote(dir.path());
+    let repo = clone_project(dir.path(), &origin, &url, "a");
+    let (service, host) = start_codex(&dir.path().join("host-a")).await;
+    (repo, service, host)
 }
 
 pub(crate) struct Pair {
@@ -420,6 +430,57 @@ pub(crate) fn db(home: &Path) -> rusqlite::Connection {
     rusqlite::Connection::open(home.join("meta-harness.sqlite")).unwrap()
 }
 
+pub(crate) fn exec_sql(home: &Path, sql: &str) {
+    db(home).execute_batch(sql).unwrap();
+}
+
+pub(crate) fn refuse(home: &Path, name: &str, on: &str) {
+    exec_sql(
+        home,
+        &format!("CREATE TRIGGER {name} {on} BEGIN SELECT RAISE(ABORT, 'refused'); END;"),
+    );
+}
+
+pub(crate) fn json_file(path: &Path) -> serde_json::Value {
+    serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap()
+}
+
+pub(crate) fn assert_refused<T>(result: Result<T, String>, text: &str) {
+    let error = result.err().expect("the call is refused");
+    assert!(error.contains(text), "{error}");
+}
+
+pub(crate) fn upgrade(
+    url: &str,
+    token: &str,
+    headers: &[(&'static str, &str)],
+) -> tokio_tungstenite::tungstenite::handshake::client::Request {
+    use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+    let mut request = url.into_client_request().unwrap();
+    request
+        .headers_mut()
+        .insert("authorization", format!("Bearer {token}").parse().unwrap());
+    for (name, value) in headers {
+        request.headers_mut().insert(*name, value.parse().unwrap());
+    }
+    request
+}
+
+pub(crate) async fn assert_handshake_cap(address: &str) {
+    let idle =
+        futures_util::future::join_all((0..32).map(|_| tokio::net::TcpStream::connect(address)))
+            .await;
+    let mut extra = tokio::net::TcpStream::connect(address).await.unwrap();
+    let read = tokio::time::timeout(Duration::from_secs(5), extra.read(&mut [0u8; 1])).await;
+    assert_eq!(
+        read.expect("closed without waiting for a handshake")
+            .unwrap(),
+        0,
+        "the extra connection is closed"
+    );
+    drop(idle);
+}
+
 pub(crate) fn peer_row(home: &Path, name: &str) -> (u16, Option<i64>) {
     db(home)
         .query_row(
@@ -440,20 +501,31 @@ pub(crate) async fn connect_paired(
     kind: ClientKind,
     name: &str,
 ) -> remote::Host {
-    let code = on.invite(kind, Access::Auto).await.unwrap();
+    let code = invite(on, kind, Access::Auto).await;
     let token = remote::pair(url, &code, name).await.unwrap().token;
     remote::Host::connect_to(url, &token, name).await.unwrap()
+}
+
+pub(crate) async fn invite(host: &remote::Host, kind: ClientKind, access: Access) -> String {
+    host.invite(kind, access).await.unwrap()
+}
+
+pub(crate) async fn propose_rules(host: &remote::Host) -> u64 {
+    host.propose(
+        "Test first",
+        vec![Change::Instruction {
+            name: "rules".to_owned(),
+            text: Some("Run the tests.".to_owned()),
+        }],
+    )
+    .await
+    .unwrap()
 }
 
 pub(crate) async fn linked(dir: &Path) -> (Hosts, String) {
     let (a, b, url_b) = two_hosts(dir).await;
     let link = Hosts { a, b, url_b };
-    let code = link
-        .b
-        .1
-        .invite(ClientKind::Host, Access::Auto)
-        .await
-        .unwrap();
+    let code = invite(&link.b.1, ClientKind::Host, Access::Auto).await;
     let (name, _) = link
         .a
         .1

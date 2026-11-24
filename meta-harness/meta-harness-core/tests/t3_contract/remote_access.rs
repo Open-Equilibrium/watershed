@@ -5,13 +5,10 @@ async fn connects(url: &str, token: &str, name: &str) -> bool {
 }
 
 async fn may_tunnel(url: &str, token: &str) -> bool {
-    use tokio_tungstenite::tungstenite::client::IntoClientRequest;
-    let mut request = url.into_client_request().unwrap();
-    let headers = request.headers_mut();
-    headers.insert("authorization", format!("Bearer {token}").parse().unwrap());
-    headers.insert("meta-harness-api", "1".parse().unwrap());
-    headers.insert("meta-harness-tunnel", "t3".parse().unwrap());
-    tokio_tungstenite::connect_async(request).await.is_ok()
+    let headers = [("meta-harness-api", "1"), ("meta-harness-tunnel", "t3")];
+    tokio_tungstenite::connect_async(upgrade(url, token, &headers))
+        .await
+        .is_ok()
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -39,50 +36,7 @@ async fn pairing_names_host_addresses_and_the_handshake_limit_are_checked_before
         error,
         "Enter the address as ws://HOST:PORT, as meta invite prints it."
     );
-
-    let address = format!("127.0.0.1:{port}");
-    let idle =
-        futures_util::future::join_all((0..32).map(|_| tokio::net::TcpStream::connect(&address)))
-            .await;
-    let mut extra = tokio::net::TcpStream::connect(&address).await.unwrap();
-    let mut byte = [0u8; 1];
-    let closed = tokio::time::timeout(Duration::from_secs(5), extra.read(&mut byte))
-        .await
-        .expect("closed without waiting for a handshake")
-        .unwrap();
-    assert_eq!(closed, 0, "the extra connection is closed");
-    drop(idle);
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn the_audit_log_names_a_remote_client_by_its_pairing_not_the_name_it_sends() {
-    let (dir, _repo, _home) = fixture();
-    let (_service, local) = start_service(&dir.path().join("meta")).await;
-    let port = remote_on_free(&local).await;
-    let url = format!("ws://127.0.0.1:{port}");
-    let code = local
-        .invite(ClientKind::Device, Access::Auto)
-        .await
-        .unwrap();
-    let paired = remote::pair(&url, &code, "phone").await.unwrap();
-    let remote = remote::Host::connect_to(&url, &paired.token, "impostor")
-        .await
-        .unwrap();
-    remote
-        .propose(
-            "Test first",
-            vec![Change::Instruction {
-                name: "rules".to_owned(),
-                text: Some("Run the tests.".to_owned()),
-            }],
-        )
-        .await
-        .unwrap();
-    let log = local.log().await.unwrap();
-    assert!(
-        !log.is_empty() && log.iter().all(|entry| entry.client == "phone"),
-        "{log:?}"
-    );
+    assert_handshake_cap(&format!("127.0.0.1:{port}")).await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -98,6 +52,25 @@ async fn remote_access_refuses_port_zero_and_binds_a_busy_port_once_it_is_free()
     let port = remote_on_free(&local).await;
     drop(local);
     service.stop().await;
+    exec_sql(
+        &meta,
+        "INSERT INTO peer (name, address, token, access, tunnel_port, linked_ms, client) \
+         VALUES ('bad', 'ws://127.0.0.1:1', 'token', 'unknown', 1, NULL, 'client')",
+    );
+    let failed = Service::start_with_remote(
+        service_config(&meta),
+        Some(vec![std::net::Ipv4Addr::LOCALHOST.into()]),
+    )
+    .await;
+    assert!(
+        failed.is_err(),
+        "a linked host with an unknown access level"
+    );
+    assert!(
+        std::net::TcpStream::connect(("127.0.0.1", port)).is_err(),
+        "nothing listens after the failed start"
+    );
+    exec_sql(&meta, "DELETE FROM peer WHERE name = 'bad'");
     let holder = std::net::TcpListener::bind(("127.0.0.1", port)).unwrap();
     let (service, local) = start_service(&meta).await;
     let waiting = local.remote_status().await.unwrap().expect("still on");
@@ -109,6 +82,7 @@ async fn remote_access_refuses_port_zero_and_binds_a_busy_port_once_it_is_free()
         status.waiting.is_none().then_some(())
     })
     .await;
+    assert!(std::net::TcpStream::connect(("127.0.0.1", port)).is_ok());
     service.stop().await;
 }
 
@@ -144,11 +118,17 @@ async fn a_device_pairs_once_keeps_its_access_across_a_restart_and_ends_with_rem
         .expect("the code was not spent")
         .token;
 
-    let device = remote::Host::connect_to(&url, &token, "phone")
+    let device = remote::Host::connect_to(&url, &token, "impostor")
         .await
         .unwrap();
     device.status().await.unwrap();
     device.config().await.unwrap();
+    propose_rules(&device).await;
+    let log = local.log().await.unwrap();
+    assert!(
+        !log.is_empty() && log.iter().all(|entry| entry.client == "phone"),
+        "{log:?}"
+    );
     assert!(device.remote_status().await.is_err());
     assert!(
         device
@@ -169,7 +149,7 @@ async fn a_device_pairs_once_keeps_its_access_across_a_restart_and_ends_with_rem
     local.revoke_client("phone").await.unwrap();
     assert!(!connects(&url, &token, "phone").await);
 
-    let host_code = local.invite(ClientKind::Host, Access::Auto).await.unwrap();
+    let host_code = invite(&local, ClientKind::Host, Access::Auto).await;
     let paired = remote::pair(&url, &host_code, "other").await.unwrap();
     let (name, host_token) = (paired.name, paired.token);
     assert_eq!(name, local.environment_name().await.unwrap().to_lowercase());

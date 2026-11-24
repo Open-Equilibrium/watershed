@@ -52,12 +52,12 @@ fn body_json(answer: &str) -> serde_json::Value {
 }
 
 fn t3_address(home: &Path) -> String {
-    let text = std::fs::read_to_string(home.join("t3/userdata/server-runtime.json")).unwrap();
-    let origin = serde_json::from_str::<serde_json::Value>(&text).unwrap()["origin"]
+    let runtime = json_file(&home.join("t3/userdata/server-runtime.json"));
+    runtime["origin"]
         .as_str()
         .unwrap()
-        .to_owned();
-    origin.trim_start_matches("http://").to_owned()
+        .trim_start_matches("http://")
+        .to_owned()
 }
 
 fn exchange(origin: &str, credential: &str, scope: Option<&str>) -> String {
@@ -156,14 +156,8 @@ fn sign_in(addr: &str, pairing: &str) -> String {
 
 fn mcp_answer(connect: &str, host: &str, bearer: &str) -> String {
     let initialize = serde_json::json!({
-        "jsonrpc": "2.0",
-        "id": 1,
-        "method": "initialize",
-        "params": {
-            "protocolVersion": "2025-06-18",
-            "capabilities": {},
-            "clientInfo": {"name": "tester", "version": "0"},
-        },
+        "jsonrpc": "2.0", "id": 1, "method": "initialize",
+        "params": {"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "tester", "version": "0"}},
     });
     http_at(
         connect,
@@ -214,9 +208,9 @@ async fn the_tunnel_passes_only_the_paths_a_link_uses() {
 #[tokio::test(flavor = "multi_thread")]
 async fn a_pairing_code_from_a_host_token_redeems_only_orchestration_scopes() {
     let (dir, _repo, _home) = fixture();
-    let (home_b, port_b) = (dir.path().join("b"), free_port());
+    let home_b = dir.path().join("b");
     let (_b, b) = start_service(&home_b).await;
-    b.remote_on(port_b).await.unwrap();
+    let port_b = remote_on_free(&b).await;
     let url = format!("ws://127.0.0.1:{port_b}");
     let origin = t3_address(&home_b);
     for (access, name, scope) in [
@@ -227,7 +221,7 @@ async fn a_pairing_code_from_a_host_token_redeems_only_orchestration_scopes() {
         ),
         (Access::ReadOnly, "reader", "orchestration:read"),
     ] {
-        let code = b.invite(ClientKind::Host, access).await.unwrap();
+        let code = invite(&b, ClientKind::Host, access).await;
         let paired = remote::pair(&url, &code, name).await.unwrap();
         assert_eq!(paired.access, access);
         let host = remote::Host::connect_to(&url, &paired.token, name)

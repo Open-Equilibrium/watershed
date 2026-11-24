@@ -25,13 +25,13 @@ def say(sid, text):
 
 
 def prompt(mid, sid, script):
+    reason = "end_turn"
     if script in ("instruct", "reinstruct"):
         path = instructions[sid]
         twice = " twice" if script == "reinstruct" else ""
         with open(path, "w", encoding="utf-8") as f:
             f.write(f"# news-bot\n\nRead the feeds{twice}.\n")
         say(sid, "Saved.")
-        reason = "end_turn"
     elif script == "rewrite-wait":
         with open(instructions[sid], "w", encoding="utf-8") as f:
             f.write("# news-bot\n\nRead the feeds three times.\n")
@@ -45,7 +45,6 @@ def prompt(mid, sid, script):
             f.write(script[len("append "):] + "\n")
         update(sid, {"sessionUpdate": "tool_call_update", "toolCallId": f"t{mid}", "status": "completed"})
         say(sid, "Appended.")
-        reason = "end_turn"
     elif script == "ask":
         asked = threading.Event()
         replies[f"p{mid}"] = [asked, None]
@@ -57,28 +56,23 @@ def prompt(mid, sid, script):
         asked.wait()
         outcome = replies.pop(f"p{mid}")[1].get("outcome", {})
         say(sid, "Approved." if outcome.get("optionId") == "allow" else "Declined.")
-        reason = "end_turn"
     elif script.startswith("stream "):
         for _ in range(int(script[len("stream "):])):
             say(sid, "sixteen bytes ok")
-        reason = "end_turn"
     elif script == "plan":
         for status in ("in_progress", "completed"):
             update(sid, {"sessionUpdate": "plan", "entries": [
                 {"content": "Explore", "priority": "medium", "status": status},
                 {"content": "Explore › scraper-1", "priority": "medium", "status": status}]})
         say(sid, "Planned.")
-        reason = "end_turn"
     elif script == "fill":
         update(sid, {"sessionUpdate": "usage_update", "used": 900, "size": 1000})
         say(sid, "Full.")
-        reason = "end_turn"
     elif script == "wait":
         cancelled[sid].wait()
         reason = "cancelled"
     else:
         say(sid, "Done.")
-        reason = "end_turn"
     send({"jsonrpc": "2.0", "id": mid, "result": {"stopReason": reason}})
 
 

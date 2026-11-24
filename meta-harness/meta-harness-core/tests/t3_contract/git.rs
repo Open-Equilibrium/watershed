@@ -1,16 +1,5 @@
 use super::*;
 
-fn origin_of(dir: &tempdir::Dir, repo: &Path) -> PathBuf {
-    let origin = dir.path().join("origin.git");
-    git(dir.path(), &["init", "-q", "--bare", "origin.git"]);
-    git(
-        repo,
-        &["remote", "add", "origin", &origin.to_string_lossy()],
-    );
-    git(repo, &["push", "-q", "-u", "origin", "main"]);
-    origin
-}
-
 async fn run(git: &remote::Git, action: GitAction, message: Option<&str>) -> GitProgress {
     let mut progress = git
         .run(GitActionRequest {
@@ -29,37 +18,47 @@ async fn run(git: &remote::Git, action: GitAction, message: Option<&str>) -> Git
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn git_commits_branches_and_pushes_as_t3_does() {
+async fn git_commits_branches_pushes_and_compares_branches_with_their_base_as_t3_does() {
     let (dir, repo, home) = fixture();
-    let origin = origin_of(&dir, &repo);
+    let origin = dir.path().join("origin.git");
+    git(dir.path(), &["init", "-q", "--bare", "origin.git"]);
+    git(
+        &repo,
+        &["remote", "add", "origin", &origin.to_string_lossy()],
+    );
+    git(&repo, &["push", "-q", "-u", "origin", "main"]);
     let (service, host) = start_service(&home).await;
     let project = host.project(&repo).await.unwrap();
-    let git = project.git();
+    let checkout = project.git();
 
     std::fs::write(repo.join("README.md"), "contract\nchanged\n").unwrap();
-    let status = git.status().await.unwrap();
+    let status = checkout.status().await.unwrap();
     assert_eq!(status.branch.as_deref(), Some("main"));
     assert!(status.repository && status.remote && status.default_branch);
     assert_eq!(status.changes.len(), 1);
     assert!(
-        git.uncommitted_diff(false)
+        checkout
+            .uncommitted_diff(false)
             .await
             .unwrap()
             .contains("+changed")
     );
 
-    git.create_branch("feature").await.unwrap();
-    let refs = git.refs("feat", 0, 50).await.unwrap();
+    checkout.create_branch("feature").await.unwrap();
+    let refs = checkout.refs("feat", 0, 50).await.unwrap();
     assert!(refs.refs.iter().any(|r| r.name == "feature" && r.current));
-    let ended = run(&git, GitAction::CommitPush, Some("Change the readme")).await;
+    let ended = run(&checkout, GitAction::CommitPush, Some("Change the readme")).await;
     assert!(matches!(ended, GitProgress::Finished { .. }), "{ended:?}");
-    let status = git.status().await.unwrap();
+    let status = checkout.status().await.unwrap();
     assert!(status.changes.is_empty() && status.upstream);
     assert_eq!(status.ahead, 0);
     assert_eq!(pushed_subject(&origin, "feature"), "Change the readme");
 
-    git.switch("main").await.unwrap();
-    assert_eq!(git.status().await.unwrap().branch.as_deref(), Some("main"));
+    checkout.switch("main").await.unwrap();
+    assert_eq!(
+        checkout.status().await.unwrap().branch.as_deref(),
+        Some("main")
+    );
     let plain = dir.path().join("plain");
     std::fs::create_dir(&plain).unwrap();
     let plain_git = host.project(&plain).await.unwrap().git();
@@ -85,17 +84,8 @@ async fn git_commits_branches_and_pushes_as_t3_does() {
             .iter()
             .any(|p| p.root == cloned.root)
     );
-    service.stop().await;
-}
 
-#[tokio::test(flavor = "multi_thread")]
-async fn branch_changes_and_the_branch_diff_compare_the_branch_with_its_base_as_t3_does() {
-    let (dir, repo, home) = fixture();
-    origin_of(&dir, &repo);
-    let (service, host) = start_service(&home).await;
-    let checkout = host.project(&repo).await.unwrap().git();
-
-    checkout.create_branch("feature").await.unwrap();
+    checkout.create_branch("compare").await.unwrap();
     std::fs::write(repo.join("README.md"), "contract\nbranch\n").unwrap();
     git(&repo, &["commit", "-qam", "Change the readme"]);
     std::fs::write(repo.join("README.md"), "contract\nbranch\nmore\n").unwrap();
