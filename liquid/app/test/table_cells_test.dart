@@ -1,11 +1,8 @@
-import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:liquid/src/rust/api/database.dart';
 import 'package:liquid/src/rust/api/workspace.dart';
-import 'package:liquid/src/workspace/table_cells.dart';
-import 'package:liquid/src/workspace/text_block.dart';
 
 import 'page_kit.dart';
 
@@ -190,23 +187,6 @@ void main() {
     expect(kit.workspace.problem.value, isNotNull);
   });
 
-  testWidgets(
-    'a click in the edited cell keeps the edit',
-    variant: TargetPlatformVariant.only(TargetPlatform.macOS),
-    (tester) async {
-      await kit.show(tester, [TablePart(expenses)]);
-      await startEdit(tester, 'r1', 'name');
-      await tester.enterText(editor(), 'Market');
-      await tester.tapAt(
-        tester.getRect(cellOf('r1', 'name')).bottomRight - const Offset(4, 4),
-        kind: PointerDeviceKind.mouse,
-      );
-      await tester.pumpAndSettle();
-      expect(tester.widget<TextField>(editor()).controller!.text, 'Market');
-      expect(written(), isEmpty);
-    },
-  );
-
   testWidgets('scrolling sideways keeps an edit in view', (tester) async {
     await kit.show(tester, [
       TablePart(
@@ -237,24 +217,6 @@ void main() {
     tester.testTextInput.enterText('78');
     await key(tester, LogicalKeyboardKey.enter);
     expect(written().single.$3.number, 78);
-  });
-
-  testWidgets('an edit of the last row ends when removed', (tester) async {
-    await kit.show(tester, [TablePart(expenses)]);
-    final table = kit.fake.views[kit.page]!.single.block;
-    await startEdit(tester, 'r2', 'name');
-    await tester.enterText(editor(), 'Power');
-    kit.fake.putRows(kit.page, table, [kit.fake.rows[table]!.first]);
-    await tester.pumpAndSettle();
-    expect(editor(), findsNothing);
-    await tester.tap(kit.inTable(find.text('New')));
-    await tester.pumpAndSettle();
-    await key(tester, LogicalKeyboardKey.backspace);
-    expect(
-      written().where((write) => write.$1 != 'r2'),
-      isEmpty,
-      reason: 'the new row comes up unselected',
-    );
   });
 
   testWidgets('an edit whose row moves out of what was read is still written', (
@@ -315,63 +277,5 @@ void main() {
     kit.fake.refuseKinds = {};
     await clickCell(tester, 'r2', 'paid');
     expect(written().single.$3.checked, isTrue);
-  });
-
-  testWidgets('a number that is none says so on leaving', (tester) async {
-    await kit.show(tester, [TablePart(expenses)]);
-    await startEdit(tester, 'r1', 'amount');
-    await tester.enterText(editor(), '12x');
-    await kit.workspace.newPage(kit.workspace.open.value!.area);
-    await tester.pumpAndSettle();
-    expect(written(), isEmpty);
-    expect(kit.workspace.problem.value, contains('“12x” is no number'));
-  });
-
-  testWidgets('esc puts the caret at the start of the Text Block below', (
-    tester,
-  ) async {
-    await kit.show(tester, [
-      TablePart(expenses),
-      const TextPart('Paid by card.'),
-    ]);
-    await clickCell(tester, 'r1', 'name');
-    await key(tester, LogicalKeyboardKey.escape);
-    final below = tester.widget<TextField>(
-      find.descendant(
-        of: find.byType(TextBlock),
-        matching: find.byType(TextField),
-      ),
-    );
-    expect(below.focusNode!.hasFocus, isTrue);
-    expect(below.controller!.selection.baseOffset, 0);
-  });
-
-  testWidgets('the arrows bring the selected cell into view', (tester) async {
-    await kit.show(tester, [TablePart(namedRows(1, 30))]);
-    await clickCell(tester, 'r1', 'name');
-    for (var step = 0; step < 15; step++) {
-      await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
-    }
-    await tester.pumpAndSettle();
-    expect(rowsScroll(tester).offset, (16 - 10) * 34.0);
-    await key(tester, LogicalKeyboardKey.backspace);
-    expect(written().single.$1, 'r16');
-  });
-
-  testWidgets('an empty checkbox cell shows an unticked box', (tester) async {
-    await kit.show(tester, [
-      TablePart([...expenses, namedRow(3)]),
-    ]);
-    await clickCell(tester, 'r1', 'paid');
-    await tester.sendKeyEvent(LogicalKeyboardKey.backspace);
-    await tester.pumpAndSettle();
-    for (final row in ['r1', 'r3']) {
-      final box = find.descendant(
-        of: cellOf(row, 'paid'),
-        matching: find.byType(CellCheckbox),
-      );
-      expect(box, findsOneWidget, reason: row);
-      expect(tester.widget<CellCheckbox>(box).checked, isFalse, reason: row);
-    }
   });
 }

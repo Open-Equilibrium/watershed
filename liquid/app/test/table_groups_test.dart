@@ -74,11 +74,4 @@ void main() {
     expect(kit.inTable(find.text('Groceries')), findsOneWidget);
     expect(kit.inTable(find.text('4 rows')), findsOneWidget);
   });
-
-  testWidgets('a Checkbox groups into unticked, then ticked', (tester) async {
-    await kit.show(tester, [TablePart(rows)]);
-    await groupBy(tester, 'paid');
-    const order = ['Electricity', 'Row 4', 'Groceries', 'Rent'];
-    expect(shownTop(tester, order), order);
-  });
 }

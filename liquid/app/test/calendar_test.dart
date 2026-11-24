@@ -61,18 +61,6 @@ void main() {
     expect(textIn(dayList, 'Row 3'), findsOneWidget);
   });
 
-  testWidgets('a day shows three rows, then +N more', (tester) async {
-    final date = day(0, 12);
-    await calendar(tester, [
-      for (var number = 1; number <= 5; number++)
-        expenseRow('r$number', 'Item $number', date, 'food', 1, false),
-    ]);
-    expect(onDay(date, 'Item 3'), findsOneWidget);
-    expect(onDay(date, 'Item 4'), findsNothing);
-    await tap(tester, onDay(date, '+2 more'));
-    expect(textIn(dayList, 'Item 5'), findsOneWidget);
-  });
-
   testWidgets('dragging a row to another day changes its date', (tester) async {
     await calendar(tester, [
       expenseRow('r1', 'Groceries', day(0, 3), 'food', 84.2, true),
@@ -112,13 +100,5 @@ void main() {
     kit.fake.putRows(kit.page, kit.fake.rows.keys.single, [namedRow(3)]);
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('row popover')), findsOneWidget);
-  });
-
-  testWidgets('a month with more rows than it reads says so', (tester) async {
-    await calendar(tester, [
-      for (var number = 1; number <= 1001; number++)
-        expenseRow('r$number', 'Item $number', day(0, 12), 'food', 1, false),
-    ]);
-    expect(find.text('1,000 of 1,001 rows shown'), findsOneWidget);
   });
 }

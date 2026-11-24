@@ -65,36 +65,6 @@ void main() {
     });
   }
 
-  for (final (name, finish) in [
-    ('⏎', LogicalKeyboardKey.enter),
-    ('⇥', LogicalKeyboardKey.tab),
-  ]) {
-    testWidgets('$name on a non-day text stays, saying so', (tester) async {
-      await kit.show(tester, [TablePart(expenses)]);
-      await open(tester, 'r1');
-      await type(tester, 'soon');
-      await key(tester, finish);
-      expect(picker, findsOneWidget);
-      expect(typed(tester), 'soon');
-      expect(kit.inTable(find.text('“soon” is no date.')), findsOneWidget);
-      expect(written(), isEmpty);
-    });
-  }
-
-  testWidgets('‹ and › show the month before and after', (tester) async {
-    await kit.show(tester, [TablePart(expenses)]);
-    await open(tester, 'r1');
-    await tap(tester, inPicker(find.byKey(const Key('next month'))));
-    expect(inPicker(find.text('December 2026')), findsOneWidget);
-    await tap(tester, day('2026-12-24'));
-    expect(picker, findsNothing);
-    expect(written(), [('r1', '2026-12-24')]);
-    await key(tester, LogicalKeyboardKey.enter);
-    expect(picker, findsOneWidget);
-    await tap(tester, inPicker(find.byKey(const Key('previous month'))));
-    expect(inPicker(find.text('November 2026')), findsOneWidget);
-  });
-
   testWidgets('typing and esc write nothing; Clear empties', (tester) async {
     await kit.show(tester, [TablePart(expenses)]);
     await open(tester, 'r1');

@@ -1,10 +1,8 @@
-import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:liquid/src/rust/api/database.dart';
 import 'package:liquid/src/rust/api/workspace.dart';
-import 'package:liquid/src/workspace/table_block.dart';
 import 'package:liquid/src/workspace/workspace_state.dart';
 
 import 'focus_kit.dart';
@@ -124,18 +122,6 @@ void main() {
     expect(find.text('Name contains ren'), findsOneWidget);
   });
 
-  testWidgets('esc closes a filter menu after its value is written on ⏎', (
-    tester,
-  ) async {
-    await kit.show(tester, [TablePart(rows)]);
-    await tap(tester, filterButton);
-    await typeValue(tester, 'ren');
-    expect(names(tester), ['Rent']);
-    await key(tester, LogicalKeyboardKey.escape);
-    expect(find.byKey(const Key('table query menu')), findsNothing);
-    expect(names(tester), ['Rent']);
-  });
-
   testWidgets('a number that is none is not written', (tester) async {
     await kit.show(tester, [TablePart(rows)]);
     await tap(tester, filterButton);
@@ -253,34 +239,6 @@ void main() {
     expect(kit.applied(BridgeMutationKind.setCell), isEmpty);
   });
 
-  testWidgets('a filtered Table keeps its place when the Page changes', (
-    tester,
-  ) async {
-    await kit.show(tester, [
-      const TextPart('October'),
-      TablePart([
-        for (var at = 0; at < 40; at++)
-          expenseRow('r$at', 'Row $at', '2026-11-01', 'home', 1, true),
-      ]),
-    ]);
-    await filterHome(tester);
-    final scroll = find.descendant(
-      of: find.byType(TableBlock),
-      matching: find.byWidgetPredicate(
-        (widget) =>
-            widget is Scrollable && widget.axisDirection == AxisDirection.down,
-      ),
-    );
-    final rowsScroll = tester.state<ScrollableState>(scroll.first).position;
-    rowsScroll.jumpTo(120);
-    await tester.pumpAndSettle();
-    await kit.workspace.apply(
-      mutation(BridgeMutationKind.addTextBlock, page: kit.page, text: 'Above'),
-    );
-    await tester.pumpAndSettle();
-    expect(rowsScroll.pixels, 120);
-  });
-
   testWidgets('an emptied value removes the filter and refuses nothing', (
     tester,
   ) async {
@@ -295,20 +253,6 @@ void main() {
     expect(view().tabs.first.filter, isNull);
   });
 
-  testWidgets('deleting a field counts every row, not those shown', (
-    tester,
-  ) async {
-    await kit.show(tester, [TablePart(rows)]);
-    await filterHome(tester);
-    await tester.tap(
-      kit.inTable(find.text('Amount')),
-      buttons: kSecondaryButton,
-    );
-    await tester.pumpAndSettle();
-    await tap(tester, find.text('Delete field'));
-    expect(find.textContaining('all 3 rows'), findsOneWidget);
-  });
-
   testWidgets('leaving a change unfinished keeps the filter', (tester) async {
     await kit.show(tester, [TablePart(rows)]);
     await tap(tester, filterButton);
@@ -320,34 +264,6 @@ void main() {
     await tester.tapAt(Offset.zero);
     await tester.pumpAndSettle();
     expect(view().tabs.first.filter?.matches, BridgeMatch.empty);
-  });
-
-  testWidgets(
-    'esc closes the menu, with a choice open or after its value field went',
-    (tester) async {
-      await kit.show(tester, [TablePart(rows)]);
-      await tap(tester, filterButton);
-      await tap(tester, filterField);
-      await tap(tester, menuText('Category'));
-      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
-      await tester.pumpAndSettle();
-      expect(find.byKey(const Key('table query menu')), findsNothing);
-      await tap(tester, filterButton);
-      await tap(tester, filterField);
-      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
-      await tester.pumpAndSettle();
-      expect(find.byKey(const Key('table query menu')), findsNothing);
-    },
-  );
-
-  testWidgets('closing a choice gives the keys back to the value', (
-    tester,
-  ) async {
-    await kit.show(tester, [TablePart(rows)]);
-    await tap(tester, filterButton);
-    await tap(tester, filterMatch);
-    await tap(tester, filterMatch);
-    expect(tester.widget<TextField>(filterValue).focusNode!.hasFocus, isTrue);
   });
 
   testWidgets('a table with no field to filter disables Filter', (

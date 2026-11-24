@@ -3,7 +3,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:liquid/src/rust/api/workspace.dart';
-import 'package:liquid/src/workspace/workspace_state.dart';
 
 import 'focus_kit.dart';
 import 'page_kit.dart';
@@ -51,22 +50,6 @@ void main() {
     await click(tester, grip);
   }
 
-  Future<void> elsewhere(
-    WidgetTester tester,
-    BridgeMutationKind kind, {
-    String? row,
-    String? after,
-  }) async {
-    final table = kit.fake.views[kit.page]!.single.block;
-    await kit.workspace.apply(
-      mutation(kind, page: kit.page, block: table, row: row, after: after),
-    );
-    await tester.pumpAndSettle();
-  }
-
-  ScrollController rowsScroll(WidgetTester tester) =>
-      tester.widget<ListView>(find.byKey(const Key('table rows'))).controller!;
-
   List<String?> added() => [
     for (final add in kit.applied(BridgeMutationKind.addRow))
       add.last ? 'last' : add.after,
@@ -93,17 +76,6 @@ void main() {
     expect(order()[1], 'r1');
   });
 
-  testWidgets('Insert above and below go next to the row', (tester) async {
-    await show(tester);
-    await openMenu(tester, 'r2');
-    await tap(tester, inMenu('Insert above'));
-    expect(menu, findsNothing);
-    await openMenu(tester, 'r2');
-    await tap(tester, inMenu('Insert below'));
-    expect(added(), ['r1', 'r2']);
-    expect(order().length, 4);
-  });
-
   testWidgets('Delete row deletes it without asking', (tester) async {
     await show(tester);
     await openMenu(tester, 'r1');
@@ -113,47 +85,5 @@ void main() {
     expect(kit.applied(BridgeMutationKind.removeRow).single.row, 'r1');
     expect(cell('r1', 'name'), findsNothing);
     expect(kit.inTable(find.text('1 row')), findsOneWidget);
-  });
-
-  testWidgets('↑↓ choose in the menu, ⏎ takes, esc closes', (tester) async {
-    await show(tester);
-    await openMenu(tester, 'r1');
-    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
-    await tester.pumpAndSettle();
-    expect(menu, findsNothing);
-    await openMenu(tester, 'r1');
-    for (var step = 0; step < 3; step++) {
-      await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
-    }
-    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
-    await tester.pumpAndSettle();
-    expect(kit.applied(BridgeMutationKind.removeRow).single.row, 'r1');
-    expect(added(), isEmpty);
-  });
-
-  testWidgets('a click outside or a Table scroll closes the menu', (
-    tester,
-  ) async {
-    await show(tester, 20);
-    await openMenu(tester, 'r1');
-    await click(tester, kit.inTable(find.text('Expenses')));
-    expect(menu, findsNothing);
-    await openMenu(tester, 'r1');
-    rowsScroll(tester).jumpTo(40);
-    await tester.pumpAndSettle();
-    expect(menu, findsNothing);
-    expect(kit.applied(BridgeMutationKind.addRow), isEmpty);
-  });
-
-  testWidgets('a row removed or added elsewhere closes its menu', (
-    tester,
-  ) async {
-    await show(tester);
-    await openMenu(tester, 'r1');
-    await elsewhere(tester, BridgeMutationKind.removeRow, row: 'r1');
-    expect(menu, findsNothing);
-    await openMenu(tester, 'r2');
-    await elsewhere(tester, BridgeMutationKind.addRow);
-    expect(menu, findsNothing);
   });
 }

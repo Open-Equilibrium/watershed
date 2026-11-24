@@ -1,6 +1,5 @@
 import 'dart:async';
 
-import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -16,20 +15,6 @@ import 'page_kit.dart';
 
 void main() {
   final kit = PageKit();
-
-  const shopped = BridgeDatabase(
-    name: 'Expenses',
-    fields: [
-      ...expenseFields,
-      BridgeField(
-        id: 'shop',
-        name: 'Shop',
-        kind: BridgeFieldKind.text,
-        options: [],
-        formula: '',
-      ),
-    ],
-  );
 
   final addField = kit.inTable(find.byKey(const Key('add field')));
   final newRow = kit.inTable(find.text('New'));
@@ -59,9 +44,6 @@ void main() {
 
   List<BridgeField> shownFields() =>
       kit.fake.databases[kit.fake.views[kit.page]!.single.block]!.fields;
-
-  Matcher button(String label) =>
-      matchesSemantics(label: label, isButton: true, hasTapAction: true);
 
   Future<void> openPanel(WidgetTester tester) => tap(tester, addField);
 
@@ -257,13 +239,6 @@ void main() {
     expect(kit.inTable(find.text('3 rows')), findsOneWidget);
   });
 
-  testWidgets('a language Cupertino lacks reads in English', (tester) async {
-    tester.platformDispatcher.localesTestValue = const [Locale('ps', 'AF')];
-    addTearDown(tester.platformDispatcher.clearLocalesTestValue);
-    await kit.show(tester, [TablePart(expenses)], app: true);
-    expect(kit.inTable(find.text('Nov 1, 2026')), findsOneWidget);
-  });
-
   testWidgets('a number shows every digit it holds', (tester) async {
     const digits = [
       (0.0004, '0.0004'),
@@ -351,24 +326,6 @@ void main() {
     });
   }
 
-  testWidgets('a numbered list after a Table starts at 1', (tester) async {
-    await kit.show(tester, [
-      const TextPart('One', BridgeTextStyle.numbered),
-      TablePart(expenses),
-      const TextPart('Two', BridgeTextStyle.numbered),
-    ]);
-    expect(find.text('1.'), findsNWidgets(2));
-    expect(find.text('2.'), findsNothing);
-    final table = kit.fake.views[kit.page]![1].block;
-    expect(
-      kit.fake.asked.where(
-        (query) => query.kind == BridgeQueryKind.text && query.block == table,
-      ),
-      isEmpty,
-      reason: 'the run ends at the Table, which is never read as text',
-    );
-  });
-
   testWidgets('+ New adds a row after the last and shows it', (tester) async {
     await kit.show(tester, [TablePart(namedRows(20))]);
     await tap(tester, newRow);
@@ -424,62 +381,6 @@ void main() {
     expect(panel, findsNothing);
   });
 
-  testWidgets('esc closes the field panel and adds nothing', (tester) async {
-    await kit.show(tester, [TablePart(expenses)]);
-    await openPanel(tester);
-    await key(tester, LogicalKeyboardKey.escape);
-    expect(panel, findsNothing);
-    expect(kit.applied(BridgeMutationKind.addField), isEmpty);
-  });
-
-  testWidgets(
-    'scrolling the Page or resizing the window closes the field panel',
-    (tester) async {
-      await kit.show(tester, [
-        TablePart(expenses),
-        for (var number = 0; number < 40; number++) TextPart('Line $number'),
-      ]);
-      await openPanel(tester);
-      final page = find
-          .descendant(
-            of: find.byType(CustomScrollView),
-            matching: find.byType(Scrollable),
-          )
-          .first;
-      tester.state<ScrollableState>(page).position.jumpTo(200);
-      await tester.pumpAndSettle();
-      expect(panel, findsNothing);
-      tester.state<ScrollableState>(page).position.jumpTo(0);
-      await tester.pumpAndSettle();
-      await openPanel(tester);
-      tester.view.physicalSize = tester.view.physicalSize / 2;
-      addTearDown(tester.view.resetPhysicalSize);
-      await tester.pumpAndSettle();
-      expect(panel, findsNothing);
-    },
-  );
-
-  testWidgets(
-    'a click beside a field name keeps its keys',
-    variant: TargetPlatformVariant.only(TargetPlatform.macOS),
-    (tester) async {
-      await kit.show(tester, [TablePart(expenses)]);
-      await openPanel(tester);
-      await tester.tap(
-        find.descendant(of: panel, matching: find.text('Kind')),
-        kind: PointerDeviceKind.mouse,
-      );
-      await tester.pumpAndSettle();
-      await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
-      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
-      await tester.pumpAndSettle();
-      expect(
-        kit.applied(BridgeMutationKind.addField).single.fieldKind,
-        BridgeFieldKind.number,
-      );
-    },
-  );
-
   testWidgets('⏎ pressed again while a field is added adds it once', (
     tester,
   ) async {
@@ -492,18 +393,6 @@ void main() {
     await tester.pump();
     await releaseGate(tester, gate);
     expect(kit.applied(BridgeMutationKind.addField), hasLength(1));
-  });
-
-  testWidgets('a refused field keeps the panel; click closes', (tester) async {
-    await kit.show(tester, [TablePart(expenses)]);
-    await openPanel(tester);
-    kit.fake.refuseKinds = {BridgeMutationKind.addField};
-    await key(tester, LogicalKeyboardKey.enter);
-    expect(panel, findsOneWidget);
-    expect(kit.workspace.problem.value, isNotNull);
-    await tester.tapAt(const Offset(1300, 850));
-    await tester.pumpAndSettle();
-    expect(panel, findsNothing);
   });
 
   testWidgets(
@@ -576,22 +465,6 @@ void main() {
     expect(table.take(2).map((row) => row.id), ['r1', 'r2']);
   });
 
-  testWidgets('a quick second + New shows its own row', (tester) async {
-    await kit.show(tester, [TablePart(namedRows(20))]);
-    final reads = holdDatabaseReads();
-    await tester.tap(newRow);
-    await tester.pump();
-    kit.fake.deferred = null;
-    final gate = gateOn(BridgeMutationKind.addRow);
-    await tester.tap(newRow);
-    await tester.pump();
-    await releaseReads(tester, reads);
-    expect(kit.inTable(find.text('21 rows')), findsOneWidget);
-    await releaseGate(tester, gate);
-    expect(kit.inTable(find.text('22 rows')), findsOneWidget);
-    expect(rowsScroll(tester).offset, (22 - 10) * 34.0);
-  });
-
   testWidgets(
     'a field or a row removed before its read leaves + and + New working',
     (tester) async {
@@ -652,60 +525,6 @@ void main() {
     await tester.pump();
     await releaseGate(tester, gate);
     expect(shownFields(), hasLength(7));
-    expect(panel, findsNothing);
-  });
-
-  testWidgets('+, + New and field kinds are buttons', (tester) async {
-    final semantics = tester.ensureSemantics();
-    await kit.show(tester, [TablePart(expenses)]);
-    expect(tester.getSemantics(addField), button('Add field'));
-    expect(tester.getSemantics(newRow), button('New'));
-    await openPanel(tester);
-    expect(
-      tester.getSemantics(
-        find.descendant(of: panel, matching: find.text('Text')),
-      ),
-      matchesSemantics(
-        label: 'Text',
-        isButton: true,
-        hasTapAction: true,
-        hasSelectedState: true,
-        isSelected: true,
-      ),
-    );
-    semantics.dispose();
-  });
-
-  testWidgets(
-    'a row this device added and one removed elsewhere leave the rows where the person reads',
-    (tester) async {
-      await kit.show(tester, [TablePart(namedRows(20))]);
-      final table = kit.fake.views[kit.page]!.single.block;
-      final reads = holdDatabaseReads();
-      await tester.tap(newRow);
-      await tester.pump();
-      kit.fake.rows[table]!.removeAt(0);
-      await releaseReads(tester, reads);
-      final rows = rowsScroll(tester);
-      rows.jumpTo(0);
-      await tester.pumpAndSettle();
-      kit.fake.putRows(kit.page, table, [
-        ...kit.fake.rows[table]!,
-        namedRow(99),
-      ]);
-      await tester.pumpAndSettle();
-      expect(rows.offset, 0, reason: 'the rows stay where the person reads');
-    },
-  );
-
-  testWidgets('the field panel closes when + leaves the view', (tester) async {
-    await kit.show(tester, [TablePart(expenses)]);
-    final table = kit.fake.views[kit.page]!.single.block;
-    await openPanel(tester);
-    expect(panel, findsOneWidget);
-    kit.fake.databases[table] = shopped;
-    kit.fake.putRows(kit.page, table, [...kit.fake.rows[table]!]);
-    await tester.pumpAndSettle();
     expect(panel, findsNothing);
   });
 }

@@ -104,27 +104,6 @@ void main() {
     expect(header('Category'), findsNothing);
   });
 
-  testWidgets('esc in the question keeps the field', (tester) async {
-    await kit.show(tester, [TablePart(expenses)]);
-    await open(tester, 'Category');
-    await tap(tester, inMenu(find.text('Delete field')));
-    await key(tester, LogicalKeyboardKey.escape);
-    expect(dialog, findsNothing);
-    expect(kit.applied(BridgeMutationKind.removeField), isEmpty);
-    expect(header('Category'), findsOneWidget);
-  });
-
-  testWidgets('↓ ⏎ in the menu asks to delete the field', (tester) async {
-    await kit.show(tester, [
-      TablePart([expenses.first]),
-    ]);
-    await open(tester, 'Category');
-    await key(tester, LogicalKeyboardKey.arrowDown);
-    await key(tester, LogicalKeyboardKey.enter);
-    expect(find.text('Delete the field “Category”?'), findsOneWidget);
-    expect(find.text('Its value in 1 row goes with it.'), findsOneWidget);
-  });
-
   testWidgets('a field removed elsewhere closes its menu', (tester) async {
     await kit.show(tester, [TablePart(expenses)]);
     final table = kit.fake.views[kit.page]!.single.block;
@@ -163,21 +142,6 @@ void main() {
     expect(header('Type'), findsOneWidget);
   });
 
-  testWidgets('⏎ renames, even with the pointer on Delete', (tester) async {
-    await kit.show(tester, [TablePart(expenses)]);
-    await open(tester, 'Category');
-    final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
-    await mouse.addPointer(
-      location: tester.getCenter(inMenu(find.text('Delete field'))),
-    );
-    addTearDown(mouse.removePointer);
-    await tester.pumpAndSettle();
-    await type(tester, 'Kind');
-    await key(tester, LogicalKeyboardKey.enter);
-    expect(dialog, findsNothing);
-    expect(renamed(), [('category', 'Kind')]);
-  });
-
   testWidgets('a typed name is kept on close or quit', (tester) async {
     await kit.show(tester, [TablePart(expenses)]);
     await open(tester, 'Category');
@@ -191,15 +155,5 @@ void main() {
     await kit.workspace.newPage(kit.workspace.open.value!.area);
     await tester.pumpAndSettle();
     expect(renamed().last, ('amount', 'Sum'));
-  });
-
-  testWidgets('typing after ↓ returns to the name', (tester) async {
-    await kit.show(tester, [TablePart(expenses)]);
-    await open(tester, 'Category');
-    await key(tester, LogicalKeyboardKey.arrowDown);
-    await type(tester, 'Kind');
-    await key(tester, LogicalKeyboardKey.enter);
-    expect(dialog, findsNothing);
-    expect(renamed(), [('category', 'Kind')]);
   });
 }

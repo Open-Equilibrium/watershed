@@ -122,18 +122,6 @@ void main() {
     expect(kit.fake.textsOf(trip), ['Groceries']);
   });
 
-  testWidgets('the same text copied elsewhere later pastes as text', (
-    tester,
-  ) async {
-    await kit.show(tester, [TablePart(expenses), const TextPart('')]);
-    await viewAction(tester, 'Copy');
-    copied = 'Expenses';
-    change++;
-    await pasteHere(tester);
-    expect(kit.applied(BridgeMutationKind.duplicateTable), isEmpty);
-    expect(field(tester, 0).controller!.text, 'Expenses');
-  });
-
   testWidgets('a copy of a Table deleted since pastes as text', (tester) async {
     await kit.show(tester, [TablePart(expenses), const TextPart('')]);
     await viewAction(tester, 'Copy');

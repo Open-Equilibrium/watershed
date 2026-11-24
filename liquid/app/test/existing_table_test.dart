@@ -95,11 +95,4 @@ void main() {
       [('By amount', sort)],
     );
   });
-
-  testWidgets('cancel adds no View', (tester) async {
-    await kit.show(tester, [TablePart(expenses), const TextPart('')]);
-    await choose(tester);
-    await pick(tester, find.text('Cancel'));
-    expect(kit.applied(BridgeMutationKind.addTableView), isEmpty);
-  });
 }

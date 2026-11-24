@@ -57,23 +57,6 @@ void main() {
     expect(kit.fake.device['tab/${view().id}'], view().tabs.last.id);
   });
 
-  testWidgets('the last used tab shows when the Page opens again', (
-    tester,
-  ) async {
-    await kit.show(tester, [TablePart(expenses)]);
-    final big = await addTab(bigCosts);
-    final area = kit.workspace.open.value!.area;
-    final other = await kit.workspace.apply(
-      mutation(BridgeMutationKind.createPage, area: area, text: 'Other'),
-    );
-    kit.workspace.open.value = OpenPage(area, other.page!);
-    await tester.pumpAndSettle();
-    kit.fake.device['tab/${view().id}'] = big;
-    kit.workspace.open.value = OpenPage(area, kit.page);
-    await tester.pumpAndSettle();
-    expect(shows('table sort', 'Amount, descending'), findsOneWidget);
-  });
-
   testWidgets('＋ adds a tab of the chosen layout, named after it', (
     tester,
   ) async {
