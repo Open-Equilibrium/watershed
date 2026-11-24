@@ -184,10 +184,16 @@ impl Host {
             tokio_tungstenite::tungstenite::Error::Http(response)
                 if response.status() == StatusCode::UNAUTHORIZED =>
             {
-                format!(
-                    "Meta-Harness at {url} no longer accepts this device's pairing; pair this \
+                match self.inner.endpoint {
+                    Endpoint::File(_) => format!(
+                        "Meta-Harness at {url} does not accept the token in connection.json; \
+                         restart Meta-Harness."
+                    ),
+                    Endpoint::Fixed { .. } => format!(
+                        "Meta-Harness at {url} no longer accepts this device's pairing; pair this \
                          device again."
-                )
+                    ),
+                }
             }
             e => format!("Could not reach Meta-Harness at {url}: {e}"),
         })?;

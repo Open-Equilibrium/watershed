@@ -109,6 +109,30 @@ async fn a_refused_connection_says_why_and_is_not_retried() {
     }
 }
 
+#[tokio::test(flavor = "multi_thread")]
+async fn a_connection_file_whose_token_is_refused_says_to_restart_meta_harness() {
+    let home = crate::tests::Dir::new();
+    let url = refusing_peer(
+        b"HTTP/1.1 401 Unauthorized\r\ncontent-length: 0\r\nconnection: close\r\n\r\n",
+    )
+    .await;
+    std::fs::write(
+        home.join(crate::service::CONNECTION_FILE),
+        serde_json::json!({"url": url, "token": "token"}).to_string(),
+    )
+    .unwrap();
+    let error = Host::connect(&home, "test")
+        .await
+        .err()
+        .expect("the connection is refused");
+    assert_eq!(
+        error,
+        format!(
+            "Meta-Harness at {url} does not accept the token in connection.json; restart Meta-Harness."
+        )
+    );
+}
+
 #[tokio::test]
 async fn pairing_refuses_an_address_that_is_not_ws_before_connecting() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
