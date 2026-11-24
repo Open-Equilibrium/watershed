@@ -82,14 +82,14 @@ impl<S: Store> Workspace<S> {
             &[(TABLE, table.as_str()), (TITLE, title), (SORT, &key)],
         )?;
         doc.put(&entry, BOUNDARY, false)?;
-        let mut last = None;
-        for setup in tabs {
-            last = Some(tab::add(
-                doc,
-                &entry,
-                last.as_ref().map_or(Place::First, Place::After),
-                setup,
-            )?);
+        let first = tabs
+            .first()
+            .cloned()
+            .unwrap_or_else(|| TabSetup::of(Layout::Table));
+        tab::start(doc, &entry, view.as_str(), &first)?;
+        let mut last = TabId::stored(view.as_str());
+        for setup in tabs.iter().skip(1) {
+            last = tab::add(doc, &entry, Place::After(&last), setup)?;
         }
         order.insert(
             key,

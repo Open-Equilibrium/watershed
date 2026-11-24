@@ -113,15 +113,24 @@ fn stored_before_tabs(doc: &AutoCommit, view: &ObjId, id: &str) -> Tab {
     }
 }
 
+pub(crate) fn start(
+    doc: &mut AutoCommit,
+    view: &ObjId,
+    id: &str,
+    setup: &TabSetup,
+) -> Result<(), Error> {
+    let tabs = doc.put_object(view, TABS, ObjType::Map)?;
+    let sort = model::sort_at(&[], Place::First)?;
+    let entry = model::insert_in(doc, &tabs, id, &[(SORT, &sort)])?;
+    write(doc, &entry, None, setup)
+}
+
 pub(crate) fn keep(doc: &mut AutoCommit, view: &ObjId, id: &str) -> Result<(), Error> {
     if model::child(doc, view, TABS).is_some() {
         return Ok(());
     }
     let tab = stored_before_tabs(doc, view, id);
-    let tabs = doc.put_object(view, TABS, ObjType::Map)?;
-    let sort = model::sort_at(&[], Place::First)?;
-    let entry = model::insert_in(doc, &tabs, id, &[(SORT, &sort)])?;
-    write(doc, &entry, None, &tab.setup)?;
+    start(doc, view, id, &tab.setup)?;
     for key in [ROW_SORT, ROW_FILTER] {
         if doc.get(view, key)?.is_some() {
             doc.delete(view, key)?;

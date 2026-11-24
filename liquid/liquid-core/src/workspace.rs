@@ -93,7 +93,7 @@ impl<S: Store> Workspace<S> {
         let device = ActorId::from(&random_bytes()?[..]);
         let mut doc = model::document(&device);
         doc.put(ROOT, OWNER, owner.as_str())?;
-        model::create_maps(&mut doc, &[AREAS])?;
+        model::create_maps(&mut doc, &[AREAS, TABLES])?;
         let mut this = Self {
             store,
             device,

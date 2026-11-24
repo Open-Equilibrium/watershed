@@ -667,3 +667,93 @@ fn removing_a_table_view_whose_table_cannot_load_is_refused_whole() {
         Err(Error::Storage("unreadable".into()))
     );
 }
+
+fn saved<S: Store>(workspace: &mut Workspace<S>, document: &Document) -> Vec<u8> {
+    workspace.docs.get_mut(document).unwrap().doc.save()
+}
+
+fn replica_of<S: Store>(workspace: &mut Workspace<S>, document: &Document, from: &[u8]) {
+    workspace.docs.get_mut(document).unwrap().doc =
+        crate::model::load(from, &automerge::ActorId::random()).unwrap();
+}
+
+fn merged(first: &[u8], second: &[u8]) -> AutoCommit {
+    let mut merged = crate::model::load(first, &automerge::ActorId::random()).unwrap();
+    let mut other = crate::model::load(second, &automerge::ActorId::random()).unwrap();
+    merged.merge(&mut other).unwrap();
+    merged
+}
+
+#[test]
+fn two_replicas_that_each_make_a_table_keep_both() {
+    use crate::model::{self, NAME, TABLES};
+
+    let mut workspace = Workspace::create(PersonId::new("benni"), MemoryStore::default()).unwrap();
+    let (area, _) = new_page(&mut workspace);
+    let base = saved(&mut workspace, &Document::Workspace);
+    let mut replicas = Vec::new();
+    for name in ["Bills", "Trips"] {
+        replica_of(&mut workspace, &Document::Workspace, &base);
+        workspace.write_create_table(&area, name, None).unwrap();
+        replicas.push(saved(&mut workspace, &Document::Workspace));
+    }
+    let both = merged(&replicas[0], &replicas[1]);
+    let names: Vec<_> = model::sorted(&both, TABLES)
+        .iter()
+        .map(|entry| entry.get(NAME).unwrap_or_default().to_string())
+        .collect();
+    assert_eq!(names.len(), 2, "{names:?}");
+}
+
+#[test]
+fn two_replicas_that_each_add_a_tab_to_a_duplicated_table_keep_both() {
+    let mut workspace = Workspace::create(PersonId::new("benni"), MemoryStore::default()).unwrap();
+    let (_, page) = new_page(&mut workspace);
+    let Created::Block { block, .. } = created(
+        &mut workspace,
+        Mutation::AddDatabaseBlock {
+            page: page.clone(),
+            after: None,
+            name: "Bills".into(),
+            layout: crate::Layout::Table,
+        },
+    ) else {
+        panic!("a Table")
+    };
+    let Created::Block { view, .. } = created(
+        &mut workspace,
+        Mutation::DuplicateTable {
+            page: page.clone(),
+            after: None,
+            table: block,
+            name: "Copy".into(),
+            tabs: Vec::new(),
+        },
+    ) else {
+        panic!("a Table")
+    };
+    let document = Document::Page(page.clone());
+    let base = saved(&mut workspace, &document);
+    let mut replicas = Vec::new();
+    for name in ["Porto", "Lisbon"] {
+        replica_of(&mut workspace, &document, &base);
+        let add = Mutation::AddTab {
+            page: page.clone(),
+            view: view.clone(),
+            after: None,
+            setup: Box::new(crate::TabSetup {
+                name: name.into(),
+                ..crate::TabSetup::of(crate::Layout::Table)
+            }),
+        };
+        apply(&mut workspace, add).unwrap();
+        replicas.push(saved(&mut workspace, &document));
+    }
+    let both = merged(&replicas[0], &replicas[1]);
+    let entry = crate::model::live(&both, crate::model::VIEWS, view.as_str()).unwrap();
+    let names: Vec<_> = crate::tab::read(&both, &entry, view.as_str())
+        .into_iter()
+        .map(|tab| tab.setup.name)
+        .collect();
+    assert_eq!(names.len(), 3, "{names:?}");
+}
