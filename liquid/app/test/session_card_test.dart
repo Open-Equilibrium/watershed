@@ -68,4 +68,27 @@ void main() {
     await tester.pumpAndSettle();
     expect(pressedOutside, 1);
   });
+
+  testWidgets('hiding Automations leaves no Automations section for an agent', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(800, 1400));
+    await pumpCard(
+      tester,
+      session: FakeSession(),
+      agents: [agentOf('news-bot', thread: 'thread-1')],
+      height: 1200,
+    );
+    expect(find.text('Automations'), findsOneWidget);
+
+    await pumpCard(
+      tester,
+      session: FakeSession(),
+      agents: [agentOf('news-bot', thread: 'thread-1')],
+      settings: SessionCardSettings(hidden: {CardItem.automations}),
+      height: 1200,
+    );
+    expect(find.text('Automations'), findsNothing);
+    expect(find.byKey(const Key('add-routine')), findsNothing);
+  });
 }

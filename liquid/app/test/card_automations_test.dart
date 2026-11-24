@@ -109,4 +109,24 @@ void main() {
     await tester.pumpAndSettle();
     expect(state.notice.value?.text, 'Could not run automation: boom');
   });
+
+  testWidgets('a long automation list that shrinks regains full density', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(800, 1400));
+    final state = await pumpCard(
+      tester,
+      session: FakeSession()
+        ..automationList = [
+          for (var index = 0; index < 30; index++)
+            taskOf(id: 'a$index', title: 'Task $index'),
+        ],
+      height: 700,
+    );
+    expect(find.text('Automations'), findsNothing, reason: 'too long: compact');
+
+    state.automations.value = [taskOf()];
+    await tester.pumpAndSettle();
+    expect(find.text('Automations'), findsOneWidget);
+  });
 }
