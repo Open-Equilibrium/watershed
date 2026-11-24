@@ -102,6 +102,73 @@ void main() {
     expect(find.text('Protected'), findsNothing);
   });
 
+  testWidgets('two grant edits before the Roles list refreshes both stay', (
+    tester,
+  ) async {
+    final kit = PageKit();
+    final table = await showBudget(tester, kit);
+    await tap(tester, find.text('Settings'));
+    await tap(tester, find.text('Roles'));
+    await tap(tester, find.text('New Role'));
+    await tap(tester, find.byKey(const Key('token add grant')));
+    await tap(tester, find.text('Expenses').last);
+    kit.fake.deferredKinds = {BridgeQueryKind.roles};
+    kit.fake.deferred = [];
+    await tap(tester, find.byKey(const Key('allow Apply 0')));
+    await tap(tester, find.byKey(const Key('allow Approve 0')));
+    final grant = lastRole(kit).grants.single;
+    expect(
+      (grant.kind, grant.id, grant.allows.apply, grant.allows.approve),
+      (BridgeTargetKind.table, table, true, true),
+    );
+    for (final release in [...kit.fake.deferred!]) {
+      release.complete();
+    }
+    await tester.pumpAndSettle();
+  });
+
+  testWidgets('an incoming rename of the open Role replaces the name in the '
+      'field', (tester) async {
+    final kit = PageKit();
+    await showBudget(tester, kit);
+    await tap(tester, find.text('Settings'));
+    await tap(tester, find.text('Roles'));
+    await tap(tester, find.text('New Role'));
+    final role = kit.fake.roles.last.id;
+    await kit.workspace.apply(
+      mutation(
+        BridgeMutationKind.setRole,
+        role: role,
+        roleSetup: const BridgeRoleSetup(name: 'Renamed elsewhere', grants: []),
+      ),
+    );
+    await tester.pumpAndSettle();
+    final name = tester.widget<TextField>(find.byKey(const Key('role name')));
+    expect(name.controller!.text, 'Renamed elsewhere');
+  });
+
+  testWidgets('an incoming rename leaves a name being typed alone', (
+    tester,
+  ) async {
+    final kit = PageKit();
+    await showBudget(tester, kit);
+    await tap(tester, find.text('Settings'));
+    await tap(tester, find.text('Roles'));
+    await tap(tester, find.text('New Role'));
+    final role = kit.fake.roles.last.id;
+    await tester.enterText(find.byKey(const Key('role name')), 'Typed');
+    await kit.workspace.apply(
+      mutation(
+        BridgeMutationKind.setRole,
+        role: role,
+        roleSetup: const BridgeRoleSetup(name: 'Renamed elsewhere', grants: []),
+      ),
+    );
+    await tester.pumpAndSettle();
+    final name = tester.widget<TextField>(find.byKey(const Key('role name')));
+    expect(name.controller!.text, 'Typed');
+  });
+
   testWidgets('an Automation runs as the Role chosen for it and says what '
       'its Role does not allow', (tester) async {
     final kit = PageKit();
