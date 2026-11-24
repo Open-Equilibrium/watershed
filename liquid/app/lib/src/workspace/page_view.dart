@@ -105,7 +105,7 @@ class _WorkspacePageState extends State<WorkspacePage> implements EditorSource {
     final text = pasted.text;
     final selection = _first.selection;
     if (text == null || text.isEmpty || !selection.isValid) return;
-    _first.value = _first.value.replaced(selection, text);
+    writeText(_first, _first.value.replaced(selection, text));
   }
 
   static bool get _plain {
