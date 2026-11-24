@@ -7,7 +7,9 @@ use meta_harness_core::{
 };
 
 use crate::api::events::{BridgeEvent, BridgeEventKind};
-use crate::stream::{Credit, Outbox, Sink, WINDOW, attach, attach_results, forward, gather, push};
+use crate::stream::{
+    Credit, Outbox, PENDING_LIMIT, Sink, WINDOW, attach, attach_results, forward, gather, push,
+};
 
 fn ev(event: AgentEvent) -> ThreadEvent {
     ThreadEvent { sequence: 1, event }
@@ -463,6 +465,36 @@ fn events_other_than_partial_output_wait_for_liquid_and_are_never_dropped() {
             kinds(&delivered),
             expected,
             "a queue past its bound waits for confirmations, in order, and drops nothing"
+        );
+    });
+}
+
+#[test]
+fn a_stalled_window_stops_merging_text_so_partial_output_stays_bounded() {
+    paused_runtime().block_on(async {
+        let credit = Arc::new(Credit::default());
+        let (events, mut deliveries) = start_forwarding(credit.clone());
+        for item in 1..=WINDOW as u64 {
+            events.send(started(item)).await.expect("sent");
+        }
+        for _ in 0..1000 {
+            events.send(delta(5000, "x")).await.expect("sent");
+        }
+        settle().await;
+        let mut delivered = taken(&mut deliveries);
+        for applied in [256u64, 512] {
+            credit.confirm(applied);
+            settle().await;
+            delivered.extend(taken(&mut deliveries));
+        }
+        let text: usize = delivered
+            .iter()
+            .filter_map(|event| event.text.as_ref())
+            .map(String::len)
+            .sum();
+        assert!(
+            text <= PENDING_LIMIT,
+            "{text} characters of partial text were held while stalled"
         );
     });
 }
