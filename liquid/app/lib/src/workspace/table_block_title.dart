@@ -177,19 +177,10 @@ extension _TableBlockTitle on _TableBlockState {
             Icon(LucideIcons.table, size: 16, color: ws.textFaint),
             const SizedBox(width: WsMetrics.space3),
             Expanded(
-              child: TextField(
+              child: BlockTitleField(
                 controller: _name.take(),
                 focusNode: _nameFocus,
                 selectAllOnFocus: false,
-                style: TextStyle(
-                  fontSize: WsMetrics.fsProse,
-                  fontWeight: WsMetrics.fwSemibold,
-                  color: ws.text,
-                ),
-                decoration: InputDecoration.collapsed(
-                  hintText: untitled,
-                  hintStyle: TextStyle(color: ws.textFaint),
-                ),
               ),
             ),
             if (database != null) ...[

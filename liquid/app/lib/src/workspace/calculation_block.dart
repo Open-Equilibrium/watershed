@@ -8,7 +8,7 @@ import '../rust/api/workspace.dart';
 import '../theme/icons.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
-import 'explorer.dart' show untitled;
+import 'block_title_field.dart';
 import 'follow.dart';
 import 'formula_field.dart';
 import 'formula_text.dart';
@@ -237,18 +237,9 @@ class _CalculationBlockState extends State<CalculationBlock> {
               Icon(LucideIcons.calculator, size: 16, color: ws.textFaint),
               const SizedBox(width: WsMetrics.space3),
               Expanded(
-                child: TextField(
+                child: BlockTitleField(
                   controller: _name.take(),
                   focusNode: _nameFocus,
-                  style: TextStyle(
-                    fontSize: WsMetrics.fsProse,
-                    fontWeight: WsMetrics.fwSemibold,
-                    color: ws.text,
-                  ),
-                  decoration: InputDecoration.collapsed(
-                    hintText: untitled,
-                    hintStyle: TextStyle(color: ws.textFaint),
-                  ),
                 ),
               ),
             ],

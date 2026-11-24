@@ -13,6 +13,7 @@ import '../theme/icons.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
 import 'anchored_menu.dart';
+import 'block_title_field.dart';
 import 'board_layout.dart';
 import 'calendar_layout.dart';
 import 'cell_pickers.dart';
