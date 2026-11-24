@@ -454,6 +454,12 @@ async fn arrive(
                 }
                 return Ok(thread);
             }
+            Some(row) if row.root != root => {
+                return Err(
+                    "This transfer started in another project folder, so the session did not move here."
+                        .to_owned(),
+                );
+            }
             Some(row) if project.is_listed(&row.thread).await? => {
                 let thread = project.open(&row.thread).await?;
                 settled(&thread, &package.transfer, &package.handoff).await?;

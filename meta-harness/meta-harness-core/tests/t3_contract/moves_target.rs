@@ -215,6 +215,32 @@ async fn a_move_abort_removes_the_thread_keeps_the_worktree_and_refuses_the_tran
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn a_starting_arrival_is_not_retried_in_another_project_folder() {
+    let pair = Pair::codex().await;
+    pushed_branch(&pair.repo_a, "feature/elsewhere");
+    let home_b = pair.dir.path().join("host-b");
+    let (project_a, project_b) = pair.projects().await;
+    let package = handoff(&appended(&project_a).await).await;
+    let token = package.transfer.as_str();
+    db(&home_b)
+        .execute(
+            "INSERT INTO arrival (transfer, state, root, thread, at_ms) \
+             VALUES (?1, 'starting', ?2, 'thread-in-folder-a', 0)",
+            rusqlite::params![token, pair.repo_a.to_string_lossy()],
+        )
+        .unwrap();
+
+    let refused = project_b.move_in(package.clone()).await.err().unwrap();
+    assert!(refused.contains("another project folder"), "{refused}");
+    assert!(project_b.threads().await.unwrap().is_empty());
+    let root: String = db(&home_b)
+        .query_row("SELECT root FROM arrival", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(root, pair.repo_a.to_string_lossy());
+    pair.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn a_move_abort_racing_a_landing_answers_what_landed() {
     let pair = Pair::codex().await;
     pushed_branch(&pair.repo_a, "feature/raced");
