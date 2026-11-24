@@ -12,6 +12,7 @@ mod platform;
 pub mod remote;
 mod service;
 mod statistics;
+mod store;
 mod t3;
 mod thread;
 mod tunnel;

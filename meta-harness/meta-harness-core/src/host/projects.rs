@@ -5,8 +5,8 @@ use std::time::{Duration, Instant};
 use serde_json::{Value, json};
 
 use super::{Host, Project, StartThread, Workspace, text};
-use crate::config::now_ms;
 use crate::host_move::{self, Landing, MovePackage};
+use crate::store::now_ms;
 use crate::t3::{Client, fresh_id, iso};
 use crate::thread::{Thread, TurnStatus};
 use crate::util::until;

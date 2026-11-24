@@ -315,7 +315,7 @@ impl Thread {
     pub async fn visit(&self) -> Result<(), String> {
         self.dispatch(json!({
             "type": "thread.visit",
-            "visitedAt": crate::t3::iso(crate::config::now_ms()),
+            "visitedAt": crate::t3::iso(crate::store::now_ms()),
             "opened": true,
         }))
         .await

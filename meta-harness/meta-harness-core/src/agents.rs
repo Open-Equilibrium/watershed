@@ -5,7 +5,7 @@ use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::config::{failed, now_ms, sql};
+use crate::store::{failed, now_ms, sql};
 use crate::{ModelChoice, Permissions};
 
 pub(crate) const SCHEMA: &str = "

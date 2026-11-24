@@ -3,8 +3,8 @@ use std::collections::HashSet;
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 
-use crate::config::{count, failed, sql};
 use crate::handoff::HANDOFF_BYTES;
+use crate::store::{count, failed, sql};
 use crate::{ChatItem, ModelChoice, Permissions};
 
 pub(crate) const SCHEMA: &str = "

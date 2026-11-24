@@ -1,6 +1,6 @@
 use super::Dir;
 use crate::agents::{self, AgentChangeKind, NewAgent};
-use crate::config::Store;
+use crate::store::Store;
 use crate::{ModelChoice, Permissions};
 
 fn new_agent(name: &str) -> NewAgent {

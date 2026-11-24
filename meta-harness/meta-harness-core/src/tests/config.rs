@@ -2,8 +2,9 @@ use std::collections::BTreeMap;
 
 use super::Dir;
 use crate::config::{
-    Action, Blocks, Change, Difference, Direction, McpServer, Proposed, Store, diff_blocks,
+    Action, Blocks, Change, Difference, Direction, McpServer, Proposed, diff_blocks,
 };
+use crate::store::Store;
 
 struct Fixture {
     store: Store,
