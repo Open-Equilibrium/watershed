@@ -82,12 +82,14 @@ impl MemoryStore {
         }
     }
 
-    pub fn drop_index(&mut self) {
+    #[cfg(test)]
+    pub(crate) fn drop_index(&mut self) {
         self.search.clear();
         self.version = 0;
     }
 
-    pub fn spoil(&mut self, document: &Document) {
+    #[cfg(test)]
+    pub(crate) fn spoil(&mut self, document: &Document) {
         self.chunks
             .insert(document.clone(), vec![b"spoiled".to_vec()]);
     }

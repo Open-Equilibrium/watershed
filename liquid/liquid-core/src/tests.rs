@@ -5,8 +5,8 @@ use automerge::AutoCommit;
 use crate::history::Header;
 use crate::{
     Action, ActionId, Actor, Applied, AreaId, AttachmentId, BlockId, Commit, Created, Document,
-    Error, MemoryStore, Mutation, Origin, PageId, PersonId, Request, Store, TextStyle, ViewId,
-    Workspace,
+    Error, Found, MemoryStore, Mutation, Origin, PageId, PersonId, Request, Store, TextStyle,
+    ViewId, Workspace,
 };
 
 fn changes(doc: &mut AutoCommit) -> Vec<(automerge::ChangeHash, Option<Header>)> {
@@ -576,4 +576,66 @@ fn a_purge_that_fails_keeps_the_page_s_history() {
     workspace.store.history_failing = false;
     workspace.revert(&owner, &[typed]).unwrap();
     assert_eq!(workspace.text(&page, &block).unwrap().unwrap(), "Five days");
+}
+
+#[test]
+fn a_replica_without_its_index_builds_it_once_opened() {
+    let mut workspace = Workspace::create(PersonId::new("benni"), MemoryStore::default()).unwrap();
+    let (_, page) = new_page(&mut workspace);
+    add_text(&mut workspace, &page, None, "We fly on 12 November.");
+    let mut store = workspace.into_store();
+    store.drop_index();
+    let mut workspace = Workspace::open(store).unwrap();
+    assert_eq!(workspace.search("novem", Found::Text, 10).unwrap().len(), 1);
+    assert_eq!(workspace.search("lisb", Found::Page, 10).unwrap().len(), 1);
+    let long = "x".repeat(crate::MAX_FILTER_TEXT + 1);
+    assert_eq!(
+        workspace.search(&long, Found::Text, 10),
+        Err(Error::TooLong)
+    );
+}
+
+#[test]
+fn an_unreadable_page_neither_stops_the_open_nor_the_rest_of_the_index() {
+    let mut workspace = Workspace::create(PersonId::new("benni"), MemoryStore::default()).unwrap();
+    let (area, trip) = new_page(&mut workspace);
+    add_text(&mut workspace, &trip, None, "We fly on 12 November.");
+    let Created::Page(broken) = created(
+        &mut workspace,
+        Mutation::CreatePage {
+            area,
+            parent: None,
+            title: "Broken".into(),
+        },
+    ) else {
+        panic!("a Page")
+    };
+    add_text(&mut workspace, &broken, None, "Never read");
+    let mut store = workspace.into_store();
+    store.drop_index();
+    store.spoil(&Document::Page(broken));
+    let mut workspace = Workspace::open(store).unwrap();
+    assert_eq!(workspace.search("novem", Found::Text, 10).unwrap().len(), 1);
+    let mut store = workspace.into_store();
+    assert_eq!(
+        store.index_version().unwrap(),
+        0,
+        "the next open tries again"
+    );
+}
+
+#[test]
+fn an_unreadable_area_does_not_stop_the_open() {
+    let mut workspace = Workspace::create(PersonId::new("benni"), MemoryStore::default()).unwrap();
+    let (area, _) = new_page(&mut workspace);
+    let mut store = workspace.into_store();
+    store.drop_index();
+    store.spoil(&Document::Area(area));
+    let workspace = Workspace::open(store).unwrap();
+    let mut store = workspace.into_store();
+    assert_eq!(
+        store.index_version().unwrap(),
+        0,
+        "the next open tries again"
+    );
 }

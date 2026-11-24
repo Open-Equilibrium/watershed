@@ -3,9 +3,7 @@
 mod common;
 
 use common::*;
-use liquid_core::{
-    AreaId, BlockId, Created, Document, Error, Found, Hit, Layout, Mutation, PageId, Store, ViewId,
-};
+use liquid_core::{AreaId, BlockId, Created, Error, Found, Hit, Layout, Mutation, PageId, ViewId};
 
 struct Home {
     workspace: Workspace,
@@ -130,58 +128,4 @@ fn edits_renames_and_removals_keep_the_index_current() {
     home.edit(Mutation::RemoveView { page: trip, view })
         .unwrap();
     assert!(home.ids("alfama", Found::Text).is_empty());
-}
-
-#[test]
-fn a_replica_without_its_index_builds_it_once_opened() {
-    let mut home = Home::new();
-    let trip = home.page("Trip to Lisbon");
-    home.text(&trip, "We fly on 12 November.");
-    let mut store = home.workspace.into_store();
-    store.drop_index();
-    let mut workspace = Workspace::open(store).unwrap();
-    assert_eq!(workspace.search("novem", Found::Text, 10).unwrap().len(), 1);
-    assert_eq!(workspace.search("lisb", Found::Page, 10).unwrap().len(), 1);
-    let long = "x".repeat(liquid_core::MAX_FILTER_TEXT + 1);
-    assert_eq!(
-        workspace.search(&long, Found::Text, 10),
-        Err(Error::TooLong)
-    );
-}
-
-#[test]
-fn an_unreadable_page_neither_stops_the_open_nor_the_rest_of_the_index() {
-    let mut home = Home::new();
-    let trip = home.page("Trip to Lisbon");
-    home.text(&trip, "We fly on 12 November.");
-    let broken = home.page("Broken");
-    home.text(&broken, "Never read");
-    let mut store = home.workspace.into_store();
-    store.drop_index();
-    store.spoil(&Document::Page(broken));
-    let mut workspace = Workspace::open(store).unwrap();
-    assert_eq!(workspace.search("novem", Found::Text, 10).unwrap().len(), 1);
-    let mut store = workspace.into_store();
-    assert_eq!(
-        store.index_version().unwrap(),
-        0,
-        "the next open tries again"
-    );
-}
-
-#[test]
-fn an_unreadable_area_does_not_stop_the_open() {
-    let mut home = Home::new();
-    home.page("Trip to Lisbon");
-    let area = home.area.clone();
-    let mut store = home.workspace.into_store();
-    store.drop_index();
-    store.spoil(&Document::Area(area));
-    let workspace = Workspace::open(store).unwrap();
-    let mut store = workspace.into_store();
-    assert_eq!(
-        store.index_version().unwrap(),
-        0,
-        "the next open tries again"
-    );
 }
