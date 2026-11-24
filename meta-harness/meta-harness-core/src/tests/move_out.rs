@@ -1,3 +1,4 @@
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -19,6 +20,11 @@ fn run(id: &str, ordinal: u64, status: &str) -> Value {
 
 fn status(branch: &str) -> Value {
     json!({"refName": branch, "isRepo": true, "workingTree": {"files": []}})
+}
+
+fn edited(branch: &str) -> Value {
+    json!({"refName": branch, "isRepo": true,
+        "workingTree": {"files": [{"path": "notes.md", "insertions": 1, "deletions": 0}]}})
 }
 
 fn movable() -> Movable {
@@ -74,7 +80,7 @@ async fn live_thread(
     (fake, thread)
 }
 
-async fn moving(thread: &Thread) -> Result<crate::MovePackage, String> {
+async fn moving(thread: &Thread, commit: bool) -> Result<crate::MovePackage, String> {
     let saving = Saving {
         save: &|_, _| Ok(()),
         unsave: &|_| {},
@@ -85,7 +91,7 @@ async fn moving(thread: &Thread) -> Result<crate::MovePackage, String> {
         from_host: "host-a",
     };
     thread
-        .move_out(movable(), departure, false, None, saving)
+        .move_out(movable(), departure, commit, None, saving)
         .await
 }
 
@@ -165,7 +171,7 @@ async fn a_move_is_refused_when_its_branch_or_turns_change_while_it_starts() {
         },
     )
     .await;
-    let refused = moving(&thread).await.unwrap_err();
+    let refused = moving(&thread, false).await.unwrap_err();
     assert!(
         refused.contains("changed while the move started"),
         "{refused}"
@@ -184,7 +190,32 @@ async fn a_move_is_refused_when_its_branch_or_turns_change_while_it_starts() {
         _ => vec![ok(id, json!({}))],
     })
     .await;
-    let refused = moving(&thread).await.unwrap_err();
+    let refused = moving(&thread, false).await.unwrap_err();
+    assert!(
+        refused.contains("changed while the move started"),
+        "{refused}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_edit_made_while_the_branch_is_pushed_refuses_a_move_that_commits() {
+    let statuses = Arc::new(AtomicUsize::new(0));
+    let (_fake, thread) = live_thread(Vec::new(), move |tag, _, id, _| match tag {
+        "vcs.refreshStatus" => {
+            let after_push = statuses.fetch_add(1, Ordering::SeqCst) > 0;
+            vec![ok(id, if after_push { edited("feature/x") } else { status("feature/x") })]
+        }
+        "git.runStackedAction" => vec![
+            chunk(
+                id,
+                vec![json!({"kind": "action_finished", "result": {"toast": {"title": "Pushed"}}})],
+            ),
+            ok(id, json!({})),
+        ],
+        _ => vec![ok(id, json!({}))],
+    })
+    .await;
+    let refused = moving(&thread, true).await.unwrap_err();
     assert!(
         refused.contains("changed while the move started"),
         "{refused}"
