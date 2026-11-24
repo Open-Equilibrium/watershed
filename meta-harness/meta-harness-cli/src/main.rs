@@ -2,6 +2,8 @@ mod agents;
 mod hosts;
 mod install;
 mod login;
+#[cfg(test)]
+mod testing;
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -370,37 +372,33 @@ fn ignore_missing(result: std::io::Result<()>) -> std::io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::testing::{Dir, executable, put};
 
     #[cfg(unix)]
     #[test]
     fn an_installed_flow_joins_t3_as_the_flow_agent() {
-        let dir = std::env::temp_dir().join(format!("meta-flow-agent-{}", std::process::id()));
-        let executable = |dir: &Path, script: &str| {
-            std::fs::create_dir_all(dir).unwrap();
-            let flow = dir.join("flow");
-            std::fs::write(&flow, script).unwrap();
-            std::fs::set_permissions(&flow, std::os::unix::fs::PermissionsExt::from_mode(0o755))
-                .unwrap();
-            flow
-        };
+        let dir = Dir::new();
         let empty = dir.join("empty");
-        std::fs::create_dir_all(&empty).unwrap();
-        std::fs::write(empty.join("flow"), "not runnable").unwrap();
+        put(empty.join("flow"), "not runnable");
         let checker = dir.join("checker");
-        executable(&checker, "#!/bin/sh\necho 'Flow, a static type checker'\n");
+        executable(
+            checker.join("flow"),
+            "#!/bin/sh\necho 'Flow, a static type checker'\n",
+        );
         let hanging = dir.join("hanging");
-        executable(&hanging, "#!/bin/sh\nexec sleep 60\n");
+        executable(hanging.join("flow"), "#!/bin/sh\nexec sleep 60\n");
         let holding = dir.join("holding");
         let descendant = dir.join("descendant.pid");
         executable(
-            &holding,
+            holding.join("flow"),
             &format!(
                 "#!/bin/sh\nsleep 60 &\necho $! > '{}'\necho '  flow acp'\n",
                 descendant.display()
             ),
         );
         let bin = dir.join("bin");
-        let flow = executable(&bin, "#!/bin/sh\necho '  flow acp'\n");
+        let flow = bin.join("flow");
+        executable(&flow, "#!/bin/sh\necho '  flow acp'\n");
 
         assert!(flow_agent(None).is_none());
         assert!(flow_agent(Some(empty.clone().into_os_string())).is_none());
@@ -426,14 +424,12 @@ mod tests {
         assert_eq!(agent.id, "flow-agent");
         assert_eq!(agent.command, flow);
         assert_eq!(agent.args, ["acp"]);
-        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
     fn the_not_running_message_holds_for_a_terminal_serve_and_the_login_service() {
         let runtime = tokio::runtime::Runtime::new().unwrap();
-        let home = std::env::temp_dir().join(format!("meta-not-running-{}", std::process::id()));
-        std::fs::create_dir_all(&home).unwrap();
+        let home = Dir::new();
         let no_file = runtime
             .block_on(remote::Host::connect(&home, CLIENT))
             .err()
@@ -446,7 +442,6 @@ mod tests {
             ))
             .err()
             .unwrap();
-        let _ = std::fs::remove_dir_all(&home);
         for message in [no_file, refused] {
             assert!(
                 message.starts_with("Meta-Harness is not running"),

@@ -409,30 +409,25 @@ fn run_step(step: &login::Step) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::testing::{Dir, put, read};
 
     #[test]
     fn a_download_installs_meta_t3_and_notices_and_replaces_an_older_t3() {
-        let mut bytes = [0u8; 8];
-        getrandom::fill(&mut bytes).unwrap();
-        let root = std::env::temp_dir().join(format!(
-            "mh-install-{}",
-            bytes.iter().map(|b| format!("{b:02x}")).collect::<String>()
-        ));
+        let root = Dir::new();
         let bundle = root.join("meta-harness-1.0.0-test-x64");
         let meta = format!("meta{}", std::env::consts::EXE_SUFFIX);
-        let t3 = bundle.join("lib/meta-harness/t3-0.1.11-test-x64");
-        std::fs::create_dir_all(t3.join("client")).unwrap();
-        std::fs::write(t3.join("client/index.html"), "t3").unwrap();
-        std::fs::create_dir_all(bundle.join("bin")).unwrap();
-        std::fs::write(bundle.join("bin").join(&meta), "new meta").unwrap();
+        put(
+            bundle.join("lib/meta-harness/t3-0.1.11-test-x64/client/index.html"),
+            "t3",
+        );
+        put(bundle.join("bin").join(&meta), "new meta");
         for notice in NOTICES {
-            std::fs::write(bundle.join(notice), notice).unwrap();
+            put(bundle.join(notice), notice);
         }
-        std::fs::write(bundle.join("bundle-info"), "1.0.0\ntest-x64\n").unwrap();
+        put(bundle.join("bundle-info"), "1.0.0\ntest-x64\n");
         let prefix = root.join("prefix");
         std::fs::create_dir_all(prefix.join("lib/meta-harness/t3-0.1.9-test-x64")).unwrap();
-        std::fs::create_dir_all(prefix.join("bin")).unwrap();
-        std::fs::write(prefix.join("bin").join(&meta), "old meta").unwrap();
+        put(prefix.join("bin").join(&meta), "old meta");
 
         assert!(
             install_files(&bundle, &prefix, "other-x64", &[])
@@ -440,33 +435,23 @@ mod tests {
                 .contains("not other-x64")
         );
         let data = prefix.join("lib/meta-harness/t3-user-data");
-        std::fs::create_dir_all(&data).unwrap();
-        std::fs::write(data.join("meta-harness.sqlite"), "data").unwrap();
+        put(data.join("meta-harness.sqlite"), "data");
         let refused =
             install_files(&bundle, &prefix, "test-x64", std::slice::from_ref(&data)).unwrap_err();
         assert!(refused.contains("t3-user-data"), "{refused}");
-        assert_eq!(
-            std::fs::read_to_string(prefix.join("bin/meta")).unwrap(),
-            "old meta"
-        );
+        assert_eq!(read(prefix.join("bin/meta")), "old meta");
         assert!(data.join("meta-harness.sqlite").exists());
         let lock = std::fs::File::create(prefix.join("lib/meta-harness/.install.lock")).unwrap();
         lock.lock().unwrap();
         let busy = install_files(&bundle, &prefix, "test-x64", &[]).unwrap_err();
         assert!(busy.contains("Another"), "{busy}");
-        assert_eq!(
-            std::fs::read_to_string(prefix.join("bin/meta")).unwrap(),
-            "old meta"
-        );
+        assert_eq!(read(prefix.join("bin/meta")), "old meta");
         drop(lock);
         let program = install_files(&bundle, &prefix, "test-x64", &[]).unwrap();
 
-        assert_eq!(std::fs::read_to_string(&program).unwrap(), "new meta");
+        assert_eq!(read(&program), "new meta");
         assert_eq!(
-            std::fs::read_to_string(
-                prefix.join("lib/meta-harness/t3-0.1.11-test-x64/client/index.html")
-            )
-            .unwrap(),
+            read(prefix.join("lib/meta-harness/t3-0.1.11-test-x64/client/index.html")),
             "t3"
         );
         assert!(!prefix.join("lib/meta-harness/t3-0.1.9-test-x64").exists());
@@ -475,23 +460,16 @@ mod tests {
                 .join("share/meta-harness/THIRD_PARTY_NOTICES.md")
                 .is_file()
         );
-        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]
     fn uninstall_removes_the_program_and_its_backup_but_never_a_folder_in_their_place() {
-        let mut bytes = [0u8; 8];
-        getrandom::fill(&mut bytes).unwrap();
-        let prefix = std::env::temp_dir().join(format!(
-            "mh-uninstall-{}",
-            bytes.iter().map(|b| format!("{b:02x}")).collect::<String>()
-        ));
+        let prefix = Dir::new();
         let program = format!("meta{}", std::env::consts::EXE_SUFFIX);
         std::fs::create_dir_all(prefix.join("lib/meta-harness/t3")).unwrap();
         std::fs::create_dir_all(prefix.join("share/meta-harness")).unwrap();
-        std::fs::create_dir_all(prefix.join("bin")).unwrap();
-        std::fs::write(prefix.join("bin").join(&program), "meta").unwrap();
-        std::fs::write(prefix.join("bin").join(format!("{program}.old")), "old").unwrap();
+        put(prefix.join("bin").join(&program), "meta");
+        put(prefix.join("bin").join(format!("{program}.old")), "old");
         remove_installation(&prefix).unwrap();
         assert!(!prefix.exists());
 
@@ -499,14 +477,9 @@ mod tests {
             .join("bin")
             .join(format!("{program}.old"))
             .join("notes.txt");
-        std::fs::create_dir_all(kept.parent().unwrap()).unwrap();
-        std::fs::write(&kept, "the person's notes").unwrap();
+        put(&kept, "the person's notes");
         assert!(remove_installation(&prefix).is_err());
-        assert_eq!(
-            std::fs::read_to_string(&kept).unwrap(),
-            "the person's notes"
-        );
-        let _ = std::fs::remove_dir_all(&prefix);
+        assert_eq!(read(&kept), "the person's notes");
     }
 
     #[test]
