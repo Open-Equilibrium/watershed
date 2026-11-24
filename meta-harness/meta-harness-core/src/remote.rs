@@ -47,7 +47,7 @@ fn refused_version(response: &Response<Option<Vec<u8>>>) -> String {
         None => "another API version".to_owned(),
     };
     format!(
-        "Meta-Harness speaks {speaks}; this client needs {}. Update Meta-Harness or Liquid.",
+        "Meta-Harness speaks {speaks}; this client needs {}. Restart Meta-Harness, or update whichever side is older.",
         api::API_VERSION
     )
 }

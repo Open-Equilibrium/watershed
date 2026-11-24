@@ -88,7 +88,7 @@ async fn a_refused_connection_says_why_and_is_not_retried() {
     let cases: [Refusal; 2] = [
         (
             b"HTTP/1.1 426 Upgrade Required\r\nmeta-harness-api: 2\r\ncontent-length: 0\r\nconnection: close\r\n\r\n",
-            |_| "Meta-Harness speaks API version 2; this client needs 1. Update Meta-Harness or Liquid.".to_owned(),
+            |_| "Meta-Harness speaks API version 2; this client needs 1. Restart Meta-Harness, or update whichever side is older.".to_owned(),
         ),
         (
             b"HTTP/1.1 401 Unauthorized\r\ncontent-length: 0\r\nconnection: close\r\n\r\n",
