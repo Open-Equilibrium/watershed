@@ -206,7 +206,12 @@ class _DrawingFrameState extends State<DrawingFrame> {
                   ),
                 ],
                 if (widget.bar && (_hovered || _more.isShowing))
-                  Positioned(top: 8, right: 8, child: _bar(context)),
+                  Positioned(
+                    key: ValueKey('$name bar'),
+                    top: 8,
+                    right: 8,
+                    child: _bar(context),
+                  ),
               ],
             ),
           ),

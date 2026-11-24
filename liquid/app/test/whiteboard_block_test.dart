@@ -476,6 +476,27 @@ void main() {
     expect(stored(), hasLength(2));
   });
 
+  testWidgets(
+    'a Whiteboard clicked under the pointer keeps its ⋯ menu after esc',
+    (tester) async {
+      await kit.show(tester, [
+        const TextPart('Intro'),
+        const WhiteboardPart(),
+        const TextPart('After'),
+      ]);
+      final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+      await mouse.addPointer(location: tester.getCenter(board()));
+      addTearDown(mouse.removePointer);
+      await focus(tester);
+      expect(find.byKey(const Key('whiteboard tools')), findsOneWidget);
+      await key(tester, LogicalKeyboardKey.escape);
+      expect(find.byKey(const Key('whiteboard tools')), findsNothing);
+      expect(tester.takeException(), isNull);
+      await tap(tester, find.byKey(const Key('whiteboard more')));
+      expect(find.byKey(const ValueKey('whiteboard Delete')), findsOneWidget);
+    },
+  );
+
   testWidgets('⋯ › Delete removes the Whiteboard', (tester) async {
     await kit.show(tester, [
       const TextPart('Intro'),

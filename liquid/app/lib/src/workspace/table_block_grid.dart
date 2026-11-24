@@ -574,6 +574,9 @@ extension _TableBlockGrid on _TableBlockState {
                   child: line(
                     height: _footerHeight,
                     color: ws.subtle,
+                    keyOf: (index) => index < fields.length
+                        ? ValueKey('footer ${fields[index].id}')
+                        : null,
                     cell: (index) => index == 0
                         ? Align(
                             alignment: Alignment.centerLeft,

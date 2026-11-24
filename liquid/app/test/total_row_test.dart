@@ -40,4 +40,35 @@ void main() {
     expect(kit.applied(BridgeMutationKind.setTabTotal).last.total, isNull);
     expect(kit.inTable(find.textContaining('180.2')), findsNothing);
   });
+
+  testWidgets('footer totals of a wide Table survive sideways scrolling', (
+    tester,
+  ) async {
+    await kit.show(tester, [
+      TablePart(
+        expenses,
+        fields: [
+          ...expenseFields,
+          for (var number = 1; number <= 4; number++)
+            BridgeField(
+              id: 'f$number',
+              name: 'Field $number',
+              kind: BridgeFieldKind.text,
+              options: const [],
+              formula: '',
+            ),
+        ],
+      ),
+    ]);
+    final columns = find.byKey(const Key('table columns'));
+    for (final dx in [
+      for (var step = 0; step < 10; step++) -90.0,
+      for (var step = 0; step < 10; step++) 90.0,
+    ]) {
+      await tester.drag(columns, Offset(dx, 0));
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull, reason: 'after a drag of $dx');
+    }
+    expect(kit.inTable(find.text('2 rows')), findsOneWidget);
+  });
 }
