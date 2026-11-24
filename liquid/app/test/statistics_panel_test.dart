@@ -183,6 +183,17 @@ void main() {
     );
     expect(session.calls, isEmpty);
   });
+
+  testWidgets('Read from cache is a share of all prompt tokens', (
+    tester,
+  ) async {
+    await show(tester);
+    await openPanel(tester);
+    await tap(tester, inPanel(find.text('Tokens')));
+
+    expectInPanel('86%');
+    expect(inPanel(find.text('88%')), findsNothing);
+  });
 }
 
 class _UnreadableStatistics extends FakeSession {
