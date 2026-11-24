@@ -175,6 +175,8 @@ class AgentsState {
     return (hosted, match.group(2)!.trim());
   }
 
+  bool isMention(String text) => _mentioned(text) != null;
+
   Future<bool> mention(String text) async {
     final found = _mentioned(text);
     final thread = _state.session?.id;
@@ -183,13 +185,14 @@ class AgentsState {
     try {
       await _project(hosted).agentMention(hosted.agent.id, thread, said);
       await readMentions();
+      return true;
     } on Object catch (error) {
       _state.notify(
         NoticeLevel.error,
         'Could not send the message to ${hosted.name}: $error',
       );
+      return false;
     }
-    return true;
   }
 
   Future<void> apply(BridgeAgentChange change) => _change(

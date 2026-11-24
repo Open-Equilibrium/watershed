@@ -356,4 +356,28 @@ void main() {
       isEmpty,
     );
   });
+
+  testWidgets('a message to an agent that fails keeps the typed prompt in the '
+      'composer', (tester) async {
+    await show(tester, agents: [agentOf('release-watch', thread: 'thread-7')]);
+    project.mentionError = 'refused';
+    await typeInComposer(tester, '@release-watch did the nightly pass?');
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+
+    expectOne(
+      find.textContaining('Could not send the message to release-watch'),
+    );
+    expect(
+      tester
+          .widget<TextField>(find.byKey(const Key('composer')))
+          .controller!
+          .text,
+      '@release-watch did the nightly pass?',
+    );
+    expect(
+      project.session.calls.where((call) => call.startsWith('send')),
+      isEmpty,
+    );
+  });
 }

@@ -58,6 +58,7 @@ class FakeProject implements ProjectBackend {
   List<BridgeAgent> agentList = [];
   List<BridgeAgentChange> changeList = [];
   List<BridgeMention> mentionList = [];
+  Object? mentionError;
   String instructionsText = '';
 
   @override
@@ -354,6 +355,7 @@ class FakeProject implements ProjectBackend {
   @override
   Future<String> agentMention(String name, String thread, String text) async {
     calls.add('agent mention $name $thread $text');
+    if (mentionError case final error?) throw error;
     return 'msg-1';
   }
 

@@ -5,7 +5,8 @@ extension SessionActions on SessionState {
     final session = _session;
     try {
       if (session != null) {
-        if (!await agents.mention(text)) await session.send(text, steer: steer);
+        if (agents.isMention(text)) return await agents.mention(text);
+        await session.send(text, steer: steer);
         return true;
       }
       if (agents.composing.value) return await agents.start(text);
