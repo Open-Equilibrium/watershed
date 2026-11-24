@@ -245,6 +245,26 @@ void main() {
     expect(lastWrite(), 'r2: B.pdf');
   });
 
+  testWidgets('two removals before the table reloads keep both removed', (
+    tester,
+  ) async {
+    await bookings(
+      tester,
+      () async => [
+        await stored('A.eml', 1),
+        await stored('B.eml', 1),
+        await stored('C.eml', 1),
+      ],
+    );
+    kit.fake.deferredKinds = {BridgeQueryKind.rows};
+    kit.fake.deferred = [];
+    await tap(tester, fileCell('r1'));
+    await press(tester, LogicalKeyboardKey.enter);
+    await press(tester, LogicalKeyboardKey.backspace);
+    await press(tester, LogicalKeyboardKey.backspace);
+    expect(lastWrite(), 'r1: C.eml');
+  });
+
   testWidgets(
     'a queued add goes to the row it was made in, wherever it moved',
     (tester) async {

@@ -137,7 +137,9 @@ class CellSelection extends ChangeNotifier {
       kind == BridgeFieldKind.file;
 
   List<BridgeMedia> get pickedFiles => switch (_target) {
-    (_, _, final cell?) when cell.kind == BridgeCellKind.files => cell.files,
+    (final row, final field, final cell?)
+        when cell.kind == BridgeCellKind.files =>
+      _written[(row.id, field.id)] ?? cell.files,
     _ => const [],
   };
 
@@ -248,10 +250,12 @@ class CellSelection extends ChangeNotifier {
   void removeFile(int index) {
     if (_target case (final row, final field, final cell?)
         when cell.kind == BridgeCellKind.files && index < cell.files.length) {
-      final held = _written[(row.id, field.id)] ?? cell.files;
+      final key = (row.id, field.id);
+      final held = _written[key] ?? cell.files;
       if (index >= held.length) return;
       final files = [...held]..removeAt(index);
-      _write(
+      _written[key] = files;
+      write(
         row,
         field,
         files.isEmpty
@@ -262,7 +266,7 @@ class CellSelection extends ChangeNotifier {
                 checked: false,
                 files: files,
               ),
-      );
+      ).then<void>((_) {}, onError: (Object _) => _written.remove(key));
     }
   }
 
