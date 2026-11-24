@@ -91,6 +91,7 @@ struct Flaky {
     index_failing: bool,
     history_failing: bool,
     unreadable: Option<Document>,
+    discarded: Vec<String>,
 }
 
 impl Store for Flaky {
@@ -142,6 +143,7 @@ impl Store for Flaky {
     }
 
     fn discard_upload(&mut self, upload: &str) -> Result<(), Error> {
+        self.discarded.push(upload.to_string());
         self.inner.discard_upload(upload)
     }
 
@@ -422,6 +424,22 @@ fn an_upload_whose_part_the_store_refused_never_finishes() {
         "a failed upload takes no more"
     );
     assert!(workspace.finish_upload(upload).is_err());
+}
+
+#[test]
+fn an_upload_whose_last_part_the_store_refuses_discards_its_parts() {
+    let owner = Actor::Person(PersonId::new("benni"));
+    let mut workspace = Workspace::create(PersonId::new("benni"), Flaky::default()).unwrap();
+    let mut upload = workspace
+        .begin_upload(&owner, crate::PART as u64 + 1)
+        .unwrap();
+    workspace
+        .upload(&mut upload, &vec![7; crate::PART])
+        .unwrap();
+    workspace.store.failing = true;
+    workspace.upload(&mut upload, &[7]).unwrap();
+    assert!(workspace.finish_upload(upload).is_err());
+    assert_eq!(workspace.store.discarded.len(), 1);
 }
 
 #[test]
