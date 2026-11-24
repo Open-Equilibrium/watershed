@@ -187,6 +187,8 @@ private func pdfPixels(of page: PDFPage, width asked: Int) -> (width: Int, heigh
   }
 }
 
+private let liquidKeyQueue = DispatchQueue(label: "liquid.key")
+
 private func liquidKey(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
   guard call.method == "enable" || call.method == "disable" else {
     return result(FlutterMethodNotImplemented)
@@ -196,7 +198,7 @@ private func liquidKey(_ call: FlutterMethodCall, result: @escaping FlutterResul
       FlutterError(code: "unsupported", message: "the Liquid key needs macOS 13", details: nil))
   }
   let enable = call.method == "enable"
-  DispatchQueue.global(qos: .userInitiated).async {
+  liquidKeyQueue.async {
     let error = enable ? enableLiquidKey() : disableLiquidKey()
     DispatchQueue.main.async { result(error) }
   }
