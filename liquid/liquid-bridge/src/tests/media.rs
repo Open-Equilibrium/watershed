@@ -94,6 +94,44 @@ fn a_file_goes_in_from_its_path_shows_in_a_media_block_and_saves_out_unchanged()
 }
 
 #[test]
+fn a_file_forgotten_while_it_is_read_is_an_error_not_a_shorter_file() {
+    let (_folder, workspace) = open("media-forgotten");
+    let (_, page, _, intro) = lisbon(&workspace);
+    let file = bytes(2 * liquid_core::PART + 12_345);
+    let attachment = workspace.add_bytes(file).unwrap();
+    let added = workspace
+        .apply(BridgeMutation {
+            page: Some(page.clone()),
+            after: Some(intro),
+            text: Some("receipt.pdf".into()),
+            media_type: Some("application/pdf".into()),
+            attachment: Some(attachment.clone()),
+            ..mutation(BridgeMutationKind::AddMediaBlock)
+        })
+        .unwrap();
+    workspace
+        .apply(BridgeMutation {
+            page: Some(page.clone()),
+            view: added.view,
+            ..mutation(BridgeMutationKind::RemoveView)
+        })
+        .unwrap();
+    let id = liquid_core::AttachmentId::parse(&attachment).unwrap();
+    let mut parts = 0;
+    let read = workspace.each_part(&id, |_| {
+        parts += 1;
+        if parts == 1 {
+            workspace.purge(Some(page.clone()), None).unwrap();
+        }
+        Ok(())
+    });
+    assert!(
+        read.is_err(),
+        "a part gone mid-read is not the end of the file"
+    );
+}
+
+#[test]
 fn a_missing_file_and_an_unknown_attachment_are_refused_and_nothing_is_written() {
     let (folder, workspace) = open("missing-file");
     let missing = folder.0.join("gone.png").to_string_lossy().into();
