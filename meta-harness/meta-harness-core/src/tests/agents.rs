@@ -269,6 +269,18 @@ fn packing_reads_a_file_only_within_the_budget_its_predecessors_left() {
 }
 
 #[test]
+fn saving_instructions_leaves_a_memory_file_named_like_its_temporary_file_alone() {
+    let home = Dir::new();
+    let store = Store::open(&home.join("meta-harness.sqlite")).unwrap();
+    let agent = agents::create(&store.db(), &home, &new_agent("news-bot"), "thread-1").unwrap();
+    let kept = agent.memory.join("instructions.tmp");
+    std::fs::write(&kept, "kept").unwrap();
+    agents::write_instructions(&agent, "# news-bot\nNew.").unwrap();
+    assert_eq!(std::fs::read_to_string(&kept).unwrap(), "kept");
+    assert_eq!(agents::instructions(&agent).unwrap(), "# news-bot\nNew.");
+}
+
+#[test]
 fn a_profile_moves_on_once_its_context_is_four_fifths_full() {
     let context = |tokens, window| {
         Some(crate::Context {
