@@ -286,4 +286,22 @@ void main() {
     await tester.pumpAndSettle();
     expect(bar(), findsNothing, reason: 'a dialog keeps the keys');
   });
+
+  testWidgets('an Enter that commits an IME candidate runs no command', (
+    tester,
+  ) async {
+    await kit.show(tester, [const TextPart('Plan')]);
+    await open(tester);
+    await type(tester, '/white');
+    tester.testTextInput.updateEditingValue(
+      const TextEditingValue(
+        text: '/white',
+        selection: TextSelection.collapsed(offset: 6),
+        composing: TextRange(start: 1, end: 6),
+      ),
+    );
+    await enter(tester);
+    expect(bar(), findsOneWidget, reason: 'the composition is still open');
+    expect(kit.applied(BridgeMutationKind.addWhiteboardBlock), isEmpty);
+  });
 }

@@ -411,7 +411,9 @@ class _PowerBarState extends State<PowerBar> {
   }
 
   KeyEventResult _key(FocusNode _, KeyEvent event, List<_Item> items) {
-    if (event is KeyUpEvent) return KeyEventResult.ignored;
+    if (event is KeyUpEvent || !_text.value.composing.isCollapsed) {
+      return KeyEventResult.ignored;
+    }
     switch (event.logicalKey) {
       case LogicalKeyboardKey.escape:
         widget.onClose();
