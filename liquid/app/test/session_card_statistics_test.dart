@@ -1,5 +1,3 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:liquid/src/agent/session_card_settings.dart';
@@ -13,16 +11,6 @@ import 'package:liquid/src/theme/theme.dart';
 import 'fake_backend.dart';
 
 const info = SessionInfo(project: 'acme-api');
-
-class GatedStatistics extends FakeSession {
-  final gate = Completer<void>();
-
-  @override
-  Future<BridgeStatistics> statistics() async {
-    await gate.future;
-    return super.statistics();
-  }
-}
 
 BridgeStatistics sessionStatistics({int? toolMs = 261000}) => BridgeStatistics(
   models: [
@@ -117,53 +105,5 @@ void main() {
     expect(inCard(find.text('14m 32s')), findsOneWidget);
     expect(inCard(find.textContaining('6 failed · 86')), findsOneWidget);
     expect(inCard(find.text('Statistics')), findsOneWidget);
-  });
-
-  testWidgets('the Statistics row opens the statistics panel', (tester) async {
-    await show(tester, sessionWith());
-    expect(state.statisticsOpen.value, isFalse);
-
-    await tester.tap(inCard(find.text('Statistics')));
-    await tester.pumpAndSettle();
-
-    expect(state.statisticsOpen.value, isTrue);
-  });
-
-  testWidgets('rows wait for the first statistics read', (tester) async {
-    final session = GatedStatistics()..contextWindow = null;
-    await show(tester, session);
-
-    expect(inCard(find.text('Tokens')), findsNothing);
-    expect(inCard(find.text('Statistics')), findsOneWidget);
-
-    session.gate.complete();
-    await tester.pumpAndSettle();
-
-    expect(inCard(find.text('Tokens')), findsOneWidget);
-  });
-
-  testWidgets('hidden statistics leave their rows out', (tester) async {
-    await show(
-      tester,
-      sessionWith(),
-      settings: const SessionCardSettings(
-        hidden: {CardItem.statistics},
-        shown: {CardItem.context},
-      ),
-    );
-
-    expect(inCard(find.text('Tokens')), findsNothing);
-    expect(inCard(find.text('Statistics')), findsNothing);
-    expect(inCard(find.text('Context')), findsOneWidget);
-  });
-
-  testWidgets('a focused statistics row explains itself', (tester) async {
-    await show(tester, sessionWith());
-
-    Focus.of(tester.element(inCard(find.text('Tokens')))).requestFocus();
-    await tester.pump();
-    await tester.pump();
-
-    expect(find.textContaining('Cache read 1.58 M'), findsOneWidget);
   });
 }

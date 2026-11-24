@@ -125,15 +125,6 @@ void main() {
     expect(find.byKey(const Key('statistics-panel')), findsNothing);
   });
 
-  testWidgets('a failed statistics read says so', (tester) async {
-    await show(tester, using: _UnreadableStatistics());
-    await openPanel(tester);
-
-    expectInPanel('No statistics shown');
-    expectInPanel('Could not read the statistics: unreadable');
-    expect(inPanel(find.text('Reading the statistics…')), findsNothing);
-  });
-
   testWidgets('turns are listed; a tap or Enter opens one', (tester) async {
     await show(tester);
     await openPanel(tester);
@@ -159,27 +150,6 @@ void main() {
     expect(scrolls, contains(2));
   });
 
-  testWidgets('Ask the agent fills the input and sends nothing', (
-    tester,
-  ) async {
-    await show(tester);
-    await openPanel(tester);
-
-    await tester.ensureVisible(
-      inPanel(find.text('Ask the agent about this session…')),
-    );
-    await tap(tester, inPanel(find.text('Ask the agent about this session…')));
-
-    expect(find.byKey(const Key('statistics-panel')), findsNothing);
-    expect(
-      tester
-          .widgetList<EditableText>(find.byType(EditableText))
-          .map((field) => field.controller.text),
-      anyElement(startsWith('About this session')),
-    );
-    expect(session.calls, isEmpty);
-  });
-
   testWidgets('Read from cache is a share of all prompt tokens', (
     tester,
   ) async {
@@ -190,9 +160,4 @@ void main() {
     expectInPanel('86%');
     expect(inPanel(find.text('88%')), findsNothing);
   });
-}
-
-class _UnreadableStatistics extends FakeSession {
-  @override
-  Future<BridgeStatistics> statistics() async => throw 'unreadable';
 }

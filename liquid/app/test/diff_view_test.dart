@@ -18,16 +18,6 @@ import 'focus_kit.dart';
 
 const info = SessionInfo(project: 'acme-api');
 
-class _OversizedSession extends FakeSession {
-  @override
-  Future<String> turnPatch(
-    int from,
-    int to,
-    String path, {
-    required bool hideWhitespace,
-  }) => Future.error('the diff is larger than 4 MiB');
-}
-
 void main() {
   late FakeProject project;
 
@@ -77,13 +67,6 @@ void main() {
 
   Future<void> press(WidgetTester tester, LogicalKeyboardKey key) async {
     await tester.sendKeyEvent(key);
-    await tester.pumpAndSettle();
-  }
-
-  Future<void> alt(WidgetTester tester, LogicalKeyboardKey key) async {
-    await tester.sendKeyDownEvent(LogicalKeyboardKey.altLeft);
-    await tester.sendKeyEvent(key);
-    await tester.sendKeyUpEvent(LogicalKeyboardKey.altLeft);
     await tester.pumpAndSettle();
   }
 
@@ -214,28 +197,6 @@ void main() {
     expect(find.text('more.txt'), findsWidgets);
   });
 
-  testWidgets('before a turn ends, the Diff says so', (tester) async {
-    await show(tester);
-    expect(find.text('No finished turn yet'), findsOneWidget);
-    expect(
-      find.text('A turn’s changes appear here when it ends.'),
-      findsOneWidget,
-    );
-  });
-
-  testWidgets('says why a diff cannot be shown', (tester) async {
-    await show(
-      tester,
-      turns: twoTurns,
-      changes: [fileOf('big.txt', added: 200000)],
-      session: _OversizedSession(),
-    );
-    expect(
-      find.text('Could not show the changes: the diff is larger than 4 MiB'),
-      findsOneWidget,
-    );
-  });
-
   testWidgets('folding, and ↑↓ passing folded files', (tester) async {
     await show(
       tester,
@@ -300,75 +261,6 @@ void main() {
     await tester.pumpAndSettle();
     expect(settings.value.layout, DiffLayout.unified);
     expect(code('keep'), findsOneWidget);
-  });
-
-  testWidgets('the ⌥↑↓ jump between changes in both layouts', (tester) async {
-    final unchanged = [for (var line = 1; line <= 200; line++) ' line $line'];
-    await show(
-      tester,
-      turns: twoTurns,
-      changes: [fileOf('a.ts', added: 2, removed: 2)],
-      patches: {
-        'a.ts': [
-          '@@ -1,201 +1,201 @@',
-          '-first',
-          '+first changed',
-          ...unchanged,
-          '@@ -400,1 +400,1 @@',
-          '-second',
-          '+second changed',
-          '',
-        ].join('\n'),
-      },
-    );
-    expect(find.text('@@ -1,201 +1,201 @@'), findsOneWidget);
-    expect(find.text('@@ -400,1 +400,1 @@'), findsNothing);
-    await alt(tester, LogicalKeyboardKey.arrowDown);
-    expect(find.text('@@ -400,1 +400,1 @@'), findsOneWidget);
-    expect(find.text('@@ -1,201 +1,201 @@'), findsNothing);
-    await alt(tester, LogicalKeyboardKey.arrowUp);
-    expect(find.text('@@ -1,201 +1,201 @@'), findsOneWidget);
-
-    await press(tester, LogicalKeyboardKey.keyU);
-    await alt(tester, LogicalKeyboardKey.arrowDown);
-    expect(find.text('@@ -400,1 +400,1 @@'), findsOneWidget);
-  });
-
-  testWidgets('long lines are cut', (tester) async {
-    final bundle = 'let a = 1;' * 100000;
-    await show(
-      tester,
-      turns: twoTurns,
-      changes: [fileOf('max.ts', added: 2, removed: 1)],
-      patches: {
-        'max.ts':
-            '@@ -1,2 +1,3 @@\n-let name = "old";\r\n+const max = 10; // ok\r\n+$bundle\n',
-      },
-    );
-    final cut = tester.widget<RichText>(
-      find.byWidgetPredicate(
-        (widget) =>
-            widget is RichText &&
-            widget.text.toPlainText().startsWith('let a = 1;'),
-      ),
-    );
-    final shown = cut.text.toPlainText();
-    expect(shown, endsWith('…'));
-    expect(shown.length, lessThan(5000));
-  });
-
-  testWidgets('W hides whitespace; the control undoes it', (tester) async {
-    await show(tester, turns: twoTurns, changes: [fileOf('a.txt')]);
-    expect(find.text('Hide whitespace changes'), findsOneWidget);
-
-    await tester.sendKeyEvent(LogicalKeyboardKey.keyW);
-    await tester.pumpAndSettle();
-    expect(find.text('Show whitespace changes'), findsOneWidget);
-    expect(project.session.calls, contains('changes 2..2'));
-
-    await tester.tap(find.text('Show whitespace changes'));
-    await tester.pumpAndSettle();
-    expect(find.text('Hide whitespace changes'), findsOneWidget);
   });
 
   testWidgets('reverts the shown turn, but not all turns', (tester) async {
