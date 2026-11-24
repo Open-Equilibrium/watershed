@@ -235,7 +235,7 @@ async fn a_moved_message_is_started_by_its_own_turn_when_another_queued_turn_has
     };
     set_arrival(&store.db(), "tr-1", &landed, 0).unwrap();
     let started = mine.clone();
-    let (_fake, thread) = live_thread(
+    let (fake, thread) = live_thread(
         json!({
             "runs": [held("run-other", 1, "msg-other", "queued"), held("run-mine", 2, &mine, "queued")],
             "messages": [{"id": "msg-other", "text": "same"}, {"id": mine, "text": "same"}],
@@ -256,4 +256,11 @@ async fn a_moved_message_is_started_by_its_own_turn_when_another_queued_turn_has
     crate::service::moves::deliver(&store, &thread, "tr-1")
         .await
         .unwrap();
+    let starts: Vec<Value> = fake
+        .payloads("orchestration.dispatchCommand")
+        .into_iter()
+        .filter(|payload| payload["type"] == "queued-run.start")
+        .map(|payload| payload["runId"].clone())
+        .collect();
+    assert_eq!(starts, [json!("run-mine")]);
 }

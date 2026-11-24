@@ -911,3 +911,16 @@ async fn subscribers_end_when_t3_ends_the_thread_stream() {
             .is_none()
     );
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_reply_whose_run_was_reverted_is_ended_and_a_running_one_is_not() {
+    let (_fake, thread) = follow(
+        projection(json!({
+            "runs": [run("r1", 1, "rolled_back", "m1"), run("r2", 2, "running", "m2")],
+        })),
+        1,
+    )
+    .await;
+    assert_eq!(thread.reply_to("m1"), Some((true, String::new())));
+    assert_eq!(thread.reply_to("m2"), Some((false, String::new())));
+}

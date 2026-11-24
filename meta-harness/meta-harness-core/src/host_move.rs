@@ -219,7 +219,11 @@ pub(crate) fn carries_credential(remote: &str) -> bool {
     let Some((scheme, rest)) = remote.split_once("://") else {
         return false;
     };
-    let authority = rest.split('/').next().unwrap_or_default();
+    let authority = rest
+        .trim_start_matches('/')
+        .split('/')
+        .next()
+        .unwrap_or_default();
     let Some((userinfo, _host)) = authority.rsplit_once('@') else {
         return false;
     };
