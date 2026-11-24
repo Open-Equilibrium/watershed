@@ -439,13 +439,13 @@ mod tests {
         let refused =
             install_files(&bundle, &prefix, "test-x64", std::slice::from_ref(&data)).unwrap_err();
         assert!(refused.contains("t3-user-data"), "{refused}");
-        assert_eq!(read(prefix.join("bin/meta")), "old meta");
+        assert_eq!(read(prefix.join("bin").join(&meta)), "old meta");
         assert!(data.join("meta-harness.sqlite").exists());
         let lock = std::fs::File::create(prefix.join("lib/meta-harness/.install.lock")).unwrap();
         lock.lock().unwrap();
         let busy = install_files(&bundle, &prefix, "test-x64", &[]).unwrap_err();
         assert!(busy.contains("Another"), "{busy}");
-        assert_eq!(read(prefix.join("bin/meta")), "old meta");
+        assert_eq!(read(prefix.join("bin").join(&meta)), "old meta");
         drop(lock);
         let program = install_files(&bundle, &prefix, "test-x64", &[]).unwrap();
 
