@@ -434,3 +434,26 @@ fn a_semicolon_csv_with_commas_inside_a_quoted_header_keeps_its_columns() {
     );
     assert_eq!(table.rows, [["Smith, John, A", "10"]]);
 }
+
+#[test]
+fn a_chart_picks_the_second_of_two_columns_with_the_same_header() {
+    let folder = Folder::new("duplicate-headers");
+    let path = folder.write("double.csv", "Amount,Amount\n1,2\n3,4\n");
+    let mut private = Private::new();
+    let source = private.add(&path);
+    let table = private.table(&source);
+    assert_ne!(table.columns[0].id, table.columns[1].id);
+    let block = private.new_chart();
+    private
+        .set_chart(
+            &block,
+            ChartSetup {
+                kind: ChartKind::Bar,
+                source: Some(ChartSource::Source(source)),
+                group: None,
+                value: ChartValue::Sum(table.columns[1].id.clone()),
+            },
+        )
+        .unwrap();
+    assert_eq!(private.chart(&block).points[0].value, 6.0);
+}
