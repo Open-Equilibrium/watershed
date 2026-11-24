@@ -200,11 +200,14 @@ impl Links {
         Ok(())
     }
 
-    async fn ensure_tunnel(&self, store: &Store, host: &LinkedHost) -> Result<LinkedHost, String> {
-        if lock(&self.tunnels)
-            .get(&host.name)
+    fn tunnel_running(&self, name: &str) -> bool {
+        lock(&self.tunnels)
+            .get(name)
             .is_some_and(|task| !task.is_finished())
-        {
+    }
+
+    async fn ensure_tunnel(&self, store: &Store, host: &LinkedHost) -> Result<LinkedHost, String> {
+        if self.tunnel_running(&host.name) {
             return Ok(host.clone());
         }
         match TcpListener::bind(("127.0.0.1", host.tunnel_port)).await {
@@ -361,7 +364,7 @@ impl Links {
         let due: Vec<LinkedHost> = match linked(&store.db()) {
             Ok(hosts) => hosts
                 .into_iter()
-                .filter(|host| is_due(host.linked_ms, now_ms()))
+                .filter(|host| is_due(host.linked_ms, now_ms()) || !self.tunnel_running(&host.name))
                 .collect(),
             Err(error) => {
                 eprintln!("meta: could not read the linked hosts: {error}");
@@ -445,7 +448,7 @@ mod tests {
     use super::{
         Access, LinkedHost, Links, RELINK_AFTER_MS, insert_linked_host, is_due, linked_named,
     };
-    use crate::store::Store;
+    use crate::store::{Store, now_ms};
     #[cfg(unix)]
     use crate::tests::{Dir, executable};
     use crate::util::until;
@@ -521,7 +524,7 @@ mod tests {
             token: "token".to_owned(),
             access: Access::ReadOnly,
             tunnel_port: port,
-            linked_ms: None,
+            linked_ms: Some(now_ms()),
             client: "host-1a2b".to_owned(),
         };
         insert_linked_host(&store.db(), &host).unwrap();
