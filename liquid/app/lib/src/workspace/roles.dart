@@ -511,7 +511,11 @@ class _Grid extends StatelessWidget {
       children: [
         row([
           Text('Allowed on', style: head),
-          for (final capability in capabilities) Text(capability, style: head),
+          for (final capability in capabilities)
+            FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Text(capability, style: head),
+            ),
         ]),
         for (final (index, grant) in grants.indexed)
           row([

@@ -3,6 +3,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:liquid/src/rust/api/automation.dart';
 import 'package:liquid/src/rust/api/role.dart';
 import 'package:liquid/src/rust/api/workspace.dart';
+import 'package:liquid/src/theme/tokens.g.dart';
+import 'package:liquid/src/workspace/roles.dart';
 import 'package:liquid/src/workspace/workspace_state.dart';
 
 import 'automations_test.dart' show buttonFields, flagLarge;
@@ -58,6 +60,23 @@ void main() {
     await tap(tester, find.byTooltip('Role actions'));
     await tap(tester, find.text('Delete Role'));
     expect(kit.applied(BridgeMutationKind.removeRole), hasLength(1));
+  });
+
+  testWidgets('the Roles grid keeps each capability header on one line at '
+      'the minimum width', (tester) async {
+    final kit = PageKit();
+    await showBudget(tester, kit);
+    await tap(tester, find.text('Settings'));
+    await tap(tester, find.text('Roles'));
+    await tester.binding.setSurfaceSize(const Size(1050, 640));
+    await tester.pumpAndSettle();
+    for (final capability in capabilities) {
+      expect(
+        tester.getSize(find.text(capability).first).height,
+        lessThan(WsMetrics.fsSmall * 2),
+        reason: capability,
+      );
+    }
   });
 
   testWidgets('a Table is protected for the Roles chosen for it and shows a '
