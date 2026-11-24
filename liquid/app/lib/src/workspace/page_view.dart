@@ -349,31 +349,39 @@ class _WorkspacePageState extends State<WorkspacePage> implements EditorSource {
       listenable: widget.state.pages(widget.open.area),
       builder: (context, _) {
         final icon = widget.state.iconOf(widget.open.page);
-        return Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            if (widget.version)
-              if (icon.isNotEmpty)
-                Padding(
-                  padding: const EdgeInsets.only(right: WsMetrics.space2),
-                  child: PageIcon(
-                    icon,
-                    size: WsMetrics.fsDisplay,
-                    color: context.ws.text,
-                  ),
-                )
-              else
-                const SizedBox.shrink()
-            else
-              Padding(
-                padding: const EdgeInsets.only(right: WsMetrics.space2),
-                child: PageIconButton(
+        if (icon.isEmpty) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              if (!widget.version)
+                PageIconButton(
                   state: widget.state,
                   page: widget.open.page,
                   icon: icon,
                   shown: _titleHovered || _title.controller.text.isEmpty,
                 ),
-              ),
+              title,
+            ],
+          );
+        }
+        return Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.only(right: WsMetrics.space2),
+              child: widget.version
+                  ? PageIcon(
+                      icon,
+                      size: WsMetrics.fsDisplay,
+                      color: context.ws.text,
+                    )
+                  : PageIconButton(
+                      state: widget.state,
+                      page: widget.open.page,
+                      icon: icon,
+                      shown: true,
+                    ),
+            ),
             Expanded(child: title),
           ],
         );

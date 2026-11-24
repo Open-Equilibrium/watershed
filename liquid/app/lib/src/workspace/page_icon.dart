@@ -276,6 +276,11 @@ class _PageIconButtonState extends State<PageIconButton> {
               child: TextButton.icon(
                 key: const Key('add page icon'),
                 onPressed: controller.open,
+                style: TextButton.styleFrom(
+                  padding: EdgeInsets.zero,
+                  minimumSize: const Size(0, 28),
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                ),
                 icon: Icon(LucideIcons.sparkles, size: 14, color: ws.textFaint),
                 label: Text(
                   'Add icon',

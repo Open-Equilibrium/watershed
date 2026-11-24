@@ -51,4 +51,15 @@ void main() {
     expect(icons().last, '');
     expect(inSidebar(find.text('💰')), findsNothing);
   });
+
+  testWidgets('without an icon the title lines up with the Blocks', (
+    tester,
+  ) async {
+    final kit = PageKit();
+    await kit.show(tester, const [TextPart('October')]);
+    expect(
+      tester.getTopLeft(find.byKey(const Key('page-title'))).dx,
+      tester.getTopLeft(block(0)).dx,
+    );
+  });
 }
