@@ -259,9 +259,11 @@ func helperRefusal(status: Int32, said: Data) -> HelperFailed {
       ? "the Liquid key helper failed with status \(status)" : message)
 }
 
-private func runHelper(_ argument: String) throws {
-  let helper = Bundle.main.bundleURL.appendingPathComponent(
+func runHelper(
+  _ argument: String,
+  at helper: URL = Bundle.main.bundleURL.appendingPathComponent(
     "Contents/Library/LoginItems/LiquidKey.app/Contents/MacOS/LiquidKey")
+) throws {
   let finished = DispatchSemaphore(value: 0)
   let run = Process()
   let said = Pipe()
@@ -269,13 +271,24 @@ private func runHelper(_ argument: String) throws {
   run.arguments = [argument]
   run.standardError = said
   run.terminationHandler = { _ in finished.signal() }
+  var diagnostic = Data()
+  let drained = DispatchSemaphore(value: 0)
   try run.run()
+  DispatchQueue.global(qos: .utility).async {
+    let reading = said.fileHandleForReading
+    while true {
+      let chunk = reading.availableData
+      if chunk.isEmpty { break }
+      if diagnostic.count < 4096 { diagnostic.append(chunk.prefix(4096 - diagnostic.count)) }
+    }
+    drained.signal()
+  }
   if finished.wait(timeout: .now() + 10) == .timedOut {
     run.terminate()
     throw HelperFailed(errorDescription: "the Liquid key helper did not finish")
   }
+  drained.wait()
   if run.terminationStatus != 0 {
-    throw helperRefusal(
-      status: run.terminationStatus, said: said.fileHandleForReading.readDataToEndOfFile())
+    throw helperRefusal(status: run.terminationStatus, said: diagnostic)
   }
 }
