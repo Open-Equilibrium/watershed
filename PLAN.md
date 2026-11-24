@@ -45,11 +45,8 @@ M2 delivers Meta-Harness as a **self-contained, host-scoped headless control pla
 - Central configuration for Flow Agent, which receives only its global authority and explicit Flows rather than a project-local config layer; device-local Runtime bindings remain owned by the execution host. Liquid edits the configuration across devices after sync and approved mockups.
 - Control plane: session registry, routing, task state, attention state and agent schedule/trigger skeleton.
 - Reference scenario for schedules: a scheduled agent keeps a news feed as a database page in Liquid and changes it only with the approval its Workspace Role requires, as `disler/pi-durable-news-agent` does with its own app.
-- Host-local Meta-Harness agent executor that rejects cross-host agent-process control (on T3 Code: ADR-0280 to ADR-0291).
-- Adapters: at least one external CLI adapter.
-- Orchestration tools for agents: T3 Code's own, across hosts through its peer links (ADR-0253, ADR-0288, [V-Spec](docs/concept/V-Spec_MetaHarness.html#orchestration)): an agent starts, messages, reads, steers and stops subagents of any harness and model, on other agent hosts too, and hosts link through the Liquid account (ADR-0285); Claude Code joins Codex as a T3 provider.
+- Orchestration tools for agents: T3 Code's own, across hosts through its peer links (ADR-0253, ADR-0288, [V-Spec](docs/concept/V-Spec_MetaHarness.html#orchestration)): an agent starts, messages, reads, steers and stops subagents of any harness and model, on other agent hosts too, and hosts link through the Liquid account (ADR-0285).
 - Event/transcript ingestion from agents; artifact/log/handoff indexing (logs, structured summaries, host-provided diffs, handoff packs, checkpoints).
-- **No rich standalone GUI**; Meta-Harness ships as CLI plus login service (ADR-0286).
 
 **DoD:** monitor, steer and configure at least two different CLI agents on one agent host from one control surface, with both represented through one normalized session/event model; reject attempts to claim or control a process on another host; run without Liquid; expose the public API/protocol over both connections; integrate Flow Agent through its public runtime surfaces (not its internals); resolve shared config without duplicated per-agent config directories for the same capability; require approval plus an audit record for every sensitive config change; and let a session on one host start, message, steer and stop a subagent of another harness on another agent host through the orchestration tools.
 
