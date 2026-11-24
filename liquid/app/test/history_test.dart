@@ -35,6 +35,21 @@ BridgeEntry entry(
 Finder inHistory(Finder finder) =>
     find.descendant(of: find.byKey(const Key('history')), matching: finder);
 
+void withVersions(PageKit kit) {
+  final now = DateTime.now().millisecondsSinceEpoch;
+  kit.fake.versionsOf[kit.page] = [
+    BridgeVersion(after: 'v2', at: now, actor: you, savePoint: false),
+    BridgeVersion(after: 'v1', at: now - 600000, actor: you, savePoint: true),
+  ];
+}
+
+FakeWorkspace copyOf(PageKit kit, String text, [void Function()? onDispose]) =>
+    _Watch(onDispose)
+      ..areas.addAll(kit.fake.areas)
+      ..pages.addAll(kit.fake.pages)
+      ..views.addAll(kit.fake.views)
+      ..texts.addAll({for (final block in kit.fake.texts.keys) block: text});
+
 class _Watch extends FakeWorkspace {
   _Watch(this.onDispose);
 
@@ -133,16 +148,8 @@ void main() {
       'deletes the earlier versions after asking', (tester) async {
     final kit = PageKit();
     await kit.show(tester, const [TextPart('October')]);
-    final now = DateTime.now().millisecondsSinceEpoch;
-    kit.fake.versionsOf[kit.page] = [
-      BridgeVersion(after: 'v2', at: now, actor: you, savePoint: false),
-      BridgeVersion(after: 'v1', at: now - 600000, actor: you, savePoint: true),
-    ];
-    kit.fake.versionAt['v1'] = FakeWorkspace()
-      ..areas.addAll(kit.fake.areas)
-      ..pages.addAll(kit.fake.pages)
-      ..views.addAll(kit.fake.views)
-      ..texts.addAll({for (final block in kit.fake.texts.keys) block: 'May'});
+    withVersions(kit);
+    kit.fake.versionAt['v1'] = copyOf(kit, 'May');
     Finder shown(String text) => find.descendant(
       of: find.byKey(const Key('page history')),
       matching: find.text(text),
@@ -180,16 +187,8 @@ void main() {
   ) async {
     final kit = PageKit();
     await kit.show(tester, const [TextPart('October')]);
-    final now = DateTime.now().millisecondsSinceEpoch;
-    kit.fake.versionsOf[kit.page] = [
-      BridgeVersion(after: 'v2', at: now, actor: you, savePoint: false),
-      BridgeVersion(after: 'v1', at: now - 600000, actor: you, savePoint: true),
-    ];
-    kit.fake.versionAt['v1'] = FakeWorkspace()
-      ..areas.addAll(kit.fake.areas)
-      ..pages.addAll(kit.fake.pages)
-      ..views.addAll(kit.fake.views)
-      ..texts.addAll({for (final block in kit.fake.texts.keys) block: 'May'});
+    withVersions(kit);
+    kit.fake.versionAt['v1'] = copyOf(kit, 'May');
     await tap(tester, find.byTooltip('Page history'));
     await tester.pump(const Duration(milliseconds: 300));
     await tester.pumpAndSettle();
@@ -219,29 +218,18 @@ void main() {
       'only after its Page has left the screen', (tester) async {
     final kit = PageKit();
     await kit.show(tester, const [TextPart('October')]);
-    final now = DateTime.now().millisecondsSinceEpoch;
-    kit.fake.versionsOf[kit.page] = [
-      BridgeVersion(after: 'v2', at: now, actor: you, savePoint: false),
-      BridgeVersion(after: 'v1', at: now - 600000, actor: you, savePoint: true),
-    ];
+    withVersions(kit);
     final juneText = find.descendant(
       of: find.byKey(const Key('page history')),
       matching: find.text('June'),
     );
     bool? juneShown;
-    FakeWorkspace copy(String text, [void Function()? onDispose]) =>
-        _Watch(onDispose)
-          ..areas.addAll(kit.fake.areas)
-          ..pages.addAll(kit.fake.pages)
-          ..views.addAll(kit.fake.views)
-          ..texts.addAll({
-            for (final block in kit.fake.texts.keys) block: text,
-          });
-    kit.fake.versionAt['v2'] = copy(
+    kit.fake.versionAt['v2'] = copyOf(
+      kit,
       'June',
       () => juneShown = juneText.evaluate().isNotEmpty,
     );
-    kit.fake.versionAt['v1'] = copy('May');
+    kit.fake.versionAt['v1'] = copyOf(kit, 'May');
     await tap(tester, find.byTooltip('Page history'));
     await tester.pump(const Duration(milliseconds: 300));
     await tester.pumpAndSettle();

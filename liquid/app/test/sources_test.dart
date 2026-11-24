@@ -71,6 +71,12 @@ BridgeSourceFile pdfFile(String path, Uint8List bytes) => BridgeSourceFile(
   bytes: bytes,
 );
 
+PdfPages noPages() => PdfPages(
+  const [],
+  (index, width) async => throw UnimplementedError(),
+  () async {},
+);
+
 Finder inSidebar(String text) =>
     find.descendant(of: find.byType(Sidebar), matching: find.text(text));
 
@@ -275,22 +281,9 @@ void main() {
     Uint8List? opened;
     PdfPages.opener = (bytes) async {
       opened = bytes;
-      return PdfPages(
-        const [],
-        (index, width) async => throw UnimplementedError(),
-        () async {},
-      );
+      return noPages();
     };
-    kit.fake.sourceFiles[(path, '')] = BridgeSourceFile(
-      read: BridgeRead.read,
-      name: 'offer.pdf',
-      path: path,
-      size: BigInt.from(pdf.length),
-      shown: BridgeFileView.pdf,
-      columns: const [],
-      rows: const [],
-      bytes: pdf,
-    );
+    kit.fake.sourceFiles[(path, '')] = pdfFile(path, pdf);
     await addFrom(tester, 'add source file');
 
     expect(opened, pdf);
@@ -383,11 +376,7 @@ void main() {
     final opened = <Uint8List>[];
     PdfPages.opener = (bytes) async {
       opened.add(bytes);
-      return PdfPages(
-        const [],
-        (index, width) async => throw UnimplementedError(),
-        () async {},
-      );
+      return noPages();
     };
     kit.fake.sourceFiles[(path, '')] = pdfFile(
       path,
