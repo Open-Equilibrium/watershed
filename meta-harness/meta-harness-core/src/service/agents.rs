@@ -450,10 +450,7 @@ async fn still(
     agent: &Agent,
     change: &crate::AgentChange,
 ) -> Result<bool, String> {
-    let task = |text: &Option<String>| {
-        text.as_deref()
-            .and_then(|text| serde_json::from_str::<Value>(text).ok())
-    };
+    let task = |text: &Option<String>| routine_json(text).ok().flatten();
     Ok(match change.kind {
         AgentChangeKind::Name => true,
         AgentChangeKind::Instructions => {
@@ -481,11 +478,6 @@ async fn restore(
     from: &Option<String>,
     to: &Option<String>,
 ) -> Result<(), String> {
-    let task = |text: &Option<String>| -> Result<Option<Value>, String> {
-        text.as_deref()
-            .map(|text| serde_json::from_str(text).map_err(|e| e.to_string()))
-            .transpose()
-    };
     match kind {
         AgentChangeKind::Name => {
             if let Some(name) = to {
@@ -498,7 +490,7 @@ async fn restore(
         AgentChangeKind::RoutineAdded
         | AgentChangeKind::RoutineRemoved
         | AgentChangeKind::RoutineChanged => {
-            let (from, to) = (task(from)?, task(to)?);
+            let (from, to) = (routine_json(from)?, routine_json(to)?);
             let thread = current(shared, agent).await?;
             let gone = from.as_ref().map(|task| task["id"].clone());
             let replaced = to.as_ref().map(|task| task["id"].clone());
@@ -654,10 +646,7 @@ fn baseline(
     mut now: Snapshot,
     held: &[(AgentChangeKind, Option<String>, Option<String>)],
 ) -> Snapshot {
-    let task = |text: &Option<String>| {
-        text.as_deref()
-            .and_then(|text| serde_json::from_str::<Value>(text).ok())
-    };
+    let task = |text: &Option<String>| routine_json(text).ok().flatten();
     for (kind, before, after) in held {
         match kind {
             AgentChangeKind::Name => {}
@@ -679,6 +668,12 @@ fn baseline(
         }
     }
     now
+}
+
+fn routine_json(text: &Option<String>) -> Result<Option<Value>, String> {
+    text.as_deref()
+        .map(|text| serde_json::from_str(text).map_err(|e| e.to_string()))
+        .transpose()
 }
 
 async fn snapshot(agent: &Agent, thread: &Thread) -> Result<Snapshot, String> {
