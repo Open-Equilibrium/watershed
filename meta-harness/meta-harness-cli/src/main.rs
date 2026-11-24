@@ -91,7 +91,7 @@ async fn run(args: &[&str]) -> Result<(), String> {
         return Ok(());
     }
     if let ["install", rest @ ..] = args {
-        return install_download(rest);
+        return install::install_download(rest);
     }
     if let Some(message) = missing(args) {
         return Err(message.to_owned());
@@ -113,9 +113,9 @@ async fn run(args: &[&str]) -> Result<(), String> {
         ["invite", rest @ ..] => hosts::invite(&connect(&home).await?, rest).await,
         ["host", rest @ ..] => hosts::host(&connect(&home).await?, rest).await,
         ["agent", rest @ ..] => agents::agent(&connect(&home).await?, rest).await,
-        ["service", "install"] => install(home),
-        ["service", "uninstall"] => remove_login_service(),
-        ["uninstall"] => uninstall(),
+        ["service", "install"] => install::install_service(home),
+        ["service", "uninstall"] => install::remove_login_service(),
+        ["uninstall"] => install::uninstall(),
         _ => Err(format!("unknown command \"{}\"\n{USAGE}", args.join(" "))),
     }
 }
@@ -262,19 +262,6 @@ async fn stopped() {
     let _ = tokio::signal::ctrl_c().await;
 }
 
-fn prefix() -> Result<PathBuf, String> {
-    let program = std::env::current_exe()
-        .and_then(|p| p.canonicalize())
-        .map_err(|e| format!("Could not find this program: {e}"))?;
-    program
-        .parent()
-        .filter(|bin| bin.ends_with("bin"))
-        .and_then(Path::parent)
-        .filter(|prefix| prefix.join("lib/meta-harness").is_dir())
-        .map(Path::to_path_buf)
-        .ok_or_else(|| format!("{} is not an installed meta.", program.display()))
-}
-
 #[cfg(unix)]
 fn answers_as_flow_agent(flow: &Path) -> bool {
     use std::io::Read;
@@ -357,7 +344,7 @@ fn flow_agent(path: Option<std::ffi::OsString>) -> Option<AcpAgent> {
 fn pinned_t3() -> Result<PathBuf, String> {
     let t3 = match std::env::var_os("META_HARNESS_T3") {
         Some(t3) => PathBuf::from(t3),
-        None => installed_t3()?,
+        None => install::installed_t3()?,
     };
     existing(t3)
 }
@@ -373,224 +360,10 @@ fn existing(t3: PathBuf) -> Result<PathBuf, String> {
     }
 }
 
-fn installed_t3() -> Result<PathBuf, String> {
-    let platform = match (std::env::consts::OS, std::env::consts::ARCH) {
-        ("macos", "aarch64") => "darwin-arm64",
-        ("linux", "x86_64") => "linux-x64",
-        ("windows", "x86_64") => "win32-x64",
-        (os, arch) => return Err(format!("Meta-Harness has no T3 Code for {os} {arch}.")),
-    };
-    let prefix = prefix().map_err(|e| {
-        format!(
-            "{e} For a build that is not installed, set META_HARNESS_T3 to its T3 Code program."
-        )
-    })?;
-    Ok(prefix
-        .join("lib/meta-harness")
-        .join(format!("t3-{}-{platform}", t3_version()))
-        .join(format!("t3{}", std::env::consts::EXE_SUFFIX)))
-}
-
-fn install_download(args: &[&str]) -> Result<(), String> {
-    if !cfg!(windows) {
-        return Err("On macOS and Linux, run install.sh from the download.".to_owned());
-    }
-    let (mut prefix, mut service) = (None, true);
-    let mut rest = args;
-    while let Some((flag, more)) = rest.split_first() {
-        rest = match (*flag, more) {
-            ("--prefix", [path, after @ ..]) => {
-                prefix = Some(PathBuf::from(path));
-                after
-            }
-            ("--no-service", after) => {
-                service = false;
-                after
-            }
-            _ => return Err(format!("meta install does not take {flag}\n{USAGE}")),
-        };
-    }
-    let prefix = match prefix {
-        Some(prefix) => prefix,
-        None => std::env::var_os("LOCALAPPDATA")
-            .map(PathBuf::from)
-            .ok_or("LOCALAPPDATA is not set; pass --prefix.")?
-            .join("Programs")
-            .join("Meta-Harness"),
-    };
-    let bundle = std::env::current_exe()
-        .map_err(|e| format!("Could not find this program: {e}"))?
-        .parent()
-        .and_then(Path::parent)
-        .map(Path::to_path_buf)
-        .ok_or("meta install runs from the bin folder of an unpacked download.")?;
-    let task = |step: &str| {
-        std::process::Command::new("schtasks")
-            .args([step, "/TN", "Meta-Harness"])
-            .output()
-            .is_ok_and(|output| output.status.success())
-    };
-    let homes: Vec<PathBuf> = std::iter::once(default_home()?)
-        .chain(login::Manager::current()?.recorded_home()?)
-        .collect();
-    let ended = task("/End");
-    let installed = install::install_files(&bundle, &prefix, "win32-x64", &homes);
-    if ended && (installed.is_err() || !service) {
-        task("/Run");
-    }
-    let program = installed?;
-    if service {
-        let status = std::process::Command::new(&program)
-            .args(["service", "install"])
-            .status()
-            .map_err(|e| format!("Could not run {}: {e}", program.display()))?;
-        if !status.success() {
-            return Err(format!(
-                "the files are installed in {}, but the login service did not start; \
-                 --no-service installs without it",
-                prefix.display()
-            ));
-        }
-    }
-    println!(
-        "Installed Meta-Harness {} in {}",
-        install::bundle_info(&bundle)?.0,
-        prefix.display()
-    );
-    println!(
-        "Add {} to your PATH to run meta from any folder.",
-        prefix.join("bin").display()
-    );
-    Ok(())
-}
-
-fn install(home: PathBuf) -> Result<(), String> {
-    let program = prefix()?
-        .join("bin")
-        .join(format!("meta{}", std::env::consts::EXE_SUFFIX));
-    let plan = login::Plan::new(program, home, |name| std::env::var(name).ok())?;
-    login::Manager::current()?.install(&plan, run_step)?;
-    if cfg!(target_os = "linux") && !lingering() {
-        eprintln!(
-            "meta: Meta-Harness stops when you log out. To keep it running, an administrator \
-             runs once: sudo loginctl enable-linger \"$(id -un)\""
-        );
-    }
-    Ok(())
-}
-
-fn lingering() -> bool {
-    let user = std::env::var("USER").unwrap_or_default();
-    std::process::Command::new("loginctl")
-        .args(["show-user", &user, "--property=Linger"])
-        .output()
-        .is_ok_and(|out| String::from_utf8_lossy(&out.stdout).trim() == "Linger=yes")
-}
-
-fn remove_login_service() -> Result<(), String> {
-    for failure in login::Manager::current()?.uninstall(run_step)? {
-        eprintln!("meta: warning: {failure}");
-    }
-    Ok(())
-}
-
-fn removes_data(prefix: &Path, home: &Path) -> bool {
-    let resolved = |path: PathBuf| path.canonicalize().unwrap_or(path);
-    home == prefix
-        || ["lib/meta-harness", "share/meta-harness"]
-            .iter()
-            .any(|folder| home.starts_with(resolved(prefix.join(folder))))
-}
-
-fn data_in_installation(prefix: &Path, homes: &[PathBuf]) -> Option<PathBuf> {
-    homes
-        .iter()
-        .find(|home| {
-            let target = home.canonicalize().unwrap_or_else(|_| home.to_path_buf());
-            removes_data(prefix, &target)
-        })
-        .cloned()
-}
-
-fn uninstall() -> Result<(), String> {
-    let prefix = prefix()?;
-    let home = default_home()?;
-    let manager = login::Manager::current()?;
-    let homes: Vec<PathBuf> = std::iter::once(home.clone())
-        .chain(manager.recorded_home()?)
-        .collect();
-    if let Some(data) = data_in_installation(&prefix, &homes) {
-        return Err(format!(
-            "The data folder {} lies in the installation that uninstall removes, so nothing was \
-             removed. Move it outside {}, set META_HARNESS_HOME to its new place, run `meta \
-             service install` and then uninstall again.",
-            data.display(),
-            prefix.display()
-        ));
-    }
-    remove_login_service()?;
-    remove_installation(&prefix)?;
-    println!(
-        "Meta-Harness is uninstalled; its data stays in {}.",
-        home.display()
-    );
-    Ok(())
-}
-
 fn ignore_missing(result: std::io::Result<()>) -> std::io::Result<()> {
     match result {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
         other => other,
-    }
-}
-
-fn remove_installation(prefix: &Path) -> Result<(), String> {
-    for folder in [
-        prefix.join("lib/meta-harness"),
-        prefix.join("share/meta-harness"),
-    ] {
-        ignore_missing(std::fs::remove_dir_all(&folder))
-            .map_err(|e| format!("Could not remove {}: {e}", folder.display()))?;
-    }
-    let program = format!("meta{}", std::env::consts::EXE_SUFFIX);
-    for name in [program.clone(), format!("{program}.old")] {
-        let path = prefix.join("bin").join(&name);
-        let removed = std::fs::remove_file(&path).or_else(|error| {
-            let aside = std::env::temp_dir()
-                .join(format!("meta-uninstalled-{}-{name}", std::process::id()));
-            if cfg!(windows) && path.is_file() && std::fs::rename(&path, &aside).is_ok() {
-                Ok(())
-            } else {
-                Err(error)
-            }
-        });
-        ignore_missing(removed).map_err(|e| format!("Could not remove {}: {e}", path.display()))?;
-    }
-    for folder in [
-        prefix.join("bin"),
-        prefix.join("lib"),
-        prefix.join("share"),
-        prefix.to_owned(),
-    ] {
-        let _ = std::fs::remove_dir(folder);
-    }
-    Ok(())
-}
-
-fn run_step(step: &login::Step) -> Result<(), String> {
-    let output = std::process::Command::new(step.program)
-        .args(&step.args)
-        .output()
-        .map_err(|e| format!("Could not run {}: {e}", step.program))?;
-    if output.status.success() {
-        Ok(())
-    } else {
-        Err(format!(
-            "{} {} failed: {}",
-            step.program,
-            step.args.join(" "),
-            String::from_utf8_lossy(&output.stderr).trim()
-        ))
     }
 }
 
@@ -657,64 +430,6 @@ mod tests {
     }
 
     #[test]
-    fn uninstall_removes_the_program_and_its_backup_but_never_a_folder_in_their_place() {
-        let mut bytes = [0u8; 8];
-        getrandom::fill(&mut bytes).unwrap();
-        let prefix = std::env::temp_dir().join(format!(
-            "mh-uninstall-{}",
-            bytes.iter().map(|b| format!("{b:02x}")).collect::<String>()
-        ));
-        let program = format!("meta{}", std::env::consts::EXE_SUFFIX);
-        std::fs::create_dir_all(prefix.join("lib/meta-harness/t3")).unwrap();
-        std::fs::create_dir_all(prefix.join("share/meta-harness")).unwrap();
-        std::fs::create_dir_all(prefix.join("bin")).unwrap();
-        std::fs::write(prefix.join("bin").join(&program), "meta").unwrap();
-        std::fs::write(prefix.join("bin").join(format!("{program}.old")), "old").unwrap();
-        remove_installation(&prefix).unwrap();
-        assert!(!prefix.exists());
-
-        let kept = prefix
-            .join("bin")
-            .join(format!("{program}.old"))
-            .join("notes.txt");
-        std::fs::create_dir_all(kept.parent().unwrap()).unwrap();
-        std::fs::write(&kept, "the person's notes").unwrap();
-        assert!(remove_installation(&prefix).is_err());
-        assert_eq!(
-            std::fs::read_to_string(&kept).unwrap(),
-            "the person's notes"
-        );
-        let _ = std::fs::remove_dir_all(&prefix);
-    }
-
-    #[test]
-    fn uninstall_refuses_a_data_folder_inside_what_it_removes() {
-        let prefix = Path::new("/opt/mh");
-        for (home, refused) in [
-            ("/opt/mh/lib/meta-harness/data", true),
-            ("/opt/mh/share/meta-harness", true),
-            ("/opt/mh", true),
-            ("/opt/mh/lib/meta-harness-data", false),
-            ("/opt/mh/bin/meta-data", false),
-            ("/home/p/.meta-harness", false),
-        ] {
-            assert_eq!(removes_data(prefix, Path::new(home)), refused, "{home}");
-        }
-    }
-
-    #[test]
-    fn uninstall_checks_the_data_folder_the_login_service_keeps_as_well() {
-        let prefix = Path::new("/opt/mh");
-        let recorded = PathBuf::from("/opt/mh/lib/meta-harness/data");
-        let shell = Path::new("/home/p/.meta-harness");
-        assert_eq!(
-            data_in_installation(prefix, &[shell.to_path_buf(), recorded.clone()]),
-            Some(recorded)
-        );
-        assert_eq!(data_in_installation(prefix, &[shell.to_path_buf()]), None);
-    }
-
-    #[test]
     fn the_not_running_message_holds_for_a_terminal_serve_and_the_login_service() {
         let runtime = tokio::runtime::Runtime::new().unwrap();
         let home = std::env::temp_dir().join(format!("meta-not-running-{}", std::process::id()));
@@ -750,7 +465,7 @@ mod tests {
     fn a_missing_t3_program_is_named_and_an_uninstalled_build_is_told_to_set_the_variable() {
         let missing = existing(PathBuf::from("/no/such/t3")).unwrap_err();
         assert!(missing.contains("/no/such/t3"), "{missing}");
-        let uninstalled = installed_t3().unwrap_err();
+        let uninstalled = install::installed_t3().unwrap_err();
         assert!(uninstalled.contains("META_HARNESS_T3"), "{uninstalled}");
     }
 
