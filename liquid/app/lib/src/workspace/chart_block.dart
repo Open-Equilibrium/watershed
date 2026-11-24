@@ -285,6 +285,7 @@ class _ChartBlockState extends State<ChartBlock> {
       controller: _panel,
       group: _panel,
       beside: chartPanelWidth,
+      minLeft: WsMetrics.widthSide,
       height: 600,
       onTapOutside: (_) {
         if (_panel.isShowing) setState(_panel.hide);
