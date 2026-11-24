@@ -376,6 +376,39 @@ BridgeElement newElement(
   text: text,
 );
 
+BridgeElement copyElement(
+  BridgeElement e, {
+  String? id,
+  double? x,
+  double? y,
+  double? w,
+  double? h,
+  double? rotation,
+  BridgeInkColor? color,
+  int? width,
+  int? docPage,
+  bool? arrowhead,
+  String? text,
+}) => BridgeElement(
+  id: id,
+  kind: e.kind,
+  x: x ?? e.x,
+  y: y ?? e.y,
+  w: w ?? e.w,
+  h: h ?? e.h,
+  rotation: rotation ?? e.rotation,
+  color: color ?? e.color,
+  width: width ?? e.width,
+  docPage: docPage ?? e.docPage,
+  pen: e.pen,
+  points: e.points,
+  shape: e.shape,
+  seed: e.seed,
+  arrowhead: arrowhead ?? e.arrowhead,
+  corners: e.corners,
+  text: text ?? e.text,
+);
+
 BridgeElementChange changeOf(
   BridgeElement element, {
   Rect? frame,

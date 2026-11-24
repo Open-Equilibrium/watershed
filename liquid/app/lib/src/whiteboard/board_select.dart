@@ -119,24 +119,14 @@ extension _BoardSelect on BoardSurfaceState {
     BridgeElement element,
     Rect frame,
     double rotation,
-  ) => BridgeElement(
+  ) => copyElement(
+    element,
     id: element.id,
-    kind: element.kind,
     x: frame.left,
     y: frame.top,
     w: frame.width,
     h: frame.height,
     rotation: rotation,
-    color: element.color,
-    width: element.width,
-    docPage: element.docPage,
-    pen: element.pen,
-    points: element.points,
-    shape: element.shape,
-    seed: element.seed,
-    arrowhead: element.arrowhead,
-    corners: element.corners,
-    text: element.text,
   );
 
   void _endTransform() {

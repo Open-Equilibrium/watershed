@@ -65,23 +65,10 @@ extension _BoardErase on BoardSurfaceState {
           pen: element.pen,
           points: packPoints(piece),
         );
-        final local = BridgeElement(
+        final local = copyElement(
+          made,
           id: '$localPrefix${_localIds++}',
-          kind: made.kind,
-          x: made.x,
-          y: made.y,
-          w: made.w,
-          h: made.h,
-          rotation: made.rotation,
-          color: made.color,
-          width: made.width,
-          docPage: made.docPage,
-          pen: made.pen,
-          points: made.points,
-          shape: made.shape,
-          seed: made.seed,
           arrowhead: false,
-          corners: made.corners,
           text: '',
         );
         kept.add(local);
@@ -105,24 +92,7 @@ extension _BoardErase on BoardSurfaceState {
   void _endErase() {
     final pieces = [
       for (final piece in _pieces[''] ?? const <BridgeElement>[])
-        BridgeElement(
-          kind: piece.kind,
-          x: piece.x,
-          y: piece.y,
-          w: piece.w,
-          h: piece.h,
-          rotation: piece.rotation,
-          color: piece.color,
-          width: piece.width,
-          docPage: piece.docPage,
-          pen: piece.pen,
-          points: piece.points,
-          shape: piece.shape,
-          seed: piece.seed,
-          arrowhead: false,
-          corners: piece.corners,
-          text: '',
-        ),
+        copyElement(piece, arrowhead: false, text: ''),
     ];
     final removed = [..._erased];
     _erased.clear();

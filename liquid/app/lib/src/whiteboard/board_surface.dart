@@ -346,22 +346,13 @@ class BoardSurfaceState extends State<BoardSurface> {
     BridgeElement element,
     Rect frame,
     String text,
-  ) => BridgeElement(
-    kind: element.kind,
+  ) => copyElement(
+    element,
     x: frame.left,
     y: frame.top,
     w: frame.width,
     h: frame.height,
-    rotation: element.rotation,
-    color: element.color,
-    width: element.width,
-    docPage: element.docPage,
-    pen: element.pen,
-    points: element.points,
-    shape: element.shape,
-    seed: element.seed,
     arrowhead: false,
-    corners: element.corners,
     text: text,
   );
 
