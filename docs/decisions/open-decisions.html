@@ -122,7 +122,7 @@
       <details id="d-118" class="decision wide">
         <summary><h3>D-118 - A Worktree Left Behind By A Refused Move</h3></summary>
         <p><strong>Status:</strong> Open; found by Clawpatch in the Meta-Harness review gate. <code>meta-harness-core/src/host/projects.rs</code> attaches a worktree for a local branch before it checks that the branch is pushed and that the move may land.</p>
-        <p><strong>Problem:</strong> When one of those checks refuses, the new worktree stays behind without a thread. It holds no work of the person, but such worktrees pile up. The V-Spec says "A move never removes a checkout", so Meta-Harness does not remove it.</p>
+        <p><strong>Problem:</strong> When one of those checks refuses, the new worktree stays behind without a thread. It holds no work of the person, but such worktrees pile up. <code>SECURITY.md</code> says "A move never removes a worktree", so Meta-Harness does not remove it.</p>
         <p><strong>Question:</strong> May a move remove a worktree it created itself?</p>
         <div class="dia">
           <div class="opt"><h4>A: Keep the rule</h4>
@@ -132,7 +132,7 @@
           <div class="opt rec"><h4>B: Remove only its own <span class="tag">Recommended</span></h4>
             <div class="b t3">T3 removes the worktree, without force</div>
             <div class="a">only if this move created it, it is clean, has no thread and the move failed before launch</div>
-            <ul><li>Pro: nothing piles up; T3 refuses if anything changed in it.</li><li>Con: the V-Spec rule gets an exception and an ADR.</li></ul>
+            <ul><li>Pro: nothing piles up; T3 refuses if anything changed in it.</li><li>Con: the SECURITY.md rule gets an exception and an ADR.</li></ul>
           </div>
           <div class="opt"><h4>C: Check before creating</h4>
             <div class="b ws">Refuse an unpushed branch before the worktree exists</div>

@@ -41,6 +41,7 @@ M2 delivers Meta-Harness as a **self-contained, host-scoped headless control pla
 - Persistent agents (ADR-0283): sharing with Can use and Can edit once the Liquid account exists.
 - Host links through the Liquid account and an end-to-end relay (ADR-0285); Tailscale carries them until then (ADR-0299).
 - Moving a session whose host is offline, through the account's sync (ADR-0284, ADR-0289); until then a session moves only while both hosts answer (ADR-0308).
+- Left from the Meta-Harness review gate: a tunnel relay that ends on a TCP half-close; uninstall on Windows when the installation and the temporary folder lie on different volumes; a child that starts its own session escaping T3's process group at stop and the `flow acp` probe's at timeout; install and uninstall running at once on one prefix; a Windows contract check that the ACP agent ends with the service.
 - API/protocol surface for Liquid and BYOA: session registry, live event and transcript streams, artifact/log/handoff queries, config read/write proposals, agent schedule/trigger control, answers to a harness's own approvals and questions, revert.
 - Central configuration for Flow Agent, which receives only its global authority and explicit Flows rather than a project-local config layer; device-local Runtime bindings remain owned by the execution host. Liquid edits the configuration across devices after sync and approved mockups.
 - Control plane: session registry, routing, task state, attention state and agent schedule/trigger skeleton.

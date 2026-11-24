@@ -337,25 +337,17 @@ mod tests {
     #[test]
     fn a_project_whose_real_path_is_not_utf8_is_refused() {
         use std::os::unix::ffi::OsStrExt;
-        let dir = std::env::temp_dir().join(format!("agent-project-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
+        let dir = crate::testing::Dir::new();
         let real = dir.join(std::ffi::OsStr::from_bytes(b"odd-\xff"));
         std::fs::create_dir_all(&real).unwrap();
         let link = dir.join("link");
         std::os::unix::fs::symlink(&real, &link).unwrap();
-        let error = new_agent(
-            "bot",
-            &[
-                "--project",
-                link.to_str().unwrap(),
-                "--model",
-                "codex/gpt-6.1",
-            ],
-        )
-        .err()
-        .expect("a path that is not UTF-8 is refused");
+        let project = link.to_str().unwrap();
+        let Err(error) = new_agent("bot", &["--project", project, "--model", "codex/gpt-6.1"])
+        else {
+            panic!("a path that is not UTF-8 is refused");
+        };
         assert!(error.contains("UTF-8"), "{error}");
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
