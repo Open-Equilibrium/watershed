@@ -77,8 +77,10 @@ extension SessionActions on SessionState {
       _act(() => _session!.dismiss(request.id), 'dismiss the question');
 
   Future<bool> revert(int turn, {required bool restoreFiles}) async {
+    final generation = _generation;
     try {
-      draft.value = await _session!.revert(turn, restoreFiles: restoreFiles);
+      final text = await _session!.revert(turn, restoreFiles: restoreFiles);
+      if (generation == _generation) draft.value = text;
       return true;
     } on Object catch (error) {
       notify(NoticeLevel.error, 'Could not revert: $error');
@@ -87,9 +89,13 @@ extension SessionActions on SessionState {
   }
 
   Future<void> fork(int turn) async {
+    final session = _session;
+    final address = _sessionAddress;
+    final generation = _generation;
     try {
-      final id = await _session!.fork(turn);
-      await open(id, address: _sessionAddress);
+      final id = await session!.fork(turn);
+      if (generation != _generation) return;
+      await open(id, address: address);
       unawaited(loadStart());
     } on Object catch (error) {
       notify(NoticeLevel.error, 'Failed to fork this response. $error');
@@ -98,9 +104,10 @@ extension SessionActions on SessionState {
 
   Future<void> setModel(BridgeModelChoice next) async {
     if (_session case final session?) {
+      final generation = _generation;
       await _act(() async {
         await session.setModel(next);
-        model.value = next;
+        if (generation == _generation) model.value = next;
       }, 'apply the model selection');
       await readStatistics();
     } else {
@@ -110,9 +117,10 @@ extension SessionActions on SessionState {
 
   Future<void> setPermissions(BridgePermissions next) async {
     if (_session case final session?) {
+      final generation = _generation;
       await _act(() async {
         await session.setPermissions(next);
-        permissions.value = next;
+        if (generation == _generation) permissions.value = next;
       }, 'change the permissions');
     } else {
       permissions.value = next;

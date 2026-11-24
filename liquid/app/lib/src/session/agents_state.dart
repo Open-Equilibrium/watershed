@@ -96,6 +96,7 @@ class AgentsState {
       _state.notify(NoticeLevel.error, 'No model is available.');
       return false;
     }
+    final navigations = _state.navigations;
     try {
       final agent = await project.agentStart(
         model,
@@ -104,6 +105,7 @@ class AgentsState {
       );
       composing.value = false;
       await load();
+      if (navigations != _state.navigations) return true;
       await show(HostAgent(address: _state.startAddress, agent: agent));
       return true;
     } on Object catch (error) {
@@ -116,6 +118,9 @@ class AgentsState {
     composing.value = false;
     _poll?.cancel();
     if (list.value.isEmpty) await load();
+    if (_state.session?.id != thread || _state.sessionAddress != address) {
+      return;
+    }
     final hosted = ofThread(thread, address);
     open.value = hosted;
     changes.value = const [];

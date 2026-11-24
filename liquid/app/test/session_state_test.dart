@@ -4,6 +4,7 @@ import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart'
     show Int64List;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:liquid/src/diff/turn_scope.dart';
+import 'package:liquid/src/rust/api/agents.dart';
 import 'package:liquid/src/rust/api/details.dart';
 import 'package:liquid/src/rust/api/events.dart';
 import 'package:liquid/src/format.dart';
@@ -18,6 +19,21 @@ import 'fake_backend.dart';
 class GatedSession extends FakeSession {
   Completer<void>? gate;
   Completer<void>? titleGate;
+  Completer<void>? permissionsGate;
+
+  @override
+  Future<void> setPermissions(BridgePermissions permissions) async {
+    await permissionsGate?.future;
+    await super.setPermissions(permissions);
+  }
+
+  Completer<void>? modelGate;
+
+  @override
+  Future<void> setModel(BridgeModelChoice model) async {
+    await modelGate?.future;
+    await super.setModel(model);
+  }
 
   @override
   Future<String> title() async {
@@ -464,6 +480,76 @@ void main() {
           (state.items.value.single.text.value, state.request.value?.id),
           ('newer', 'a1'),
         );
+      },
+    );
+
+    test('a model change that finishes after a switch leaves the new session alone', () async {
+      final gate = Completer<void>();
+      await switchTo(GatedSession()..modelGate = gate);
+      unawaited(state.setModel(choiceOf('claude-haiku')));
+      await pumpEventQueue();
+
+      await switchTo(FakeSession(id: 'thread-2'));
+      final before = state.model.value;
+      gate.complete();
+      await pumpEventQueue();
+
+      expect(state.model.value, before);
+    });
+
+    test('a permission change that finishes after a switch leaves the new session alone', () async {
+      final gate = Completer<void>();
+      await switchTo(GatedSession()..permissionsGate = gate);
+      unawaited(state.setPermissions(BridgePermissions.supervised));
+      await pumpEventQueue();
+
+      await switchTo(FakeSession(id: 'thread-2'));
+      final before = state.permissions.value;
+      gate.complete();
+      await pumpEventQueue();
+
+      expect(state.permissions.value, before);
+    });
+
+    test(
+      'an agent created after the Chat moved does not open over it',
+      () async {
+        final gate = Completer<void>();
+        final hosted = GatedAgents(startGate: gate.future);
+        final moving = SessionState(hosted);
+        addTearDown(moving.dispose);
+        moving.model.value = choiceOf('claude-opus-5-5');
+        await moving.agents.compose();
+        unawaited(moving.agents.start('Build it'));
+        await pumpEventQueue();
+
+        hosted.session = FakeSession(id: 'thread-2');
+        await moving.open('thread-2');
+        gate.complete();
+        await pumpEventQueue();
+
+        expect(hosted.calls, isNot(contains('open thread-agent-1')));
+      },
+    );
+
+    test(
+      'an agent found after the Chat moved is not selected for the new thread',
+      () async {
+        final gate = Completer<void>();
+        final hosted = GatedAgents(listGate: gate.future)
+          ..agentList = [agentOf('news-bot', thread: 'thread-1')];
+        final moving = SessionState(hosted);
+        addTearDown(moving.dispose);
+        await moving.open('thread-1');
+        await pumpEventQueue();
+
+        hosted.session = FakeSession(id: 'thread-2');
+        await moving.open('thread-2');
+        await pumpEventQueue();
+        gate.complete();
+        await pumpEventQueue();
+
+        expect(moving.agents.open.value, isNull);
       },
     );
 
@@ -1158,6 +1244,33 @@ void main() {
 List<String> threadIds(SessionState state) => [
   for (final listed in state.recent.value) listed.thread.id,
 ];
+
+class GatedAgents extends FakeProject {
+  GatedAgents({this.startGate, this.listGate});
+
+  final Future<void>? startGate;
+  final Future<void>? listGate;
+  bool _listed = false;
+
+  @override
+  Future<List<BridgeAgent>> agents() async {
+    if (!_listed) {
+      _listed = true;
+      await listGate;
+    }
+    return super.agents();
+  }
+
+  @override
+  Future<BridgeAgent> agentStart(
+    BridgeModelChoice model,
+    BridgePermissions permissions,
+    String request,
+  ) async {
+    await startGate;
+    return super.agentStart(model, permissions, request);
+  }
+}
 
 class FailingListing extends FakeProject {
   FailingListing(this.gate);

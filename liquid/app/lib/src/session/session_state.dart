@@ -115,6 +115,8 @@ class SessionState {
 
   int _switchRequests = 0;
 
+  int get navigations => _switchRequests;
+
   SessionBackend? get session => _session;
 
   ProjectBackend? get project => _agents[_startAddress];
