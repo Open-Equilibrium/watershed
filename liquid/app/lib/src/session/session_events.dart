@@ -3,6 +3,7 @@ part of 'session_state.dart';
 extension SessionEvents on SessionState {
   void _restore(BridgeSnapshot snapshot) {
     _sequence = snapshot.sequence;
+    _held = null;
     _byId.clear();
     final record = _moveRecord;
     _prefix = record == null
@@ -114,6 +115,13 @@ extension SessionEvents on SessionState {
   }
 
   void _receive(BridgeEvent event) {
+    final held = _held;
+    if (held != null &&
+        event.kind != BridgeEventKind.fellBehind &&
+        event.kind != BridgeEventKind.rolledBack) {
+      held.add(event);
+      return;
+    }
     try {
       _apply(event);
     } finally {
@@ -192,13 +200,18 @@ extension SessionEvents on SessionState {
     final session = _session;
     final generation = _generation;
     if (session == null) return;
+    final turnRead = ++_turnReads;
     try {
       final read = await session.turns();
       if (generation != _generation) return;
-      _setTurns(read);
-      _status();
+      if (turnRead == _turnReads) {
+        _setTurns(read);
+        _status();
+      }
       if (ended) {
-        sessionTitle.value = await session.title();
+        final title = await session.title();
+        if (generation != _generation) return;
+        sessionTitle.value = title;
         unawaited(readChanges());
         unawaited(readStatistics());
         unawaited(loadStart());
@@ -208,18 +221,32 @@ extension SessionEvents on SessionState {
     }
   }
 
+  void _replay(List<BridgeEvent> held, int after) {
+    _held = null;
+    for (final event in held) {
+      if (event.sequence > after) _receive(event);
+    }
+  }
+
   Future<void> _reload() async {
     final session = _session;
     final generation = _generation;
     if (session == null) return;
+    final reload = ++_reloads;
+    _held ??= [];
     try {
       final snapshot = await session.snapshot();
-      if (generation != _generation) return;
+      if (generation != _generation || reload != _reloads) return;
+      final held = _held ?? const <BridgeEvent>[];
       _restore(snapshot);
+      _replay(held, snapshot.sequence);
       unawaited(readChanges());
       unawaited(readStatistics());
     } on Object catch (error) {
-      notify(NoticeLevel.warning, 'Could not reload the Chat: $error');
+      if (generation == _generation && reload == _reloads) {
+        _replay(_held ?? const [], _sequence);
+        notify(NoticeLevel.warning, 'Could not reload the Chat: $error');
+      }
     }
   }
 }

@@ -213,6 +213,9 @@ class SessionState {
 
   int _applied = 0;
   int _confirmed = 0;
+  int _turnReads = 0;
+  int _reloads = 0;
+  List<BridgeEvent>? _held;
 
   int? _confirmingFor;
 

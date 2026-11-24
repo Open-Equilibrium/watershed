@@ -80,6 +80,30 @@ class MovingSession extends FakeSession {
   }
 }
 
+class DelayedReads extends FakeSession {
+  final turnReads = <Completer<List<BridgeTurn>>>[];
+  bool gateTurns = false;
+  Completer<void>? titleGate;
+  Completer<BridgeSnapshot>? snapshotGate;
+
+  @override
+  Future<List<BridgeTurn>> turns() {
+    if (!gateTurns) return super.turns();
+    final read = Completer<List<BridgeTurn>>();
+    turnReads.add(read);
+    return read.future;
+  }
+
+  @override
+  Future<String> title() async {
+    await titleGate?.future;
+    return super.title();
+  }
+
+  @override
+  Future<BridgeSnapshot> snapshot() => snapshotGate?.future ?? super.snapshot();
+}
+
 class HeldChanges extends FakeSession {
   final holds = <int, Completer<void>>{};
 
@@ -385,6 +409,63 @@ void main() {
         expect(state.items.value.single.text.value, text);
       }
     });
+
+    test('a slower turn read cannot replace a newer one', () async {
+      final delayed = DelayedReads();
+      await switchTo(delayed);
+      delayed.gateTurns = true;
+      delayed.emit(event(BridgeEventKind.turnStarted, 1, turn: 1));
+      delayed.emit(event(BridgeEventKind.turnCompleted, 2, turn: 1));
+      await pumpEventQueue();
+
+      delayed.turnReads[1].complete([turnOf(1)]);
+      await pumpEventQueue();
+      delayed.turnReads[0].complete([
+        turnOf(1, status: BridgeTurnStatus.running, checkpoint: false),
+      ]);
+      await pumpEventQueue();
+
+      expect(state.status.value, RunStatus.idle);
+    });
+
+    test('a title read after a switch cannot replace the new title', () async {
+      final first = DelayedReads()..sessionTitle = 'First';
+      await switchTo(first);
+      first.titleGate = Completer<void>();
+      first.emit(event(BridgeEventKind.turnCompleted, 1, turn: 1));
+      await pumpEventQueue();
+
+      await switchTo(FakeSession(id: 'thread-2')..sessionTitle = 'Second');
+      first.titleGate!.complete();
+      await pumpEventQueue();
+
+      expect(state.sessionTitle.value, 'Second');
+    });
+
+    test(
+      'events received during a snapshot recovery survive its restore',
+      () async {
+        final delayed = DelayedReads()
+          ..snapshotGate = Completer<BridgeSnapshot>();
+        await switchTo(delayed);
+        delayed.emit(event(BridgeEventKind.fellBehind, 1));
+        await pumpEventQueue();
+
+        delayed.emit(startItem(2, 1, item(1, BridgeItemKind.assistantMessage)));
+        delayed.emit(textDelta(3, 'newer'));
+        delayed.emit(
+          event(BridgeEventKind.requestOpened, 4, request: approvalOf('a1')),
+        );
+        await pumpEventQueue();
+        delayed.snapshotGate!.complete(snapshotOf(sequence: 1));
+        await pumpEventQueue();
+
+        expect(
+          (state.items.value.single.text.value, state.request.value?.id),
+          ('newer', 'a1'),
+        );
+      },
+    );
 
     test('every event, skipped ones too, is confirmed (ADR-0272)', () async {
       await open(snapshotOf(sequence: 5));
