@@ -383,6 +383,7 @@ extension _TableBlockGrid on _TableBlockState {
                         fields[index].id == _fieldMenus.open,
                     cell: (index) => index == fields.length
                         ? AddField(
+                            key: _plusKey,
                             plus: _plus,
                             panel: _panel,
                             onTap: _togglePanel,

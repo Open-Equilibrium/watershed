@@ -130,6 +130,8 @@ class _TableBlockState extends State<TableBlock> implements CellDrop {
 
   final _panel = OverlayPortalController();
   final _plus = LayerLink();
+  final _plusKey = GlobalKey();
+  Rect? _panelAt;
 
   var _rowAdded = false;
   int _rowsWriting = 0;
@@ -444,6 +446,7 @@ class _TableBlockState extends State<TableBlock> implements CellDrop {
         child: FieldPanelPortal(
           panel: _panel,
           plus: _plus,
+          anchor: _panelAt,
           onAdd: _addField,
           child: Padding(
             padding: const EdgeInsets.symmetric(vertical: WsMetrics.space3),
@@ -519,6 +522,7 @@ class _TableBlockState extends State<TableBlock> implements CellDrop {
                                 child: SizedBox(
                                   width: _addWidth,
                                   child: AddField(
+                                    key: _plusKey,
                                     plus: _plus,
                                     panel: _panel,
                                     onTap: _togglePanel,

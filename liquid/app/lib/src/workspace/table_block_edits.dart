@@ -91,6 +91,12 @@ extension _TableBlockEdits on _TableBlockState {
     if (_panel.isShowing) return _panel.hide();
     _fieldMenus.close();
     _panelOpened++;
+    final box = _plusKey.currentContext?.findRenderObject();
+    _update(
+      () => _panelAt = box is RenderBox
+          ? box.localToGlobal(Offset.zero) & box.size
+          : null,
+    );
     _panel.show();
   }
 

@@ -664,6 +664,38 @@ void main() {
     },
   );
 
+  testWidgets('a field panel opened low on the window flips above + so every '
+      'kind stays on screen', (tester) async {
+    await kit.show(tester, [TablePart(expenses), TablePart(expenses)]);
+    await tester.binding.setSurfaceSize(const Size(1050, 640));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    await tester.pumpAndSettle();
+    await tap(tester, find.byKey(const Key('add field')).last);
+    expect(
+      (Offset.zero & const Size(1050, 640)).contains(
+        tester.getBottomRight(
+          find.descendant(of: panel, matching: find.text('Button')),
+        ),
+      ),
+      isTrue,
+    );
+  });
+
+  testWidgets('a field panel too tall for either side of + stays inside the '
+      'window', (tester) async {
+    await kit.show(tester, [TablePart(expenses)]);
+    await tester.binding.setSurfaceSize(const Size(1050, 400));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    await tester.pumpAndSettle();
+    await tap(tester, find.byKey(const Key('add field')));
+    expect(
+      (Offset.zero & const Size(1050, 400)).contains(
+        tester.getBottomRight(panel),
+      ),
+      isTrue,
+    );
+  });
+
   testWidgets('the field panel closes when + leaves the view', (tester) async {
     await kit.show(tester, [TablePart(expenses)]);
     final table = kit.fake.views[kit.page]!.single.block;
