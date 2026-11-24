@@ -1,6 +1,7 @@
 use std::path::Path;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
+#[cfg(unix)]
 use super::{Dir, executable, read};
 use crate::t3::server::{Server, issue, listening_origin};
 use crate::t3::t3_version;
@@ -26,7 +27,7 @@ async fn a_server_that_ends_during_its_start_is_started_again() {
         ),
     );
 
-    let started = Instant::now();
+    let started = std::time::Instant::now();
     let mut server = Server::start(&binary, &home)
         .await
         .expect("the second start serves");
@@ -51,7 +52,7 @@ async fn a_token_issue_that_never_ends_is_killed_at_its_wait() {
     let binary = dir.join("t3");
     executable(&binary, "#!/bin/sh\nexec sleep 60\n");
 
-    let started = Instant::now();
+    let started = std::time::Instant::now();
     let result = issue(binary, dir.to_path_buf(), Duration::from_millis(200)).await;
     assert!(result.is_err(), "{result:?}");
     assert!(

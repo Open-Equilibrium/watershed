@@ -370,7 +370,9 @@ fn ignore_missing(result: std::io::Result<()>) -> std::io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::testing::{Dir, executable, put};
+    use crate::testing::Dir;
+    #[cfg(unix)]
+    use crate::testing::{executable, put};
 
     #[cfg(unix)]
     #[test]
