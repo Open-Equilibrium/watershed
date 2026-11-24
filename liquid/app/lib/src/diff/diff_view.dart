@@ -59,6 +59,7 @@ class _DiffViewState extends State<DiffView> {
   final _folded = <String>{};
 
   bool _loading = false;
+  bool _requested = false;
 
   final _scroll = ScrollController();
 
@@ -114,13 +115,17 @@ class _DiffViewState extends State<DiffView> {
         _note = null;
       }
     });
-    if (_loading) return;
+    if (_loading) {
+      _requested = true;
+      return;
+    }
     _loading = true;
     try {
       while (mounted) {
         final wanted = _selected;
         final comparison = _comparison;
         if (wanted == null) return;
+        _requested = false;
         String? note;
         var lines = const <DiffLine>[];
         try {
@@ -129,7 +134,10 @@ class _DiffViewState extends State<DiffView> {
         } on Object catch (error) {
           note = 'Could not show the changes: $error';
         }
-        if (!mounted || _selected != wanted || _comparison != comparison) {
+        if (!mounted ||
+            _requested ||
+            _selected != wanted ||
+            _comparison != comparison) {
           continue;
         }
         final keepPosition =

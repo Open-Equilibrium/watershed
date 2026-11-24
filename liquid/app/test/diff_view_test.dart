@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -36,6 +38,7 @@ void main() {
     Map<String, String> patches = const {},
     FakeSession? session,
     DiffSettingsController? diffSettings,
+    PatchParser parse = parsePatch,
     Size size = const Size(1600, 900),
   }) async {
     await tester.binding.setSurfaceSize(size);
@@ -52,7 +55,7 @@ void main() {
         home: AgentShell(
           state: state,
           info: info,
-          parseDiff: parsePatch,
+          parseDiff: parse,
           diffSettings: diffSettings,
         ),
       ),
@@ -119,6 +122,39 @@ void main() {
     await tester.tap(find.byKey(const Key('diff-panel-close')));
     await tester.pumpAndSettle();
     expect(find.byType(DiffPanel), findsNothing);
+  });
+
+  testWidgets('a refresh while a patch loads shows the newer patch', (
+    tester,
+  ) async {
+    final change = fileOf('a.txt');
+    final gate = Completer<void>();
+    var parses = 0;
+    final session = FakeSession()
+      ..turnList = twoTurns
+      ..changes = [change]
+      ..patches = {'a.txt': '@@ -1 +1 @@\n-a\n+old file\n'};
+    await show(
+      tester,
+      session: session,
+      turns: twoTurns,
+      changes: [change],
+      patches: session.patches,
+      parse: (patch) async {
+        if (parses++ == 0) await gate.future;
+        return parsePatch(patch);
+      },
+    );
+    session.patches = {'a.txt': '@@ -1 +1 @@\n-a\n+new file\n'};
+    session.changes = [change];
+    session.emit(event(BridgeEventKind.turnsChanged, 1));
+    await tester.pumpAndSettle();
+
+    gate.complete();
+    await tester.pumpAndSettle();
+
+    expect(containing('new file'), findsOneWidget);
+    expect(containing('old file'), findsNothing);
   });
 
   testWidgets('the turn menu lists scopes, and a turn opens', (tester) async {
